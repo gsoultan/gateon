@@ -190,12 +190,12 @@ func (h *Holder) SetTwoFactorPending(id string, pending bool) error {
 	return s.SetTwoFactorPending(id, pending)
 }
 
-func (h *Holder) Setup2FA(id string) (string, string, []string, error) {
+func (h *Holder) Setup2FA(id, password string) (string, string, []string, error) {
 	s := h.Get()
 	if s == nil {
 		return "", "", nil, ErrUnavailable
 	}
-	return s.Setup2FA(id)
+	return s.Setup2FA(id, password)
 }
 
 func (h *Holder) EnrollPending2FA(username, password string) (string, string, []string, string, error) {

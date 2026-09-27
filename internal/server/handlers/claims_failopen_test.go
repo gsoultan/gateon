@@ -120,7 +120,9 @@ func TestSelfServiceStillWorks(t *testing.T) {
 	}{
 		{"password", "/v1/users/password", `{"id":"user-1","password":"new-one"}`,
 			func(s *failOpenAPI) bool { return s.changePasswordCalled }},
-		{"2fa setup", "/v1/auth/2fa/setup", `{"id":"user-1"}`,
+		// Self-service setup carries the account's current password; without
+		// it the handler refuses before the service (two_factor_setup_stepup_test.go).
+		{"2fa setup", "/v1/auth/2fa/setup", `{"id":"user-1","password":"current-one"}`,
 			func(s *failOpenAPI) bool { return s.setup2FACalled }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

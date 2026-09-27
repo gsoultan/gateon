@@ -132,6 +132,13 @@ message User {
 
 message Setup2FARequest {
   string id = 1;
+  // password is the account's current password. Setup is self-service, and
+  // the session alone is not enough to start it: script running in the
+  // dashboard rides the session cookie without being able to read it, and
+  // would otherwise enrol the account with a TOTP secret it holds. A missing
+  // or wrong password is refused before a secret is generated, and counts
+  // towards the same lockout as a failed sign-in.
+  string password = 2;
 }
 
 message Setup2FAResponse {

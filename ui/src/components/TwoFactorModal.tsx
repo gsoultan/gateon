@@ -9,18 +9,18 @@ import {
   Stack,
   Group,
   TextInput,
+  PasswordInput,
   Image,
   Code,
-  List,
   ThemeIcon,
   rem,
   Alert,
   SimpleGrid,
   Paper,
 } from "@mantine/core";
-import { IconCheck, IconCopy, IconShieldCheck, IconInfoCircle } from "@tabler/icons-react";
-import { apiFetch } from "../hooks/useGateon";
+import { IconAlertCircle, IconShieldCheck, IconInfoCircle } from "@tabler/icons-react";
 import type { Setup2FAResponse, User } from "../types/gateon";
+import { startTwoFactorSetup, verifyTwoFactorCode } from "./twoFactorSetup";
 
 interface TwoFactorModalProps {
   opened: boolean;
@@ -28,6 +28,61 @@ interface TwoFactorModalProps {
   user: User;
   onSuccess: () => void;
 }
+
+interface PasswordStepProps {
+  password: string;
+  onPasswordChange: (value: string) => void;
+  onSubmit: () => void;
+  loading: boolean;
+  error: string | null;
+}
+
+/**
+ * The first step of enrolment: the account's current password.
+ *
+ * The gateway will not start setup on the session alone, because setup hands
+ * back a TOTP secret and the session is a cookie that script in the page can
+ * ride. A wrong password counts towards the sign-in lockout, so the error says
+ * which of the two happened without repeating anything the server wrote.
+ */
+export const TwoFactorPasswordStep: React.FC<PasswordStepProps> = ({
+  password,
+  onPasswordChange,
+  onSubmit,
+  loading,
+  error,
+}) => (
+  <form
+    onSubmit={(e) => {
+      e.preventDefault();
+      onSubmit();
+    }}
+  >
+    <Stack gap="md">
+      <Text size="sm">
+        Two-factor authentication (2FA) adds an extra layer of security to your account.
+        In addition to your password, you'll need to enter a code from an authenticator app.
+      </Text>
+      <PasswordInput
+        label="Current password"
+        description="Confirm it's you before an authenticator is linked to this account."
+        value={password}
+        onChange={(e) => onPasswordChange(e.currentTarget.value)}
+        autoComplete="current-password"
+        required
+        data-autofocus
+      />
+      {error && (
+        <Alert color="red" variant="light" icon={<IconAlertCircle size="1rem" />} role="alert">
+          {error}
+        </Alert>
+      )}
+      <Button type="submit" loading={loading} disabled={password.length === 0} fullWidth>
+        Continue
+      </Button>
+    </Stack>
+  </form>
+);
 
 export const TwoFactorModal: React.FC<TwoFactorModalProps> = ({
   opened,
@@ -37,54 +92,44 @@ export const TwoFactorModal: React.FC<TwoFactorModalProps> = ({
 }) => {
   const [step, setPage] = useState<"intro" | "setup" | "verify" | "success">("intro");
   const [setupData, setSetupData] = useState<Setup2FAResponse | null>(null);
+  const [password, setPassword] = useState("");
   const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   const startSetup = async () => {
     setLoading(true);
-    try {
-      const res = await apiFetch("/v1/auth/2fa/setup", {
-        method: "POST",
-        body: JSON.stringify({ id: user.id }),
-      });
-      if (!res.ok) throw new Error(await res.text());
-      const data = await res.json();
-      setSetupData(data);
+    setError(null);
+    const outcome = await startTwoFactorSetup(user.id, password);
+    // Not kept past the attempt: a refused one is retyped, and an accepted one
+    // has no further use.
+    setPassword("");
+    setLoading(false);
+    if (outcome.ok) {
+      setSetupData(outcome.data);
       setPage("setup");
-    } catch (err: any) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
+    } else {
+      setError(outcome.message);
     }
   };
 
   const verifyCode = async () => {
     setLoading(true);
     setError(null);
-    try {
-      const res = await apiFetch("/v1/auth/2fa/verify", {
-        method: "POST",
-        body: JSON.stringify({ id: user.id, code }),
-      });
-      if (!res.ok) throw new Error(await res.text());
-      const data = await res.json();
-      if (data.success) {
-        setPage("success");
-        onSuccess();
-      } else {
-        setError("Invalid code. Please try again.");
-      }
-    } catch (err: any) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
+    const outcome = await verifyTwoFactorCode(user.id, code);
+    setLoading(false);
+    if (outcome.ok) {
+      setPage("success");
+      onSuccess();
+    } else {
+      setError(outcome.message);
     }
   };
 
   const handleClose = () => {
     setPage("intro");
     setSetupData(null);
+    setPassword("");
     setCode("");
     setError(null);
     onClose();
@@ -100,15 +145,13 @@ export const TwoFactorModal: React.FC<TwoFactorModalProps> = ({
     >
       <Stack gap="md">
         {step === "intro" && (
-          <>
-            <Text size="sm">
-              Two-factor authentication (2FA) adds an extra layer of security to your account.
-              In addition to your password, you'll need to enter a code from an authenticator app.
-            </Text>
-            <Button onClick={startSetup} loading={loading} fullWidth>
-              Enable 2FA
-            </Button>
-          </>
+          <TwoFactorPasswordStep
+            password={password}
+            onPasswordChange={setPassword}
+            onSubmit={() => void startSetup()}
+            loading={loading}
+            error={error}
+          />
         )}
 
         {step === "setup" && setupData && (
@@ -147,13 +190,16 @@ export const TwoFactorModal: React.FC<TwoFactorModalProps> = ({
               Enter the 6-digit code from your authenticator app to verify setup.
             </Text>
             <TextInput
+              label="Verification code"
               placeholder="000000"
               value={code}
               onChange={(e) => setCode(e.currentTarget.value)}
               error={error}
+              autoComplete="one-time-code"
+              inputMode="numeric"
               data-autofocus
             />
-            <Button onClick={verifyCode} loading={loading} fullWidth>
+            <Button onClick={() => void verifyCode()} loading={loading} disabled={code.length === 0} fullWidth>
               Verify & Enable
             </Button>
             <Button variant="subtle" onClick={() => setPage("setup")} fullWidth>

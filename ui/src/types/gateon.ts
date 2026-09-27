@@ -335,6 +335,8 @@ export type LoginResponse = {
 
 export type Setup2FARequest = {
   id: string;
+  // The account's current password: setup is refused without it.
+  password: string;
 };
 
 export type Setup2FAResponse = {

@@ -43,8 +43,12 @@ func (s *ApiService) Setup2FA(ctx context.Context, req *gateonv1.Setup2FARequest
 	if !auth.Available(s.Auth) {
 		return nil, errors.New("auth service not initialized")
 	}
-	secret, qr, recovery, err := s.Auth.Setup2FA(req.Id)
+	secret, qr, recovery, err := s.Auth.Setup2FA(req.Id, req.Password)
 	if err != nil {
+		if errors.Is(err, auth.ErrInvalidCredentials) || errors.Is(err, auth.ErrAccountLocked) {
+			s.logAudit(ctx, "setup_2fa_refused", "user",
+				fmt.Sprintf("2FA setup refused for user %s: %v", req.Id, err))
+		}
 		return nil, err
 	}
 	s.logAudit(ctx, "setup_2fa", "user", fmt.Sprintf("User initiated 2FA setup: %s", req.Id))

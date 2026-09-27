@@ -40,9 +40,9 @@ func createUser(t *testing.T, m *Manager, username, password string) string {
 
 // enroll runs Setup2FA followed by a TOTP verification to fully enable 2FA.
 // It returns the plaintext secret and recovery codes.
-func enroll(t *testing.T, m *Manager, id string) (secret string, codes []string) {
+func enroll(t *testing.T, m *Manager, id, password string) (secret string, codes []string) {
 	t.Helper()
-	secret, _, codes, err := m.Setup2FA(id)
+	secret, _, codes, err := m.Setup2FA(id, password)
 	if err != nil {
 		t.Fatalf("Setup2FA: %v", err)
 	}
@@ -63,7 +63,7 @@ func enroll(t *testing.T, m *Manager, id string) (secret string, codes []string)
 func TestAuthenticateDoesNotLeakSecretWhen2FARequired(t *testing.T) {
 	m := newTestManager(t)
 	id := createUser(t, m, "alice", "s3cret-pass")
-	enroll(t, m, id)
+	enroll(t, m, id, "s3cret-pass")
 
 	token, user, err := m.Authenticate("alice", "s3cret-pass")
 	if !errors.Is(err, ErrTwoFactorRequired) {
@@ -89,7 +89,7 @@ func TestAuthenticateDoesNotLeakSecretWhen2FARequired(t *testing.T) {
 func TestSetup2FAStoresEncryptedSecret(t *testing.T) {
 	m := newTestManager(t)
 	id := createUser(t, m, "carol", "pw")
-	secret, _, _, err := m.Setup2FA(id)
+	secret, _, _, err := m.Setup2FA(id, "pw")
 	if err != nil {
 		t.Fatalf("Setup2FA: %v", err)
 	}
@@ -115,7 +115,7 @@ func TestVerify2FARecoveryCodeOnlyAfterEnabled(t *testing.T) {
 	m := newTestManager(t)
 	id := createUser(t, m, "dave", "pw")
 	// Setup but do NOT enable.
-	_, _, codes, err := m.Setup2FA(id)
+	_, _, codes, err := m.Setup2FA(id, "pw")
 	if err != nil {
 		t.Fatalf("Setup2FA: %v", err)
 	}
@@ -132,7 +132,7 @@ func TestVerify2FARecoveryCodeOnlyAfterEnabled(t *testing.T) {
 func TestVerify2FARecoveryCodeConsumed(t *testing.T) {
 	m := newTestManager(t)
 	id := createUser(t, m, "erin", "pw")
-	_, codes := enroll(t, m, id)
+	_, codes := enroll(t, m, id, "pw")
 
 	// First use of a recovery code succeeds.
 	ok, token, _, err := m.Verify2FA(id, codes[0])
@@ -153,7 +153,7 @@ func TestVerify2FARecoveryCodeConsumed(t *testing.T) {
 func TestVerify2FALockoutAfterRepeatedFailures(t *testing.T) {
 	m := newTestManager(t)
 	id := createUser(t, m, "frank", "pw")
-	enroll(t, m, id)
+	enroll(t, m, id, "pw")
 
 	var lastErr error
 	for range MaxFailedAttempts {

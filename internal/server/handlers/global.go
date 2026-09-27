@@ -37,6 +37,42 @@ func decodeGlobalConfig(body []byte, conf *gateonv1.GlobalConfig) error {
 	return nil
 }
 
+// wrongCodeStatus is the status for a second factor that did not verify.
+//
+// During sign-in there is no session yet, and 401 says so. A caller enrolling
+// their own account is signed in: the dashboard's apiFetch reads any 401 as
+// "the session is over" and signs the user out, so a mistyped code in the
+// enrolment dialog ended the session it was meant to protect. The session is
+// fine; it is this code that was refused.
+func wrongCodeStatus(isLoginStep bool) int {
+	if isLoginStep {
+		return http.StatusUnauthorized
+	}
+	return http.StatusForbidden
+}
+
+// writeSetup2FARefusal answers a self-service 2FA setup the service refused.
+//
+// A wrong password is 403, not 401, for the reason wrongCodeStatus gives: the
+// caller is signed in, and it is the re-authentication that failed. Nothing
+// the service produced is written, and neither is its error text, which for an
+// unexpected failure could be a database error.
+func writeSetup2FARefusal(w http.ResponseWriter, r *http.Request, err error) {
+	switch {
+	case errors.Is(err, auth.ErrAccountLocked):
+		logger.SecurityEvent("auth_2fa_setup_locked", r, "account_locked")
+		WriteHTTPError(w, http.StatusTooManyRequests, err.Error())
+	case errors.Is(err, auth.ErrInvalidCredentials):
+		logger.SecurityEvent("auth_2fa_setup_failure", r, "invalid_password")
+		WriteHTTPError(w, http.StatusForbidden, "the current password is incorrect")
+	case errors.Is(err, auth.ErrAccountDisabled):
+		WriteHTTPError(w, http.StatusForbidden, err.Error())
+	default:
+		logger.L.LogError("2FA setup failed", "error", err)
+		WriteHTTPError(w, http.StatusInternalServerError, "2FA setup could not be started")
+	}
+}
+
 // registerGlobalHandlers registers global configuration and utility handlers.
 func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 	mux.HandleFunc("GET /v1/global", func(w http.ResponseWriter, r *http.Request) {
@@ -527,10 +563,17 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 				return
 			}
 		}
+		// The session is not enough: see auth.Manager.Setup2FA. A missing
+		// password is refused here without being counted, because it is not a
+		// guess; a wrong one is counted by the service like a failed sign-in.
+		if req.Password == "" {
+			WriteHTTPError(w, http.StatusBadRequest, "your current password is required to set up 2FA")
+			return
+		}
 
 		resp, err := svc.Setup2FA(r.Context(), &req)
 		if err != nil {
-			WriteHTTPError(w, http.StatusInternalServerError, err.Error())
+			writeSetup2FARefusal(w, r, err)
 			return
 		}
 		data, err := ProtojsonOptions().Marshal(resp)
@@ -579,7 +622,7 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 			case errors.Is(err, auth.ErrInvalidTwoFactorCode):
 				logger.SecurityEvent("auth_2fa_failure", r, "invalid_2fa_code")
 				audit.Log(r.Context(), req.Id, "2fa_failed", "auth", "Invalid 2FA code", request.ClientAddr(r))
-				WriteHTTPError(w, http.StatusUnauthorized, err.Error())
+				WriteHTTPError(w, wrongCodeStatus(isLoginStep), err.Error())
 			default:
 				WriteHTTPError(w, http.StatusInternalServerError, err.Error())
 			}
