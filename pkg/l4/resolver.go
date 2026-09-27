@@ -6,14 +6,14 @@ package l4
 
 import (
 	"context"
-	"fmt"
-	"hash/fnv"
 	"net"
-	"sort"
+	"slices"
+	"strconv"
 	"strings"
 	"sync"
 
 	"github.com/gsoultan/gateon/internal/config"
+	"github.com/gsoultan/gateon/internal/logger"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
@@ -98,7 +98,6 @@ func BackendsFromService(svc *gateonv1.Service) []string {
 			addrs = append(addrs, addr)
 		}
 	}
-	fmt.Printf("L4 Resolver: Service %s has %d L4 backends: %v\n", svc.Id, len(addrs), addrs)
 	return addrs
 }
 
@@ -179,6 +178,7 @@ func (r *Resolver) ResolveTCP(ep *gateonv1.EntryPoint, protocol string) TCPProxy
 	if pool != nil && cfg.HealthCheckInterval > 0 && cfg.EnableHealthCheck {
 		go pool.StartHealthChecks()
 	}
+	logPoolBuilt(ep, "tcp", cfg)
 	r.mu.Lock()
 	old := r.tcpPools[key]
 	if old != nil && old.pool != nil {
@@ -206,6 +206,7 @@ func (r *Resolver) ResolveUDP(ep *gateonv1.EntryPoint) UDPProxy {
 	r.mu.RUnlock()
 
 	proxy := NewUDPSessionProxy(cfg.Backends, cfg.LoadBalancer, cfg.UDPSessionTimeout, cfg.UDPMaxSessions)
+	logPoolBuilt(ep, "udp", cfg)
 	r.mu.Lock()
 	old := r.udpProxies[key]
 	if old != nil && old.proxy != nil {
@@ -249,32 +250,66 @@ func (r *Resolver) resolveConfig(ep *gateonv1.EntryPoint, routeType string, prot
 // an address, which is what made the concatenation ambiguous in the first place.
 // Backends stay order-insensitive on purpose: reordering a round-robin list is
 // not a change worth tearing down live connections for.
+//
+// It runs once per accepted connection, so it allocates nothing on the usual
+// path: FNV-1a is computed in place rather than through hash/fnv's
+// constructor, the integers are formatted into a stack buffer, and backends
+// already in order -- one backend always is -- are not copied to be sorted.
 func configHash(cfg *L4Config) uint64 {
-	h := fnv.New64a()
-	write := func(s string) {
-		_, _ = h.Write([]byte(s))
-		_, _ = h.Write([]byte{0})
+	h := fnv64a(fnvOffset64)
+	h.field(cfg.LoadBalancer)
+	for _, n := range [...]int{cfg.HealthCheckInterval, cfg.HealthCheckTimeout, cfg.UDPSessionTimeout, cfg.UDPMaxSessions} {
+		var digits [20]byte
+		h.fieldBytes(strconv.AppendInt(digits[:0], int64(n), 10))
 	}
-
-	write(cfg.LoadBalancer)
-	write(fmt.Sprintf("%d", cfg.HealthCheckInterval))
-	write(fmt.Sprintf("%d", cfg.HealthCheckTimeout))
-	write(fmt.Sprintf("%d", cfg.UDPSessionTimeout))
-	write(fmt.Sprintf("%d", cfg.UDPMaxSessions))
 	if cfg.ProxyProtocol {
-		write("proxy")
+		h.field("proxy")
 	} else {
-		write("noproxy")
+		h.field("noproxy")
 	}
 
-	// Copied before sorting: cfg belongs to the caller, and reordering its
-	// backends underneath them would be a surprising side effect of hashing.
-	backends := append([]string(nil), cfg.Backends...)
-	sort.Strings(backends)
-	for _, b := range backends {
-		write(b)
+	backends := cfg.Backends
+	if !slices.IsSorted(backends) {
+		// Copied before sorting: cfg belongs to the caller, and reordering its
+		// backends underneath them would be a surprising side effect of hashing.
+		backends = slices.Sorted(slices.Values(backends))
 	}
-	return h.Sum64()
+	for _, b := range backends {
+		h.field(b)
+	}
+	return uint64(h)
+}
+
+// fnv64a is a 64-bit FNV-1a hash accumulated in place.
+type fnv64a uint64
+
+const (
+	fnvOffset64 = 14695981039346656037
+	fnvPrime64  = 1099511628211
+)
+
+// field hashes s and then a NUL, so adjacent fields cannot run together.
+func (h *fnv64a) field(s string) {
+	for i := range len(s) {
+		*h ^= fnv64a(s[i])
+		*h *= fnvPrime64
+	}
+	*h *= fnvPrime64 // the NUL: xor with 0, then multiply
+}
+
+func (h *fnv64a) fieldBytes(b []byte) {
+	for _, c := range b {
+		*h ^= fnv64a(c)
+		*h *= fnvPrime64
+	}
+	*h *= fnvPrime64
+}
+
+// logPoolBuilt records a backend pool being built for an entrypoint -- when the
+// configuration it was resolved from changes, not per connection.
+func logPoolBuilt(ep *gateonv1.EntryPoint, network string, cfg *L4Config) {
+	logger.L.LogInfo("L4 backend pool built",
+		"entrypoint", ep.Id, "network", network, "backends", strings.Join(cfg.Backends, ","))
 }
 
 // InvalidateEntrypoint clears the cache for the given entrypoint (call when routes/services change).
