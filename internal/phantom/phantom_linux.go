@@ -220,25 +220,23 @@ func (c *linuxCore) OptimizeListener(l net.Listener) net.Listener {
 	return l
 }
 
-// GetStatus returns the operational status of the Linux core.
+// GetStatus reports the acceleration actually in effect. It feeds the
+// Diagnostics page's Phantom Core card and the metrics snapshot's titanEnabled.
+//
+// It used to add "AF_XDP" and report enabled whenever it held an eBPF manager.
+// main always passes ebpf.GlobalHolder, which is never nil, so every Linux
+// install -- io_uring off, the default -- showed OPTIMIZED over the engine
+// "standardAF_XDP". Nothing here moves a byte over AF_XDP: proxyWithXDP returns
+// an error on every call. io_uring is the only acceleration this core applies,
+// and only once GATEON_PHANTOM=1 has brought a ring up.
 func (c *linuxCore) GetStatus() (enabled bool, engine string, activePorts int) {
-	if c.ring != nil {
-		engine = "io_uring"
-		enabled = true
-	} else {
-		engine = "standard"
-	}
-
-	if c.ebpf != nil {
-		if engine != "" && engine != "standard" {
-			engine += " + "
-		}
-		engine += "AF_XDP"
-		enabled = true
-	}
-
 	activePorts = int(c.activePorts.Load())
-	return
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if c.ring != nil {
+		return true, "io_uring", activePorts
+	}
+	return false, "standard", activePorts
 }
 
 // Close releases the io_uring ring and other kernel resources.
