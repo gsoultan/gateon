@@ -107,6 +107,25 @@ func TestMitigationListPagesThroughThrottlesThenStoredMitigations(t *testing.T) 
 	}
 }
 
+// TestTheMitigationListTakesAnyPageItIsAskedFor: the page comes from the
+// client. A negative offset slices below zero, and a limit is not a size to
+// allocate up front.
+func TestTheMitigationListTakesAnyPageItIsAskedFor(t *testing.T) {
+	s, _ := throttleTestService(t)
+	if err := holderOf(t, s).SetAdaptiveRateLimitFor("10.63.0.1", time.Second, "test"); err != nil {
+		t.Fatal(err)
+	}
+	for _, page := range []struct{ limit, offset int32 }{{2, -5}, {1 << 30, 0}} {
+		resp, err := s.ListSecurityThreats(t.Context(), &gateonv1.ListSecurityThreatsRequest{
+			Status: "ipMitigated", Limit: page.limit, Offset: page.offset,
+		})
+		if err != nil || len(resp.GetThreats()) != 1 {
+			t.Errorf("limit %d, offset %d: %d rows (err %v), want the one throttle", page.limit, page.offset,
+				len(resp.GetThreats()), err)
+		}
+	}
+}
+
 // TestAnIPv6ThrottleIsListedAndReleasedByItsSlash64: the kernel limits IPv6 by
 // /64, so that is what is listed, and the row's own Source releases it.
 func TestAnIPv6ThrottleIsListedAndReleasedByItsSlash64(t *testing.T) {

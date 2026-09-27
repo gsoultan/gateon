@@ -1234,7 +1234,10 @@ func (s *ApiService) listMitigations(ctx context.Context, kind mitigationList, l
 	if kind != mitigationsUser {
 		throttles = s.kernelThrottles()
 	}
-	res := make([]*gateonv1.Anomaly, 0, limit)
+	// Both come from the request: nothing is sized by limit, and a negative
+	// offset is the first page rather than an index below zero.
+	offset = max(0, offset)
+	var res []*gateonv1.Anomaly
 	if offset < len(throttles) {
 		for _, l := range throttles[offset:min(len(throttles), offset+limit)] {
 			res = append(res, throttleAnomaly(l))
