@@ -5,7 +5,9 @@ Date: 2026-09-04
 ## Status
 
 Accepted. Co-signed `arch` ↔ `sec`: it moves the trust boundary the reputation
-control acts on.
+control acts on. Amended by ADR 0024: the fingerprint half of the identity is
+the part a client cannot vary per request -- the JA4, or JA4H without its
+method, cookie and referer bits -- which answers the "inverse failure" below.
 
 ## Context
 

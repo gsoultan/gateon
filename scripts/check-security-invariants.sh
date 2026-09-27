@@ -318,9 +318,12 @@ fi
 # with 403 below a score of 2.0, so while it keyed on the bare fingerprint a
 # single patient attacker on an unmodified browser could drive that shared score
 # to zero and lock out every other user of that browser, everywhere -- with no
-# volume and nothing unusual about the traffic. repid.For pairs
-# the class with the client's network so a refusal reaches one network instead of
-# one browser.
+# volume and nothing unusual about the traffic. repid.For pairs the client's
+# class with its network, so a refusal reaches one kind of client on one network
+# instead of one browser everywhere. The class is the part of the fingerprint a
+# client cannot vary per request -- the JA4, or JA4H without its method, cookie
+# and referer bits (ADR 0024) -- and repid.For cuts it itself, which is one more
+# reason nothing outside internal/telemetry should hold the raw fingerprint.
 #
 # Nothing in the type system distinguishes the two strings: both are a string,
 # and passing the wrong one compiles, runs, and silently restores the old blast
@@ -330,10 +333,11 @@ fi
 # internal/api/security_threat_detector.go is exempt, deliberately. It reads by
 # raw IP, and it only ever *relaxes*: a high score discounts an already-computed
 # threat score so that busy offices and known proxies are not flagged for minor
-# oddities. Scoping it would change nothing, because a threat recorded without a
-# fingerprint is still stored under its bare address (repid.For returns the
-# address when the fingerprint is empty), so that lookup keeps finding exactly
-# what it found before.
+# oddities. The lookup finds only the scores of threats recorded without a
+# fingerprint (repid.For returns the address when the fingerprint is empty); a
+# fingerprinted client's score is under its scoped identity, so a client the
+# blocker refuses can still get the full discount. That is an open defect in the
+# detector (ADR 0024 lists it), not a reason to widen this exemption.
 #
 # PerFingerprint and PerJA4H are exempt too. They are rate-limit key functions an
 # operator selects by name, so grouping every client of one browser into a shared
