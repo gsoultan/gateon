@@ -187,6 +187,127 @@ status, which stays current while the page is open.
 **Who is affected:** nobody needs to act. API clients reading the mitigation
 list can use `expiresAt` instead of parsing the description.
 
+### Plaintext TCP entrypoints proxy protocols in which the server speaks first — SMTP, POP3, IMAP, FTP, MySQL
+
+A plaintext TCP entrypoint reads each connection's first bytes to choose
+between its HTTP server, an `ssh` or `rdp` route and its `tcp` route. A client
+of a server-first protocol sends nothing until it has the server's greeting,
+so the entrypoint waited for the client while the client waited for the
+server: after a second it wrote its own banner line and closed the
+connection, and the backend was never dialled. SMTP on 25 and 587, POP3,
+IMAP, FTP, MySQL and VNC could not be proxied through a plaintext TCP
+entrypoint at all, although `doc/email-backend-setup.md` described exactly
+that setup. They now work, in one of two ways depending on what else the
+entrypoint serves.
+
+**An entrypoint whose only route is a `tcp` route** has nothing to tell apart,
+so each connection goes to the route the moment it is accepted: no detection,
+no delay, the backend's greeting arrives at once (measured: under a
+millisecond on loopback, the direct connection plus the proxy's own dial).
+Everything the client sends is the backend's -- an HTTP request to such a port
+reaches the tcp backend, not the gateway's HTTP handling.
+
+**An entrypoint that also serves HTTP, gRPC, `ssh` or `rdp` routes** still reads
+first. A client that speaks within **500 ms** is routed by what it says,
+exactly as before. A client that has said nothing after 500 ms is raced
+against the `tcp` route's backend: the gateway connects to the backend and
+keeps listening to the client. If the backend speaks first, it is a
+server-first protocol and gets the session, greeting and all. If the client
+speaks first -- a browser that opened the connection before it had a request,
+a request whose first packet was lost and resent -- it is routed by what it
+said, and the backend connection is closed having received nothing. If neither
+speaks within the entrypoint's read timeout (15 s unless set), both are
+closed; if the backend cannot be reached, the client is closed at once.
+
+The 500 ms is measured, not chosen: a client that speaks first sends its
+opening bytes right after connecting at any round-trip time, and later only
+behind a slow uplink (~210 ms for a full packet at 64 kbit/s) or when that
+packet is lost and resent (~300 ms later at 50 ms RTT). There is no setting.
+
+**Who is affected:** plaintext TCP entrypoints with a `tcp` route.
+
+What an operator should do (`doc/email-backend-setup.md` gives the same rules for mail):
+
+1. **Give every server-first protocol an entrypoint of its own, with only its
+   `tcp` route** -- one entrypoint per port (25, 587, 110, 143, 21, 3306 ...).
+   Its greeting then arrives at once.
+2. **An entrypoint counts as tcp-only only if no HTTP-type route is served
+   there.** A route of type `http`, `grpc` or `graphql` that lists **no**
+   entrypoints is served on **every** entrypoint -- including your SMTP port --
+   and turns every entrypoint into a mixed one, with the 500 ms greeting delay
+   below. List entrypoints explicitly on HTTP routes. An `ssh` or `rdp` route
+   listing the entrypoint also makes it mixed; a `udp` route does not.
+3. **On a mixed entrypoint, a server-first greeting takes 500 ms.** The session
+   still works; only the greeting waits. And a client that speaks first (HTTP,
+   SSH, RDP) but more than 500 ms after connecting -- a slow or lossy link --
+   loses the race to a server-first backend and reaches it instead of its own
+   route. Against a backend that waits for its client (TLS passthrough,
+   PostgreSQL, Redis), a late client is never misrouted.
+4. **TLS-terminating TCP entrypoints** (SMTPS 465, IMAPS 993, POP3S 995 with TLS
+   enabled on the entrypoint) never inspected and were never affected: no
+   delay. Their backends receive plaintext -- point them at the backend's
+   plaintext ports.
+5. **An entrypoint with no `tcp` route** behaves as before: a client has a
+   second to say something, then is told there is no route (below).
+
+### A TCP entrypoint holds at most max_connections at once — a new default cap
+
+An entrypoint's `max_connections` was stored and read by nothing, so a TCP
+entrypoint had no connection limit: a flood of connections, which cost the
+client one packet each, cost the gateway two goroutines and several
+descriptors each without bound. A TCP entrypoint (plaintext or TLS) now holds
+at most `max_connections` connections at once -- L4 sessions and connections
+still being inspected; a connection past the limit is closed as soon as it is
+accepted. With `max_connections` at 0 (the default, and what every existing
+entrypoint has) the limit is the resource profile's: **1000** (`minimal`),
+**10000** (`standard`), **50000** (`enterprise`), selected by `GATEON_PROFILE`
+as for every other profile default. Refusals are counted with the other
+connection-limit rejections on the Diagnostics limit card, and logged at WARN
+at most once a minute per entrypoint (`TCP entrypoint at its connection
+limit, refusing new connections`). The limit is read when the entrypoint
+starts.
+
+**Who is affected:** a TCP entrypoint that holds more concurrent connections
+than its profile's default -- more than 10000 on the standard profile. Set
+`max_connections` on it (config file or API; the dashboard does not show the
+field yet). HTTP entrypoints still do not read `max_connections`.
+
+### The PROXY protocol header names the address the client connected to
+
+With **Send PROXY protocol** on a TCP service, the header's destination address
+and port were the backend's own, not the gateway address the client connected
+to, and came from a different socket than the source -- an IPv6 client behind
+an IPv4 backend got a header naming one of each, which PROXY readers reject.
+The destination is now the address and port the client connected to, as the
+PROXY protocol specifies.
+
+**Who is affected:** backends reading the PROXY header's destination -- a mail
+server or proxy that tells apart which gateway address or port a client used,
+or logs it. The source (the client) was always right.
+
+### A connection a TCP entrypoint has no route for is told so
+
+A connection nothing claims -- a client that says nothing to an entrypoint
+without a `tcp` route, or a protocol with no route -- is answered with one line
+and closed. The line was `Gateon TCP Entrypoint - <time>`, which said nothing
+about why the connection was ending, and whose time ended in the process's
+monotonic clock reading (`m=+12345.678`), i.e. its uptime. It is now:
+
+    Gateon TCP Entrypoint - no route for this connection
+
+The same line answers a TLS-terminating TCP entrypoint that has no route. On a
+plaintext entrypoint without a `tcp` route a silent client still has a full
+second to speak before it gets it, as before. The DEBUG line
+`TCP inspection fallback to generic TCP` -- there was never a generic fallback --
+is now `TCP inspection: no route for this connection, closing it`, with the
+protocol, the byte count (0 for a client that said nothing) and the client
+address. The race and the tcp-only path log their outcome at DEBUG
+(`TCP inspection: backend spoke first, proxying`, `... client spoke first,
+routing by its bytes`, `... the tcp route is all this entrypoint serves,
+proxying`). Nothing new is logged at INFO.
+
+**Who is affected:** anyone matching the old banner text or the old DEBUG line.
+
 ### First-run setup requires a setup token — **scripted setup must send it**
 
 Setup runs before any account exists, and it required nothing: whoever reached
