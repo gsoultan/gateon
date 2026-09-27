@@ -70,21 +70,31 @@ test.describe('Circuit Breaker', () => {
   test('shows the down target OPEN and the healthy one CLOSED, counts them, and records the change', async ({
     page,
     request,
+    playwright,
   }) => {
     // A saved route goes live when the router is rebuilt, which the PUT does
-    // not wait for. Round robin sends every other request to the dead target,
-    // so keep asking until one has failed there: that is the error the page
-    // has to count.
-    let failed = 0;
-    await expect
-      .poll(
-        async () => {
-          if ((await request.get(`${PROXY}${PREFIX}/warm`)).status() >= 500) failed++;
-          return failed;
-        },
-        { message: 'no request reached the dead target', timeout: 20_000 },
-      )
-      .toBeGreaterThan(0);
+    // not wait for, and the per-target counters live in the route's handler:
+    // a rebuild shortly after the save starts them again at zero. So keep
+    // sending traffic -- round robin gives the dead target every other request
+    // -- until the gateway's own stats show an error there. That count is
+    // what the page has to show.
+    const api = await admin(playwright);
+    let counted = 0;
+    try {
+      await expect
+        .poll(
+          async () => {
+            await request.get(`${PROXY}${PREFIX}/warm`);
+            const stats = (await (await api.get('/v1/routes/stats')).json()) as Record<string, { url: string; errorCount?: number }[]>;
+            counted = stats[ROUTE]?.find((t) => t.url === DEAD)?.errorCount ?? 0;
+            return counted;
+          },
+          { message: 'the gateway never counted an error on the dead target', timeout: 20_000 },
+        )
+        .toBeGreaterThan(0);
+    } finally {
+      await api.dispose();
+    }
 
     await page.goto('/circuit-breaker');
     await expect(page.getByRole('heading', { name: 'Circuit Breaker', level: 2 })).toBeVisible();
@@ -99,10 +109,10 @@ test.describe('Circuit Breaker', () => {
     // Columns: route, target, state, requests, errors.
     await expect
       .poll(async () => Number(await dead.getByRole('cell').nth(4).innerText()), {
-        message: 'the failed requests are not counted as errors on the dead target',
+        message: 'the page does not show the errors the gateway counted on the dead target',
         timeout: 15_000,
       })
-      .toBeGreaterThanOrEqual(failed);
+      .toBeGreaterThanOrEqual(counted);
 
     // The OPEN total: the card's label, its number, "Failing targets".
     const openCount = page.locator('.mantine-Paper-root').filter({ hasText: 'Failing targets' }).locator('p').nth(1);

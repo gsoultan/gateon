@@ -54,7 +54,12 @@ test.describe('Path Metrics', () => {
     await openPathMetrics(page);
     await page.getByPlaceholder('Search host or path text...').fill(marker);
 
+    // On a tier with the trace store the list comes from the database, which
+    // the writer fills every flush interval, so the paths may first appear at
+    // the table's next refresh.
     const served = pathRow(page, `/test/${marker}`);
+    await expect(served).toHaveCount(1, NEXT_REFRESH);
+    await expect(pathRow(page, `/${marker}/${HOSTILE}`)).toHaveCount(1, NEXT_REFRESH);
     const cells = served.getByRole('cell');
     await expect(cells.nth(0)).toHaveText('localhost');
     await expect(cells.nth(2), 'requests to the path').toHaveText('3', NEXT_REFRESH);
@@ -62,7 +67,6 @@ test.describe('Path Metrics', () => {
     await expect(page.getByText('2 paths', { exact: true })).toBeVisible();
 
     // The client's bytes, as characters, and nothing made of them.
-    await expect(pathRow(page, `/${marker}/${HOSTILE}`)).toHaveCount(1);
     await expect(page.locator('img[src="x"]')).toHaveCount(0);
     expect(dialogs, 'a path ran as script').toEqual([]);
 
