@@ -37,6 +37,14 @@ const firstRunDir =
   process.env.GATEON_E2E_FIRST_RUN_DIR ?? fs.mkdtempSync(path.join(os.tmpdir(), 'gateon-e2e-first-run-'));
 process.env.GATEON_E2E_FIRST_RUN_DIR = firstRunDir;
 
+// The suite gateway's trace archive, outside the checkout. Before the gateway
+// starts, seed_trace_archive archives an hour of traces into it as another
+// node, gw-seed -- the way gateways sharing an archive's storage see each
+// other's hours (tests/trace-archive.spec.ts). A worker reuses it, as above.
+const archiveDir =
+  process.env.GATEON_E2E_ARCHIVE_DIR ?? fs.mkdtempSync(path.join(os.tmpdir(), 'gateon-e2e-archive-'));
+process.env.GATEON_E2E_ARCHIVE_DIR = archiveDir;
+
 export default defineConfig({
   testDir: './tests',
   fullyParallel: false,
@@ -98,7 +106,7 @@ export default defineConfig({
   ],
   webServer: [
     {
-      command: 'rm -rf ../../telemetry_pebble/ && rm -f ../../gateon_test.db* && cd ../.. && GATEON_TEST=1 go run tests/e2e/create_user/main.go && GATEON_TEST=1 ./gateon',
+      command: 'rm -rf ../../telemetry_pebble/ && rm -f ../../gateon_test.db* && cd ../.. && GATEON_TEST=1 go run tests/e2e/create_user/main.go && GATEON_TEST=1 go run tests/e2e/seed_trace_archive/main.go && GATEON_TEST=1 ./gateon',
       port: 8080,
       reuseExistingServer: !process.env.CI,
       stdout: 'pipe',
@@ -116,6 +124,8 @@ export default defineConfig({
         GATEON_TEST: '1',
         GATEON_TRACE_SAMPLE_RATE: '1',
         GATEON_PROFILE: 'enterprise',
+        GATEON_TRACE_ARCHIVE_DIR: archiveDir,
+        GATEON_NODE_NAME: 'gw-e2e',
       },
     },
     {
