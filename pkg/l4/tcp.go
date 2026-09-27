@@ -269,10 +269,33 @@ func takeReadAhead(client net.Conn, backend io.Writer) (net.Conn, error) {
 	return conn, nil
 }
 
+// splicedSessions counts the L4 sessions whose bytes splice(2) is moving now.
+var splicedSessions atomic.Int64
+
+// SpliceSupported reports whether this build moves L4 session bytes with
+// splice(2): Linux does, between two plain TCP sockets.
+func SpliceSupported() bool { return spliceSupported }
+
+// SplicedSessions reports how many L4 sessions are being spliced right now:
+// both ends plain TCP sockets on a build that splices. A TLS-terminated
+// session is copied through a buffer and is not counted.
+func SplicedSessions() int64 { return splicedSessions.Load() }
+
+// spliceable reports whether a session between a and b is spliced.
+func spliceable(a, b net.Conn) bool {
+	_, aTCP := a.(*net.TCPConn)
+	_, bTCP := b.(*net.TCPConn)
+	return spliceSupported && aTCP && bTCP
+}
+
 // pipeHalfClose copies client and backend into each other until both
 // directions are done. When one side stops sending, the other is half-closed,
 // so it reads EOF while its own direction carries on.
 func pipeHalfClose(client, backend net.Conn) {
+	if spliceable(client, backend) {
+		splicedSessions.Add(1)
+		defer splicedSessions.Add(-1)
+	}
 	done := make(chan struct{})
 	go func() {
 		defer close(done)

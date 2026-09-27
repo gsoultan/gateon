@@ -4,6 +4,7 @@
 package l4
 
 import (
+	"context"
 	"io"
 	"net"
 	"runtime"
@@ -69,4 +70,60 @@ func TestProxyTCPSplicesAReadAheadConnection(t *testing.T) {
 			"io.Copy allocates 32 KiB", perSession)
 	}
 	t.Logf("%d bytes allocated per 2 MiB session", perSession)
+}
+
+// TestSplicedSessionsCountsTheSessionsBeingSpliced: the count the Diagnostics
+// page shows is sessions whose bytes the kernel is moving now -- an inspected
+// plaintext session counts, a session with an end that is not a plain TCP
+// socket (a TLS connection, here a pipe) does not, and neither counts once it
+// has ended.
+func TestSplicedSessionsCountsTheSessionsBeingSpliced(t *testing.T) {
+	echo := func(c net.Conn) { _, _ = io.Copy(c, c) }
+	roundTrip := func(t *testing.T, c net.Conn) {
+		t.Helper()
+		if _, err := c.Write([]byte{1}); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+		if _, err := io.ReadFull(c, make([]byte, 1)); err != nil {
+			t.Fatalf("echo: %v", err)
+		}
+	}
+
+	client, done := proxiedPair(t, "", false, echo)
+	roundTrip(t, client) // the session is up
+	if n := SplicedSessions(); n != 1 {
+		t.Errorf("%d spliced sessions with one inspected plaintext session open, want 1", n)
+	}
+	_ = client.Close()
+	<-done
+	if n := SplicedSessions(); n != 0 {
+		t.Errorf("%d spliced sessions after it ended, want 0", n)
+	}
+
+	backend := listenLoopback(t)
+	echoed := make(chan struct{})
+	go func() {
+		defer close(echoed)
+		if c, err := backend.Accept(); err == nil {
+			echo(c)
+			_ = c.Close()
+		}
+	}()
+	defer func() {
+		_ = backend.Close()
+		<-echoed
+	}()
+	pipeClient, pipeProxySide := net.Pipe()
+	pool := NewTCPBackendPool([]string{backend.Addr().String()}, "round_robin", 10000, 1000, false)
+	proxied := make(chan struct{})
+	go func() {
+		defer close(proxied)
+		pool.ProxyTCP(context.Background(), pipeProxySide)
+	}()
+	roundTrip(t, pipeClient)
+	if n := SplicedSessions(); n != 0 {
+		t.Errorf("%d spliced sessions with only a session whose client is not a TCP socket, want 0", n)
+	}
+	_ = pipeClient.Close()
+	<-proxied
 }

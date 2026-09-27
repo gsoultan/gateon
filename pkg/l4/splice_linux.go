@@ -10,6 +10,10 @@ import (
 	"syscall"
 )
 
+// spliceSupported is true: between two *net.TCPConn, SpliceCopy reaches
+// splice(2) through the standard library.
+const spliceSupported = true
+
 // SpliceCopy attempts to zero-copy data from src to dst using splice(2).
 // On Linux, this is achieved by leveraging Go's built-in support in (*net.TCPConn).ReadFrom.
 func SpliceCopy(dst, src net.Conn) (int64, error) {

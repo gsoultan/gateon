@@ -27,6 +27,7 @@ import (
 	"sync"
 
 	"github.com/gsoultan/gateon/internal/logger"
+	"github.com/gsoultan/gateon/pkg/l4"
 )
 
 // PhantomCore is the data-path engine behind the gateway's listeners.
@@ -35,8 +36,12 @@ type PhantomCore interface {
 	// listener measured here; see datapath_bench_test.go.
 	OptimizeListener(l net.Listener) net.Listener
 
-	// GetStatus reports the engine actually in use.
-	GetStatus() (enabled bool, engine string, activePorts int)
+	// GetStatus reports how the gateway moves L4 bytes: enabled and engine
+	// "splice (zero-copy)" where plaintext TCP routes are spliced by the
+	// kernel (Linux), "standard" elsewhere. splicedSessions is how many
+	// sessions are being spliced right now -- the Diagnostics field it feeds
+	// is still called active_phantom_ports.
+	GetStatus() (enabled bool, engine string, splicedSessions int)
 
 	// Close releases the core. It holds nothing, so it never fails.
 	Close() error
@@ -77,8 +82,14 @@ type core struct{}
 
 func (core) OptimizeListener(l net.Listener) net.Listener { return l }
 
-func (core) GetStatus() (enabled bool, engine string, activePorts int) {
-	return false, "standard", 0
+// spliceEngine is the engine name while L4 sessions are spliced.
+const spliceEngine = "splice (zero-copy)"
+
+func (core) GetStatus() (enabled bool, engine string, splicedSessions int) {
+	if !l4.SpliceSupported() {
+		return false, "standard", 0
+	}
+	return true, spliceEngine, int(l4.SplicedSessions())
 }
 
 func (core) Close() error { return nil }

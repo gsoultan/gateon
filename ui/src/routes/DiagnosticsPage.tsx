@@ -409,13 +409,19 @@ const DiagnosticsPage: React.FC = () => {
                 </Box>
                 <Stack gap={4}>
                   <Group justify="space-between">
-                    <Text size="xs" c="dimmed" fw={800} style={{ textTransform: "uppercase" }}>Phantom Core</Text>
+                    <Tooltip label="How the gateway moves proxied bytes. On Linux, plaintext TCP routes are copied socket to socket by the kernel (splice); TLS and HTTP traffic goes through Go's standard network stack.">
+                      <Text size="xs" c="dimmed" fw={800} style={{ textTransform: "uppercase", cursor: 'help' }}>Phantom Core</Text>
+                    </Tooltip>
                     <Badge size="xs" color={data.system.titan.phantomEnabled ? "teal" : "gray"}>
-                      {data.system.titan.phantomEnabled ? "OPTIMIZED" : "FALLBACK"}
+                      {data.system.titan.phantomEnabled ? "ZERO-COPY" : "STANDARD"}
                     </Badge>
                   </Group>
-                  <Text fw={900} size="xl">{data.system.titan.phantomEngine || "Standard"}</Text>
-                  <Text size="10px" c="dimmed">Active Redirections: {data.system.titan.activePhantomPorts}</Text>
+                  <Text fw={900} size="xl">{data.system.titan.phantomEngine || "standard"}</Text>
+                  <Text size="10px" c="dimmed">
+                    {data.system.titan.phantomEnabled
+                      ? `Spliced TCP sessions now: ${data.system.titan.activePhantomPorts ?? 0}`
+                      : "No kernel splice on this platform"}
+                  </Text>
                 </Stack>
               </Paper>
 

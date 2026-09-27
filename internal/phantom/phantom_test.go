@@ -69,8 +69,9 @@ func TestOptimizeListenerReturnsTheListenerItWasGiven(t *testing.T) {
 }
 
 // TestStatusClaimsNoAccelerationThatIsNotRunning pins what the Diagnostics
-// page's Phantom Core card is fed: nothing here accelerates anything, so the
-// status must not say it does, whatever the environment asked for.
+// page's Phantom Core card is fed, whatever the environment asked for: no
+// io_uring and no AF_XDP, because neither exists. What it does claim is pinned
+// per platform in status_linux_test.go and status_other_test.go.
 //
 // It first appended "AF_XDP" whenever it held an eBPF manager, which main
 // always gave it, so every Linux install showed OPTIMIZED over the engine
@@ -83,18 +84,11 @@ func TestStatusClaimsNoAccelerationThatIsNotRunning(t *testing.T) {
 	core := NewPhantomCore()
 	defer func() { _ = core.Close() }()
 
-	enabled, engine, ports := core.GetStatus()
-	if enabled {
-		t.Errorf("GetStatus reports enabled (engine %q): the dashboard shows OPTIMIZED while "+
-			"nothing is", engine)
-	}
+	_, engine, _ := core.GetStatus()
 	for _, claim := range []string{"io_uring", "AF_XDP"} {
 		if strings.Contains(engine, claim) {
 			t.Errorf("GetStatus reports engine %q, but no %s path exists", engine, claim)
 		}
-	}
-	if ports != 0 {
-		t.Errorf("GetStatus reports %d active phantom ports; nothing registers one", ports)
 	}
 }
 
