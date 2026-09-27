@@ -5,6 +5,22 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "./api";
 import type { WafRule, ListWafRulesResponse, ListWafRulesRequest, CreateWafRuleRequest, UpdateWafRuleRequest } from "../types/gateon";
 import { useState } from "react";
+import { getApiErrorMessage } from "./api";
+
+/**
+ * The body of a successful answer, or an error carrying the gateway's message.
+ *
+ * Create, update and delete returned resp.json() whatever the status. The
+ * gateway answers a rule it refuses -- a regex RE2 cannot compile, a SecLang
+ * directive -- with 500 and {"error": ...}, which parsed fine, so the tab
+ * announced "WAF Rule created successfully" for a rule that was never stored.
+ */
+async function okJson(resp: Response): Promise<unknown> {
+  if (!resp.ok) {
+    throw new Error(getApiErrorMessage(new Error(await resp.text())) || `HTTP ${resp.status}`);
+  }
+  return resp.json();
+}
 
 export function useWafRules(initialParams: ListWafRulesRequest = { pageSize: 10, page: 0 }) {
   const queryClient = useQueryClient();
@@ -32,12 +48,15 @@ export function useWafRules(initialParams: ListWafRulesRequest = { pageSize: 10,
   });
 
   const createMutation = useMutation({
+    // The tab reports failures itself; without this the global handler
+    // showed a second toast for the same refusal.
+    meta: { skipGlobalError: true },
     mutationFn: async (req: CreateWafRuleRequest) => {
       const resp = await apiFetch("/v1/waf/rules", {
         method: "POST",
         body: JSON.stringify(req),
       });
-      return resp.json();
+      return okJson(resp);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["waf-rules"] });
@@ -45,12 +64,13 @@ export function useWafRules(initialParams: ListWafRulesRequest = { pageSize: 10,
   });
 
   const updateMutation = useMutation({
+    meta: { skipGlobalError: true },
     mutationFn: async (req: UpdateWafRuleRequest) => {
       const resp = await apiFetch("/v1/waf/rules", {
         method: "PUT",
         body: JSON.stringify(req),
       });
-      return resp.json();
+      return okJson(resp);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["waf-rules"] });
@@ -58,11 +78,12 @@ export function useWafRules(initialParams: ListWafRulesRequest = { pageSize: 10,
   });
 
   const deleteMutation = useMutation({
+    meta: { skipGlobalError: true },
     mutationFn: async (id: string) => {
       const resp = await apiFetch(`/v1/waf/rules/${id}`, {
         method: "DELETE",
       });
-      return resp.json();
+      return okJson(resp);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["waf-rules"] });
