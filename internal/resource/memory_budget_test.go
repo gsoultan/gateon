@@ -100,7 +100,7 @@ func TestTheCgroupWorkingSetLeavesOutReclaimableCache(t *testing.T) {
 	dir := t.TempDir()
 	fakeCgroup(t, dir, "1073741824", "1000000000", "600000000")
 
-	inUse, limit, ok := cgroupV2{dirs: []string{dir}}.read()
+	inUse, limit, ok := cgroupV2{root: dir, dirs: []string{"."}}.read()
 	if !ok || limit != 1073741824 {
 		t.Fatalf("read = (%d, %d, %v), want the 1 GiB limit", inUse, limit, ok)
 	}
@@ -112,10 +112,10 @@ func TestTheCgroupWorkingSetLeavesOutReclaimableCache(t *testing.T) {
 func TestAnUnlimitedCgroupIsNotAYardstick(t *testing.T) {
 	dir := t.TempDir()
 	fakeCgroup(t, dir, "max", "1000000000", "0")
-	if _, _, ok := (cgroupV2{dirs: []string{dir}}).read(); ok {
+	if _, _, ok := (cgroupV2{root: dir, dirs: []string{"."}}).read(); ok {
 		t.Fatal(`memory.max "max" was read as a limit`)
 	}
-	if _, _, ok := (cgroupV2{dirs: []string{filepath.Join(dir, "absent")}}).read(); ok {
+	if _, _, ok := (cgroupV2{root: dir, dirs: []string{"absent"}}).read(); ok {
 		t.Fatal("a cgroup directory that does not exist was read as a limit")
 	}
 }
@@ -203,7 +203,7 @@ func TestACgroupThatCannotBeReadIsNotAYardstick(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			inUse, _, ok := cgroupV2{dirs: []string{dir}}.read()
+			inUse, _, ok := cgroupV2{root: dir, dirs: []string{"."}}.read()
 			if ok != tc.ok || inUse != tc.inUse {
 				t.Fatalf("read = (%d, ok %v), want (%d, ok %v)", inUse, ok, tc.inUse, tc.ok)
 			}
@@ -229,5 +229,25 @@ func TestLimitsAreNamedInTheUnitsTheyAreSetIn(t *testing.T) {
 func TestTheYardstickIsUnknownUntilMeasured(t *testing.T) {
 	if got := NewGovernor().MemoryYardstick(); got != "" {
 		t.Fatalf("MemoryYardstick() before any sample = %q, want empty", got)
+	}
+}
+
+// TestTheCgroupReaderCannotLeaveTheMount: the directory comes from
+// /proc/self/cgroup, joined under the cgroup2 mount. Reads go through an
+// os.Root at the mount, so neither a ".." in that path nor a symlink inside the
+// mount can point the governor at a file elsewhere on the host.
+func TestTheCgroupReaderCannotLeaveTheMount(t *testing.T) {
+	outside := t.TempDir()
+	fakeCgroup(t, outside, "1073741824", "1000", "0")
+	root := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(root, "escape")); err != nil {
+		t.Fatal(err)
+	}
+	if _, limit, ok := (cgroupV2{root: root, dirs: []string{"escape"}}).read(); ok {
+		t.Errorf("read a limit of %d through a symlink out of the cgroup mount", limit)
+	}
+	cg := cgroupV2FromProc("0::/../../"+filepath.Base(outside)+"\n", root)
+	if _, limit, ok := cg.read(); ok {
+		t.Errorf("a /proc/self/cgroup path climbing out of the mount read a limit of %d", limit)
 	}
 }

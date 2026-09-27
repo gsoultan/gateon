@@ -7,7 +7,7 @@ import (
 	"context"
 	"math"
 	"os"
-	"path/filepath"
+	"path"
 	"runtime/debug"
 	"runtime/metrics"
 	"strconv"
@@ -101,8 +101,14 @@ func hostMemoryUsage(ctx context.Context) (float64, error) {
 }
 
 // cgroupV2 reads the memory controller of the process's cgroup v2.
+//
+// Every read goes through an os.Root opened at the cgroup2 mount, and dirs are
+// relative to it: the path comes from /proc/self/cgroup, and os.Root refuses
+// any name -- a ".." or a symlink inside the mount -- that would resolve to a
+// file elsewhere on the host.
 type cgroupV2 struct {
-	dirs []string // where to look, in order
+	root string   // the cgroup2 mount
+	dirs []string // where to look under root, in order; "." is the mount itself
 }
 
 // cgroupV2FromProc finds the process's cgroup from the contents of
@@ -112,8 +118,12 @@ type cgroupV2 struct {
 // there, while its own cgroup is what is mounted at root.
 func cgroupV2FromProc(procSelfCgroup, root string) cgroupV2 {
 	for line := range strings.SplitSeq(procSelfCgroup, "\n") {
-		if path, ok := strings.CutPrefix(line, "0::"); ok {
-			return cgroupV2{dirs: []string{filepath.Join(root, path), root}}
+		if p, ok := strings.CutPrefix(line, "0::"); ok {
+			rel := strings.TrimPrefix(path.Clean("/"+p), "/")
+			if rel == "" {
+				return cgroupV2{root: root, dirs: []string{"."}}
+			}
+			return cgroupV2{root: root, dirs: []string{rel, "."}}
 		}
 	}
 	return cgroupV2{} // cgroup v1, or none: no limit this can read
@@ -128,16 +138,24 @@ func cgroupV2FromProc(procSelfCgroup, root string) cgroupV2 {
 // trace store and logs through the page cache would read close to 100% of its
 // limit for as long as it ran.
 func (c cgroupV2) read() (inUse, limit uint64, ok bool) {
+	if c.root == "" || len(c.dirs) == 0 {
+		return 0, 0, false
+	}
+	r, err := os.OpenRoot(c.root)
+	if err != nil {
+		return 0, 0, false
+	}
+	defer func() { _ = r.Close() }()
 	for _, dir := range c.dirs {
-		if inUse, limit, ok = readCgroupMemory(dir); ok {
+		if inUse, limit, ok = readCgroupMemory(r, dir); ok {
 			return inUse, limit, true
 		}
 	}
 	return 0, 0, false
 }
 
-func readCgroupMemory(dir string) (inUse, limit uint64, ok bool) {
-	raw, err := os.ReadFile(filepath.Join(dir, "memory.max"))
+func readCgroupMemory(r *os.Root, dir string) (inUse, limit uint64, ok bool) {
+	raw, err := r.ReadFile(path.Join(dir, "memory.max"))
 	if err != nil {
 		return 0, 0, false
 	}
@@ -145,7 +163,7 @@ func readCgroupMemory(dir string) (inUse, limit uint64, ok bool) {
 	if err != nil || limit == 0 { // "max" is no limit
 		return 0, 0, false
 	}
-	raw, err = os.ReadFile(filepath.Join(dir, "memory.current"))
+	raw, err = r.ReadFile(path.Join(dir, "memory.current"))
 	if err != nil {
 		return 0, 0, false
 	}
@@ -153,12 +171,12 @@ func readCgroupMemory(dir string) (inUse, limit uint64, ok bool) {
 	if err != nil {
 		return 0, 0, false
 	}
-	return saturatingSub(current, inactiveFile(dir)), limit, true
+	return saturatingSub(current, inactiveFile(r, dir)), limit, true
 }
 
 // inactiveFile is memory.stat's inactive_file, or 0 when it cannot be read.
-func inactiveFile(dir string) uint64 {
-	raw, err := os.ReadFile(filepath.Join(dir, "memory.stat"))
+func inactiveFile(r *os.Root, dir string) uint64 {
+	raw, err := r.ReadFile(path.Join(dir, "memory.stat"))
 	if err != nil {
 		return 0
 	}
