@@ -33,6 +33,7 @@ import {
 import { formatBytes } from "../../utils/format";
 import { QueryError } from "../QueryError";
 import { archivePath, severalNodes } from "./traceNodes";
+import { archiveSpan } from "./tracePeriods";
 
 const when = (iso: string) => (iso ? new Date(iso).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }) : "—");
 const clock = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
@@ -40,6 +41,12 @@ const day = (iso: string) => new Date(iso).toLocaleDateString([], { weekday: "sh
 
 // The most gateway names the status card lists before counting the rest.
 const LISTED_NODES = 6;
+
+// coverage is the time the archive covers, to the end of its newest hour.
+function coverage(status: TraceArchiveStatus): string {
+  const span = archiveSpan(status.oldestPeriod, status.newestPeriod);
+  return span ? `${when(span.from.toISOString())} – ${when(span.to.toISOString())}` : "—";
+}
 
 interface TraceArchivePanelProps {
   /** Opens the History tab on one archived hour. */
@@ -150,10 +157,7 @@ function ArchiveStatusCard({ status, newest }: { status: TraceArchiveStatus | nu
         <SimpleGrid cols={{ base: 2, md: 4 }}>
           <Stat label="Hours archived" value={status.segmentCount.toLocaleString()} />
           <Stat label="Kept for" value={`${status.retentionDays} days`} />
-          <Stat
-            label="Covers"
-            value={status.oldestPeriod ? `${when(status.oldestPeriod)} – ${when(status.newestPeriod)}` : "—"}
-          />
+          <Stat label="Covers" value={coverage(status)} />
           <Stat label="Last archived" value={when(status.lastArchivedAt)} />
         </SimpleGrid>
 

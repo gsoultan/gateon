@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 import { describe, expect, test } from "bun:test";
-import { fromLocalInput, hourPeriod, periodProblem, presetPeriod, toLocalInput } from "./tracePeriods";
+import { archiveSpan, fromLocalInput, hourPeriod, periodProblem, presetPeriod, toLocalInput } from "./tracePeriods";
 
 describe("trace periods", () => {
   test("a preset ends now and reaches back its length", () => {
@@ -17,6 +17,15 @@ describe("trace periods", () => {
     expect(p?.from.toISOString()).toBe("2026-09-26T14:00:00.000Z");
     expect(p?.to.toISOString()).toBe("2026-09-26T15:00:00.000Z");
     expect(hourPeriod("not a time")).toBeNull();
+  });
+
+  // The status names the newest hour by its start; what the archive covers
+  // runs to that hour's end. Shown as the start, it read an hour short.
+  test("an archive covers from its oldest hour's start to its newest hour's end", () => {
+    const span = archiveSpan("2026-09-25T00:00:00Z", "2026-09-26T01:00:00Z");
+    expect(span?.from.toISOString()).toBe("2026-09-25T00:00:00.000Z");
+    expect(span?.to.toISOString()).toBe("2026-09-26T02:00:00.000Z");
+    expect(archiveSpan("", "")).toBeNull();
   });
 
   test("a local input round-trips to the minute", () => {

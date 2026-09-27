@@ -39,6 +39,17 @@ export function hourPeriod(periodStart: string): Period | null {
   return { from, to: new Date(from.getTime() + HOUR_MS) };
 }
 
+/**
+ * archiveSpan is the time an archive covers, given its oldest and newest
+ * hours as the gateway names them -- by their starts: from the start of the
+ * oldest hour to the end of the newest.
+ */
+export function archiveSpan(oldestPeriod: string, newestPeriod: string): Period | null {
+  const oldest = hourPeriod(oldestPeriod);
+  const newest = hourPeriod(newestPeriod);
+  return oldest && newest ? { from: oldest.from, to: newest.to } : null;
+}
+
 const pad = (n: number) => String(n).padStart(2, "0");
 
 /** A date as a datetime-local input shows it: local time, to the minute. */
