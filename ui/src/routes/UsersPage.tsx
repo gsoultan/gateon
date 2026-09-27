@@ -48,6 +48,8 @@ import { TwoFactorModal } from "../components/TwoFactorModal";
 import { QueryError } from "../components/QueryError";
 import { ChangePasswordForm } from "../components/ChangePasswordForm";
 import { queryClient } from "../queryClient";
+import { ConfirmDeleteModal } from "../components/ConfirmDelete";
+import { notifyError, notifySuccess } from "../utils/notify";
 
 export default function UsersPage() {
   const [search, setSearch] = useState("");
@@ -65,6 +67,7 @@ export default function UsersPage() {
   const [tfaOpened, { open: tfaOpen, close: tfaClose }] = useDisclosure(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [targetUser, setTargetUser] = useState<User | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<User | null>(null);
   const currentUser = useAuthStore((state) => state.user);
   const token = useAuthStore((state) => state.token);
   const logout = useAuthStore((state) => state.logout);
@@ -148,9 +151,12 @@ export default function UsersPage() {
           ...changes,
         }),
       });
-      if (res.ok) refetch();
+      if (!res.ok) throw new Error(await res.text());
+      refetch();
     } catch (err) {
-      console.error("Failed to update user", err);
+      // A refused change used to vanish into the console, leaving the row as
+      // it was with nothing to say the click had failed.
+      notifyError(err, { title: `Could not update user "${user.username}"` });
     }
   };
 
@@ -193,28 +199,32 @@ export default function UsersPage() {
         }),
       });
 
-      if (res.ok) {
-        refetch();
-        close();
-      }
+      // A refused save used to do nothing at all: no message, the form still
+      // open, and no way to tell a rejected account from a slow one.
+      if (!res.ok) throw new Error(await res.text());
+      notifySuccess(`User "${values.username}" saved.`);
+      refetch();
+      close();
     } catch (err) {
-      console.error("Failed to save user", err);
+      notifyError(err, { title: "Could not save user" });
     }
   };
 
-  const handleDelete = async (id: string) => {
-    if (!confirm("Are you sure you want to delete this user?")) return;
-
+  // Deleting asked "Are you sure you want to delete this user?" -- the same
+  // question on every row. The confirmation names the account now.
+  const confirmDelete = async () => {
+    const user = pendingDelete;
+    setPendingDelete(null);
+    if (!user) return;
     try {
-      const res = await apiFetch(`/v1/users/${id}`, {
+      const res = await apiFetch(`/v1/users/${encodeURIComponent(user.id)}`, {
         method: "DELETE",
       });
-
-      if (res.ok) {
-        refetch();
-      }
+      if (!res.ok) throw new Error(await res.text());
+      notifySuccess(`User "${user.username}" deleted.`);
+      refetch();
     } catch (err) {
-      console.error("Failed to delete user", err);
+      notifyError(err, { title: `Could not delete user "${user.username}"` });
     }
   };
 
@@ -271,6 +281,7 @@ export default function UsersPage() {
               variant="subtle"
               color="blue"
               onClick={() => handleChangePassword(user)}
+              aria-label={`Change password for ${user.username}`}
               disabled={currentUser?.role !== "admin" && currentUser?.id !== user.id}
             >
               <IconKey size={16} />
@@ -297,6 +308,7 @@ export default function UsersPage() {
                     : "gray"
               }
               onClick={() => handle2FA(user)}
+              aria-label={`Two-factor authentication for ${user.username}`}
               disabled={
                 !(
                   currentUser?.id === user.id ||
@@ -312,6 +324,7 @@ export default function UsersPage() {
               variant="subtle"
               color={user.disabled ? "green" : "orange"}
               onClick={() => handleToggleDisabled(user)}
+              aria-label={user.disabled ? `Enable user ${user.username}` : `Disable user ${user.username}`}
               disabled={!isAdmin || currentUser?.id === user.id}
             >
               {user.disabled ? (
@@ -326,6 +339,7 @@ export default function UsersPage() {
               variant="subtle"
               color="gray"
               onClick={() => handleEdit(user)}
+              aria-label={`Edit user ${user.username}`}
               disabled={currentUser?.role !== "admin"}
             >
               <IconEdit size={16} />
@@ -335,7 +349,8 @@ export default function UsersPage() {
             <ActionIcon
               variant="subtle"
               color="red"
-              onClick={() => handleDelete(user.id)}
+              onClick={() => setPendingDelete(user)}
+              aria-label={`Delete user ${user.username}`}
               disabled={
                 currentUser?.role !== "admin" || currentUser?.id === user.id
               }
@@ -428,6 +443,7 @@ export default function UsersPage() {
                           variant="light"
                           color="blue"
                           onClick={() => handleChangePassword(user)}
+              aria-label={`Change password for ${user.username}`}
                           disabled={currentUser?.role !== "admin" && currentUser?.id !== user.id}
                         >
                           <IconKey size={16} />
@@ -437,6 +453,7 @@ export default function UsersPage() {
                         variant="light"
                         color={user.twoFactorEnabled ? "green" : user.twoFactorPending ? "orange" : "gray"}
                         onClick={() => handle2FA(user)}
+              aria-label={`Two-factor authentication for ${user.username}`}
                         disabled={!(currentUser?.id === user.id || (isAdmin && !user.twoFactorEnabled))}
                       >
                         <IconShieldLock size={16} />
@@ -445,6 +462,7 @@ export default function UsersPage() {
                         variant="light"
                         color={user.disabled ? "green" : "orange"}
                         onClick={() => handleToggleDisabled(user)}
+              aria-label={user.disabled ? `Enable user ${user.username}` : `Disable user ${user.username}`}
                         disabled={!isAdmin || currentUser?.id === user.id}
                       >
                         {user.disabled ? <IconUserCheck size={16} /> : <IconBan size={16} />}
@@ -453,6 +471,7 @@ export default function UsersPage() {
                         variant="light"
                         color="gray"
                         onClick={() => handleEdit(user)}
+              aria-label={`Edit user ${user.username}`}
                         disabled={currentUser?.role !== "admin"}
                       >
                         <IconEdit size={16} />
@@ -460,7 +479,8 @@ export default function UsersPage() {
                       <ActionIcon
                         variant="light"
                         color="red"
-                        onClick={() => handleDelete(user.id)}
+                        onClick={() => setPendingDelete(user)}
+              aria-label={`Delete user ${user.username}`}
                         disabled={currentUser?.role !== "admin" || currentUser?.id === user.id}
                       >
                         <IconTrash size={16} />
@@ -553,6 +573,10 @@ export default function UsersPage() {
                 { label: "Viewer (Read Only)", value: "viewer" },
               ]}
               required
+              // Choosing the option already chosen used to clear it (Mantine's
+              // default), so re-picking the preselected Viewer left the form
+              // refusing to submit with "Role is required".
+              allowDeselect={false}
               {...form.getInputProps("role")}
             />
             <Button type="submit" mt="md" fullWidth>
@@ -621,6 +645,13 @@ export default function UsersPage() {
           </div>
         </Group>
       </Paper>
+
+      <ConfirmDeleteModal
+        target={pendingDelete ? { kind: "user", name: pendingDelete.username } : null}
+        consequence="Their sessions end and the account can no longer log in."
+        onCancel={() => setPendingDelete(null)}
+        onConfirm={() => void confirmDelete()}
+      />
     </Stack>
   );
 }
