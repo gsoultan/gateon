@@ -9,9 +9,19 @@
 #   3. runtime — distroless static, non-root.
 #
 # Build from the repo root:  make docker   (or: docker build -t gateon:latest .)
+#
+# The ui and builder stages run on the machine doing the build and the binary
+# is cross-compiled for each --platform target, so a multi-arch image needs no
+# emulation: the binary is CGO-free and the eBPF object is compiled for the BPF
+# target, not the host's. VERSION is what the binary reports -- the release
+# without its "v", as goreleaser stamps the release binaries:
+#   docker buildx build --platform linux/amd64,linux/arm64 --build-arg VERSION=2.7.0 .
+# A builder with about 2 GB of memory -- podman's default machine -- has the
+# compiler killed building several packages at once; with podman, add
+# --env GOFLAGS=-p=1 to build one at a time.
 
 # ---- Stage 1: UI ------------------------------------------------------------
-FROM oven/bun:1 AS ui
+FROM --platform=$BUILDPLATFORM oven/bun:1 AS ui
 WORKDIR /ui
 # Install deps first for layer caching, then build.
 COPY ui/package.json ui/bun.lock* ./
@@ -22,7 +32,7 @@ RUN bun run build
 # ---- Stage 2: builder -------------------------------------------------------
 # bookworm + clang/llvm/libbpf lets `go generate` compile the XDP program so the
 # Linux build (manager_linux.go) links the bpf2go loader. Pin to go.mod's Go.
-FROM golang:1.27-bookworm AS builder
+FROM --platform=$BUILDPLATFORM golang:1.27-bookworm AS builder
 # nodejs is here for `buf generate` below: the TypeScript stubs are produced by
 # protoc-gen-es / protoc-gen-connect-es, which are node scripts under
 # ui/node_modules/.bin (`#!/usr/bin/env node`). Without node on PATH `buf
@@ -31,8 +41,15 @@ FROM golang:1.27-bookworm AS builder
 # .github/ci/Dockerfile.ci and so never exercised this path. It lands only in
 # the throwaway builder stage; the distroless runtime image is unchanged.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        clang llvm libbpf-dev libelf-dev linux-libc-dev gcc-multilib make nodejs \
+        clang llvm libbpf-dev libelf-dev linux-libc-dev make nodejs \
     && rm -rf /var/lib/apt/lists/*
+# <asm/*.h>, which <linux/types.h> includes, sits under the multiarch triplet,
+# off clang's default search path. gcc-multilib used to place it, but exists
+# only on amd64, so the build failed on any arm64 host -- which, with this
+# stage running on the build machine, is every build on Apple silicon. Naming
+# both triplets works on either; clang ignores the absent one. This is what
+# ci.yml, release.yml and internal/ebpf/Dockerfile.gen already do.
+ENV CPATH=/usr/include/x86_64-linux-gnu:/usr/include/aarch64-linux-gnu
 ENV BPF2GO_CC=clang BPF2GO_STRIP=llvm-strip
 
 WORKDIR /src
@@ -63,10 +80,14 @@ RUN PATH="${PATH}:/src/ui/node_modules/.bin" buf generate && \
     go generate ./internal/ebpf/... && \
     go mod verify
 
-# Static, CGO-free binary. The Go toolchain auto-applies cmd/gateon/default.pgo
-# when present (see `make pgo-profile`). -trimpath + -s -w shrink the binary.
+# Static, CGO-free binary for the target platform. The Go toolchain
+# auto-applies cmd/gateon/default.pgo when present (see `make pgo-profile`).
+# -trimpath + -s -w shrink the binary. An empty TARGETOS/TARGETARCH (a builder
+# that does not set them) builds for the build machine, as before.
 ENV CGO_ENABLED=0
-RUN go build -trimpath -ldflags="-s -w" -o /out/gateon ./cmd/gateon
+ARG TARGETOS TARGETARCH VERSION
+RUN GOOS=$TARGETOS GOARCH=$TARGETARCH \
+    go build -trimpath -ldflags="-s -w -X main.Version=${VERSION}" -o /out/gateon ./cmd/gateon
 
 # ---- Stage 3: runtime -------------------------------------------------------
 FROM gcr.io/distroless/static-debian12:nonroot
