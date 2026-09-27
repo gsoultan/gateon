@@ -85,6 +85,13 @@ type TierDefaults struct {
 	// a few dozen bytes; the ceiling is about bounding worst-case growth, not
 	// steady-state cost.
 	RLLimiterStates int
+
+	// TCPMaxConnections is how many connections a TCP entrypoint holds open
+	// at once -- L4 sessions, and connections still being inspected -- when
+	// its own max_connections is 0. A connection costs a client one SYN and
+	// the gateway two goroutines and, spliced, six descriptors, so without a
+	// ceiling a flood of them is paid for by the gateway alone.
+	TCPMaxConnections int
 }
 
 // NormalizeTier coerces an arbitrary string to a known tier, defaulting to
@@ -141,6 +148,7 @@ func DefaultsFor(tier Tier) TierDefaults {
 			FlushIntervalSeconds:      10,
 			WAFTier:                   TierMinimal,
 			RLLimiterStates:           2000,
+			TCPMaxConnections:         1000,
 		}
 	case TierEnterprise:
 		return TierDefaults{
@@ -165,6 +173,7 @@ func DefaultsFor(tier Tier) TierDefaults {
 			FlushIntervalSeconds:      1,
 			WAFTier:                   TierEnterprise,
 			RLLimiterStates:           100000,
+			TCPMaxConnections:         50000,
 		}
 	default: // TierStandard
 		return TierDefaults{
@@ -189,6 +198,7 @@ func DefaultsFor(tier Tier) TierDefaults {
 			FlushIntervalSeconds:      2,
 			WAFTier:                   TierStandard,
 			RLLimiterStates:           20000,
+			TCPMaxConnections:         10000,
 		}
 	}
 }

@@ -9,6 +9,8 @@ import (
 	"net"
 	"net/http"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/logger"
@@ -62,7 +64,7 @@ func shutdownHTTPServer(ctx context.Context, srv *http.Server) error {
 
 // openConns tracks the connections a TCP entrypoint has accepted, so its
 // shutdown can let them finish and then close whatever is still open when the
-// deadline passes.
+// deadline passes, and so it can refuse connections past its limit.
 //
 // An L4 session has no request boundary to drain at: an idle SSH or database
 // session lasts exactly as long as its client keeps it. Closing the listener
@@ -71,25 +73,54 @@ func shutdownHTTPServer(ctx context.Context, srv *http.Server) error {
 type openConns struct {
 	mu       sync.Mutex
 	conns    map[net.Conn]struct{}
+	limit    int // most connections held at once; the map never grows past it
 	closing  bool
 	drained  chan struct{}
 	signaled bool
+	lastWarn atomic.Int64 // unix nanoseconds of the last at-limit warning
 }
 
-func newOpenConns() *openConns {
-	return &openConns{conns: make(map[net.Conn]struct{}), drained: make(chan struct{})}
+func newOpenConns(limit int) *openConns {
+	return &openConns{conns: make(map[net.Conn]struct{}), limit: limit, drained: make(chan struct{})}
 }
 
-// add records c. It reports false once shutdown has begun, in which case the
-// caller closes c instead of serving it.
-func (o *openConns) add(c net.Conn) bool {
+// admission is what add decided about a connection.
+type admission int
+
+const (
+	admitted       admission = iota
+	refusedClosing           // shutdown has begun
+	refusedFull              // limit connections are already open
+)
+
+// add records c, unless shutdown has begun or limit connections are open
+// already; the caller closes a connection that was not admitted instead of
+// serving it.
+func (o *openConns) add(c net.Conn) admission {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	if o.closing {
-		return false
+	switch {
+	case o.closing:
+		return refusedClosing
+	case len(o.conns) >= o.limit:
+		return refusedFull
 	}
 	o.conns[c] = struct{}{}
-	return true
+	return admitted
+}
+
+// atLimitWarningEvery spaces the warnings a full entrypoint logs: every
+// refusal counts, but a flood of them must not become a flood of log lines.
+const atLimitWarningEvery = time.Minute
+
+// warnDue reports whether a refusal at now should log, at most once per
+// atLimitWarningEvery.
+func (o *openConns) warnDue(now time.Time) bool {
+	last := o.lastWarn.Load()
+	if now.UnixNano()-last < int64(atLimitWarningEvery) {
+		return false
+	}
+	return o.lastWarn.CompareAndSwap(last, now.UnixNano())
 }
 
 // remove forgets c once the goroutine serving it is done with it.

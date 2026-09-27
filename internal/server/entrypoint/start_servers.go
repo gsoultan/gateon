@@ -258,53 +258,88 @@ func startTCPServer(addr string, ep *gateonv1.EntryPoint, deps *Deps, wg *syncut
 		logger.L.LogError("TCP listen failed", "error", err, "addr", addr)
 		return
 	}
-	conns := newOpenConns()
+	s := &tcpServer{ep: ep, deps: deps, wg: wg, conns: newOpenConns(tcpConnLimit(ep)), plaintext: !terminatesTLS}
 	if shutdownReg != nil {
 		shutdownReg.Register(func(ctx context.Context) error {
 			err := l.Close()
-			conns.shutdown(ctx)
+			s.conns.shutdown(ctx)
 			return err
 		})
 	}
-	wg.Go(func() {
-		defer l.Close()
-		plaintext := !terminatesTLS
-		for {
-			conn, err := l.Accept()
-			if err != nil {
-				telemetry.GlobalDiagnostics.RecordEPError(ep.Id, err.Error())
-				return
-			}
-			if !conns.add(conn) {
-				_ = conn.Close()
-				continue
-			}
-			telemetry.GlobalDiagnostics.RecordConnection(ep.Id)
-			c := conn
-			if plaintext {
-				wg.Go(func() {
-					defer conns.remove(c)
-					defer telemetry.GlobalDiagnostics.RecordDisconnect(ep.Id)
-					handleTCPConnWithInspection(c, ep, deps, wg)
-				})
-			} else {
-				var p l4.TCPProxy
-				if deps.L4Resolver != nil {
-					p = deps.L4Resolver.ResolveTCP(ep, "")
-				}
-				wg.Go(func() {
-					defer conns.remove(c)
-					defer telemetry.GlobalDiagnostics.RecordDisconnect(ep.Id)
-					defer c.Close()
-					if p != nil {
-						handleTCPProxyL4(c, p)
-					} else {
-						handleTCPConn(c)
-					}
-				})
-			}
+	wg.Go(func() { s.serve(l) })
+}
+
+// tcpServer is a TCP entrypoint's accept loop and the connections it holds.
+type tcpServer struct {
+	ep        *gateonv1.EntryPoint
+	deps      *Deps
+	wg        *syncutil.WaitGroup
+	conns     *openConns
+	plaintext bool
+}
+
+// tcpConnLimit is the most connections ep holds open at once: its
+// max_connections, or the resource profile's default when that is 0. It was
+// stored and shown and read by nothing, so a TCP entrypoint had no cap at all.
+func tcpConnLimit(ep *gateonv1.EntryPoint) int {
+	if n := int(ep.GetMaxConnections()); n > 0 {
+		return n
+	}
+	return config.CurrentTierDefaults().TCPMaxConnections
+}
+
+// serve accepts until l is closed. A connection past the limit is closed at
+// once, so the loop never waits for a slot.
+func (s *tcpServer) serve(l net.Listener) {
+	defer l.Close()
+	for {
+		conn, err := l.Accept()
+		if err != nil {
+			telemetry.GlobalDiagnostics.RecordEPError(s.ep.Id, err.Error())
+			return
 		}
-	})
+		switch s.conns.add(conn) {
+		case refusedClosing:
+			_ = conn.Close()
+		case refusedFull:
+			s.refuseOverLimit(conn)
+		case admitted:
+			telemetry.GlobalDiagnostics.RecordConnection(s.ep.Id)
+			s.wg.Go(func() {
+				defer s.conns.remove(conn)
+				defer telemetry.GlobalDiagnostics.RecordDisconnect(s.ep.Id)
+				s.handle(conn)
+			})
+		}
+	}
+}
+
+// handle serves one admitted connection: inspected on a plaintext
+// entrypoint, proxied to the entrypoint's route on one that terminates TLS.
+func (s *tcpServer) handle(c net.Conn) {
+	if s.plaintext {
+		handleTCPConnWithInspection(c, s.ep, s.deps, s.wg)
+		return
+	}
+	defer c.Close()
+	if p := resolveTCPRoute(s.ep, s.deps, ""); p != nil {
+		handleTCPProxyL4(c, p)
+		return
+	}
+	handleTCPConn(c)
+}
+
+// refuseOverLimit closes a connection accepted while the entrypoint already
+// holds its limit. Every refusal is counted with the other connection-limit
+// rejections; the log says so at most once a minute, so that a flood of them
+// is not also a flood of log lines.
+func (s *tcpServer) refuseOverLimit(c net.Conn) {
+	_ = c.Close()
+	telemetry.IncInflightRejected("tcp_max_connections")
+	if s.conns.warnDue(time.Now()) {
+		logger.L.LogWarn("TCP entrypoint at its connection limit, refusing new connections",
+			"ep", s.ep.Id, "max_connections", s.conns.limit)
+	}
 }
 
 func startUDPServer(addr string, ep *gateonv1.EntryPoint, deps *Deps, wg *syncutil.WaitGroup, shutdownReg *ShutdownRegistry) {
