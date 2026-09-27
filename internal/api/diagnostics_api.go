@@ -19,6 +19,7 @@ import (
 
 	"github.com/gsoultan/gateon/internal/ai"
 	"github.com/gsoultan/gateon/internal/logger"
+	"github.com/gsoultan/gateon/internal/middleware/security"
 	"github.com/gsoultan/gateon/internal/security/waf"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	"github.com/gsoultan/gateon/internal/telemetry/repid"
@@ -912,6 +913,9 @@ func (s *ApiService) RemoveMitigatedThreat(ctx context.Context, req *gateonv1.Re
 			}, nil
 		}
 		s.resetReputationForIP(ctx, source)
+		// The honeypot keeps a ban of its own, in memory, in front of every
+		// route; nothing above reaches it.
+		security.ReleaseHoneypotBan(source)
 	} else if !releaseFingerprintMitigation(source, req.GetJa4Plus(), req.GetJa4H()) {
 		return &gateonv1.RemoveMitigatedThreatResponse{
 			Success: false,

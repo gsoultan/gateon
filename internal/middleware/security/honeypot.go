@@ -125,11 +125,31 @@ func defaultHoneypotPaths() []string {
 	return []string{"/.env", "/.git", "/config.php", "/backup.sql", "/.aws", "/.ssh"}
 }
 
+// ReleaseHoneypotBan lifts the honeypot's ban on ip and forgets its strikes,
+// reporting whether there was a ban to lift.
+//
+// The ban lives only here, in memory, in front of every route, so the
+// operator's release has to reach it by name: clearing the IP mitigation table,
+// the eBPF shun and the reputation scores left it in force, and the dashboard's
+// "Remove Mitigation / Allow IP" reported success on an address that was still
+// refused on every request. The strikes go too: a release is the operator's
+// judgement that the hits were a mistake, and keeping them would put the next
+// hit straight back on the rung the mistake had reached.
+func ReleaseHoneypotBan(ip string) bool {
+	blocklistMu.Lock()
+	defer blocklistMu.Unlock()
+	_, banned := honeypotBlocklist[ip]
+	delete(honeypotBlocklist, ip)
+	delete(honeypotStrikes, ip)
+	return banned
+}
+
 // blockHoneypotIP records a ban, keeping the blocklist bounded.
 //
-// Loopback is never banned. The ban lasts 24 hours, lives only in memory, and
-// has no expiry path other than waiting it out or restarting the process, so
-// recording one against 127.0.0.1 takes out every local caller at once: health
+// Loopback is never banned. The ban lasts up to 24 hours, lives only in memory,
+// and ends by expiring, by a restart or by an operator's release
+// (ReleaseHoneypotBan), so recording one against 127.0.0.1 takes out every
+// local caller at once until one of those happens: health
 // checks, the management API, and an administrator browsing the dashboard from
 // the same host. That is a self-inflicted outage triggered by anything local
 // touching a trap path, and it buys nothing — an attacker who can originate
