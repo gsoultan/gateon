@@ -89,8 +89,15 @@ When your server sends mail, it typically connects directly to recipient MTAs. Y
 
 ## TLS and STARTTLS
 
-- **Ports 465, 993, 995:** Enable TLS on the Gateon entrypoint and point targets to the backend’s TLS ports.
-- **STARTTLS (e.g. 25, 587):** Gateon passes bytes through; STARTTLS upgrades work without extra config.
+- **Implicit TLS (465, 993, 995):** choose who terminates TLS.
+  - *The mail server:* a TCP entrypoint **without** TLS, with targets on the server's TLS
+    ports (`mail.internal:993`). Gateon relays the encrypted bytes untouched.
+  - *Gateon:* enable TLS on the entrypoint and point the targets at the server's
+    **plaintext** ports (`mail.internal:143` for IMAPS, `:110` for POP3S, `:25` or `:587`
+    for SMTPS). A TLS-terminating entrypoint forwards plaintext, so a target on the
+    server's TLS port would receive plaintext on a TLS listener and fail.
+- **STARTTLS (25, 587, 143, 110):** Gateon relays the bytes, so the upgrade happens
+  between the client and the mail server without extra config.
 
 ## Summary
 
