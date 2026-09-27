@@ -163,9 +163,9 @@ type L4Resolver interface {
 	ResolveUDP(ep *gateonv1.EntryPoint) l4.UDPProxy
 }
 
-// PhantomCore defines the interface for the high-performance TITAN proxy core.
+// PhantomCore is what the entrypoints ask of the phantom core: the listener to
+// serve on. L4 sessions go to the route's l4.TCPProxy after inspection.
 type PhantomCore interface {
-	ProxyL4(ctx context.Context, client net.Conn, targetAddr string) error
 	OptimizeListener(l net.Listener) net.Listener
 }
 

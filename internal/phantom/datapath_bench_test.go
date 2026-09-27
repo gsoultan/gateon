@@ -5,32 +5,30 @@
 
 package phantom
 
-// Benchmarks for the data path the Phantom core puts in front of traffic: the
-// listener OptimizeListener hands back, and ProxyL4. They are what an
-// "accelerated" engine has to beat to be worth switching on, measured the same
-// way for every engine so benchstat can compare two runs:
+// Benchmarks for the listener the Phantom core puts in front of net/http: what
+// an "accelerated" engine has to beat to be worth switching on, measured the
+// same way for every engine so benchstat can compare two runs:
 //
 //	scripts/bench-datapath.sh    # Linux, two CPUs, see its header
 //
 // The io_uring listener was measured with exactly these and removed; the
-// numbers are in the commit that removed it.
+// numbers are in the commit that removed it. The L4 path is benchmarked where
+// it runs, through the TCP entrypoint (internal/server/entrypoint).
 //
 // Every benchmark also reports cpu-ns/op, the process's user plus system CPU
 // time per operation from getrusage. Wall time alone flatters an engine that is
 // fast only because it keeps a core busy polling; CPU per operation does not.
 //
-// Client, proxy and backend share the process, so cpu-ns/op includes the
-// client's and the backend's work. That work is the same whichever engine is
-// under test, so the difference between two runs is the engine's.
+// Client and server share the process, so cpu-ns/op includes the client's
+// work. That work is the same whichever engine is under test, so the
+// difference between two runs is the engine's.
 
 import (
 	"bufio"
-	"context"
 	"io"
 	"net"
 	"net/http"
 	"sync"
-	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -254,161 +252,4 @@ func BenchmarkIdleCPU(b *testing.B) {
 	}
 	elapsed := time.Since(began)
 	b.ReportMetric(float64(processCPU(b)-start)/float64(elapsed)*1e3, "cpu-ms/s")
-}
-
-// serveTCP runs handle for every connection to a plain loopback listener: the
-// backend, which is the same for every engine. stop closes the listener and
-// waits for the handlers, which return when the proxy closes its side.
-func serveTCP(b *testing.B, handle func(net.Conn)) (addr string, stop func()) {
-	b.Helper()
-	ln := listenLoopback(b)
-	var handlers sync.WaitGroup
-	served := make(chan struct{})
-	go func() {
-		defer close(served)
-		for {
-			c, err := ln.Accept()
-			if err != nil {
-				return
-			}
-			handlers.Go(func() {
-				defer c.Close()
-				handle(c)
-			})
-		}
-	}()
-	return ln.Addr().String(), func() {
-		_ = ln.Close()
-		<-served
-		handlers.Wait()
-	}
-}
-
-// proxyFront accepts on the listener core hands back and gives each connection
-// to ProxyL4 with target as the backend.
-func proxyFront(b *testing.B, core PhantomCore, target string) (addr string, stop func()) {
-	b.Helper()
-	ln := listenLoopback(b)
-	l := core.OptimizeListener(ln)
-	var sessions sync.WaitGroup
-	var closing atomic.Bool
-	served := make(chan struct{})
-	go func() {
-		defer close(served)
-		for {
-			c, err := l.Accept()
-			if err != nil {
-				return
-			}
-			if closing.Load() {
-				_ = c.Close()
-				return
-			}
-			sessions.Go(func() { _ = core.ProxyL4(context.Background(), c, target) })
-		}
-	}()
-	return ln.Addr().String(), func() {
-		closing.Store(true)
-		stopAccepting(b, l.Close, served)
-		sessions.Wait()
-	}
-}
-
-func echo(c net.Conn) { _, _ = io.Copy(c, c) }
-
-const bulk = 1 << 20
-
-// sinkWithAck reads bulk bytes and acknowledges each with one byte.
-func sinkWithAck(c net.Conn) {
-	ack := []byte{1}
-	for {
-		if _, err := io.CopyN(io.Discard, c, bulk); err != nil {
-			return
-		}
-		if _, err := c.Write(ack); err != nil {
-			return
-		}
-	}
-}
-
-// sourceOnRequest answers each one-byte request with bulk bytes.
-func sourceOnRequest(c net.Conn) {
-	req := make([]byte, 1)
-	payload := make([]byte, bulk)
-	for {
-		if _, err := io.ReadFull(c, req); err != nil {
-			return
-		}
-		if _, err := c.Write(payload); err != nil {
-			return
-		}
-	}
-}
-
-// proxiedConn is a client connection through ProxyL4 to a backend running
-// handle, with the proxy session already established.
-func proxiedConn(b *testing.B, handle func(net.Conn)) (conn net.Conn, stop func()) {
-	b.Helper()
-	backend, stopBackend := serveTCP(b, handle)
-	front, stopFront := proxyFront(b, benchCore(b), backend)
-	conn = dialLoopback(b, front)
-	return conn, func() {
-		_ = conn.Close()
-		stopFront()
-		stopBackend()
-	}
-}
-
-// BenchmarkL4Echo is a 64-byte request and its echo through ProxyL4: the L4
-// path's latency for small messages.
-func BenchmarkL4Echo(b *testing.B) {
-	conn, stop := proxiedConn(b, echo)
-	defer stop()
-	msg, buf := make([]byte, 64), make([]byte, 64)
-	if err := roundTrip(conn, msg, buf); err != nil { // the session is up
-		b.Fatalf("first round trip: %v", err)
-	}
-
-	b.ReportAllocs()
-	start := processCPU(b)
-	for b.Loop() {
-		if err := roundTrip(conn, msg, buf); err != nil {
-			b.Fatalf("round trip: %v", err)
-		}
-	}
-	reportCPU(b, start)
-}
-
-// BenchmarkL4Throughput moves 1 MiB per operation through ProxyL4, client to
-// backend (upload) and backend to client (download): one direction of the
-// proxy each.
-func BenchmarkL4Throughput(b *testing.B) {
-	b.Run("upload", func(b *testing.B) {
-		conn, stop := proxiedConn(b, sinkWithAck)
-		defer stop()
-		payload, ack := make([]byte, bulk), make([]byte, 1)
-		b.SetBytes(bulk)
-		b.ReportAllocs()
-		start := processCPU(b)
-		for b.Loop() {
-			if err := roundTrip(conn, payload, ack); err != nil {
-				b.Fatalf("upload: %v", err)
-			}
-		}
-		reportCPU(b, start)
-	})
-	b.Run("download", func(b *testing.B) {
-		conn, stop := proxiedConn(b, sourceOnRequest)
-		defer stop()
-		req, payload := []byte{1}, make([]byte, bulk)
-		b.SetBytes(bulk)
-		b.ReportAllocs()
-		start := processCPU(b)
-		for b.Loop() {
-			if err := roundTrip(conn, req, payload); err != nil {
-				b.Fatalf("download: %v", err)
-			}
-		}
-		reportCPU(b, start)
-	})
 }

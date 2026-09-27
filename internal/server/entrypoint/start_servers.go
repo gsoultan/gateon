@@ -284,12 +284,6 @@ func startTCPServer(addr string, ep *gateonv1.EntryPoint, deps *Deps, wg *syncut
 				wg.Go(func() {
 					defer conns.remove(c)
 					defer telemetry.GlobalDiagnostics.RecordDisconnect(ep.Id)
-					if deps.Phantom != nil {
-						// For plaintext TCP, attempt TITAN L4 hardware offload (AF_XDP/io_uring)
-						if err := deps.Phantom.ProxyL4(context.Background(), c, ""); err == nil {
-							return
-						}
-					}
 					handleTCPConnWithInspection(c, ep, deps, wg)
 				})
 			} else {
