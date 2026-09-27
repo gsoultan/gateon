@@ -284,6 +284,14 @@ export function AnomalyEngineTab() {
 // many unlisted paths produces a card per path, and each is its own fix.
 const applyKey = (a: Anomaly) => `${a.type}-${a.source}-${a.requestUri ?? ""}`;
 
+// The gateway lists at most ten of a folded finding's clients.
+const MAX_LISTED_CLIENTS = 10;
+
+function clientsNote(listed: number): string {
+  if (listed < 2) return "";
+  return listed >= MAX_LISTED_CLIENTS ? ` from ${MAX_LISTED_CLIENTS} or more clients` : ` from ${listed} clients`;
+}
+
 function severityCounts(threats: Anomaly[]) {
   const count = (sev: string) => threats.filter((t) => t.severity.toLowerCase() === sev).length;
   return { critical: count("critical"), high: count("high"), medium: count("medium"), low: count("low") };
@@ -413,6 +421,11 @@ export const AnomalyCard: React.FC<{
           <Code color="blue.0" c="blue.8" style={{ cursor: "pointer" }} onClick={() => onTrace(anomaly.source)}>
             {anomaly.source}
           </Code>
+          {(anomaly.occurrences ?? 0) > 1 && (
+            <Text size="xs" c="dimmed">
+              {`· seen ${anomaly.occurrences} times${clientsNote(anomaly.sourceIps?.length ?? 0)}`}
+            </Text>
+          )}
         </Group>
 
         <Alert variant="light" color="indigo" radius="md" p="sm" icon={<IconRobot size={18} />}>

@@ -61,6 +61,11 @@ message Anomaly {
   // host is the Host header the unrouted request named, as recorded on its
   // trace (port included); empty when the trace predates the field.
   string host = 39;
+  // occurrences is how many requests one finding stands for, when a detector
+  // folds repeats into one: an unlisted_route finding covers every request for
+  // its path, entrypoint and host in the pass, with the latest one's time and
+  // source. Zero where a detector does not count.
+  int32 occurrences = 40;
 }
 
 message GossipStatus {

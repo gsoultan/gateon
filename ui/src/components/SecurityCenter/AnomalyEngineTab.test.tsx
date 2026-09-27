@@ -67,3 +67,22 @@ describe("AnomalyCard's Apply automatic fix", () => {
     expect(render(finding("unlisted_route"), false)).not.toContain(APPLY);
   });
 });
+
+describe("AnomalyCard's count of folded requests", () => {
+  test("says how many requests and clients a folded finding stands for", () => {
+    const html = render({ ...finding("unlisted_route"), occurrences: 3, sourceIps: ["10.0.0.1", "10.0.0.2"] });
+
+    expect(html).toContain("· seen 3 times from 2 clients");
+  });
+
+  test("says when it lists only some of the clients", () => {
+    const many = Array.from({ length: 10 }, (_, i) => `10.0.0.${i}`);
+    const html = render({ ...finding("unlisted_route"), occurrences: 50, sourceIps: many });
+
+    expect(html).toContain("· seen 50 times from 10 or more clients");
+  });
+
+  test("says nothing for a single request", () => {
+    expect(render({ ...finding("unlisted_route"), occurrences: 1 })).not.toContain("seen");
+  });
+});

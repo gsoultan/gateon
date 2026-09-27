@@ -848,6 +848,8 @@ export type Anomaly = {
   // when it has none) and the host it named. Set on unlisted_route findings.
   entrypoint?: string;
   host?: string;
+  // How many requests this finding stands for, when the detector folds repeats.
+  occurrences?: number;
   mitigated?: boolean;
   category?: string;
   actionTaken?: string;

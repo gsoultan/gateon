@@ -50,23 +50,88 @@ type UnlistedRouteDetector struct {
 	HoneypotPaths []string
 }
 
+// maxFindingSources bounds the client addresses one folded finding lists.
+const maxFindingSources = 10
+
+// unlistedKey is what makes two unrouted requests one finding: the same path,
+// entrypoint and host. A honeypot finding also keys on the client, because
+// each address that springs a trap is its own actor to block.
+type unlistedKey struct {
+	path, entrypoint, host, source string
+}
+
+// foldedFinding is one finding while a pass folds requests into it.
+type foldedFinding struct {
+	anomaly      *gateonv1.Anomaly
+	latest       time.Time
+	allMitigated bool
+}
+
+// Detect reports one finding per unrouted path, entrypoint and host in the
+// pass, carrying how many requests it stands for, the latest one's time and
+// client, and up to maxFindingSources distinct clients. It used to report one
+// per trace, so a single scanner sweeping a path filled the list with copies.
+// Everything it keeps is bounded by the pass's traces.
 func (d *UnlistedRouteDetector) Detect(ctx context.Context, data *DiagnosticData) []*gateonv1.Anomaly {
 	honeypots := d.HoneypotPaths
 	if len(honeypots) == 0 {
 		honeypots = defaultHoneypotPaths
 	}
-	var anomalies []*gateonv1.Anomaly
+	var order []unlistedKey
+	found := make(map[unlistedKey]*foldedFinding)
+	mitigated := make(map[string]bool)
 	for _, tr := range data.Traces {
 		// Skip internal Gateon paths and health checks
 		if middleware.IsInternalPath(tr.Path) || !unrouted(tr.ServiceName) {
 			continue
 		}
-		anomaly := unlistedRouteAnomaly(tr, slices.Contains(honeypots, tr.Path))
-		anomaly.Mitigated = data.IsIPMitigated(tr.SourceIP)
-		populateAnomalyGeo(ctx, anomaly, tr.SourceIP)
-		anomalies = append(anomalies, anomaly)
+		honeypot := slices.Contains(honeypots, tr.Path)
+		key := unlistedKey{path: tr.Path, entrypoint: unroutedEntrypoint(tr.ServiceName), host: tr.Host}
+		if honeypot {
+			key.source = tr.SourceIP
+		}
+		f, ok := found[key]
+		if !ok {
+			f = &foldedFinding{anomaly: unlistedRouteAnomaly(tr, honeypot), latest: tr.Timestamp, allMitigated: true}
+			found[key] = f
+			order = append(order, key)
+		}
+		f.add(tr, isMitigatedOnce(data, mitigated, tr.SourceIP))
+	}
+	anomalies := make([]*gateonv1.Anomaly, 0, len(order))
+	for _, key := range order {
+		f := found[key]
+		f.anomaly.Mitigated = f.allMitigated
+		populateAnomalyGeo(ctx, f.anomaly, f.anomaly.GetSource())
+		anomalies = append(anomalies, f.anomaly)
 	}
 	return anomalies
+}
+
+// add folds one more request into the finding: the count, the latest time and
+// client, the list of clients, and whether every client is mitigated.
+func (f *foldedFinding) add(tr *telemetry.TraceRecord, mitigated bool) {
+	a := f.anomaly
+	a.Occurrences++
+	if tr.Timestamp.After(f.latest) {
+		f.latest = tr.Timestamp
+		a.Timestamp = tr.Timestamp.Format(time.RFC3339)
+		a.Source = tr.SourceIP
+	}
+	if tr.SourceIP != "" && len(a.SourceIps) < maxFindingSources && !slices.Contains(a.SourceIps, tr.SourceIP) {
+		a.SourceIps = append(a.SourceIps, tr.SourceIP)
+	}
+	f.allMitigated = f.allMitigated && mitigated
+}
+
+// isMitigatedOnce answers IsIPMitigated once per address in a pass.
+func isMitigatedOnce(data *DiagnosticData, seen map[string]bool, ip string) bool {
+	m, ok := seen[ip]
+	if !ok {
+		m = data.IsIPMitigated(ip)
+		seen[ip] = m
+	}
+	return m
 }
 
 // unrouted reports whether a trace's service name says no user route matched:

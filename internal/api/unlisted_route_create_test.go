@@ -5,12 +5,14 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/url"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gsoultan/gateon/internal/auth"
 	"github.com/gsoultan/gateon/internal/config"
@@ -512,5 +514,96 @@ func TestUnlistedRouteFixCopiesNoMiddlewaresWhenTheSiblingsDisagree(t *testing.T
 	}
 	if !strings.Contains(resp.GetMessage(), "review its middlewares before enabling it") {
 		t.Errorf("message does not say the middlewares need review: %s", resp.GetMessage())
+	}
+}
+
+// TestUnlistedRouteDetectorFoldsRepeatsIntoOneFinding: the detector reported
+// one finding per trace, so one scanner sweeping one path filled the Anomaly
+// Engine with copies of the same thing. Requests for the same path,
+// entrypoint and host are one finding now, with how many there were, the
+// latest one's time and client, and the clients seen. A honeypot keeps a
+// finding per client, because each one that springs the trap is its own actor.
+func TestUnlistedRouteDetectorFoldsRepeatsIntoOneFinding(t *testing.T) {
+	t0 := time.Date(2026, 9, 27, 12, 0, 0, 0, time.UTC)
+	at := func(path, host, ip string, sec int) *telemetry.TraceRecord {
+		return &telemetry.TraceRecord{ServiceName: "gateon-http-plain", Path: path, Host: host, SourceIP: ip,
+			Timestamp: t0.Add(time.Duration(sec) * time.Second)}
+	}
+	got := (&UnlistedRouteDetector{}).Detect(t.Context(), &DiagnosticData{Traces: []*telemetry.TraceRecord{
+		at("/a", "localhost:8081", "10.0.0.1", 0),
+		at("/a", "localhost:8081", "10.0.0.2", 1),
+		at("/a", "localhost:8081", "10.0.0.1", 2),
+		at("/a", "other.example", "10.0.0.3", 1),
+		at("/b", "localhost:8081", "10.0.0.1", 0),
+		at("/.env", "localhost:8081", "10.0.0.4", 0),
+		at("/.env", "localhost:8081", "10.0.0.5", 0),
+		at("/.env", "localhost:8081", "10.0.0.4", 3),
+	}})
+	if len(got) != 5 {
+		t.Fatalf("findings: %d, want 5 (one per path, entrypoint and host; a trap's per client)", len(got))
+	}
+	a := got[0]
+	if a.GetRequestUri() != "/a" || a.GetHost() != "localhost:8081" || a.GetOccurrences() != 3 ||
+		a.GetSource() != "10.0.0.1" || a.GetTimestamp() != t0.Add(2*time.Second).Format(time.RFC3339) ||
+		!slices.Equal(a.GetSourceIps(), []string{"10.0.0.1", "10.0.0.2"}) {
+		t.Errorf("folded /a = {occurrences %d, source %q, time %q, sources %v}, want 3, the latest 10.0.0.1 at +2s, both clients",
+			a.GetOccurrences(), a.GetSource(), a.GetTimestamp(), a.GetSourceIps())
+	}
+	traps := 0
+	for _, f := range got {
+		if f.GetType() == "honeypot_triggered" {
+			traps++
+			if f.GetSource() == "10.0.0.4" && f.GetOccurrences() != 2 {
+				t.Errorf("10.0.0.4 sprang the trap twice; occurrences = %d", f.GetOccurrences())
+			}
+		}
+	}
+	if traps != 2 {
+		t.Errorf("honeypot findings: %d, want one per client (2)", traps)
+	}
+}
+
+// TestUnlistedRouteDetectorBoundsWhatAFindingKeeps: a thousand clients on one
+// path are one finding, which lists no more than maxFindingSources of them.
+func TestUnlistedRouteDetectorBoundsWhatAFindingKeeps(t *testing.T) {
+	traces := make([]*telemetry.TraceRecord, 0, 1000)
+	for i := range 1000 {
+		traces = append(traces, &telemetry.TraceRecord{ServiceName: "gateon-http-plain", Path: "/sweep",
+			SourceIP: fmt.Sprintf("10.1.%d.%d", i/250, i%250), Timestamp: time.Unix(int64(i), 0)})
+	}
+	got := (&UnlistedRouteDetector{}).Detect(t.Context(), &DiagnosticData{Traces: traces})
+	if len(got) != 1 {
+		t.Fatalf("findings: %d, want 1", len(got))
+	}
+	if got[0].GetOccurrences() != 1000 || len(got[0].GetSourceIps()) != maxFindingSources {
+		t.Errorf("occurrences %d, sources listed %d; want 1000 and %d",
+			got[0].GetOccurrences(), len(got[0].GetSourceIps()), maxFindingSources)
+	}
+}
+
+// TestAFoldedFindingIsMitigatedOnlyWhenEveryClientIs: blocking one of a
+// path's clients leaves the others active, so the finding stays active until
+// every client it stands for is blocked.
+func TestAFoldedFindingIsMitigatedOnlyWhenEveryClientIs(t *testing.T) {
+	blocked := []*gateonv1.Middleware{{Type: "ipfilter", Config: map[string]string{"deny_list": "10.0.0.1"}}}
+	trace := func(ip string, sec int) *telemetry.TraceRecord {
+		return &telemetry.TraceRecord{ServiceName: "gateon-http-plain", Path: "/m", SourceIP: ip,
+			Timestamp: time.Unix(int64(sec), 0)}
+	}
+	for _, tc := range []struct {
+		name   string
+		traces []*telemetry.TraceRecord
+		want   bool
+	}{
+		{"one client, blocked", []*telemetry.TraceRecord{trace("10.0.0.1", 0), trace("10.0.0.1", 1)}, true},
+		{"a blocked client last, an open one before", []*telemetry.TraceRecord{trace("10.0.0.2", 0), trace("10.0.0.1", 1)}, false},
+		{"an open client last", []*telemetry.TraceRecord{trace("10.0.0.1", 0), trace("10.0.0.2", 1)}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := (&UnlistedRouteDetector{}).Detect(t.Context(), &DiagnosticData{Traces: tc.traces, Middlewares: blocked})
+			if len(got) != 1 || got[0].GetMitigated() != tc.want {
+				t.Errorf("findings %d, mitigated %v; want one finding, mitigated %v", len(got), len(got) == 1 && got[0].GetMitigated(), tc.want)
+			}
+		})
 	}
 }
