@@ -34,7 +34,7 @@ func TestAnalyzeConfigTLSInsightMatchesTheNegotiatedMinimum(t *testing.T) {
 	}
 	for _, tc := range cases {
 		cfg := &gateonv1.GlobalConfig{Tls: &gateonv1.TlsConfig{Enabled: true, MinTlsVersion: tc.min}}
-		got := hasInsight(analyzeConfig(t.Context(), cfg), "Weak minimum TLS version")
+		got := hasInsight(analyzeConfig(t.Context(), cfg, wafCoverage{}), "Weak minimum TLS version")
 		if got != tc.weak {
 			t.Errorf("min_tls_version %q: weak-TLS insight reported = %v, want %v", tc.min, got, tc.weak)
 		}

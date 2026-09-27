@@ -12,7 +12,7 @@ import (
 )
 
 func TestAnalyzeConfigNilUsesSmartEngineSummary(t *testing.T) {
-	resp := analyzeConfig(context.Background(), nil)
+	resp := analyzeConfig(context.Background(), nil, wafCoverage{})
 	if !strings.Contains(resp.Summary, "Smart Engine") {
 		t.Fatalf("summary should mention Smart Engine for Local Mode, got %q", resp.Summary)
 	}
@@ -23,7 +23,7 @@ func TestAnalyzeConfigFlagsWeakPosture(t *testing.T) {
 	cfg := &gateonv1.GlobalConfig{
 		Tls: &gateonv1.TlsConfig{Enabled: true, MinTlsVersion: "TLS1.0"},
 	}
-	resp := analyzeConfig(context.Background(), cfg)
+	resp := analyzeConfig(context.Background(), cfg, wafCoverage{})
 	if !strings.Contains(resp.Summary, "Smart Engine") {
 		t.Fatalf("summary should mention Smart Engine, got %q", resp.Summary)
 	}
