@@ -13,6 +13,7 @@ import { CanaryWizard } from '../components/CanaryWizard'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { notifications } from '@mantine/notifications'
 import { QueryError } from "../components/QueryError";
+import { ConfirmDeleteModal } from "../components/ConfirmDelete";
 
 export default function ServicesPage() {
   const { canWrite } = usePermissions()
@@ -40,6 +41,10 @@ export default function ServicesPage() {
   })
   const queryClient = useQueryClient()
 
+  // Deleting used to happen on the menu click itself; it waits for a
+  // confirmation that names the service now.
+  const [pendingDelete, setPendingDelete] = useState<{ id: string; name?: string } | null>(null)
+
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
       const res = await apiFetch(`/v1/services/${encodeURIComponent(id)}`, { method: 'DELETE' })
@@ -47,6 +52,7 @@ export default function ServicesPage() {
       return true
     },
     onSuccess: () => {
+      setPendingDelete(null)
       queryClient.invalidateQueries({ queryKey: ['services'] })
       notifications.show({
         title: 'Service Deleted',
@@ -182,13 +188,13 @@ export default function ServicesPage() {
                           {canWrite && (
                             <Menu shadow="md" position="bottom-end">
                               <Menu.Target>
-                                <ActionIcon variant="subtle" color="gray"><IconDotsVertical size={16} /></ActionIcon>
+                                <ActionIcon variant="subtle" color="gray" aria-label={`Manage service ${s.name || s.id}`}><IconDotsVertical size={16} /></ActionIcon>
                               </Menu.Target>
                               <Menu.Dropdown>
                                 <Menu.Item leftSection={<IconEdit size={14} />} onClick={() => handleEdit(s)}>Edit</Menu.Item>
                                 <Menu.Item leftSection={<IconRocket size={14} />} color="blue" onClick={() => handleCanary(s)}>Canary Deployment</Menu.Item>
                                 <Menu.Divider />
-                                <Menu.Item leftSection={<IconTrash size={14} />} color="red" onClick={() => deleteMutation.mutate(s.id)}>Delete</Menu.Item>
+                                <Menu.Item leftSection={<IconTrash size={14} />} color="red" onClick={() => setPendingDelete(s)}>Delete</Menu.Item>
                               </Menu.Dropdown>
                             </Menu>
                           )}
@@ -297,14 +303,14 @@ export default function ServicesPage() {
                           {canWrite && (
                             <Menu shadow="md" position="bottom-end" transitionProps={{ transition: 'pop-top-right' }}>
                               <Menu.Target>
-                                <ActionIcon variant="subtle" color="gray"><IconDotsVertical size={16} /></ActionIcon>
+                                <ActionIcon variant="subtle" color="gray" aria-label={`Manage service ${s.name || s.id}`}><IconDotsVertical size={16} /></ActionIcon>
                               </Menu.Target>
                               <Menu.Dropdown>
                                 <Menu.Label>Actions</Menu.Label>
                                 <Menu.Item leftSection={<IconEdit size={14} />} onClick={() => handleEdit(s)}>Edit</Menu.Item>
                                 <Menu.Item leftSection={<IconRocket size={14} />} color="blue" onClick={() => handleCanary(s)}>Canary Deployment</Menu.Item>
                                 <Menu.Divider />
-                                <Menu.Item leftSection={<IconTrash size={14} />} color="red" onClick={() => deleteMutation.mutate(s.id)}>Delete</Menu.Item>
+                                <Menu.Item leftSection={<IconTrash size={14} />} color="red" onClick={() => setPendingDelete(s)}>Delete</Menu.Item>
                               </Menu.Dropdown>
                             </Menu>
                           )}
@@ -347,6 +353,14 @@ export default function ServicesPage() {
           )}
         </Stack>
       </Card>
+
+      <ConfirmDeleteModal
+        target={pendingDelete ? { kind: 'service', name: pendingDelete.name || pendingDelete.id, id: pendingDelete.id } : null}
+        consequence="Routes that send traffic to it are left without an upstream."
+        loading={deleteMutation.isPending}
+        onCancel={() => setPendingDelete(null)}
+        onConfirm={() => pendingDelete && deleteMutation.mutate(pendingDelete.id)}
+      />
 
       <Drawer
         opened={opened}
