@@ -7,15 +7,19 @@ import { IconShieldLock, IconUpload, IconInfoCircle, IconPlus, IconCertificate, 
 import { useDisclosure } from '@mantine/hooks'
 import { useIsMobile } from "../hooks/useMobile"
 import type { GlobalConfig, Certificate } from '../types/gateon'
-import { apiFetch } from '../hooks/useGateon'
+import { apiFetch, getApiErrorMessage } from '../hooks/useGateon'
 import { usePermissions } from '../hooks/usePermissions'
+import { useGlobalConfigDraft } from '../hooks/useGlobalConfigDraft'
+import { ConfirmDeleteModal } from '../components/ConfirmDelete'
 
 export default function CertificatesPage() {
   const { canUploadCerts } = usePermissions()
   const isMobile = useIsMobile()
-  const [config, setConfig] = useState<GlobalConfig>({
-    tls: { enabled: false },
-  })
+  // Nothing may be saved until the gateway's config has been read: see
+  // useGlobalConfigDraft for what saving the placeholder did.
+  const { config, setConfig, status, loadError, retry } = useGlobalConfigDraft()
+  const canEdit = canUploadCerts && status === 'loaded'
+  const [pendingDelete, setPendingDelete] = useState<Certificate | null>(null)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [savedOk, setSavedOk] = useState(false)
@@ -25,22 +29,6 @@ export default function CertificatesPage() {
   const [editingCert, setEditingCert] = useState<Certificate | null>(null)
   const [pastingField, setPastingField] = useState<'certFile' | 'keyFile' | 'caFile' | null>(null)
   const [pasteContent, setPasteContent] = useState('')
-
-  useEffect(() => {
-    fetchConfig()
-  }, [])
-
-  const fetchConfig = () => {
-    const controller = new AbortController()
-    apiFetch("/v1/global", { signal: controller.signal })
-      .then(async (r) => {
-        if (!r.ok) throw new Error(await r.text())
-        return r.json()
-      })
-      .then((cfg: GlobalConfig) => setConfig(cfg || { tls: { enabled: false } } as GlobalConfig))
-      .catch(() => {})
-    return () => controller.abort()
-  }
 
   const saveGatewayConfig = async (newConfig: GlobalConfig) => {
     setSaving(true)
@@ -55,8 +43,8 @@ export default function CertificatesPage() {
       if (!res.ok) throw new Error(await res.text())
       setSavedOk(true)
       setTimeout(() => setSavedOk(false), 3000)
-    } catch (e: any) {
-      setError(e.message || 'Failed to save configuration')
+    } catch (e: unknown) {
+      setError(getApiErrorMessage(e) || 'Failed to save configuration')
     } finally {
       setSaving(false)
     }
@@ -168,6 +156,8 @@ export default function CertificatesPage() {
   }
 
   const certificates = config.tls?.certificates || []
+  const emptyText =
+    status === 'loaded' ? 'No certificates configured' : status === 'loading' ? 'Loading certificates…' : 'Unavailable until the certificates load.'
   const PAGE_SIZE = 10
   const [page, setPage] = useState(1)
   const paginatedCerts = useMemo(() => {
@@ -187,9 +177,23 @@ export default function CertificatesPage() {
           <Text c="dimmed" size="sm">Manage SSL/TLS certificates for your domains.</Text>
         </div>
         {canUploadCerts && (
-          <Button leftSection={<IconPlus size={16} />} onClick={startAdd} fullWidth={isMobile}>Add Certificate</Button>
+          <Button leftSection={<IconPlus size={16} />} onClick={startAdd} fullWidth={isMobile} disabled={!canEdit}>Add Certificate</Button>
         )}
       </Group>
+
+      {status === 'failed' && (
+        <Alert color="red" variant="light" radius="md" icon={<IconAlertTriangle size={16} />} title="Certificates could not be loaded">
+          <Stack gap="xs">
+            <Text size="sm">
+              {loadError || 'The gateway did not answer.'} Adding and removing certificates is disabled until they
+              load, so an empty list cannot be saved over the gateway's TLS settings.
+            </Text>
+            <Group>
+              <Button size="xs" variant="light" color="red" onClick={retry}>Retry</Button>
+            </Group>
+          </Stack>
+        </Alert>
+      )}
 
       <Alert icon={<IconInfoCircle size={16} />} color="blue" variant="light" radius="md">
         Certificates managed here can be used across multiple routes or assigned to entryPoints.
@@ -200,7 +204,7 @@ export default function CertificatesPage() {
           <Stack gap="md">
             {certificates.length === 0 ? (
                <Center py="xl">
-                 <Text c="dimmed">No certificates configured</Text>
+                 <Text c="dimmed">{emptyText}</Text>
                </Center>
             ) : (
               paginatedCerts.map((cert) => (
@@ -221,10 +225,10 @@ export default function CertificatesPage() {
                       </Group>
                       {canUploadCerts && (
                         <Group gap={4}>
-                          <ActionIcon variant="subtle" color="blue" onClick={() => startEdit(cert)}>
+                          <ActionIcon variant="subtle" color="blue" onClick={() => startEdit(cert)} aria-label={`Edit certificate ${cert.name || cert.id}`}>
                             <IconPencil size={16} />
                           </ActionIcon>
-                          <ActionIcon variant="subtle" color="red" onClick={() => removeCertificate(cert.id)}>
+                          <ActionIcon variant="subtle" color="red" onClick={() => setPendingDelete(cert)} aria-label={`Remove certificate ${cert.name || cert.id}`}>
                             <IconTrash size={16} />
                           </ActionIcon>
                         </Group>
@@ -269,7 +273,7 @@ export default function CertificatesPage() {
                   <Table.Tr>
                     <Table.Td colSpan={5}>
                       <Center py="xl">
-                        <Text c="dimmed">No certificates configured</Text>
+                        <Text c="dimmed">{emptyText}</Text>
                       </Center>
                     </Table.Td>
                   </Table.Tr>
@@ -303,12 +307,12 @@ export default function CertificatesPage() {
                         {canUploadCerts && (
                           <Group gap="xs" justify="flex-end">
                             <Tooltip label="Edit">
-                              <ActionIcon variant="subtle" color="blue" onClick={() => startEdit(cert)}>
+                              <ActionIcon variant="subtle" color="blue" onClick={() => startEdit(cert)} aria-label={`Edit certificate ${cert.name || cert.id}`}>
                                 <IconPencil size={16} />
                               </ActionIcon>
                             </Tooltip>
                             <Tooltip label="Remove">
-                              <ActionIcon variant="subtle" color="red" onClick={() => removeCertificate(cert.id)}>
+                              <ActionIcon variant="subtle" color="red" onClick={() => setPendingDelete(cert)} aria-label={`Remove certificate ${cert.name || cert.id}`}>
                                 <IconTrash size={16} />
                               </ActionIcon>
                             </Tooltip>
@@ -340,7 +344,7 @@ export default function CertificatesPage() {
         )}
       </Card>
 
-      <Modal opened={opened} onClose={close} title={editingCert?.name ? 'Edit Certificate' : 'Add Certificate'} radius="lg">
+      <Modal opened={opened} onClose={close} title={editingCert && certificates.some((c) => c.id === editingCert.id) ? 'Edit Certificate' : 'Add Certificate'} radius="lg">
         <Stack gap="md">
           <TextInput 
             label="Friendly Name" 
@@ -359,14 +363,14 @@ export default function CertificatesPage() {
             rightSection={
               <Group gap={4} mr={4}>
                 <Tooltip label="Paste Certificate">
-                  <ActionIcon variant="subtle" color="blue" onClick={() => { setPastingField('certFile'); openPaste(); }}>
+                  <ActionIcon variant="subtle" color="blue" onClick={() => { setPastingField('certFile'); openPaste(); }} aria-label="Paste certificate">
                     <IconClipboard size={16} />
                   </ActionIcon>
                 </Tooltip>
                 <FileButton onChange={(f) => handleUpload('certFile', f)} accept=".pem,.crt,.cer">
                   {(props) => (
                     <Tooltip label="Upload Certificate">
-                      <ActionIcon {...props} variant="subtle" loading={uploading['certFile']}>
+                      <ActionIcon {...props} variant="subtle" loading={uploading['certFile']} aria-label="Upload certificate">
                         <IconUpload size={16} />
                       </ActionIcon>
                     </Tooltip>
@@ -385,14 +389,14 @@ export default function CertificatesPage() {
             rightSection={
               <Group gap={4} mr={4}>
                 <Tooltip label="Paste Private Key">
-                  <ActionIcon variant="subtle" color="blue" onClick={() => { setPastingField('keyFile'); openPaste(); }}>
+                  <ActionIcon variant="subtle" color="blue" onClick={() => { setPastingField('keyFile'); openPaste(); }} aria-label="Paste private key">
                     <IconClipboard size={16} />
                   </ActionIcon>
                 </Tooltip>
                 <FileButton onChange={(f) => handleUpload('keyFile', f)} accept=".pem,.key">
                   {(props) => (
                     <Tooltip label="Upload Private Key">
-                      <ActionIcon {...props} variant="subtle" loading={uploading['keyFile']}>
+                      <ActionIcon {...props} variant="subtle" loading={uploading['keyFile']} aria-label="Upload private key">
                         <IconUpload size={16} />
                       </ActionIcon>
                     </Tooltip>
@@ -412,14 +416,14 @@ export default function CertificatesPage() {
             rightSection={
               <Group gap={4} mr={4}>
                 <Tooltip label="Paste CA Certificate">
-                  <ActionIcon variant="subtle" color="blue" onClick={() => { setPastingField('caFile'); openPaste(); }}>
+                  <ActionIcon variant="subtle" color="blue" onClick={() => { setPastingField('caFile'); openPaste(); }} aria-label="Paste CA certificate">
                     <IconClipboard size={16} />
                   </ActionIcon>
                 </Tooltip>
                 <FileButton onChange={(f) => handleUpload('caFile', f)} accept=".pem,.crt,.cer">
                   {(props) => (
                     <Tooltip label="Upload CA Certificate">
-                      <ActionIcon {...props} variant="subtle" loading={uploading['caFile']}>
+                      <ActionIcon {...props} variant="subtle" loading={uploading['caFile']} aria-label="Upload CA certificate">
                         <IconUpload size={16} />
                       </ActionIcon>
                     </Tooltip>
@@ -485,6 +489,16 @@ export default function CertificatesPage() {
           </Button>
         </Stack>
       </Modal>
+
+      <ConfirmDeleteModal
+        target={pendingDelete ? { kind: 'certificate', name: pendingDelete.name || pendingDelete.id } : null}
+        loading={saving}
+        onCancel={() => setPendingDelete(null)}
+        onConfirm={() => {
+          if (pendingDelete) removeCertificate(pendingDelete.id)
+          setPendingDelete(null)
+        }}
+      />
 
       {error && <Text c="red" size="sm" fw={600}>{error}</Text>}
       {savedOk && <Text c="green" size="sm" fw={600}>Certificates updated successfully!</Text>}

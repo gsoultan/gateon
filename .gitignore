@@ -173,3 +173,7 @@ trace_archive/
 # binary into the package directory, so a profiling run leaves one in the
 # checkout -- and CI fails if `go test ./...` leaves the tree dirty.
 *.test
+# Certificates and CA bundles pasted or uploaded from the dashboard are written
+# to <data dir>/certs; in a checkout the data directory is the working directory,
+# which is where the e2e suite runs its gateway.
+/certs/
