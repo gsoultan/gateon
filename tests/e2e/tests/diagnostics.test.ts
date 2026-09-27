@@ -171,9 +171,17 @@ test.describe('Gateon Diagnostics E2E', () => {
     // The SQLi above was blocked, and a blocked threat is a mitigated one, so
     // it belongs under the Mitigated tab rather than beside the active
     // anomalies.
+    //
+    // Asserted on the card, not the word: the tab clicked here is labelled
+    // "Mitigated (N)", so /Mitigated/ was on screen whatever the list held,
+    // including nothing at all.
     console.log('Navigating to Mitigated tab...');
     await page.getByRole('tab', { name: /Mitigated/i }).click();
-    await expect(page.getByText(/Mitigated/i).first()).toBeVisible({ timeout: 20000 });
+    const mitigatedHere = page.locator('[data-testid="anomaly-card"]')
+      .filter({ hasText: ANOMALY_IP })
+      .filter({ has: page.getByText('Mitigated', { exact: true }) });
+    await expect(mitigatedHere.first(), `nothing from ${ANOMALY_IP} is listed as mitigated`)
+      .toBeVisible({ timeout: 20000 });
 
     console.log('Diagnostics E2E scenario completed successfully.');
   });
