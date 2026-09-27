@@ -761,6 +761,16 @@ route instead of once per alternation.
 **Who is affected:** TCP entrypoints carrying more than one TCP route. Health
 checks and `least_conn` now behave as configured.
 
+### TLS-terminated TCP sessions reuse their copy buffers
+
+Sessions through a TCP entrypoint that terminates TLS cannot be spliced; they
+were copied through two freshly allocated 32 KiB buffers each. The buffers are
+now pooled: a short TLS session allocates 117 KiB instead of 181 KiB (most of
+the rest is the TLS handshake), with latency unchanged.
+
+**Who is affected:** TLS-terminating TCP entrypoints; less garbage-collection
+pressure under many short sessions. No configuration change.
+
 ### The Logs page's route, status and client filters work on the text-format log
 
 The filters on **Logs** read fields from JSON lines only. The gateway writes
