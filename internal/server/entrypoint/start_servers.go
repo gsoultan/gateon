@@ -98,60 +98,126 @@ func StartServers(
 	}
 }
 
-func startSecureManagementServer(port string, deps *Deps, wg *syncutil.WaitGroup) {
-	bind := "127.0.0.1"
-	if deps.ManagementConfig != nil && deps.ManagementConfig.Bind != "" {
-		bind = deps.ManagementConfig.Bind
-	}
+// ManagementBind is the address the dedicated management listener binds to:
+// GATEON_MANAGEMENT_BIND, else the configured bind, else loopback.
+func ManagementBind(cfg *gateonv1.ManagementConfig) string {
 	if envBind := os.Getenv("GATEON_MANAGEMENT_BIND"); envBind != "" {
-		bind = envBind
+		return envBind
 	}
+	if bind := cfg.GetBind(); bind != "" {
+		return bind
+	}
+	return loopbackIPv4
+}
 
-	mgmtPort := port
-	if deps.ManagementConfig != nil && deps.ManagementConfig.Port != "" {
-		mgmtPort = deps.ManagementConfig.Port
-	}
-	if envPort := os.Getenv("GATEON_MANAGEMENT_PORT"); envPort != "" {
-		mgmtPort = envPort
-	}
+// loopbackIPv4 is where the management listener binds, and whom it admits, when
+// nothing says otherwise.
+const loopbackIPv4 = "127.0.0.1"
 
+// ManagementAllowedIPs is the client allowlist the dedicated management
+// listener enforces: GATEON_MANAGEMENT_ALLOWED_IPS, else the configured list,
+// else loopback only.
+func ManagementAllowedIPs(cfg *gateonv1.ManagementConfig) []string {
+	if allowedIPsStr := os.Getenv("GATEON_MANAGEMENT_ALLOWED_IPS"); allowedIPsStr != "" {
+		return strings.Split(allowedIPsStr, ",")
+	}
+	if allowed := cfg.GetAllowedIps(); len(allowed) > 0 {
+		return allowed
+	}
+	return []string{loopbackIPv4, "::1"}
+}
+
+// ManagementListenerWorldOpen reports whether the dedicated management listener
+// admits a connection from any address: bound to every interface, with an
+// allowlist that constrains nothing. It is the condition the listener warns
+// about at startup, exported so the security advisory reports the same one.
+func ManagementListenerWorldOpen(cfg *gateonv1.ManagementConfig) bool {
+	return isWildcardBind(ManagementBind(cfg)) && allowsEveryAddress(ManagementAllowedIPs(cfg))
+}
+
+func startSecureManagementServer(port string, deps *Deps, wg *syncutil.WaitGroup) {
+	bind := ManagementBind(deps.ManagementConfig)
+	mgmtPort := managementPort(port, deps.ManagementConfig)
 	addr := net.JoinHostPort(bind, mgmtPort)
 
 	// IP Whitelisting for management entrypoint
-	allowedIPs := []string{"127.0.0.1", "::1"}
-	if deps.ManagementConfig != nil && len(deps.ManagementConfig.AllowedIps) > 0 {
-		allowedIPs = deps.ManagementConfig.AllowedIps
-	}
-	if allowedIPsStr := os.Getenv("GATEON_MANAGEMENT_ALLOWED_IPS"); allowedIPsStr != "" {
-		allowedIPs = strings.Split(allowedIPsStr, ",")
-	}
+	allowedIPs := ManagementAllowedIPs(deps.ManagementConfig)
 
 	warnIfManagementWorldOpen(bind, mgmtPort, allowedIPs)
-
-	mgmtHost := ""
-	if bind != "0.0.0.0" && bind != "::" && net.ParseIP(bind) == nil {
-		mgmtHost = bind
-	}
-	if envHost := os.Getenv("GATEON_MANAGEMENT_HOST"); envHost != "" {
-		mgmtHost = envHost
-	}
 
 	handler := middleware.Chain(
 		middleware.EntryPoint("management", "management", true),
 		middleware.Recovery(),
 		middleware.SecurityHeaders(middleware.SecurityHeadersConfig{Preset: "recommended"}),
-		middleware.HostFilter(mgmtHost),
+		middleware.HostFilter(managementHost(bind)),
 		security.IPFilter(allowedIPs, nil),
 		traffic.MaxConnections(500),
 	)(deps.BaseHandler)
 
+	server := newManagementHTTPServer(addr, handler)
+
+	if deps.ShutdownRegistry != nil {
+		deps.ShutdownRegistry.Register(func(ctx context.Context) error {
+			return shutdownHTTPServer(ctx, server)
+		})
+	}
+
+	logger.L.LogInfo("Secure Management Entrypoint started", "addr", addr)
+	wg.Go(func() { serveManagement(server, addr, deps.Phantom) })
+}
+
+// managementPort is GATEON_MANAGEMENT_PORT, else the configured port, else the
+// gateway's own port.
+func managementPort(port string, cfg *gateonv1.ManagementConfig) string {
+	if envPort := os.Getenv("GATEON_MANAGEMENT_PORT"); envPort != "" {
+		return envPort
+	}
+	if p := cfg.GetPort(); p != "" {
+		return p
+	}
+	return port
+}
+
+// managementHost is the Host the management listener answers to:
+// GATEON_MANAGEMENT_HOST, else a named bind address, else any.
+func managementHost(bind string) string {
+	if envHost := os.Getenv("GATEON_MANAGEMENT_HOST"); envHost != "" {
+		return envHost
+	}
+	if !isWildcardBind(bind) && net.ParseIP(bind) == nil {
+		return bind
+	}
+	return ""
+}
+
+// serveManagement listens on addr and serves the management API until the
+// server is shut down.
+func serveManagement(server *http.Server, addr string, phantom PhantomCore) {
+	l, err := net.Listen("tcp", addr)
+	if err != nil {
+		logger.L.LogError("Management listen failed", "error", err)
+		return
+	}
+	defer l.Close()
+
+	if phantom != nil {
+		l = phantom.OptimizeListener(l)
+	}
+
+	if err := server.Serve(l); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		logger.L.LogError("Management server failed", "error", err)
+	}
+}
+
+// newManagementHTTPServer builds the management listener's HTTP server.
+func newManagementHTTPServer(addr string, handler http.Handler) *http.Server {
 	// Enable H2C (HTTP/2 Cleartext) support for gRPC and modern HTTP clients.
 	// In Go 1.26+, this is handled natively via the Protocols field.
 	protocols := new(http.Protocols)
 	protocols.SetHTTP1(true)
 	protocols.SetUnencryptedHTTP2(true)
 
-	server := &http.Server{
+	return &http.Server{
 		Addr:      addr,
 		Handler:   handler,
 		HTTP2:     &http.HTTP2Config{},
@@ -171,30 +237,6 @@ func startSecureManagementServer(port string, deps *Deps, wg *syncutil.WaitGroup
 			}
 		},
 	}
-
-	if deps.ShutdownRegistry != nil {
-		deps.ShutdownRegistry.Register(func(ctx context.Context) error {
-			return shutdownHTTPServer(ctx, server)
-		})
-	}
-
-	logger.L.LogInfo("Secure Management Entrypoint started", "addr", addr)
-	wg.Go(func() {
-		l, err := net.Listen("tcp", addr)
-		if err != nil {
-			logger.L.LogError("Management listen failed", "error", err)
-			return
-		}
-		defer l.Close()
-
-		if deps.Phantom != nil {
-			l = deps.Phantom.OptimizeListener(l)
-		}
-
-		if err := server.Serve(l); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			logger.L.LogError("Management server failed", "error", err)
-		}
-	})
 }
 
 func startTCPServer(addr string, ep *gateonv1.EntryPoint, deps *Deps, wg *syncutil.WaitGroup, shutdownReg *ShutdownRegistry) {

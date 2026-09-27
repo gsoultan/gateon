@@ -10,11 +10,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"slices"
 	"sort"
 	"strings"
 
 	"github.com/gsoultan/gateon/internal/auth"
+	"github.com/gsoultan/gateon/internal/server/entrypoint"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	gtls "github.com/gsoultan/gateon/internal/tls"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
@@ -157,17 +159,7 @@ func analyzeConfig(ctx context.Context, cfg *gateonv1.GlobalConfig) aiAnalysisRe
 	}
 
 	// --- Management plane exposure ---
-	if mgmt := cfg.GetManagement(); mgmt != nil && mgmt.GetAllowPublicManagement() {
-		if len(mgmt.GetAllowedIps()) == 0 && len(mgmt.GetAllowedHosts()) == 0 {
-			insights = append(insights, aiInsight{
-				Title:          "Management API exposed publicly without an allow-list",
-				Description:    "Public management access is enabled but no allowed IPs or hosts are configured, exposing the admin API/dashboard to the internet.",
-				Severity:       "critical",
-				Category:       "security",
-				Recommendation: "Restrict management access with an IP/CIDR allow-list (and/or allowed hosts), or disable public management.",
-			})
-		}
-	}
+	insights = append(insights, managementExposureInsights(cfg.GetManagement())...)
 
 	// --- Audit logging ---
 	if audit := cfg.GetAudit(); audit == nil || !audit.GetEnabled() {
@@ -249,6 +241,43 @@ func analyzeConfig(ctx context.Context, cfg *gateonv1.GlobalConfig) aiAnalysisRe
 	}
 
 	return aiAnalysisResponse{Summary: summary, Insights: insights}
+}
+
+// managementExposureInsights reports the two ways the management API ends up in
+// front of any client, judged the way the listeners judge them.
+//
+// It used to fire only for public management with both allow-lists empty. The
+// shipped allowlist is 0.0.0.0/0 and ::/0, never empty, so it could not fire,
+// and it measured the wrong thing anyway: on a public entrypoint
+// isPublicManagementAllowed consults neither list once public management is
+// on, and allowed_hosts matches a Host header the client writes.
+func managementExposureInsights(mgmt *gateonv1.ManagementConfig) []aiInsight {
+	var out []aiInsight
+	// GATEON_ALLOW_PUBLIC_MANAGEMENT is the override isPublicManagementAllowed
+	// (internal/server) honours alongside the setting.
+	if mgmt.GetAllowPublicManagement() || os.Getenv("GATEON_ALLOW_PUBLIC_MANAGEMENT") == "true" {
+		out = append(out, aiInsight{
+			Title: "Management API is served on every entrypoint",
+			Description: "Public management is on, so the admin API and dashboard answer on every entrypoint. " +
+				"management.allowed_ips applies only to the dedicated management listener, and allowed_hosts " +
+				"matches a Host header the client chooses, so neither limits who reaches it there.",
+			Severity:       "critical",
+			Category:       "security",
+			Recommendation: "Turn public management off and reach the dashboard through the dedicated management listener, restricted to your admin network.",
+		})
+	}
+	if entrypoint.ManagementListenerWorldOpen(mgmt) {
+		out = append(out, aiInsight{
+			Title: "Management listener accepts connections from any address",
+			Description: "The dedicated management listener binds to every interface and its allowlist covers the " +
+				"whole address space, so the dashboard and management API face every network this host is on, " +
+				"behind only the login form. Inside a container, where the container network is the boundary, this is expected.",
+			Severity:       "warning",
+			Category:       "security",
+			Recommendation: "Restrict management.allowed_ips (or GATEON_MANAGEMENT_ALLOWED_IPS) to your admin network, or bind the management listener to a private address.",
+		})
+	}
+	return out
 }
 
 // analyzeLogs produces a deterministic, human-readable summary of recent log
