@@ -834,6 +834,26 @@ the item and its id.
 Creating, editing, disabling or deleting a user that the gateway refused used to
 do nothing visible. It now shows the gateway's message and keeps the form open.
 
+### Quick Presets keep the settings they do not name
+
+Applying a preset in Settings replaced the whole logging section (and, for
+High-Throughput, the transport section), so saving afterwards reset every
+retention period, the trace-archive limits and the transport timeouts to their
+defaults. Presets now change only the fields they name.
+
+**Who is affected:** anyone who applied a preset and saved. Check the retention
+periods and trace-archive settings if you did.
+
+### The WAF rule editor reports rules the gateway refuses
+
+Saving a rule the gateway rejects (for example a regular expression RE2 cannot
+compile) used to show "WAF Rule created successfully" and close the editor,
+although nothing was stored. The editor now shows the gateway's reason and stays
+open.
+
+**Who is affected:** operators writing custom WAF rules; a rule you believed was
+saved may not exist.
+
 ---
 
 ## v2.7.0
