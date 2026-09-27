@@ -244,6 +244,16 @@ affected.
 about five minutes after it stops misbehaving, where before it stayed throttled
 until a restart.
 
+### Under sustained memory pressure the proxy cache is purged once a minute, not every five seconds
+
+Above 80% memory use the resource governor purges the proxy cache, which drops
+every route's balancer and backend connection pool. It did so on every
+five-second sample for as long as the pressure lasted, so every request after
+each purge opened new backend connections -- twelve times a minute, on a host
+already short of memory. It now purges when pressure begins and at most once a
+minute while it lasts; a new spell of pressure still purges at once. The
+"high memory pressure detected" warning follows the purges.
+
 ### `ai_predictive` load balancing balances — **it sent every request to the first target**
 
 The `ai_predictive` policy (also spelled `intelligent`) sent every request to

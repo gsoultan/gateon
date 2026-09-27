@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gsoultan/gateon/internal/logger"
@@ -27,6 +28,17 @@ const (
 // defaultInterval is how often Start samples. Five seconds is frequent enough
 // to react to a leak and rare enough that the sampling itself is not a load.
 const defaultInterval = 5 * time.Second
+
+// memoryScavengeCooldown is the least time between two runs of the memory
+// scavengers within one spell of pressure.
+//
+// They ran on every sample, and the proxy cache's scavenger discards every
+// route's balancer and backend connection pool. Under sustained pressure -- a
+// 2 GB host near its ceiling, a busy shared machine -- every request after each
+// purge paid for new connections and TLS handshakes, twelve times a minute,
+// while a purge that did not relieve the pressure the first time relieved
+// nothing the next eleven. A new spell of pressure still scavenges at once.
+const memoryScavengeCooldown = time.Minute
 
 // usageFunc reports how much of a resource is in use, as a percentage.
 //
@@ -69,6 +81,11 @@ type Governor struct {
 	interval    time.Duration
 	memUsage    usageFunc
 	cpuUsage    usageFunc
+	now         func() time.Time // injectable for tests
+
+	// lastScavenge is when the memory scavengers last ran in the current spell
+	// of pressure, in UnixNano; 0 outside one.
+	lastScavenge atomic.Int64
 }
 
 // NewGovernor creates a new resource governor with default monitoring interval.
@@ -79,6 +96,7 @@ func NewGovernor() *Governor {
 		interval:    defaultInterval,
 		memUsage:    liveMemoryUsage,
 		cpuUsage:    liveCPUUsage,
+		now:         time.Now,
 	}
 }
 
@@ -131,8 +149,17 @@ func (g *Governor) checkMemory(ctx context.Context) {
 		return
 	}
 	if used <= memoryPressurePercent {
+		g.lastScavenge.Store(0) // the spell is over
 		return
 	}
+	now := time.Now()
+	if g.now != nil {
+		now = g.now()
+	}
+	if last := g.lastScavenge.Load(); last != 0 && now.UnixNano()-last < int64(memoryScavengeCooldown) {
+		return
+	}
+	g.lastScavenge.Store(now.UnixNano())
 	logger.L.LogWarn("high memory pressure detected", "used_percent", used)
 	for name, hook := range g.snapshot(g.memoryHooks) {
 		logger.L.LogDebug("triggering memory scavenge hook", "name", name)
