@@ -18,10 +18,15 @@ const (
 	QueryUpdateUserDisabled     = "UPDATE users SET disabled = ? WHERE id = ?"
 	QueryUpdateTwoFactorPending = "UPDATE users SET two_factor_pending = ? WHERE id = ?"
 
-	QueryInsertUserSQLitePostgresWithPassword = `INSERT INTO users (id, username, password, role) VALUES (?, ?, ?, ?)
-		ON CONFLICT(username) DO UPDATE SET password=excluded.password, role=excluded.role`
-	QueryInsertUserSQLitePostgresNoPassword = `INSERT INTO users (id, username, password, role) VALUES (?, ?, ?, ?)
-		ON CONFLICT(username) DO UPDATE SET role=excluded.role`
+	// QueryInsertUser creates an account, and nothing else: a username another
+	// account has is refused by the table's unique constraint. That refusal is
+	// the check, so two creates racing for one name cannot both succeed.
+	QueryInsertUser = "INSERT INTO users (id, username, password, role) VALUES (?, ?, ?, ?)"
+
+	// QueryUpdateUser and QueryUpdateUserWithPassword edit the account an id
+	// names. A rename onto a taken username is refused the same way.
+	QueryUpdateUser             = "UPDATE users SET username = ?, role = ? WHERE id = ?"
+	QueryUpdateUserWithPassword = "UPDATE users SET username = ?, password = ?, role = ? WHERE id = ?"
 
 	// QuerySessionBindingByID reads only the columns that make up a session
 	// binding (see revocation.go). Kept narrow so the per-verify cache miss is

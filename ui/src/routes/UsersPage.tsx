@@ -50,6 +50,7 @@ import { ChangePasswordForm } from "../components/ChangePasswordForm";
 import { queryClient } from "../queryClient";
 import { ConfirmDeleteModal } from "../components/ConfirmDelete";
 import { notifyError, notifySuccess } from "../utils/notify";
+import { userSaveRefusalMessage } from "../components/userSaveMessages";
 
 export default function UsersPage() {
   const [search, setSearch] = useState("");
@@ -199,6 +200,13 @@ export default function UsersPage() {
         }),
       });
 
+      // A taken username is refused (409) and nothing is written; say so in
+      // the dashboard's words and keep the form open to pick another name.
+      const refusal = userSaveRefusalMessage(res.status);
+      if (refusal) {
+        notifyError(null, { title: "Could not save user", message: refusal });
+        return;
+      }
       // A refused save used to do nothing at all: no message, the form still
       // open, and no way to tell a rejected account from a slow one.
       if (!res.ok) throw new Error(await res.text());

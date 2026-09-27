@@ -100,17 +100,22 @@ func TestAdminResetOfAnotherAccountKeepsTodaysRule(t *testing.T) {
 
 // TestEditingYourselfCannotSetYourPassword: PUT /v1/users writes a password
 // when the body has one, so the step-up above could be walked around by editing
-// your own account as a user -- by id, or by a fresh id with your username,
-// which the upsert resolves to your account all the same.
+// your own account as a user. By id that is refused as a password change that
+// skipped the step-up (403). A fresh id with your username used to resolve to
+// your account as well; it is a create now, which your taken username refuses
+// (409).
 func TestEditingYourselfCannotSetYourPassword(t *testing.T) {
 	f := newStepUpFixture(t)
-	for name, body := range map[string]string{
-		"by id":       `{"id":"` + f.id + `","username":"alice","role":"admin","password":"` + newPassword + `"}`,
-		"by username": `{"id":"another-id","username":"alice","role":"admin","password":"` + newPassword + `"}`,
+	for name, tc := range map[string]struct {
+		body string
+		want int
+	}{
+		"by id":       {`{"id":"` + f.id + `","username":"alice","role":"admin","password":"` + newPassword + `"}`, http.StatusForbidden},
+		"by username": {`{"id":"another-id","username":"alice","role":"admin","password":"` + newPassword + `"}`, http.StatusConflict},
 	} {
-		rr := f.as(t, http.MethodPut, "/v1/users", body)
-		if rr.Code != http.StatusForbidden {
-			t.Errorf("%s: status %d, want 403: %s", name, rr.Code, rr.Body.String())
+		rr := f.as(t, http.MethodPut, "/v1/users", tc.body)
+		if rr.Code != tc.want {
+			t.Errorf("%s: status %d, want %d: %s", name, rr.Code, tc.want, rr.Body.String())
 		}
 	}
 	f.assertPassword(t, "alice", stepUpPassword, newPassword)

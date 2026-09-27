@@ -101,6 +101,8 @@ func writeServiceRefusal(w http.ResponseWriter, err error) {
 		WriteHTTPError(w, http.StatusForbidden, st.Message())
 	case codes.ResourceExhausted:
 		WriteHTTPError(w, http.StatusTooManyRequests, st.Message())
+	case codes.AlreadyExists:
+		WriteHTTPError(w, http.StatusConflict, st.Message())
 	default:
 		logger.L.LogError("management request failed", "error", err)
 		WriteHTTPError(w, http.StatusInternalServerError, "the request could not be completed")
