@@ -128,9 +128,10 @@ export type SystemMetrics = {
   cpuUsagePercent: number;
   memoryUsagePercent: number;
   cpuCores: number;
-  memoryTotalGb: number;
-  storageUsageGb: number;
-  storageTotalGb: number;
+  // "GB", as telemetry.SystemMetrics tags them -- not the "Gb" of /v1/status.
+  memoryTotalGB: number;
+  storageUsageGB: number;
+  storageTotalGB: number;
   storageUsagePercent: number;
   publicIp: string;
   status: string;

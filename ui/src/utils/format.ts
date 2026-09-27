@@ -20,6 +20,20 @@ export function formatBytes(num: number | undefined | null): string {
   return `${Math.round(n)} B`;
 }
 
+/**
+ * formatUptime renders a gateway uptime. Whole seconds: the live metrics
+ * snapshot reports uptime as float seconds, and the fraction used to be printed
+ * as it came ("50.395464208s").
+ */
+export function formatUptime(seconds: number) {
+  const s = Math.floor(seconds)
+  if (s < 60) return `${s}s`
+  if (s < 3600) return `${Math.floor(s / 60)}m ${s % 60}s`
+  const hours = Math.floor(s / 3600)
+  const minutes = Math.floor((s % 3600) / 60)
+  return `${hours}h ${minutes}m`
+}
+
 export function safeToFixed(val: number | undefined | null, decimals = 1): string {
   if (val === undefined || val === null || isNaN(Number(val))) return "0";
   return Number(val).toFixed(decimals);
