@@ -118,72 +118,78 @@ export function CommandPaletteProvider({ children }: { children: ReactNode }) {
   return (
     <CommandPaletteContext.Provider value={ctxValue}>
       {children}
-      <Modal
+      <Modal.Root
         opened={opened}
         onClose={close}
-        withCloseButton={false}
         size="lg"
         padding={0}
         radius="md"
         yOffset="12vh"
         scrollAreaComponent={ScrollArea.Autosize}
-        aria-label="Command palette"
         trapFocus
       >
-        <Box p="xs">
-          <TextInput
-            data-autofocus
-            value={query}
-            onChange={(e) => setQuery(e.currentTarget.value)}
-            onKeyDown={onKeyDown}
-            placeholder="Search pages and actions…"
-            variant="unstyled"
-            size="md"
-            leftSection={<IconSearch size={18} />}
-            aria-label="Search commands"
-            styles={{ input: { fontSize: 16 } }}
-          />
-        </Box>
-        <Box style={{ borderTop: "1px solid var(--mantine-color-default-border)" }} />
-        <ScrollArea.Autosize mah={360} type="hover">
-          {filtered.length === 0 ? (
-            <Text c="dimmed" size="sm" ta="center" py="xl">
-              No matching commands
-            </Text>
-          ) : (
-            <CommandList
-              commands={filtered}
-              activeIndex={activeIndex}
-              onHover={setActiveIndex}
-              onSelect={(cmd) => cmd.perform()}
-            />
-          )}
-        </ScrollArea.Autosize>
-        <Group
-          justify="space-between"
-          px="sm"
-          py={6}
-          style={{ borderTop: "1px solid var(--mantine-color-default-border)" }}
-        >
-          <Group gap={6}>
-            <Kbd>↑</Kbd>
-            <Kbd>↓</Kbd>
-            <Text size="xs" c="dimmed">
-              navigate
-            </Text>
-            <Kbd>↵</Kbd>
-            <Text size="xs" c="dimmed">
-              select
-            </Text>
-          </Group>
-          <Group gap={6}>
-            <Kbd>esc</Kbd>
-            <Text size="xs" c="dimmed">
-              close
-            </Text>
-          </Group>
-        </Group>
-      </Modal>
+        <Modal.Overlay />
+        {/* The name goes on the dialog element itself. Given to <Modal>, an
+            aria-label lands on the root container, and with no title the
+            dialog was announced to screen readers without a name. */}
+        <Modal.Content aria-label="Command palette" radius="md">
+          <Modal.Body>
+            <Box p="xs">
+              <TextInput
+                data-autofocus
+                value={query}
+                onChange={(e) => setQuery(e.currentTarget.value)}
+                onKeyDown={onKeyDown}
+                placeholder="Search pages and actions…"
+                variant="unstyled"
+                size="md"
+                leftSection={<IconSearch size={18} />}
+                aria-label="Search commands"
+                styles={{ input: { fontSize: 16 } }}
+              />
+            </Box>
+            <Box style={{ borderTop: "1px solid var(--mantine-color-default-border)" }} />
+            <ScrollArea.Autosize mah={360} type="hover">
+              {filtered.length === 0 ? (
+                <Text c="dimmed" size="sm" ta="center" py="xl">
+                  No matching commands
+                </Text>
+              ) : (
+                <CommandList
+                  commands={filtered}
+                  activeIndex={activeIndex}
+                  onHover={setActiveIndex}
+                  onSelect={(cmd) => cmd.perform()}
+                />
+              )}
+            </ScrollArea.Autosize>
+            <Group
+              justify="space-between"
+              px="sm"
+              py={6}
+              style={{ borderTop: "1px solid var(--mantine-color-default-border)" }}
+            >
+              <Group gap={6}>
+                <Kbd>↑</Kbd>
+                <Kbd>↓</Kbd>
+                <Text size="xs" c="dimmed">
+                  navigate
+                </Text>
+                <Kbd>↵</Kbd>
+                <Text size="xs" c="dimmed">
+                  select
+                </Text>
+              </Group>
+              <Group gap={6}>
+                <Kbd>esc</Kbd>
+                <Text size="xs" c="dimmed">
+                  close
+                </Text>
+              </Group>
+            </Group>
+          </Modal.Body>
+        </Modal.Content>
+      </Modal.Root>
     </CommandPaletteContext.Provider>
   );
 }
