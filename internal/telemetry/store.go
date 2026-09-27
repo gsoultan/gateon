@@ -3197,7 +3197,15 @@ func GetAssociatedFingerprints(ctx context.Context, ip string) []string {
 }
 
 // FlushThreats blocks until all enqueued security threats are processed and persisted to DB.
-func FlushThreats() {
+func FlushThreats() { flushQueues() }
+
+// FlushTraces blocks until every trace recorded before it is in the trace
+// store. It is the same barrier as FlushThreats -- one flush drains every
+// intake -- under the name a caller waiting for traces looks for; without it,
+// tests slept and hoped the timed flush had run.
+func FlushTraces() { flushQueues() }
+
+func flushQueues() {
 	s := getStore()
 	if s == nil {
 		return

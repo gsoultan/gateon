@@ -21,7 +21,7 @@ func storeTraces(t *testing.T, at map[string]time.Time) {
 		RecordTrace(id, "GET /", "svc", "r", 1, ts, "200", "/", "192.0.2.1", "", "", "", "GET", "", "/", "", "",
 			nil, nil, "none", 0, 0, 0, 0, 0)
 	}
-	FlushThreats() // the store's barrier for every intake, traces included
+	FlushTraces()
 }
 
 func scanIDs(t *testing.T, sc TraceScan) []string {
@@ -139,7 +139,7 @@ func TestTraceView_HoldsThroughAPrune(t *testing.T) {
 	freshStore(t)
 	// The store's loop sets retention from the profile when it starts, and a
 	// flush is answered only once it has: read the cutoff after one.
-	FlushThreats()
+	FlushTraces()
 	now := time.Now().UTC()
 	cutoff := TracePruneCutoff(now)
 	storeTraces(t, map[string]time.Time{"old": cutoff.Add(-time.Hour), "recent": now.Add(-time.Minute)})

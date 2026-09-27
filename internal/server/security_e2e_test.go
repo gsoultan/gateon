@@ -200,8 +200,7 @@ func TestIntegration_DistributedTracing(t *testing.T) {
 	traceID := "trace-123"
 	telemetry.RecordTrace(traceID, "GET /api", "service-1", "route-1", 50.0, time.Now(), "200", "/api", "127.0.0.1", "", "US", "UA", "GET", "", "/api", "", "", nil, nil, "", 1.0, 0, 0, 0, 0)
 
-	// Wait for batch flush
-	time.Sleep(1500 * time.Millisecond)
+	telemetry.FlushTraces()
 
 	// 3. Retrieve trace
 	traces := telemetry.GetTraces(context.Background(), 10)

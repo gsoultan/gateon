@@ -50,7 +50,7 @@ func archivedHour(t *testing.T, paths ...string) tracearchive.Segment {
 		telemetry.RecordTrace(id, "GET "+p, "svc", "r", 1, at.Add(time.Duration(i)*time.Millisecond), "200", p,
 			"192.0.2.1", "", "", "", "GET", "", p, "", "", nil, nil, "none", 0, 0, 0, 0, 0)
 	}
-	telemetry.FlushThreats() // the store's barrier for every intake, traces included
+	telemetry.FlushTraces()
 	(&tracearchive.Archiver{}).ArchiveNow(context.Background())
 	return tracearchive.SegmentAt(at)
 }

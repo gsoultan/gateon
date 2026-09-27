@@ -49,7 +49,7 @@ func TestTraceArchive_AnArchivedTraceIsFoundAndOpens(t *testing.T) {
 	telemetry.RecordTrace("archived-1", "GET /orders", "svc", "route-1", 12.5, at, "502", "/orders",
 		"198.51.100.7", "", "NL", "curl/8", "GET", "", "/orders?id=9", "", "",
 		map[string][]string{"Accept": {"*/*"}}, nil, "none", 40, 0, 0, 0, 0)
-	telemetry.FlushThreats() // the store's barrier for every intake, traces included
+	telemetry.FlushTraces()
 	(&tracearchive.Archiver{}).ArchiveNow(context.Background())
 
 	// A new, empty store: the trace now exists only in the archive.

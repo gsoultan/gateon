@@ -52,7 +52,6 @@ type testTrace struct {
 }
 
 // store records traces and waits until the store has written them.
-// FlushThreats is the store's flush barrier for every intake, traces included.
 func store(t *testing.T, traces ...testTrace) {
 	t.Helper()
 	for _, tr := range traces {
@@ -70,7 +69,7 @@ func store(t *testing.T, traces ...testTrace) {
 			"203.0.113.9", "", "NL", "curl/8", method, "", path, "", "",
 			map[string][]string{"Accept": {"*/*"}}, nil, "none", 90, 0, 0, 0, 0)
 	}
-	telemetry.FlushThreats()
+	telemetry.FlushTraces()
 }
 
 // line is the JSON the archive stores for a trace, built the way the store
