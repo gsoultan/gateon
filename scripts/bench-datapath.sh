@@ -94,16 +94,18 @@ run() {
 			for bin in "$dir"/*.test; do
 				echo "round $i/$count: $(basename "$bin") -> $out ${envs:+($envs)}" >&2
 				# A failed benchmark must stop the run, not thin out the file:
-				# benchstat compares whatever rows it is given.
+				# benchstat compares whatever rows it is given. Results are
+				# stdout only: code under test that logs (to stderr) mid-run
+				# would otherwise split a result row in two.
 				log=$(mktemp)
-				if ! run_one "$bin" "$regex" "$envs" >"$log" 2>&1; then
-					cat "$log" >&2
-					rm -f "$log"
+				if ! run_one "$bin" "$regex" "$envs" >"$log" 2>"$log.err"; then
+					cat "$log" "$log.err" >&2
+					rm -f "$log" "$log.err"
 					echo "benchmark binary failed: $bin" >&2
 					exit 1
 				fi
 				grep -E '^(Benchmark|goos|goarch|pkg|cpu)' "$log" >>"$out" || true
-				rm -f "$log"
+				rm -f "$log" "$log.err"
 			done
 		done
 		i=$((i + 1))
