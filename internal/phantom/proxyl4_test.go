@@ -14,12 +14,9 @@ import (
 // ProxyL4 splices a client and a backend together in both directions and waits
 // for both to finish.
 //
-// These go through NewPhantomCore rather than naming an implementation, so they
-// are not a test of the non-Linux fallback: on Linux they exercise linuxCore's
-// proxyWithSplice, which is the path that ships. GATEON_XDP_IFACE is unset in a
-// test environment, so ProxyL4 goes straight to the splice path. Both
-// implementations had the same defect and took the same fix, and this runs
-// against whichever one was built.
+// These go through NewPhantomCore, the way cmd/gateon builds the core. There
+// used to be a Linux and a non-Linux implementation; both had the defect below
+// and took the same fix, and there is now one.
 
 // idleBackend accepts one connection and then does nothing with it: it neither
 // sends nor closes. That is not a broken server, it is any protocol where the
@@ -80,7 +77,7 @@ func TestProxyL4ReturnsWhenTheClientDisconnects(t *testing.T) {
 	// A socket pair standing in for the accepted client connection.
 	clientSide, proxySide := net.Pipe()
 
-	core := NewPhantomCore(nil)
+	core := NewPhantomCore()
 	returned := make(chan error, 1)
 	go func() {
 		returned <- core.ProxyL4(context.Background(), proxySide, backendAddr)
@@ -121,7 +118,7 @@ func TestProxyL4ReturnsWhenTheBackendDisconnects(t *testing.T) {
 	clientSide, proxySide := net.Pipe()
 	defer clientSide.Close()
 
-	core := NewPhantomCore(nil)
+	core := NewPhantomCore()
 	returned := make(chan error, 1)
 	go func() {
 		returned <- core.ProxyL4(context.Background(), proxySide, ln.Addr().String())
@@ -160,7 +157,7 @@ func TestProxyL4CopiesBothDirections(t *testing.T) {
 	}()
 
 	clientSide, proxySide := net.Pipe()
-	core := NewPhantomCore(nil)
+	core := NewPhantomCore()
 	go func() { _ = core.ProxyL4(context.Background(), proxySide, ln.Addr().String()) }()
 
 	go func() { _, _ = clientSide.Write([]byte("hello")) }()

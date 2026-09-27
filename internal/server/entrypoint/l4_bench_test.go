@@ -107,7 +107,7 @@ func tcpEntrypoint(b *testing.B, backend string) (addr string, stop func()) {
 		ShutdownRegistry: reg,
 		L4Resolver:       l4Resolver(b, ep.Id, backend),
 		GlobalStore:      config.NewGlobalRegistry(filepath.Join(b.TempDir(), "global.json")),
-		Phantom:          phantom.NewPhantomCore(nil),
+		Phantom:          phantom.NewPhantomCore(),
 	}
 	wg := &syncutil.WaitGroup{}
 	startTCPServer(addr, ep, deps, wg, reg) // binds before it returns

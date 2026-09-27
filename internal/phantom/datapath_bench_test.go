@@ -8,9 +8,12 @@ package phantom
 // Benchmarks for the data path the Phantom core puts in front of traffic: the
 // listener OptimizeListener hands back, and ProxyL4. They are what an
 // "accelerated" engine has to beat to be worth switching on, measured the same
-// way for every engine so benchstat can compare two runs of one binary:
+// way for every engine so benchstat can compare two runs:
 //
 //	scripts/bench-datapath.sh    # Linux, two CPUs, see its header
+//
+// The io_uring listener was measured with exactly these and removed; the
+// numbers are in the commit that removed it.
 //
 // Every benchmark also reports cpu-ns/op, the process's user plus system CPU
 // time per operation from getrusage. Wall time alone flatters an engine that is
@@ -26,7 +29,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"os"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -35,25 +37,18 @@ import (
 )
 
 // benchShared is the one core every benchmark here measures, built once per
-// process from the environment the way cmd/gateon builds it.
+// process the way cmd/gateon builds it.
 var benchShared struct {
 	once sync.Once
 	core PhantomCore
 }
 
-// benchCore returns the core under measurement. Asked for io_uring
-// (GATEON_PHANTOM=1), it refuses to measure anything else: newPhantomCore falls
-// back to the standard path without a word when the kernel refuses a ring, and
-// a silent fallback would publish the standard path's numbers under the
-// io_uring label.
+// benchCore returns the core under measurement. An engine that can fall back
+// must fail here when it does, rather than publish the fallback's numbers
+// under its own name; the io_uring one could, and did, without a word.
 func benchCore(b *testing.B) PhantomCore {
 	b.Helper()
-	benchShared.once.Do(func() { benchShared.core = NewPhantomCore(nil) })
-	_, engine, _ := benchShared.core.GetStatus()
-	if os.Getenv("GATEON_PHANTOM") == "1" && engine != "io_uring" {
-		b.Fatalf("GATEON_PHANTOM=1 but the core runs %q: no ring came up (needs Linux, "+
-			"CAP_IPC_LOCK, and no seccomp or SELinux veto on io_uring_setup)", engine)
-	}
+	benchShared.once.Do(func() { benchShared.core = NewPhantomCore() })
 	return benchShared.core
 }
 
@@ -89,39 +84,20 @@ func serveHTTP(b *testing.B, core PhantomCore) (addr string, stop func()) {
 		defer close(served)
 		_ = srv.Serve(core.OptimizeListener(ln))
 	}()
-	addr = ln.Addr().String()
-	return addr, func() { stopAccepting(b, addr, srv.Close, served) }
+	return ln.Addr().String(), func() { stopAccepting(b, srv.Close, served) }
 }
 
-// stopAccepting calls closeFn and waits until the accept loop has returned.
-//
-// Closing the io_uring listener does not end an Accept already waiting on the
-// ring (see iouring_open_linux_test.go), so http.Server.Close would wait on it
-// forever. A connection completes that accept, after which the loop sees the
-// listener is closed and returns; so this keeps dialing until it has. Against a
-// listener that honours Close the dial is refused and changes nothing.
-func stopAccepting(b *testing.B, addr string, closeFn func() error, served <-chan struct{}) {
+// stopAccepting calls closeFn and waits until the accept loop has returned. A
+// listener whose Close does not end a pending Accept fails here instead of
+// hanging the run; the io_uring one needed a connection to complete its
+// accept before it would stop.
+func stopAccepting(b *testing.B, closeFn func() error, served <-chan struct{}) {
 	b.Helper()
-	closed := make(chan struct{})
-	go func() {
-		defer close(closed)
-		_ = closeFn() // http.Server.Close itself waits for the accept loop
-	}()
-	tick := time.NewTicker(10 * time.Millisecond)
-	defer tick.Stop()
-	deadline := time.After(10 * time.Second)
-	for {
-		select {
-		case <-served:
-			<-closed
-			return
-		case <-deadline:
-			b.Fatal("the accept loop did not return within 10s of its listener closing")
-		case <-tick.C:
-			if c, err := net.DialTimeout("tcp", addr, 100*time.Millisecond); err == nil {
-				_ = c.Close()
-			}
-		}
+	_ = closeFn()
+	select {
+	case <-served:
+	case <-time.After(10 * time.Second):
+		b.Fatal("the accept loop did not return within 10s of its listener closing")
 	}
 }
 
@@ -242,10 +218,9 @@ func BenchmarkHTTPRoundTripParallel(b *testing.B) {
 // request, one response, close. It is the accept path's cost.
 //
 // The client reads the response by its length and hangs up, rather than
-// sending Connection: close and reading to EOF. Under the io_uring listener a
-// Connection: close response never ends: net/http unblocks its background read
-// with a read deadline, the io_uring conn ignores deadlines, so the server
-// never gets past finishing the response to closing the connection.
+// sending Connection: close and reading to EOF, because under the io_uring
+// listener that response never ended (it ignored the read deadline net/http
+// ends its background read with). Kept so later runs compare with its numbers.
 func BenchmarkHTTPConnectRoundTrip(b *testing.B) {
 	addr, stop := serveHTTP(b, benchCore(b))
 	defer stop()
@@ -332,10 +307,9 @@ func proxyFront(b *testing.B, core PhantomCore, target string) (addr string, sto
 			sessions.Go(func() { _ = core.ProxyL4(context.Background(), c, target) })
 		}
 	}()
-	addr = ln.Addr().String()
-	return addr, func() {
+	return ln.Addr().String(), func() {
 		closing.Store(true)
-		stopAccepting(b, addr, l.Close, served)
+		stopAccepting(b, l.Close, served)
 		sessions.Wait()
 	}
 }

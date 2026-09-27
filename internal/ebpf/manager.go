@@ -102,8 +102,6 @@ type Manager interface {
 	UpdateLoadBalancerBackends(ips []string) error
 	SetAdaptiveRateLimit(ip string, interval time.Duration) error
 	ClearAdaptiveRateLimit(ip string) error
-	RegisterPhantomPort(port uint32) error
-	UnregisterPhantomPort(port uint32) error
 	GetTopIPs(limit int) ([]IPStat, error)
 	GetMapStats() (MapStats, error)
 }
@@ -436,34 +434,6 @@ func (m *EbpfManager) ClearAdaptiveRateLimit(ip string) error {
 	}
 	logger.L.LogInfo("Cleared adaptive rate limit in eBPF", "ip", ip)
 	return nil
-}
-
-// RegisterPhantomPort enables AF_XDP redirection for a specific port.
-func (m *EbpfManager) RegisterPhantomPort(port uint32) error {
-	logger.L.LogInfo("Registering Phantom port in eBPF", "port", port)
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	phantomMap, ok := m.maps["phantom_ports"]
-	if !ok {
-		return fmt.Errorf("phantom_ports map not loaded")
-	}
-
-	return phantomMap.Update(port, uint32(1), ebpf.UpdateAny)
-}
-
-// UnregisterPhantomPort disables AF_XDP redirection for a specific port.
-func (m *EbpfManager) UnregisterPhantomPort(port uint32) error {
-	logger.L.LogInfo("Unregistering Phantom port in eBPF", "port", port)
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	phantomMap, ok := m.maps["phantom_ports"]
-	if !ok {
-		return fmt.Errorf("phantom_ports map not loaded")
-	}
-
-	return phantomMap.Delete(port)
 }
 
 var dropReasons = map[uint32]string{

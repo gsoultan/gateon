@@ -30,7 +30,7 @@ func TestProxyL4LeavesTheClientUsableWhenItCannotOffload(t *testing.T) {
 	defer client.Close()
 	defer peer.Close()
 
-	core := NewPhantomCore(nil)
+	core := NewPhantomCore()
 
 	// "" is what the entrypoint passes when no route has been resolved yet.
 	err := core.ProxyL4(context.Background(), client, "")

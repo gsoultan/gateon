@@ -153,22 +153,6 @@ func (h *Holder) ClearAdaptiveRateLimit(ip string) error {
 	return nil
 }
 
-// RegisterPhantomPort delegates to the active manager, if any.
-func (h *Holder) RegisterPhantomPort(port uint32) error {
-	if m := h.Current(); m != nil {
-		return m.RegisterPhantomPort(port)
-	}
-	return nil
-}
-
-// UnregisterPhantomPort delegates to the active manager, if any.
-func (h *Holder) UnregisterPhantomPort(port uint32) error {
-	if m := h.Current(); m != nil {
-		return m.UnregisterPhantomPort(port)
-	}
-	return nil
-}
-
 // GetTopIPs delegates to the active manager, if any.
 func (h *Holder) GetTopIPs(limit int) ([]IPStat, error) {
 	if m := h.Current(); m != nil {

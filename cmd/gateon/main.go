@@ -203,8 +203,8 @@ func main() {
 		ipReputation.Start(ctx)
 	}
 
-	// Initialize TITAN Phantom core for hardware acceleration.
-	phantomCore := phantom.NewPhantomCore(ebpfHolder)
+	// The data-path engine the listeners and the Diagnostics page consult.
+	phantomCore := phantom.NewPhantomCore()
 
 	// Load AI model if provided, or use default.
 	var wasmBytes []byte
