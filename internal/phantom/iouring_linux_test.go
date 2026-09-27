@@ -259,6 +259,64 @@ func TestUringZeroLengthIODoesNotCrash(t *testing.T) {
 	}
 }
 
+// TestUringWriteAfterCloseDoesNotReachAReusedDescriptor pins that a closed
+// optimized connection stops touching its descriptor.
+//
+// iouringConn caches the integer fd at accept time and Read/Write name it
+// directly. The embedded net.Conn's Close closes that fd but nothing marked the
+// wrapper closed, so a Read or Write arriving after Close still issued an
+// io_uring op against the bare number -- which the kernel had already handed to
+// the next accepted connection. A late write then delivered one client's bytes
+// to another's socket.
+func TestUringWriteAfterCloseDoesNotReachAReusedDescriptor(t *testing.T) {
+	opt := listenOptimized(t, uringCore(t))
+	closed, _ := acceptOne(t, opt)
+	fd := closed.(*iouringConn).fd
+
+	// A second client waits in the backlog, then closed is shut. Its fd is now
+	// free and the lowest available, so the next accept reuses that number.
+	victimBacking, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer victimBacking.Close()
+	victimClient, err := net.Dial("tcp", victimBacking.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer victimClient.Close()
+
+	if err := closed.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	victimServer, err := victimBacking.Accept()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer victimServer.Close()
+	reused := victimServer.(*net.TCPConn)
+	var reusedFd int
+	rc, _ := reused.SyscallConn()
+	_ = rc.Control(func(f uintptr) { reusedFd = int(f) })
+	if reusedFd != fd {
+		t.Skipf("the kernel did not reuse fd %d (gave %d), so this run cannot "+
+			"observe the confusion", fd, reusedFd)
+	}
+
+	secret := []byte("secret for the connection that was closed\n")
+	n, werr := closed.Write(secret)
+	t.Logf("Write on the closed conn: n=%d err=%v", n, werr)
+
+	_ = victimClient.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
+	buf := make([]byte, len(secret))
+	m, rerr := victimClient.Read(buf)
+	if m > 0 {
+		t.Fatalf("the victim connection received %q, written by a Write on a "+
+			"different, already-closed connection whose fd it reused", buf[:m])
+	}
+	t.Logf("victim read ended with %v (no leaked bytes)", rerr)
+}
+
 // TestStatusNamesIOURingWhileItsRingIsUp is the other half of
 // TestStatusClaimsNoAccelerationThatIsNotRunning: with a ring up, the engine
 // is io_uring and nothing more. It read "io_uring + AF_XDP" here, because the

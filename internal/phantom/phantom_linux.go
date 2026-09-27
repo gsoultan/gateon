@@ -359,10 +359,20 @@ func (l *iouringListener) Accept() (net.Conn, error) {
 // iouringConn wraps a net.Conn to use io_uring for Read and Write.
 type iouringConn struct {
 	net.Conn
-	ring *uring.Ring
-	rea  *reactor.Reactor
-	fd   int
-	ctx  context.Context
+	ring   *uring.Ring
+	rea    *reactor.Reactor
+	fd     int
+	ctx    context.Context
+	closed atomic.Bool
+}
+
+// Close closes the underlying connection and stops this wrapper from issuing
+// any further io_uring op against the cached fd. The fd belongs to the kernel
+// again the moment the embedded Close returns, and it hands out the lowest free
+// number, so an op that named it after this could land on another connection.
+func (c *iouringConn) Close() error {
+	c.closed.Store(true)
+	return c.Conn.Close()
 }
 
 // awaitOp queues op on the reactor and waits for its completion.
@@ -387,6 +397,9 @@ func (c *iouringConn) awaitOp(op uring.Operation) (event uring.CQEvent, ok bool,
 }
 
 func (c *iouringConn) Read(b []byte) (int, error) {
+	if c.closed.Load() {
+		return 0, net.ErrClosed
+	}
 	if len(b) == 0 {
 		// uring.Read takes &b[0], which panics on an empty slice; and the op
 		// would already be queued when it did, leaving the reactor a nil
@@ -410,6 +423,9 @@ func (c *iouringConn) Read(b []byte) (int, error) {
 }
 
 func (c *iouringConn) Write(b []byte) (int, error) {
+	if c.closed.Load() {
+		return 0, net.ErrClosed
+	}
 	if len(b) == 0 {
 		return 0, nil
 	}
