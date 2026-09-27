@@ -45,6 +45,7 @@ import {
 } from "@tabler/icons-react";
 import type { Route } from "../types/gateon";
 import { useTableDensity } from "../hooks/useTableDensity";
+import { ConfirmDeleteModal } from "./ConfirmDelete";
 
 export default function RouteList({
   limit,
@@ -96,6 +97,17 @@ export default function RouteList({
 
   const routes = optimisticRoutes;
   const totalCount = data?.totalCount ?? 0;
+
+  // The desktop table deleted on the first click; the mobile cards asked with
+  // a browser confirm. Both ask here now, naming the route.
+  const [pendingDelete, setPendingDelete] = useState<Route | null>(null);
+  const confirmDelete = () => {
+    if (!pendingDelete || !onDelete) return;
+    const id = pendingDelete.id;
+    setPendingDelete(null);
+    startTransition(() => deleteOptimisticRoute(id));
+    onDelete(id);
+  };
 
   if (isLoading)
     return (
@@ -260,7 +272,7 @@ export default function RouteList({
                           {!readOnly && (
                             <Menu position="bottom-end">
                               <Menu.Target>
-                                <ActionIcon variant="subtle">
+                                <ActionIcon variant="subtle" aria-label={`Manage route ${route.name || route.id}`}>
                                   <IconDotsVertical size={16} />
                                 </ActionIcon>
                               </Menu.Target>
@@ -274,14 +286,9 @@ export default function RouteList({
                                   {route.disabled ? "Resume" : "Pause"}
                                 </Menu.Item>
                                 <Menu.Divider />
-                                <Menu.Item color="red" leftSection={<IconTrash size={16} />} onClick={() => {
-                                  if (confirm(`Delete route ${route.id}?`)) {
-                                    startTransition(() => {
-                                      deleteOptimisticRoute(route.id);
-                                      onDelete?.(route.id);
-                                    });
-                                  }
-                                }}>Delete</Menu.Item>
+                                <Menu.Item color="red" leftSection={<IconTrash size={16} />} onClick={() => setPendingDelete(route)}>
+                                  Delete
+                                </Menu.Item>
                               </Menu.Dropdown>
                             </Menu>
                           )}
@@ -538,7 +545,7 @@ export default function RouteList({
                         transitionProps={{ transition: "pop-top-right" }}
                       >
                         <Menu.Target>
-                          <ActionIcon variant="subtle" color="gray">
+                          <ActionIcon variant="subtle" color="gray" aria-label={`Manage route ${route.name || route.id}`}>
                             <IconDotsVertical size={16} />
                           </ActionIcon>
                         </Menu.Target>
@@ -566,14 +573,7 @@ export default function RouteList({
                           <Menu.Item
                             leftSection={<IconTrash size={14} />}
                             color="red"
-                            onClick={() => {
-                              if (onDelete) {
-                                startTransition(() => {
-                                  deleteOptimisticRoute(route.id);
-                                });
-                                onDelete(route.id);
-                              }
-                            }}
+                            onClick={() => setPendingDelete(route)}
                           >
                             Delete
                           </Menu.Item>
@@ -628,6 +628,12 @@ export default function RouteList({
           </Box>
         )}
       </Stack>
+      <ConfirmDeleteModal
+        target={pendingDelete ? { kind: "route", name: pendingDelete.name || pendingDelete.id, id: pendingDelete.id } : null}
+        consequence="Requests it matched will no longer be routed."
+        onCancel={() => setPendingDelete(null)}
+        onConfirm={confirmDelete}
+      />
     </Card>
   );
 }
