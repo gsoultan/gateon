@@ -6,6 +6,7 @@ package handlers
 import (
 	"cmp"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/gsoultan/gateon/internal/auth"
 	"github.com/gsoultan/gateon/internal/telemetry"
+	gtls "github.com/gsoultan/gateon/internal/tls"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
@@ -97,12 +99,13 @@ func analyzeConfig(ctx context.Context, cfg *gateonv1.GlobalConfig) aiAnalysisRe
 	}
 
 	// --- TLS posture ---
-	if tls := cfg.GetTls(); tls != nil && tls.GetEnabled() {
-		minTLS := tls.GetMinTlsVersion()
-		if minTLS == "" || strings.Contains(minTLS, "1.0") || strings.Contains(minTLS, "1.1") {
+	// Read the setting the way the TLS manager does (applyExtraTLSConfig): every
+	// spelling it accepts, and TLS 1.2 when the setting is empty.
+	if tlsCfg := cfg.GetTls(); tlsCfg != nil && tlsCfg.GetEnabled() {
+		if gtls.ParseTLSVersion(tlsCfg.GetMinTlsVersion(), tls.VersionTLS12) < tls.VersionTLS12 {
 			insights = append(insights, aiInsight{
 				Title:           "Weak minimum TLS version",
-				Description:     "The minimum TLS version is unset or below TLS 1.2, allowing legacy clients to negotiate deprecated, attackable protocol versions.",
+				Description:     "The minimum TLS version is below TLS 1.2, allowing legacy clients to negotiate deprecated, attackable protocol versions.",
 				Severity:        "critical",
 				Category:        "security",
 				Recommendation:  "Set the minimum TLS version to TLS 1.2 (prefer TLS 1.3) on your TLS options.",
