@@ -11,6 +11,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -290,6 +291,12 @@ func (l *iouringListener) Accept() (net.Conn, error) {
 	// Use io_uring to accept the next connection.
 	resCh := make(chan uring.CQEvent, 1)
 	op := uring.Accept(uintptr(fd), 0)
+	// The SQE refers to op's address buffer by a bare integer the collector
+	// cannot see, and the kernel writes the peer's sockaddr into it when a
+	// connection arrives. Without this the operation was garbage the moment it
+	// was queued: a collection while the accept was pending freed the buffer,
+	// and the next client's address landed in whatever reused it.
+	defer runtime.KeepAlive(op)
 	_, err = l.rea.Queue(op, func(event uring.CQEvent) {
 		resCh <- event
 	})
@@ -361,6 +368,7 @@ type iouringConn struct {
 func (c *iouringConn) Read(b []byte) (n int, err error) {
 	resCh := make(chan uring.CQEvent, 1)
 	op := uring.Read(uintptr(c.fd), b, 0)
+	defer runtime.KeepAlive(op) // the kernel writes into op's buffer; see Accept
 	_, err = c.rea.Queue(op, func(event uring.CQEvent) {
 		resCh <- event
 	})
@@ -387,6 +395,7 @@ func (c *iouringConn) Read(b []byte) (n int, err error) {
 func (c *iouringConn) Write(b []byte) (n int, err error) {
 	resCh := make(chan uring.CQEvent, 1)
 	op := uring.Write(uintptr(c.fd), b, 0)
+	defer runtime.KeepAlive(op) // the kernel reads op's buffer; see Accept
 	_, err = c.rea.Queue(op, func(event uring.CQEvent) {
 		resCh <- event
 	})
