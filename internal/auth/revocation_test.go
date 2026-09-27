@@ -186,22 +186,35 @@ func TestSessionRevocation(t *testing.T) {
 // unchanged input (so tokens are not spuriously revoked on every verify) and
 // different for each security-relevant field (so no change slips through).
 func TestSessionBindingIsStableAndSensitive(t *testing.T) {
-	base := sessionBinding("hash", RoleAdmin, false)
+	state := accountState{passwordHash: "hash", role: RoleAdmin}
+	base := state.binding()
 
-	if base != sessionBinding("hash", RoleAdmin, false) {
+	if base != state.binding() {
 		t.Error("binding is not stable for identical input")
 	}
-	if base == sessionBinding("other-hash", RoleAdmin, false) {
+	changed := func(mutate func(*accountState)) string {
+		s := state
+		mutate(&s)
+		return s.binding()
+	}
+	if base == changed(func(s *accountState) { s.passwordHash = "other-hash" }) {
 		t.Error("password change did not change the binding")
 	}
-	if base == sessionBinding("hash", RoleViewer, false) {
+	if base == changed(func(s *accountState) { s.role = RoleViewer }) {
 		t.Error("role change did not change the binding")
 	}
-	if base == sessionBinding("hash", RoleAdmin, true) {
+	if base == changed(func(s *accountState) { s.disabled = true }) {
 		t.Error("disabling did not change the binding")
 	}
+	first := changed(func(s *accountState) { s.sessionEpoch = 1 })
+	if base == first {
+		t.Error("signing out did not change the binding")
+	}
+	if first == changed(func(s *accountState) { s.sessionEpoch = 2 }) {
+		t.Error("a second sign-out did not change the binding")
+	}
 	// Length-prefixing guards the field boundaries.
-	if sessionBinding("ab", "c", false) == sessionBinding("a", "bc", false) {
+	if (accountState{passwordHash: "ab", role: "c"}).binding() == (accountState{passwordHash: "a", role: "bc"}).binding() {
 		t.Error("field boundaries collide; concatenation is ambiguous")
 	}
 	if base == "" {

@@ -35,6 +35,7 @@ import { useAuthStore } from "../store/useAuthStore";
 import { queryClient } from "../queryClient";
 import { TwoFactorModal } from "../components/TwoFactorModal";
 import { ChangePasswordForm } from "../components/ChangePasswordForm";
+import { SIGN_OUT_SCOPE } from "../components/signOut";
 
 const ROLE_COLOR: Record<string, string> = {
   admin: "red",
@@ -88,7 +89,7 @@ export default function ProfilePage() {
   const handleSignOut = async () => {
     setSigningOut(true);
     try {
-      // Invalidate the server-side session (clears HttpOnly cookie).
+      // Ends every session of the account and clears the HttpOnly cookie.
       await apiFetch("/v1/logout", { method: "POST" });
     } catch {
       // Clear local session regardless of network errors.
@@ -155,15 +156,17 @@ export default function ProfilePage() {
               </Text>
             </Stack>
           </Group>
-          <Button
-            color="red"
-            variant="light"
-            leftSection={<IconLogout size={16} />}
-            onClick={handleSignOut}
-            loading={signingOut}
-          >
-            Sign out
-          </Button>
+          <Tooltip label={SIGN_OUT_SCOPE}>
+            <Button
+              color="red"
+              variant="light"
+              leftSection={<IconLogout size={16} />}
+              onClick={handleSignOut}
+              loading={signingOut}
+            >
+              Sign out
+            </Button>
+          </Tooltip>
         </Group>
       </Card>
 

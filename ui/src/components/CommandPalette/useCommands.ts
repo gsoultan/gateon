@@ -35,6 +35,7 @@ import { useAuthStore } from "../../store/useAuthStore";
 import { usePreferencesStore } from "../../store/usePreferencesStore";
 import { apiFetch } from "../../hooks/useGateon";
 import { queryClient } from "../../queryClient";
+import { SIGN_OUT_SCOPE } from "../signOut";
 import type { Command } from "./types";
 
 interface NavSpec {
@@ -154,6 +155,7 @@ export function useCommands(close: () => void): Command[] {
       {
         id: "action:logout",
         label: "Sign out",
+        description: SIGN_OUT_SCOPE,
         group: "Actions",
         icon: IconLogout,
         keywords: ["logout", "exit"],

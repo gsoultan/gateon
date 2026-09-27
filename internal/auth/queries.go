@@ -27,7 +27,11 @@ const (
 	// binding (see revocation.go). Kept narrow so the per-verify cache miss is
 	// as cheap as possible and so the password hash is never pulled into a
 	// wider struct that might get logged or serialized.
-	QuerySessionBindingByID = "SELECT password, role, disabled FROM users WHERE id = ?"
+	QuerySessionBindingByID = "SELECT password, role, disabled, session_epoch FROM users WHERE id = ?"
+
+	// QueryAdvanceSessionEpoch is a sign-out: it moves the account to its next
+	// epoch, which every session issued before it no longer matches.
+	QueryAdvanceSessionEpoch = "UPDATE users SET session_epoch = session_epoch + 1 WHERE id = ?"
 
 	QueryDeleteUser = "DELETE FROM users WHERE id = ?"
 	// #nosec G101 -- a parameterised statement, not a credential. Both values

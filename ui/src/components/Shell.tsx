@@ -35,6 +35,7 @@ import { usePreferencesStore } from "../store/usePreferencesStore";
 import { CommandPaletteProvider } from "./CommandPalette";
 import { CommandSearchButton } from "./CommandPalette/CommandSearchButton";
 import { ConnectionStatus } from "./ConnectionStatus";
+import { SIGN_OUT_SCOPE } from "./signOut";
 import {
   IconDashboard,
   IconRoute,
@@ -335,6 +336,9 @@ export function Shell() {
             }}
           >
             Sign out
+            <Text size="xs" c="dimmed">
+              {SIGN_OUT_SCOPE}
+            </Text>
           </Menu.Item>
         </Menu.Dropdown>
       </Menu>
