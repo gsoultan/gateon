@@ -281,7 +281,16 @@ func (s *IPReputationStore) SetIPScore(ip string, score float64) {
 }
 
 // GetExternalScore checks external integrations for the given IP.
-// It returns the highest confidence score found and the name of the provider.
+// It returns the highest confidence score found above its integration's
+// threshold, and the name of the provider; (0, "") when no provider's answer
+// clears its threshold.
+//
+// Each integration's "Confidence Threshold" -- "Score above which to consider
+// IP malicious", the dashboard says -- used to be read by nothing: this
+// returned the highest raw answer and the one consumer, the security threat
+// detector, applied a hard-coded 20, so an operator who set 95 to cut noise or
+// 10 to catch more changed nothing. The threshold is applied here now, per
+// provider, and the detector takes whatever this returns.
 func (s *IPReputationStore) GetExternalScore(ctx context.Context, ip string) (int, string) {
 	s.mu.RLock()
 	integrations := s.integrations
@@ -297,7 +306,7 @@ func (s *IPReputationStore) GetExternalScore(ctx context.Context, ip string) (in
 				logger.L.LogWarn("failed to check IP in external provider", "provider", p.config.Name, "error", err)
 				continue
 			}
-			if score > maxScore {
+			if score > p.threshold() && score > maxScore {
 				maxScore = score
 				bestProvider = p.config.Name
 			}
@@ -305,6 +314,20 @@ func (s *IPReputationStore) GetExternalScore(ctx context.Context, ip string) (in
 	}
 
 	return maxScore, bestProvider
+}
+
+// unsetExternalThreshold is the score a provider's answer must exceed when its
+// integration has no threshold of its own: 0, proto3's unset, which is every
+// integration saved before the field was read. It is the 20 the threat
+// detector hard-coded, so those installs detect exactly what they did.
+const unsetExternalThreshold = 20
+
+// threshold is the score this provider's answer must exceed to count.
+func (p reputationProvider) threshold() int {
+	if t := int(p.config.GetConfidenceThreshold()); t > 0 {
+		return t
+	}
+	return unsetExternalThreshold
 }
 
 func (s *IPReputationStore) GetBlockThreshold() float64 {

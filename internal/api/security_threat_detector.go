@@ -124,9 +124,11 @@ func (d *SecurityThreatDetector) Detect(ctx context.Context, data *DiagnosticDat
 				}
 			}
 
-			// External Threat Intelligence
+			// External Threat Intelligence. GetExternalScore applies each
+			// integration's configured confidence threshold (20 where none is
+			// set), so any score it returns has cleared it.
 			if d.Reputation != nil && (score > 0 || stats.TotalRequests > 10) {
-				if abuseScore, provider := d.Reputation.GetExternalScore(ctx, ip); abuseScore > 20 {
+				if abuseScore, provider := d.Reputation.GetExternalScore(ctx, ip); abuseScore > 0 {
 					score += abuseScore / 2
 					reasons = append(reasons, fmt.Sprintf("External threat feed (%s) confidence: %d%%", provider, abuseScore))
 				}
