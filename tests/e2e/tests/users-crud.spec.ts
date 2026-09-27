@@ -213,4 +213,51 @@ test.describe('Users', () => {
       await deleteUserById(playwright, taken);
     }
   });
+
+  test('editing an account keeps it disabled and keeps the 2FA it is required to set up', async ({
+    page,
+    playwright,
+  }) => {
+    // The gateway writes the disabled flag and the pending-2FA requirement from
+    // every save to PUT /v1/users, and the Edit form sent the name and the role
+    // and nothing else. Changing a disabled account's role enabled it again;
+    // changing the role of an account required to set up 2FA dropped the
+    // requirement.
+    const edited = `${USER}-edited`;
+    const api = await adminApi(playwright);
+    try {
+      const made = await api.put('/v1/users', {
+        data: { username: edited, password: PASSWORD, role: 'viewer', disabled: true, twoFactorPending: true },
+      });
+      expect(made.ok(), `PUT /v1/users: ${made.status()}`).toBe(true);
+    } finally {
+      await api.dispose();
+    }
+    try {
+      await page.goto('/users');
+      const row = userRow(page, edited);
+      await expect(row).toContainText('Disabled');
+      await expect(row).toContainText('2FA pending');
+
+      await page.getByRole('button', { name: `Edit user ${edited}` }).click();
+      const edit = page.getByRole('dialog', { name: 'Edit User' });
+      await pickRole(page, edit, 'Operator (Read/Write Config)');
+      const saved = waitForUserSave(page);
+      await edit.getByRole('button', { name: 'Update User' }).click();
+      expect((await saved).status()).toBe(200);
+      await expect(edit).toBeHidden();
+
+      // The role is what changed; wait for the table to show it before reading
+      // the rest of the row, so the old row cannot answer for the new one.
+      await expect(row).toContainText('operator');
+      await expect(row, 'changing the role enabled the account').toContainText('Disabled');
+      await expect(row, 'changing the role dropped the required 2FA').toContainText('2FA pending');
+      expect(
+        await loginStatus(playwright, edited, PASSWORD, '198.51.100.63'),
+        'the disabled account logged in after its role was changed',
+      ).not.toBe(200);
+    } finally {
+      await deleteUserById(playwright, edited);
+    }
+  });
 });

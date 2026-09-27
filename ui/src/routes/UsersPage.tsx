@@ -43,6 +43,7 @@ import { useUsers, apiFetch } from "../hooks/useGateon";
 import { useTableDensity } from "../hooks/useTableDensity";
 import { useIsMobile } from "../hooks/useMobile";
 import type { User } from "../types/gateon";
+import { userUpdateBody, type UserChanges } from "../components/userUpdate";
 import { useAuthStore } from "../store/useAuthStore";
 import { TwoFactorModal } from "../components/TwoFactorModal";
 import { QueryError } from "../components/QueryError";
@@ -135,22 +136,13 @@ export default function UsersPage() {
   }
 
   // putUser persists a partial change while preserving the rest of the user's
-  // state, so toggling one flag never silently resets the others (the backend
-  // applies disabled and twoFactorPending from whatever the body contains).
-  const putUser = async (user: User, changes: Partial<User>) => {
+  // state, so toggling one flag never silently resets the others.
+  const putUser = async (user: User, changes: UserChanges) => {
     try {
       const res = await apiFetch("/v1/users", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          id: user.id,
-          username: user.username,
-          role: user.role,
-          disabled: user.disabled ?? false,
-          twoFactorPending: user.twoFactorPending ?? false,
-          twoFactorEnabled: user.twoFactorEnabled ?? false,
-          ...changes,
-        }),
+        body: JSON.stringify(userUpdateBody(user, changes)),
       });
       if (!res.ok) throw new Error(await res.text());
       refetch();
@@ -194,10 +186,8 @@ export default function UsersPage() {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          id: editingUser?.id,
-          ...values,
-        }),
+        // An edit keeps what the form does not show; see userUpdateBody.
+        body: JSON.stringify(editingUser ? userUpdateBody(editingUser, values) : values),
       });
 
       // A taken username is refused (409) and nothing is written; say so in

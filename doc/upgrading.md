@@ -27,6 +27,21 @@ but upgrade. Until you can, stop such an entrypoint being reachable from anywher
 you do not trust. A gRPC route on such an entrypoint is now proxied to its
 backend; before, the gateway's own server answered it.
 
+### Editing a user no longer enables a disabled account — **check your disabled accounts**
+
+The Users page's Edit form saved only the account's name and role, and the
+gateway writes the disabled flag and the "must set up 2FA" requirement from
+every save. So changing a disabled account's role or name enabled it again,
+and changing an account you had required to set up 2FA dropped that
+requirement. The form now keeps both.
+
+**Who is affected:** anyone who used Edit on a disabled account, or on one
+required to set up 2FA. Check the Users page: an account you disabled that
+shows no Disabled badge, or one you required 2FA of that shows no "2FA pending",
+was changed by an edit. Disable it or require 2FA again. Scripts that call
+`PUT /v1/users` are unaffected: the gateway still sets both flags from what
+the request sends, as it always has.
+
 ### First-run setup requires a setup token — **scripted setup must send it**
 
 Setup runs before any account exists, and it required nothing: whoever reached
