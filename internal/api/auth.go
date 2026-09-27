@@ -10,6 +10,7 @@ import (
 
 	"github.com/gsoultan/gateon/internal/auth"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
+	"google.golang.org/grpc/metadata"
 )
 
 func (s *ApiService) Login(ctx context.Context, req *gateonv1.LoginRequest) (*gateonv1.LoginResponse, error) {
@@ -36,7 +37,34 @@ func (s *ApiService) Login(ctx context.Context, req *gateonv1.LoginRequest) (*ga
 		return nil, err
 	}
 	s.logAudit(ctx, "login_success", "auth", fmt.Sprintf("User logged in: %s", req.Username))
+	if calledFromBrowser(ctx) {
+		token = ""
+	}
 	return &gateonv1.LoginResponse{Token: token, User: user}, nil
+}
+
+// calledFromBrowser reports whether the gRPC call in ctx was sent by a browser.
+//
+// POST /v1/login gives a browser the session only as its HttpOnly cookie: a
+// token in the body is a string any script in the page can read and carry off
+// as a bearer credential. The Login RPC sets no cookie and put the token in its
+// reply for every caller, and a browser can make that call -- script on the
+// dashboard's origin sending application/grpc over HTTP/2. The management
+// server serves gRPC through grpc-go's ServeHTTP transport, which copies every
+// request header into the call's metadata, and every browser sends
+// Sec-Fetch-Mode on every request, where page script can neither set nor
+// remove it (see handlers.sentByBrowser). So a browser gets a successful
+// sign-in with no token in it, and uses /v1/login for a session; a native gRPC
+// client never sends the header and keeps its token.
+//
+// REST calls Login with an HTTP request's context, which carries no gRPC
+// metadata: /v1/login needs the token to set the cookie, and withholds it from
+// the body itself. gRPC-Web does not reach Login at all -- the management
+// server passes it to grpc-go unconverted, and grpc-go refuses the content type
+// before any RPC runs -- and would carry the header the same way if it did.
+func calledFromBrowser(ctx context.Context) bool {
+	md, ok := metadata.FromIncomingContext(ctx)
+	return ok && len(md.Get("sec-fetch-mode")) > 0
 }
 
 func (s *ApiService) Setup2FA(ctx context.Context, req *gateonv1.Setup2FARequest) (*gateonv1.Setup2FAResponse, error) {
