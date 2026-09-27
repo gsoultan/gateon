@@ -78,10 +78,10 @@ func (s *Settings) applyEnv() {
 	if b, err := strconv.ParseBool(strings.TrimSpace(os.Getenv(EnvEnabled))); err == nil {
 		s.Enabled = b
 	}
-	if d, ok := positiveEnv(EnvRetentionDays); ok {
+	if d, ok := positiveEnv(EnvRetentionDays, 32); ok {
 		s.RetentionDays = int(min(d, 1<<20))
 	}
-	if mb, ok := positiveEnv(EnvMaxMB); ok {
+	if mb, ok := positiveEnv(EnvMaxMB, 64); ok {
 		s.MaxBytes = min(mb, 1<<40) << 20
 	}
 	if dir := strings.TrimSpace(os.Getenv(EnvDir)); dir != "" {
@@ -102,7 +102,10 @@ var hostName = sync.OnceValue(func() string {
 	return h
 })
 
-func positiveEnv(name string) (int64, bool) {
-	n, err := strconv.ParseInt(strings.TrimSpace(os.Getenv(name)), 10, 64)
+// positiveEnv reads a variable as a positive integer of at most bits bits;
+// anything else is malformed. A day count is parsed at 32 bits: it becomes an
+// int and then the API's int32, and a value that fits 32 bits fits both.
+func positiveEnv(name string, bits int) (int64, bool) {
+	n, err := strconv.ParseInt(strings.TrimSpace(os.Getenv(name)), 10, bits)
 	return n, err == nil && n > 0
 }

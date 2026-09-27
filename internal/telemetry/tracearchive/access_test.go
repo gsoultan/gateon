@@ -151,6 +151,24 @@ func TestCurrentSettings_EnvironmentBeatsConfigBeatsProfile(t *testing.T) {
 	}
 }
 
+// What the environment asks for is held to what the archive can use: days and
+// megabytes are clamped, and a day count past what 32 bits hold is not a
+// number of days but a typo, ignored like one.
+func TestCurrentSettings_BoundsWhatTheEnvironmentAsks(t *testing.T) {
+	t.Setenv("GATEON_PROFILE", "enterprise")
+	t.Setenv(EnvEnabled, "")
+	t.Setenv(EnvDir, "")
+	t.Setenv(EnvRetentionDays, "5000000")
+	t.Setenv(EnvMaxMB, "1125899906842624") // 2^50 MB
+	if s := CurrentSettings(); s.RetentionDays != 1<<20 || s.MaxBytes != 1<<60 {
+		t.Fatalf("settings = %+v; want 2^20 days and 2^40 MB", s)
+	}
+	t.Setenv(EnvRetentionDays, "99999999999")
+	if s := CurrentSettings(); s.RetentionDays != 365 {
+		t.Fatalf("a day count past 32 bits gave %d days, want the profile's 365", s.RetentionDays)
+	}
+}
+
 // The stored config sits between the two, and a zero in it means "the
 // profile's default", not "keep nothing". Applied the way CurrentSettings
 // applies it; the global config itself is process state a test cannot put back.
