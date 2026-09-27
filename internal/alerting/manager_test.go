@@ -60,8 +60,6 @@ func (s *stubEbpf) SetPortKnockingSequence([]int32) error            { return ni
 func (s *stubEbpf) UpdateLoadBalancerBackends([]string) error        { return nil }
 func (s *stubEbpf) SetAdaptiveRateLimit(string, time.Duration) error { return nil }
 func (s *stubEbpf) ClearAdaptiveRateLimit(string) error              { return nil }
-func (s *stubEbpf) RegisterPhantomPort(uint32) error                 { return nil }
-func (s *stubEbpf) UnregisterPhantomPort(uint32) error               { return nil }
 func (s *stubEbpf) GetTopIPs(int) ([]ebpf.IPStat, error)             { return nil, nil }
 func (s *stubEbpf) GetMapStats() (ebpf.MapStats, error)              { return ebpf.MapStats{}, nil }
 

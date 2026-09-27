@@ -84,8 +84,6 @@ func (m *mockEbpfManager) Start(ctx context.Context)                            
 func (m *mockEbpfManager) UpdateLoadBalancerBackends(ips []string) error                { return nil }
 func (m *mockEbpfManager) SetAdaptiveRateLimit(ip string, interval time.Duration) error { return nil }
 func (m *mockEbpfManager) ClearAdaptiveRateLimit(ip string) error                       { return nil }
-func (m *mockEbpfManager) RegisterPhantomPort(port uint32) error                        { return nil }
-func (m *mockEbpfManager) UnregisterPhantomPort(port uint32) error                      { return nil }
 func (m *mockEbpfManager) GetTopIPs(limit int) ([]ebpf.IPStat, error)                   { return nil, nil }
 func (m *mockEbpfManager) GetMapStats() (ebpf.MapStats, error)                          { return ebpf.MapStats{}, nil }
 

@@ -71,8 +71,6 @@ func (r *recordingLimiter) UnshunIP(string) error                     { return n
 func (r *recordingLimiter) UpdateManagementWhitelist([]string) error  { return nil }
 func (r *recordingLimiter) SetPortKnockingSequence([]int32) error     { return nil }
 func (r *recordingLimiter) UpdateLoadBalancerBackends([]string) error { return nil }
-func (r *recordingLimiter) RegisterPhantomPort(uint32) error          { return nil }
-func (r *recordingLimiter) UnregisterPhantomPort(uint32) error        { return nil }
 func (r *recordingLimiter) GetTopIPs(int) ([]ebpf.IPStat, error)      { return nil, nil }
 func (r *recordingLimiter) GetMapStats() (ebpf.MapStats, error)       { return ebpf.MapStats{}, nil }
 
