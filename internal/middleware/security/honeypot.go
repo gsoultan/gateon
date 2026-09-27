@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/netip"
 	"strings"
 	"sync"
 	"time"
@@ -66,13 +67,98 @@ var honeypotBanLadder = []time.Duration{
 // record.
 const honeypotStrikeWindow = 24 * time.Hour
 
-// honeypotBanFor records a strike for clientIP and returns how long it should be
-// banned. Callers hold no lock; this takes it.
+// ipv6BanBits is how much of an IPv6 address a ban, and the strikes behind it,
+// cover: the /64, the network ADR 0011 scopes reputation to.
+//
+// Keyed by the exact address, the ban could not hold an IPv6 client at all. A
+// customer is delegated a /64 -- 2^64 addresses it can source from at no cost --
+// so a scanner rotating through it was refused for the one request that tripped
+// each ban, never climbed the ladder, and after ten thousand trap hits had filled
+// both maps to maxHoneypotBlocklist. At the cap the blocklist refuses to grow, so
+// the next scanner to reach a trap, on any address, was not banned at all: one
+// customer could switch the honeypot off for everyone.
+//
+// The cost is that a ban now covers everything in the /64. That is normally one
+// subscriber -- a household, a phone, a VM -- which is why ADR 0011 chose it; on
+// a provider that puts several customers in one /64, one of them tripping a trap
+// takes the others with it. IPv4 keeps per-address bans, and a v4-mapped address
+// is banned as the IPv4 address it is.
+const ipv6BanBits = 64
+
+// honeypotKeyBufLen fits every key the request path formats without spilling
+// to the heap: an IPv6 key is 21 bytes at the /64 (see appendIPv6Key), 41 if the
+// ban ever widened to a whole address, and an IPv4 address is at most 15. A
+// longer value -- not an address at all -- still works; it just allocates.
+const honeypotKeyBufLen = 48
+
+// appendHoneypotKey appends the key a ban and its strikes are recorded under.
+//
+// Every read and every write of honeypotBlocklist and honeypotStrikes goes
+// through this one function -- the ban check, the strike, the ban, and the
+// operator's release -- because a ban recorded under one key and looked up under
+// another is a ban that silently never applies.
+//
+// Anything without a colon is returned as it is: an IPv4 address, which the
+// ladder keys per address as it always has, or a value that is not an address,
+// which keeps its own key rather than being merged with others. That branch
+// costs no parse, so IPv4 traffic pays nothing for the IPv6 rule.
+func appendHoneypotKey(dst []byte, clientIP string) []byte {
+	if strings.IndexByte(clientIP, ':') < 0 {
+		return append(dst, clientIP...)
+	}
+	addr, err := netip.ParseAddr(clientIP)
+	if err != nil {
+		return append(dst, clientIP...)
+	}
+	if addr.Is4In6() {
+		// The same host as its IPv4 spelling, and a dual-stack listener or a
+		// forwarding header can present either.
+		return addr.Unmap().AppendTo(dst)
+	}
+	prefix, err := addr.Prefix(ipv6BanBits)
+	if err != nil {
+		return append(dst, clientIP...)
+	}
+	return appendIPv6Key(dst, prefix.Addr().As16())
+}
+
+// appendIPv6Key writes the hextets of the masked address that the ban covers,
+// four digits each, then "::": "2001:0db8:0001:0002::" for anything in
+// 2001:db8:1:2::/64 -- the network's own address, in a spelling any IPv6
+// parser accepts.
+//
+// Not the canonical text: finding the longest zero run to compress to "::" was
+// most of the cost of formatting, and this runs on every IPv6 request through
+// either honeypot. A key has to be unique, not canonical. The hextets past the
+// ban's width are all zero after the mask, so they are left to the "::".
+func appendIPv6Key(dst []byte, a [16]byte) []byte {
+	const hexDigits = "0123456789abcdef"
+	for i := 0; i < (ipv6BanBits+15)/16*2; i += 2 {
+		if i > 0 {
+			dst = append(dst, ':')
+		}
+		dst = append(dst,
+			hexDigits[a[i]>>4], hexDigits[a[i]&0x0f],
+			hexDigits[a[i+1]>>4], hexDigits[a[i+1]&0x0f])
+	}
+	return append(dst, "::"...)
+}
+
+// honeypotKey is appendHoneypotKey as a string, for the paths that store one.
+func honeypotKey(clientIP string) string {
+	var buf [honeypotKeyBufLen]byte
+	return string(appendHoneypotKey(buf[:0], clientIP))
+}
+
+// honeypotBanFor records a strike for clientIP's key and returns how long it
+// should be banned. Callers hold no lock; this takes it.
 func honeypotBanFor(clientIP string, now time.Time) time.Duration {
+	key := honeypotKey(clientIP)
+
 	blocklistMu.Lock()
 	defer blocklistMu.Unlock()
 
-	st := honeypotStrikes[clientIP]
+	st := honeypotStrikes[key]
 	if now.Sub(st.last) > honeypotStrikeWindow {
 		st.count = 0
 	}
@@ -82,7 +168,7 @@ func honeypotBanFor(clientIP string, now time.Time) time.Duration {
 	// Bounded by the same cap as the blocklist and swept the same way: this map
 	// is keyed by attacker-supplied addresses, so it needs a ceiling for the
 	// same reason.
-	if _, exists := honeypotStrikes[clientIP]; !exists && len(honeypotStrikes) >= maxHoneypotBlocklist {
+	if _, exists := honeypotStrikes[key]; !exists && len(honeypotStrikes) >= maxHoneypotBlocklist {
 		for ip, s := range honeypotStrikes {
 			if now.Sub(s.last) > honeypotStrikeWindow {
 				delete(honeypotStrikes, ip)
@@ -96,7 +182,7 @@ func honeypotBanFor(clientIP string, now time.Time) time.Duration {
 			return honeypotBanLadder[len(honeypotBanLadder)-1]
 		}
 	}
-	honeypotStrikes[clientIP] = st
+	honeypotStrikes[key] = st
 
 	if st.count > len(honeypotBanLadder) {
 		return honeypotBanLadder[len(honeypotBanLadder)-1]
@@ -135,12 +221,18 @@ func defaultHoneypotPaths() []string {
 // refused on every request. The strikes go too: a release is the operator's
 // judgement that the hits were a mistake, and keeping them would put the next
 // hit straight back on the rung the mistake had reached.
+//
+// It releases by the ban's key, so releasing any address of an IPv6 /64 lifts
+// the ban the whole /64 is under (see ipv6BanBits): the ban was never on the
+// address the operator is looking at, and deleting that address would find
+// nothing while the dashboard reported success.
 func ReleaseHoneypotBan(ip string) bool {
+	key := honeypotKey(ip)
 	blocklistMu.Lock()
 	defer blocklistMu.Unlock()
-	_, banned := honeypotBlocklist[ip]
-	delete(honeypotBlocklist, ip)
-	delete(honeypotStrikes, ip)
+	_, banned := honeypotBlocklist[key]
+	delete(honeypotBlocklist, key)
+	delete(honeypotStrikes, key)
 	return banned
 }
 
@@ -169,22 +261,23 @@ func blockHoneypotIP(clientIP string, until time.Time) {
 	if mitigation.IsAllowlisted(clientIP) {
 		return
 	}
+	key := honeypotKey(clientIP)
 
 	blocklistMu.Lock()
 	defer blocklistMu.Unlock()
 
-	if _, exists := honeypotBlocklist[clientIP]; !exists && len(honeypotBlocklist) >= maxHoneypotBlocklist {
+	if _, exists := honeypotBlocklist[key]; !exists && len(honeypotBlocklist) >= maxHoneypotBlocklist {
 		now := time.Now()
-		for ip, exp := range honeypotBlocklist {
+		for k, exp := range honeypotBlocklist {
 			if now.After(exp) {
-				delete(honeypotBlocklist, ip)
+				delete(honeypotBlocklist, k)
 			}
 		}
 		if len(honeypotBlocklist) >= maxHoneypotBlocklist {
 			return
 		}
 	}
-	honeypotBlocklist[clientIP] = until
+	honeypotBlocklist[key] = until
 }
 
 // HoneypotConfig defines the configuration for the Honeypot middleware.
@@ -230,22 +323,48 @@ func serveHoneypotGlobal(globalStore config.GlobalConfigStore, next http.Handler
 // drops the entry when it is not. The expiry sweep happens on read because
 // there is no other pass over this map, and leaving expired entries would make
 // it a map keyed by attacker-supplied address with no eviction.
+//
+// Every request through either honeypot pays for this. With no ban in force --
+// most of the time, on most installs -- it is one read-locked length check and
+// no key at all, which spares IPv6 clients the address parse their key needs.
+// Otherwise the key is built in a stack buffer and looked up as string(key),
+// which the compiler does without allocating.
 func honeypotBanActive(clientIP string) bool {
+	if noHoneypotBans() {
+		return false
+	}
+	var buf [honeypotKeyBufLen]byte
+	key := appendHoneypotKey(buf[:0], clientIP)
+
 	blocklistMu.RLock()
-	until, blocked := honeypotBlocklist[clientIP]
+	until, blocked := honeypotBlocklist[string(key)]
 	blocklistMu.RUnlock()
 
 	if !blocked {
 		return false
 	}
 	if time.Now().Before(until) {
-		return true
+		// An allowlisted address is never banned itself (blockHoneypotIP), but
+		// an IPv6 ban covers the whole /64, so a neighbour's ban would otherwise
+		// refuse it. Asked only once a ban has matched, so it costs the
+		// unbanned majority nothing.
+		return !mitigation.IsAllowlisted(clientIP)
 	}
 
 	blocklistMu.Lock()
-	delete(honeypotBlocklist, clientIP)
+	delete(honeypotBlocklist, string(key))
 	blocklistMu.Unlock()
 	return false
+}
+
+// noHoneypotBans reports whether the blocklist is empty. Read from the map
+// itself under its lock rather than from a counter kept beside it: a counter
+// that drifted to zero while bans existed would skip every ban check, and this
+// shortcut must never be the reason a ban does not apply.
+func noHoneypotBans() bool {
+	blocklistMu.RLock()
+	defer blocklistMu.RUnlock()
+	return len(honeypotBlocklist) == 0
 }
 
 // honeypotPaths resolves the configured trap paths, falling back to the
@@ -357,20 +476,12 @@ func Honeypot(cfg HoneypotConfig) kind.Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			clientIP := request.GetClientIP(r, config.EffectiveTrustCloudflare())
-
-			blocklistMu.RLock()
-			until, blocked := honeypotBlocklist[clientIP]
-			blocklistMu.RUnlock()
-
-			if blocked {
-				if time.Now().Before(until) {
-					http.Error(w, "Forbidden", http.StatusForbidden)
-					return
-				}
-				// Expired
-				blocklistMu.Lock()
-				delete(honeypotBlocklist, clientIP)
-				blocklistMu.Unlock()
+			// The same check as the global honeypot's rather than a copy of it:
+			// the copy each kept had to learn every rule the other did, and the
+			// IPv6 key is one more.
+			if honeypotBanActive(clientIP) {
+				http.Error(w, "Forbidden", http.StatusForbidden)
+				return
 			}
 
 			path := r.URL.Path

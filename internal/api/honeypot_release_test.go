@@ -68,3 +68,32 @@ func TestReleasingAnAddressLiftsItsHoneypotBan(t *testing.T) {
 			res.GetMessage(), got)
 	}
 }
+
+// TestReleasingAnIPv6AddressLiftsItsNetworksHoneypotBan pins the release to
+// the key the ban is filed under. An IPv6 ban covers the offender's /64, and
+// the operator releases the one address the threat recorded; releasing that
+// address rather than its /64 would find no ban, leave the whole /64 refused,
+// and still report success.
+func TestReleasingAnIPv6AddressLiftsItsNetworksHoneypotBan(t *testing.T) {
+	svc := newMitigationTestService(t)
+	gate := honeypotGate(t)
+	const offender, neighbour = "2001:db8:177:1::10", "2001:db8:177:1::20"
+
+	if got := serveFrom(gate, "["+offender+"]", "/.env"); got != http.StatusForbidden {
+		t.Fatalf("setup: a request for a trap path got %d, want 403", got)
+	}
+	if got := serveFrom(gate, "["+neighbour+"]", "/"); got != http.StatusForbidden {
+		t.Fatalf("setup: the trap hit did not ban the offender's /64 (a neighbour got %d)", got)
+	}
+
+	res, err := svc.RemoveMitigatedThreat(t.Context(), &gateonv1.RemoveMitigatedThreatRequest{Source: offender})
+	if err != nil || !res.GetSuccess() {
+		t.Fatalf("release failed: err=%v msg=%q", err, res.GetMessage())
+	}
+	for _, ip := range []string{offender, neighbour} {
+		if got := serveFrom(gate, "["+ip+"]", "/"); got != http.StatusOK {
+			t.Errorf("after %q, %s still gets %d: the release did not reach the /64 the "+
+				"ban is filed under", res.GetMessage(), ip, got)
+		}
+	}
+}
