@@ -54,7 +54,7 @@ func assertMitigationTTLHolds(t *testing.T, databaseURL string) {
 	defer func() { _ = ClosePathStatsStore(context.Background()) }()
 
 	s := getStore()
-	fp := fmt.Sprintf("t13d1516h2_zone_%d", time.Now().UnixNano())
+	fp := fmt.Sprintf("t13d1516h2_zone_%d|203.0.113", time.Now().UnixNano())
 	defer func() {
 		_, _ = s.db.Exec(s.dialect.Rebind("DELETE FROM user_mitigations WHERE fingerprint = ?"), fp)
 	}()

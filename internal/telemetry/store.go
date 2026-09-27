@@ -1377,6 +1377,7 @@ func (s *pathStatsStore) prune() {
 	s.pruneTraces()
 	s.pruneSecurityThreats(ctx)
 	s.pruneAuditLogs(ctx)
+	s.pruneUserMitigations(ctx)
 
 	// Reclaim the disk space freed by the deletes above. Deleting rows/keys
 	// only marks them obsolete; without these steps SQLite and Pebble keep the
@@ -1793,10 +1794,11 @@ func normalizeThreatHeaders(st *SecurityThreat) {
 
 // escalateMitigation blocks the actor behind a threat, not just the request.
 //
-// A fingerprint is mitigated immediately. An IP is only mitigated once
-// ipShunUniqueUserThreshold distinct malicious fingerprints have been seen
-// behind it, because one address can front an entire office; shunning on the
-// first bad fingerprint would take out everyone sharing the NAT.
+// A fingerprint is blocked on the threat's network once that class has
+// attacked from there repeatedly (escalateFingerprint, ADR 0026). An IP is only
+// mitigated once ipShunUniqueUserThreshold distinct malicious fingerprints have
+// been seen behind it, because one address can front an entire office; shunning
+// on the first bad fingerprint would take out everyone sharing the NAT.
 //
 // Mitigation threats are excluded, or acting on one would produce another.
 func escalateMitigation(st *SecurityThreat) {
@@ -1808,14 +1810,7 @@ func escalateMitigation(st *SecurityThreat) {
 		return
 	}
 
-	if st.Fingerprint != "" && !IsUserUnmitigated(st.Fingerprint) {
-		if ok, reason := shouldMitigateFingerprint(st.Fingerprint, st.SourceIP); ok {
-			MarkUserMitigated(st.Fingerprint, "JA4+", st.Details, st.Category)
-		} else {
-			logger.Default().LogInfo("declined to mitigate fingerprint",
-				"fingerprint", st.Fingerprint, "reason", reason, "threat", st.Type)
-		}
-	}
+	escalateFingerprint(st)
 	if st.SourceIP == "" || st.Fingerprint == "" {
 		return
 	}
@@ -2269,10 +2264,14 @@ func GetIPMitigations(ctx context.Context, limit, offset int) ([]IPMitigation, i
 	return res, total
 }
 
-// IsUserMitigated returns true if the JA4+ fingerprint is currently marked as mitigated.
+// IsUserMitigated reports whether a client class is blocked on a network: key
+// is repid.For(fingerprint, address), the identity UserMitigation enforces
+// (telemetry.GetReputationID). A key without a network scope -- a bare
+// fingerprint, as blocks were keyed before ADR 0026 -- names a class on every
+// network and is never enforced.
 func IsUserMitigated(ja4plus string) bool {
 	s := getStore()
-	if s == nil || ja4plus == "" {
+	if s == nil || !repid.Scoped(ja4plus) {
 		return false
 	}
 
@@ -2346,7 +2345,10 @@ func IsUserUnmitigated(ja4plus string) bool {
 	return err == nil && status == statusUnmitigated
 }
 
-// GetUserMitigations returns a list of currently mitigated users/fingerprints.
+// GetUserMitigations returns the fingerprint blocks in force: a client class on
+// a network each, inside its TTL. Rows past the TTL block nobody, and a row
+// with no network scope was written before ADR 0026 and is never enforced, so
+// neither is listed or counted as a mitigation.
 func GetUserMitigations(ctx context.Context, limit, offset int) ([]UserMitigation, int) {
 	s := getStore()
 	if s == nil {
@@ -2356,17 +2358,17 @@ func GetUserMitigations(ctx context.Context, limit, offset int) ([]UserMitigatio
 		limit = 50
 	}
 
-	countQuery := s.dialect.Rebind("SELECT COUNT(*) FROM user_mitigations WHERE status = 'mitigated'")
+	cutoff := mitigationCutoff()
 	var total int
-	if err := s.db.QueryRowContext(ctx, countQuery).Scan(&total); err != nil {
+	if err := s.db.QueryRowContext(ctx, s.dialect.Rebind(QueryCountInForceUserMitigations), cutoff).Scan(&total); err != nil {
 		return nil, 0
 	}
 
-	query := s.dialect.Rebind("SELECT fingerprint, ja4h, fp_type, status, reason, category, mitigated_at, unmitigated_at, updated_at FROM user_mitigations WHERE status = 'mitigated' ORDER BY mitigated_at DESC LIMIT ? OFFSET ?")
+	query := s.dialect.Rebind(QueryListInForceUserMitigations)
 	ex, cleanup := s.getExecutor(ctx)
 	defer cleanup()
 
-	rows, err := ex.QueryContext(ctx, query, limit, offset)
+	rows, err := ex.QueryContext(ctx, query, cutoff, limit, offset)
 	if err != nil {
 		return nil, 0
 	}
@@ -2402,11 +2404,13 @@ func GetCombinedMitigations(ctx context.Context, limit, offset int) ([]CombinedM
 	}
 
 	totalIPQuery := s.dialect.Rebind("SELECT COUNT(*) FROM ip_mitigations WHERE status = 'mitigated'")
-	totalUserQuery := s.dialect.Rebind("SELECT COUNT(*) FROM user_mitigations WHERE status = 'mitigated'")
 
+	// The user half is the fingerprint blocks in force, as GetUserMitigations
+	// lists them.
+	cutoff := mitigationCutoff()
 	var totalIP, totalUser int
 	_ = s.db.QueryRowContext(ctx, totalIPQuery).Scan(&totalIP)
-	_ = s.db.QueryRowContext(ctx, totalUserQuery).Scan(&totalUser)
+	_ = s.db.QueryRowContext(ctx, s.dialect.Rebind(QueryCountInForceUserMitigations), cutoff).Scan(&totalUser)
 	total := totalIP + totalUser
 
 	// Use UNION ALL for consistent paging across both types.
@@ -2418,7 +2422,7 @@ func GetCombinedMitigations(ctx context.Context, limit, offset int) ([]CombinedM
 		UNION ALL
 		SELECT 'user' as source_type, fingerprint as source, ja4h, fp_type as type, category, status, reason, mitigated_at, unmitigated_at, updated_at
 		FROM user_mitigations
-		WHERE status = 'mitigated'
+		WHERE ` + inForceUserMitigation + `
 		ORDER BY mitigated_at DESC
 		LIMIT ? OFFSET ?
 	`
@@ -2427,7 +2431,7 @@ func GetCombinedMitigations(ctx context.Context, limit, offset int) ([]CombinedM
 	ex, cleanup := s.getExecutor(ctx)
 	defer cleanup()
 
-	rows, err := ex.QueryContext(ctx, query, limit, offset)
+	rows, err := ex.QueryContext(ctx, query, cutoff, limit, offset)
 	if err != nil {
 		logger.Default().LogError("failed to get combined mitigations", "error", err)
 		return nil, 0
@@ -2453,10 +2457,18 @@ func GetCombinedMitigations(ctx context.Context, limit, offset int) ([]CombinedM
 	return res, total
 }
 
-// MarkUserMitigated records that a user fingerprint has been mitigated.
+// MarkUserMitigated blocks a client class on a network: key is
+// repid.For(fingerprint, address). A key without a network scope is refused
+// and logged rather than written: it would name a browser build on every
+// network, and IsUserMitigated never enforces one (ADR 0026).
 func MarkUserMitigated(ja4plus string, fpType string, reason string, category string) {
 	s := getStore()
 	if s == nil || ja4plus == "" {
+		return
+	}
+	if !repid.Scoped(ja4plus) {
+		logger.Default().LogError("refused a fingerprint mitigation with no network scope; "+
+			"a fingerprint on its own names a client class on every network", "fingerprint", ja4plus)
 		return
 	}
 	// We only use the fingerprint column for JA4+ suite. ja4h column is kept for schema compatibility but left empty.
@@ -2511,6 +2523,70 @@ func MarkUserUnmitigated(ja4plus string) bool {
 		logger.Default().LogError("failed to mark user as unmitigated", "ja4plus", ja4plus, "error", err)
 	}
 	return released
+}
+
+// ReleaseUserMitigationClass releases a fingerprint's class on every network it
+// is blocked on, holds the class against being blocked again automatically for
+// the hold window, and reports whether a block in force was released.
+//
+// A release names what an operator or a client sees: a threat's whole JA4+, or
+// a legacy client's JA4 and JA4H. Blocks are kept per class and network
+// (repid.For, ADR 0026), so they are found by the class alone, the way
+// ResetReputationClass finds scores.
+func ReleaseUserMitigationClass(fingerprint string) bool {
+	s := getStore()
+	if s == nil || fingerprint == "" {
+		return false
+	}
+	class := repid.Class(fingerprint)
+	released := false
+	for _, key := range s.inForceUserMitigationKeysOfClass(class) {
+		if MarkUserUnmitigated(key) {
+			released = true
+		}
+	}
+	// The hold, under the class itself. No block is ever written there, and
+	// escalateFingerprint consults it beside the key's own (userMitigationHeld),
+	// so the class stays released on every network, as a released fingerprint
+	// did before blocks were scoped.
+	MarkUserUnmitigated(class)
+	return released
+}
+
+// maxReleasedScopes bounds one class release. The table is pruned to a day of
+// blocks, and one class on this many networks at once is already a campaign
+// that needs no bulk release.
+const maxReleasedScopes = 10_000
+
+// inForceUserMitigationKeysOfClass is every key a block on class is in force
+// under: the class on each network it was blocked on.
+func (s *pathStatsStore) inForceUserMitigationKeysOfClass(class string) []string {
+	prefix := repid.ScopesOf(class)
+	rows, err := s.db.Query(s.dialect.Rebind(QueryInForceUserMitigationKeysOfClass),
+		mitigationCutoff(), len(prefix), prefix, maxReleasedScopes)
+	if err != nil {
+		logger.Default().LogError("failed to find a class's fingerprint mitigations", "class", class, "error", err)
+		return nil
+	}
+	defer rows.Close()
+	var keys []string
+	for rows.Next() {
+		var key string
+		if rows.Scan(&key) == nil {
+			keys = append(keys, key)
+		}
+	}
+	return keys
+}
+
+// pruneUserMitigations removes mitigation rows past both a block's TTL and a
+// release's hold. Blocks are kept per class and network, so the table would
+// otherwise grow by a row for every network a class was ever blocked on.
+func (s *pathStatsStore) pruneUserMitigations(ctx context.Context) {
+	cutoff := time.Now().UTC().Add(-userMitigationRetention()).Format("2006-01-02 15:04:05")
+	if _, err := s.db.ExecContext(ctx, s.dialect.Rebind(QueryPruneUserMitigations), cutoff); err != nil {
+		logger.Default().LogError("user mitigations: prune failed", "error", err)
+	}
 }
 
 // countInForceUserMitigations reports how many mitigation rows are stored under

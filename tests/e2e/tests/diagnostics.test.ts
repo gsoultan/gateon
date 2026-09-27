@@ -30,25 +30,26 @@ const asRemote = { headers: { 'X-Forwarded-For': ANOMALY_IP } };
 test.describe('Gateon Diagnostics E2E', () => {
   test.setTimeout(180000);
 
-  // Release the JA4+ mitigation this spec earns, or every later spec gets a 403.
+  // Release the fingerprint mitigation this spec may earn, or later specs from
+  // the same network get a 403.
   //
   // Sending the SQLi from a routable address is what makes the WAF violation
   // above real: the threat is now recorded instead of dropped, which is the
-  // whole point of the header. But a recorded block is not inert.
-  // pathStatsStore.processThreat marks the *fingerprint* mitigated the moment a
-  // threat comes back blocked — no threshold, no decay — and middleware's
-  // UserMitigation check then rejects everything carrying it.
+  // whole point of the header. But a recorded block is not inert. Three pieces
+  // of attack evidence within ten minutes block the client's fingerprint class
+  // on its network (ADR 0026), and UserMitigation then rejects every request
+  // from that class on that /24.
   //
   // Playwright's APIRequestContext is one Node HTTP client, so every
-  // request.get() in the entire suite presents the same JA4+. One earned
-  // mitigation therefore 403s every subsequent spec, and the failures surface
-  // far from here, looking like unrelated breakage in whatever ran next.
+  // request.get() in the entire suite presents the same fingerprint, and the
+  // specs share a handful of TEST-NET /24s. One earned block therefore 403s
+  // later specs on the same network, and the failures surface far from here,
+  // looking like unrelated breakage in whatever ran next.
   //
-  // There is no way to both leave the mitigation in place and keep using the
-  // runner: the fingerprint is shared, so it is all-or-nothing. The spec that
-  // earns it has to hand it back. MarkUserUnmitigated also records a 24h
-  // marker that processThreat honours, so this holds for the rest of the run
-  // rather than being re-applied by the next blocked request.
+  // So the spec that earns it hands it back. Releasing a fingerprint releases
+  // its class on every network it is blocked on, and holds the class for 24h,
+  // so this holds for the rest of the run rather than being re-applied by the
+  // next blocked request.
   test.afterAll(async ({ playwright }) => {
     const api = await playwright.request.newContext({
       baseURL: 'http://localhost:8080',

@@ -515,43 +515,12 @@ func countTriggeredRules(stats *IPStats, triggered string) {
 // carrying a stranger's record the same afternoon.
 const attackEvidenceWindow = 30 * time.Minute
 
-// Threat kinds that are attack evidence. See attackEvidenceWeight.
-const (
-	threatHoneypotTriggered = "honeypot_triggered"
-	threatFastPathSignature = "fast_path_signature"
-	threatWAFPrefix         = "waf_"
-	categoryMalware         = "malware"
-	categoryBruteForce      = "brute_force"
-	categoryExploitScanning = "exploit_scanning"
-
-	// decisiveAttackWeight is a decision no ordinary client provokes by
-	// accident, worth as much as three WAF blocks.
-	decisiveAttackWeight = 3.0
-)
-
-// attackEvidenceWeight is what a recorded threat says about its source address:
-// 1 for a request the WAF blocked on an attack payload, decisiveAttackWeight for
-// a trap sprung, a malware upload, or a brute-force or exploit-scan detection,
-// and 0 for everything else.
-//
-// Everything else deliberately includes: rate-limit rejections, which a busy
-// office egress earns without attacking anyone; geo and bot-management blocks,
-// which are policy about who a client is rather than evidence of what it did;
-// the mitigation and reputation blocks that follow an earlier decision, which
-// would feed a block back in as its own evidence; the WAF's detection-only
-// matches, which the operator has not trusted enough to block on; and every
-// threat this engine records itself, which would make one false positive the
-// evidence for the next.
+// attackEvidenceWeight is what a recorded threat says about its source address.
+// The definition is telemetry.AttackEvidenceWeight, which the fingerprint block
+// on the recording path uses too: one answer to "is this an attack", wherever
+// evidence can end in a limit.
 func attackEvidenceWeight(th *telemetry.SecurityThreat) float64 {
-	switch {
-	case th.Type == threatHoneypotTriggered, th.Category == categoryMalware,
-		th.Category == categoryBruteForce, th.Category == categoryExploitScanning:
-		return decisiveAttackWeight
-	case th.Type == threatFastPathSignature, strings.HasPrefix(th.Type, threatWAFPrefix) && th.Mitigated:
-		return 1
-	default:
-		return 0
-	}
+	return telemetry.AttackEvidenceWeight(th)
 }
 
 // maxAnomaliesPerPass bounds what a single detection pass returns.

@@ -106,8 +106,8 @@ func TestReleaseLiftsTheReputationBlock(t *testing.T) {
 		// Three blocks: the fingerprint is blocked as well, which is what gives
 		// the fingerprint release something to release.
 		earnRefusal(t, gate, fp, ip, 3)
-		if !telemetry.IsUserMitigated(fp) {
-			t.Fatal("setup: three blocks from one address did not mitigate the fingerprint")
+		if !telemetry.IsUserMitigated(repid.For(fp, ip)) {
+			t.Fatal("setup: three blocks from one address did not block the fingerprint on its network")
 		}
 
 		res, err := svc.RemoveMitigatedThreat(t.Context(), &gateonv1.RemoveMitigatedThreatRequest{
@@ -119,6 +119,29 @@ func TestReleaseLiftsTheReputationBlock(t *testing.T) {
 		if got := serveAsClient(gate, fp, ip); got != http.StatusOK {
 			t.Fatalf("after %q the released client still gets %d; the fingerprint "+
 				"release lifted the fingerprint block and left its reputation block", res.GetMessage(), got)
+		}
+	})
+
+	// Releasing an address releases the fingerprint block its clients were
+	// refused by: the class on that address's network (ADR 0026), not the bare
+	// fingerprint, which no block is kept under any more.
+	t.Run("release by address lifts the fingerprint block", func(t *testing.T) {
+		const fp, ip = "t13d1516h2_release_block_by_address_e5_f6", "192.0.2.43"
+		svc := newMitigationTestService(t)
+		gate := enforcementGate(t)
+		t.Cleanup(func() { telemetry.ResetReputation(repid.For(fp, ip)) })
+
+		earnRefusal(t, gate, fp, ip, 3)
+		if !telemetry.IsUserMitigated(repid.For(fp, ip)) {
+			t.Fatal("setup: three blocks from one address did not block the fingerprint on its network")
+		}
+
+		res, err := svc.RemoveMitigatedThreat(t.Context(), &gateonv1.RemoveMitigatedThreatRequest{Source: ip})
+		if err != nil || !res.GetSuccess() {
+			t.Fatalf("release failed: err=%v msg=%q", err, res.GetMessage())
+		}
+		if telemetry.IsUserMitigated(repid.For(fp, ip)) {
+			t.Fatalf("after %q the address's fingerprint block is still in force", res.GetMessage())
 		}
 	})
 }

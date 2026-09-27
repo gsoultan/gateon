@@ -62,10 +62,12 @@ test.describe('Adversarial probe', () => {
   });
 
   // Every probe below asserts some form of "not 200". That is trivially true of
-  // a client the gateway has already mitigated, and one WAF block is enough to
-  // mitigate this one — the whole suite shares a single JA4+. Without this
-  // hook, the first test to trip the WAF would make every later test pass by
-  // being blocked wholesale, which is the most expensive kind of green.
+  // a client the gateway has already mitigated, and three WAF blocks from one
+  // network are enough to block this client's fingerprint class there -- the
+  // whole suite shares a single fingerprint, and these probes share
+  // 203.0.113.0/24. Without this hook, the first test to trip the WAF would make
+  // every later test pass by being blocked wholesale, which is the most
+  // expensive kind of green.
   //
   // So each test starts from a released fingerprint and proves it: a benign
   // request must come back 200 before any assertion about a hostile one means

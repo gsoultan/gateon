@@ -47,7 +47,7 @@ import TraceVisualizer from "../Diagnostics/TraceVisualizer";
 import { QueryError } from "../QueryError";
 import type { Anomaly } from "../../types/gateon";
 import { formatLiftsIn, msUntilLiftsInChanges, safeFormatDate } from "../../utils/format";
-import { getSeverityColor } from "../../utils/security";
+import { getSeverityColor, splitScopedBlock } from "../../utils/security";
 import { notifications } from "@mantine/notifications";
 import { usePermissions } from "../../hooks/usePermissions";
 
@@ -412,11 +412,19 @@ export function ThreatExplorerTab() {
               This lifts the kernel rate limit on <b>{pendingAllow?.source}</b> and resets the automatic
               history that set it. It will be able to send at full rate again.
             </Alert>
+          ) : splitScopedBlock(pendingAllow?.source) ? (
+            <Alert color="red" icon={<IconAlertTriangle size={16} />}>
+              This lifts the block on the client build <b>{splitScopedBlock(pendingAllow?.source)?.build}</b> for
+              clients on <b>{splitScopedBlock(pendingAllow?.source)?.network}</b>. They will be able to reach your
+              services again.
+            </Alert>
           ) : (
             <Alert color="red" icon={<IconAlertTriangle size={16} />}>
               This removes the mitigation for <b>{pendingAllow?.source}</b>
-              {pendingAllow?.ja4plus ? ` (fingerprint ${pendingAllow.ja4plus})` : ""}. It will be able to
-              reach your services again.
+              {pendingAllow?.ja4plus && pendingAllow.ja4plus !== pendingAllow.source
+                ? ` (fingerprint ${pendingAllow.ja4plus})`
+                : ""}
+              . It will be able to reach your services again.
             </Alert>
           )}
           <Group justify="flex-end" gap="sm">

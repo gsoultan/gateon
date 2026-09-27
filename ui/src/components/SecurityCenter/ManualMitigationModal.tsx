@@ -53,7 +53,13 @@ export function ManualMitigationModal({ opened, onClose }: ManualMitigationModal
       <Stack gap="md">
         <TextInput
           label="Source (IP or Fingerprint)"
-          placeholder="e.g., 1.2.3.4 or ja4Fingerprint..."
+          placeholder={type === "IP" ? "e.g., 203.0.113.7" : "fingerprint|203.0.113.7"}
+          description={
+            type === "IP"
+              ? undefined
+              : "A fingerprint names a browser build that every user of it shares, so it is blocked on one network: " +
+                "name an address after it, and the block covers that address's /24 (or /64) only."
+          }
           required
           value={source}
           onChange={(e) => setSource(e.currentTarget.value)}

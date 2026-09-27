@@ -118,6 +118,23 @@ func ClassOf(repID string) string {
 	return repID
 }
 
+// Scoped reports whether an identity carries a network scope: whether it is one
+// For built from a fingerprint, rather than a bare fingerprint or address.
+//
+// A fingerprint mitigation keyed on anything else names a client class on
+// every network (ADR 0026), so the store refuses to write one and never
+// enforces one.
+func Scoped(id string) bool {
+	return strings.Contains(id, separator)
+}
+
+// ScopesOf is the prefix every identity For builds for a class shares: the
+// class and the separator. A store finds every network a class is recorded on
+// by it, without knowing the networks in advance.
+func ScopesOf(class string) string {
+	return class + separator
+}
+
 // The layout of a JA4H as telemetry.GenerateJA4H writes it, which is what the
 // class is cut from: "ge11cr0200_7e33b58890ac" is the method's first two
 // letters, the HTTP version, c or n for a Cookie, r or n for a Referer, how many

@@ -6,10 +6,14 @@ package telemetry
 import (
 	"os"
 	"strconv"
+	"strings"
 	"time"
+
+	"github.com/gsoultan/gateon/internal/logger"
+	"github.com/gsoultan/gateon/internal/telemetry/repid"
 )
 
-// Deciding when a JA4+ fingerprint is safe to block.
+// Deciding when a client class is safe to block, and where.
 //
 // A JA4+ is not an identity. Its header component hashes header *names*, and
 // gateon tracks two of them, so that component has four possible values in
@@ -18,43 +22,56 @@ import (
 // a person. Every Chrome on Windows sending User-Agent and Accept-Language
 // looks the same from here.
 //
-// escalateMitigation used to block on the first qualifying threat, with no
-// threshold and no ceiling. That turns one attacker into an outage for everyone
-// who happens to share their class, and it is cheap to trigger deliberately:
-// send one injection from an ordinary browser and take out that browser's
-// users. The e2e suite demonstrated it accidentally for months — one spec's
-// SQLi 403'd every later spec, because Playwright's HTTP client is a class of
-// exactly one shared fingerprint.
+// So a fingerprint block is never a block on the class alone. It is recorded
+// under, and enforced against, the class on one network -- repid.For, the
+// identity reputation already uses (ADR 0011, 0024) -- so it reaches the clients
+// of one browser build on one /24 or /64, and not every user of that build on
+// every network (ADR 0026). And the class is the part a client cannot vary per
+// request, so dropping a Referer or a cookie does not shed the block.
 //
-// Two gates, both necessary:
+// Three gates on the automatic block, all conservative in the same direction:
+// when unsure, do not block. The WAF has already refused the request that got
+// us here; declining to *also* block the class costs a rule evaluation on the
+// next request, not a breach.
 //
-//   - Repetition. A single hit is noise; a client class that keeps producing
-//     blocked requests is a signal. Waiting for N costs an attacker nothing
-//     they were not already paying, and costs a bystander everything.
+//   - Evidence. Only attack evidence counts (AttackEvidenceWeight): a request
+//     the WAF blocked on its payload, a trap sprung, a malware upload, a
+//     brute-force or exploit-scan detection. A rate-limit rejection, a geo or
+//     bot-policy block, or a reputation or mitigation block that follows an
+//     earlier decision says nothing about what the client did, and three of
+//     them from one busy office used to block that office's browser class.
 //
-//   - Blast radius. The number of distinct source addresses seen behind a
-//     fingerprint is a direct measure of how many parties a block would hit.
-//     One address is a client. Dozens is a population, and blocking it is
-//     doing the attacker's work.
+//   - Repetition. A single hit is noise, and one user retrying a form the WAF
+//     misjudges is three. Three pieces of evidence within
+//     mitigationEvidenceWindow is a client class that keeps attacking; three
+//     spread over a week is three unrelated mistakes, and does not add up.
 //
-// Both are deliberately conservative in the same direction: when unsure, do not
-// block. The WAF has already refused the request that got us here — declining
-// to *also* blocklist the fingerprint costs a rule evaluation on the next one,
-// not a breach.
+//   - Blast radius. The number of distinct addresses behind the evidence is how
+//     many parties a block would hit inside the network. One address is a
+//     client. Five is a population, and blocking it is doing the attacker's
+//     work.
 const (
-	// defaultMitigateAfter is how many qualifying threats one fingerprint must
-	// produce before it is blocked outright.
+	// defaultMitigateAfter is how many pieces of attack evidence one class must
+	// produce on one network, within mitigationEvidenceWindow, before it is
+	// blocked there.
 	defaultMitigateAfter = 3
 
 	// defaultMaxBlastRadius is the largest number of distinct source addresses
-	// a fingerprint may span and still be treated as one actor.
+	// the evidence may come from and still be treated as one actor.
 	defaultMaxBlastRadius = 4
 
-	// maxTrackedIPs bounds the per-fingerprint address set. Anything above the
-	// blast-radius ceiling already disqualifies the fingerprint, so the exact
-	// count past that point is not worth the memory — the set stops growing and
-	// the fingerprint stays disqualified.
+	// maxTrackedIPs bounds the per-key address set. Anything above the
+	// blast-radius ceiling already disqualifies the key, so the exact count
+	// past that point is not worth the memory — the set stops growing and the
+	// key stays disqualified for the window.
 	maxTrackedIPs = defaultMaxBlastRadius + 1
+
+	// mitigationEvidenceWindow is how long the evidence towards one block
+	// accumulates. An attack produces its blocked requests within seconds or
+	// minutes; a count that never lapsed turned three false positives, days
+	// apart, into a block, and once past the threshold made every later one a
+	// block on its own.
+	mitigationEvidenceWindow = 10 * time.Minute
 )
 
 var (
@@ -74,8 +91,53 @@ func envPositiveInt(key string, def int) int {
 	return v
 }
 
-// fingerprintSighting is what we know about one JA4+ so far.
+// Threat kinds that are attack evidence. See AttackEvidenceWeight.
+const (
+	threatHoneypotTriggered = "honeypot_triggered"
+	threatFastPathSignature = "fast_path_signature"
+	threatWAFPrefix         = "waf_"
+	categoryMalware         = "malware"
+	categoryBruteForce      = "brute_force"
+	categoryExploitScanning = "exploit_scanning"
+
+	// DecisiveAttackWeight is a decision no ordinary client provokes by
+	// accident, worth as much as three WAF blocks.
+	DecisiveAttackWeight = 3.0
+)
+
+// AttackEvidenceWeight is what a recorded threat says about its source: 1 for a
+// request the WAF blocked on an attack payload, DecisiveAttackWeight for a trap
+// sprung, a malware upload, or a brute-force or exploit-scan detection, and 0
+// for everything else.
+//
+// Everything else deliberately includes: rate-limit rejections, which a busy
+// office egress earns without attacking anyone; geo and bot-management blocks,
+// which are policy about who a client is rather than evidence of what it did;
+// the mitigation and reputation blocks that follow an earlier decision, which
+// would feed a block back in as its own evidence; the WAF's detection-only
+// matches, which the operator has not trusted enough to block on; and every
+// threat the analysis engine records itself, which would make one false
+// positive the evidence for the next.
+//
+// One definition for everything that turns evidence into a limit: the
+// analysis engine's harm rule and Graph Intelligence (ADR 0025), and the
+// fingerprint block (ADR 0026).
+func AttackEvidenceWeight(th *SecurityThreat) float64 {
+	switch {
+	case th.Type == threatHoneypotTriggered, th.Category == categoryMalware,
+		th.Category == categoryBruteForce, th.Category == categoryExploitScanning:
+		return DecisiveAttackWeight
+	case th.Type == threatFastPathSignature, strings.HasPrefix(th.Type, threatWAFPrefix) && th.Mitigated:
+		return 1
+	default:
+		return 0
+	}
+}
+
+// fingerprintSighting is the evidence towards blocking one key in the current
+// window.
 type fingerprintSighting struct {
+	since   time.Time // when the current window opened, at its first evidence
 	threats int
 	ips     map[string]struct{}
 	// ipOverflow records that the address set stopped growing at maxTrackedIPs,
@@ -83,14 +145,11 @@ type fingerprintSighting struct {
 	ipOverflow bool
 }
 
-// shouldMitigateFingerprint records this sighting and reports whether the
-// fingerprint has earned an outright block. The returned reason is for the
-// operator log when it has not.
-//
-// sourceIP may be empty; it simply contributes nothing to the blast-radius
-// estimate rather than counting as a distinct address.
-func shouldMitigateFingerprint(fingerprint, sourceIP string) (bool, string) {
-	if fingerprint == "" {
+// shouldMitigateFingerprint records one piece of attack evidence against key --
+// a class on a network, repid.For -- at now, and reports whether the key has
+// earned a block. The returned reason is for the operator log when it has not.
+func shouldMitigateFingerprint(key, sourceIP string, now time.Time) (bool, string) {
+	if key == "" {
 		return false, "no fingerprint"
 	}
 
@@ -98,11 +157,11 @@ func shouldMitigateFingerprint(fingerprint, sourceIP string) (bool, string) {
 	defer fingerprintMu.Unlock()
 
 	var s *fingerprintSighting
-	if v, ok := fingerprintSightings.Get(fingerprint); ok {
+	if v, ok := fingerprintSightings.Get(key); ok {
 		s, _ = v.(*fingerprintSighting)
 	}
-	if s == nil {
-		s = &fingerprintSighting{ips: make(map[string]struct{}, 1)}
+	if s == nil || now.Sub(s.since) > mitigationEvidenceWindow {
+		s = &fingerprintSighting{since: now, ips: make(map[string]struct{}, 1)}
 	}
 
 	s.threats++
@@ -115,10 +174,11 @@ func shouldMitigateFingerprint(fingerprint, sourceIP string) (bool, string) {
 			}
 		}
 	}
-	fingerprintSightings.Add(fingerprint, s)
+	fingerprintSightings.Add(key, s)
 
 	if s.threats < mitigateAfter {
-		return false, "below threshold: " + strconv.Itoa(s.threats) + " of " + strconv.Itoa(mitigateAfter)
+		return false, "below threshold: " + strconv.Itoa(s.threats) + " of " + strconv.Itoa(mitigateAfter) +
+			" within " + mitigationEvidenceWindow.String()
 	}
 	if s.ipOverflow || len(s.ips) > maxBlastRadius {
 		return false, "blast radius too wide: seen from " + strconv.Itoa(len(s.ips)) +
@@ -127,15 +187,45 @@ func shouldMitigateFingerprint(fingerprint, sourceIP string) (bool, string) {
 	return true, ""
 }
 
-// FingerprintBlastRadius reports how many distinct source addresses have been
-// seen behind a fingerprint, and whether that count is a floor. Exported for
-// the diagnostics surface: an operator looking at a mitigation should be able
-// to see how many parties it covers.
-func FingerprintBlastRadius(fingerprint string) (count int, atLeast bool) {
+// escalateFingerprint blocks the class a threat came from, on the network it
+// came from, once the class has attacked from there repeatedly (see the gates
+// above). The key is the one UserMitigation enforces -- repid.For, from the
+// same fingerprint and address -- or the block would be written where nothing
+// reads it.
+func escalateFingerprint(st *SecurityThreat) {
+	if st.Fingerprint == "" || st.SourceIP == "" || AttackEvidenceWeight(st) == 0 {
+		return
+	}
+	key := repid.For(st.Fingerprint, st.SourceIP)
+	ok, reason := shouldMitigateFingerprint(key, st.SourceIP, time.Now())
+	if ok && userMitigationHeld(key) {
+		ok, reason = false, "released by an operator in the last 24h"
+	}
+	if !ok {
+		logger.Default().LogInfo("declined to mitigate fingerprint",
+			"identity", key, "reason", reason, "threat", st.Type)
+		return
+	}
+	MarkUserMitigated(key, "JA4+", st.Details, st.Category)
+}
+
+// userMitigationHeld reports whether an operator released key, or its whole
+// class, within the hold window, so the next threat does not undo the release.
+// A release of a bare fingerprint releases the class on every network and holds
+// it under the class alone (ReleaseUserMitigationClass).
+func userMitigationHeld(key string) bool {
+	return IsUserUnmitigated(key) || IsUserUnmitigated(repid.ClassOf(key))
+}
+
+// FingerprintBlastRadius reports how many distinct source addresses the current
+// evidence against a key came from, and whether that count is a floor.
+// Exported for the diagnostics surface: an operator looking at a mitigation
+// should be able to see how many parties it covers.
+func FingerprintBlastRadius(key string) (count int, atLeast bool) {
 	fingerprintMu.Lock()
 	defer fingerprintMu.Unlock()
 
-	v, ok := fingerprintSightings.Get(fingerprint)
+	v, ok := fingerprintSightings.Get(key)
 	if !ok {
 		return 0, false
 	}
@@ -144,38 +234,6 @@ func FingerprintBlastRadius(fingerprint string) (count int, atLeast bool) {
 		return 0, false
 	}
 	return len(s.ips), s.ipOverflow
-}
-
-// fingerprintKeySeparator joins a JA4 to a JA4H when a threat carries no
-// fingerprint of its own and the two halves have to stand in for one.
-const fingerprintKeySeparator = "_"
-
-// FindUserMitigationKey reports the key an in-force mitigation for this source
-// is actually stored under, or false when no mitigation is in force.
-//
-// MarkUserMitigated writes the fingerprint string it is handed verbatim into
-// user_mitigations.fingerprint and leaves the ja4h column empty, and its
-// callers hand it two different shapes: the fingerprint on its own, and the
-// legacy ja4 + "_" + ja4h composite used when a threat carries no fingerprint.
-// A caller that cannot name the key must therefore ask which shape the row is
-// under. Rebuilding the composite and hoping is a guess, and a wrong guess
-// deletes nothing while looking exactly like a successful release.
-//
-// ja4h may be empty, in which case only the plain source is considered.
-func FindUserMitigationKey(source, ja4h string) (string, bool) {
-	if source == "" {
-		return "", false
-	}
-	if IsUserMitigated(source) {
-		return source, true
-	}
-	if ja4h == "" {
-		return "", false
-	}
-	if composite := source + fingerprintKeySeparator + ja4h; IsUserMitigated(composite) {
-		return composite, true
-	}
-	return "", false
 }
 
 // ResetFingerprintSightings clears the sighting table. Tests only.
@@ -195,10 +253,8 @@ func ResetFingerprintSightings() {
 // share the old one stay blocked with nobody aware they were caught.
 //
 // An hour is short enough that a mistake ages out before it becomes a support
-// case, and long enough to be worth applying. Repeat offenders re-earn it
-// almost immediately — the threshold counter is separate and does not expire
-// with the block — so the cost of being wrong about an attacker is one more
-// pass through the WAF, which was going to run anyway.
+// case, and long enough to be worth applying. A class that keeps attacking
+// from the network re-earns it within the evidence window.
 const defaultMitigationTTL = time.Hour
 
 var mitigationTTL = envDuration("GATEON_JA4_MITIGATION_TTL", defaultMitigationTTL)
@@ -221,4 +277,10 @@ func envDuration(key string, def time.Duration) time.Duration {
 // comparison is a plain lexicographic one on both.
 func mitigationCutoff() string {
 	return time.Now().UTC().Add(-mitigationTTL).Format("2006-01-02 15:04:05")
+}
+
+// userMitigationRetention is how long a user_mitigations row is kept: past both
+// the block's TTL and a release's hold, a row decides nothing.
+func userMitigationRetention() time.Duration {
+	return max(mitigationTTL, unmitigationHoldWindow)
 }

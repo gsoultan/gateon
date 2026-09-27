@@ -113,3 +113,28 @@ const (
 	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	ON CONFLICT(id) DO NOTHING;`
 )
+
+// Fingerprint blocks (user_mitigations). A block's key is repid.For: a client
+// class, '|', and the network it is blocked on (ADR 0026). A key with no '|'
+// was written before blocks were scoped and is never enforced, and a row older
+// than the TTL (the bound cutoff) blocks nobody, so neither is in force.
+const (
+	inForceUserMitigation = `status = 'mitigated' AND fingerprint LIKE '%|%' AND updated_at > ?`
+
+	QueryCountInForceUserMitigations = `SELECT COUNT(*) FROM user_mitigations WHERE ` + inForceUserMitigation
+
+	QueryListInForceUserMitigations = `SELECT fingerprint, ja4h, fp_type, status, reason, category, mitigated_at, unmitigated_at, updated_at
+		FROM user_mitigations
+		WHERE ` + inForceUserMitigation + `
+		ORDER BY mitigated_at DESC
+		LIMIT ? OFFSET ?`
+
+	// QueryInForceUserMitigationKeysOfClass finds the networks one class is
+	// blocked on by the key's prefix. SUBSTR rather than LIKE: a JA4 is full of
+	// '_', which LIKE reads as a wildcard.
+	QueryInForceUserMitigationKeysOfClass = `SELECT DISTINCT fingerprint FROM user_mitigations
+		WHERE ` + inForceUserMitigation + ` AND SUBSTR(fingerprint, 1, ?) = ?
+		LIMIT ?`
+
+	QueryPruneUserMitigations = `DELETE FROM user_mitigations WHERE updated_at < ?`
+)
