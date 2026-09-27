@@ -161,7 +161,7 @@ func ssrfSafeTransport() *http.Transport {
 // check-security-invariants greps for `.AuthManager == nil` and its siblings, so
 // the same comparison on a parameter goes unseen.
 func isLogsRequestAuthorized(r *http.Request, verifier auth.Service) bool {
-	claims, ok := callerClaims(r)
+	claims, ok := callerOrSelfAuthenticated(r)
 	if !ok {
 		return false
 	}

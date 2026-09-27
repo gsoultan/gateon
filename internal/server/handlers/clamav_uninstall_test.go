@@ -49,7 +49,7 @@ func TestUninstallClamavPassesSudoPassword(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 
-	mux.ServeHTTP(rec, req)
+	mux.ServeHTTP(rec, authWaived(req))
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
@@ -76,7 +76,7 @@ func TestUninstallClamavAcceptsEmptyBody(t *testing.T) {
 			strings.NewReader(body))
 		rec := httptest.NewRecorder()
 
-		mux.ServeHTTP(rec, req)
+		mux.ServeHTTP(rec, authWaived(req))
 
 		if rec.Code != http.StatusOK {
 			t.Errorf("body %q: status = %d, want 200: %s", body, rec.Code, rec.Body.String())
@@ -105,7 +105,7 @@ func TestUninstallClamavRejectsMalformedBody(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 
-	mux.ServeHTTP(rec, req)
+	mux.ServeHTTP(rec, authWaived(req))
 
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400 for malformed JSON", rec.Code)

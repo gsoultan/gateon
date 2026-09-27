@@ -11,6 +11,22 @@ here after the fact.
 
 ## Unreleased
 
+### gRPC on a plaintext TCP entrypoint is authenticated — **upgrade if you run one**
+
+On a plaintext TCP entrypoint, gRPC and gRPC-Web went straight to the gateway's
+own gRPC server, past the handler that authenticates the management API. The
+server's permission check read "no caller" as "authentication is off", so anyone
+who could reach the port could call the management API with no credential,
+`UpdateGlobalConfig` included. That traffic now goes through the same handler as
+everything else. A permission check also refuses a request that carries no
+caller unless that handler decided the request needs none. See ADR 0027.
+
+**Who is affected:** every install with a TCP entrypoint that is not TLS, on
+every release so far (the dispatch dates from v0.1.0). Nothing needs changing,
+but upgrade. Until you can, stop such an entrypoint being reachable from anywhere
+you do not trust. A gRPC route on such an entrypoint is now proxied to its
+backend; before, the gateway's own server answered it.
+
 ### First-run setup requires a setup token — **scripted setup must send it**
 
 Setup runs before any account exists, and it required nothing: whoever reached

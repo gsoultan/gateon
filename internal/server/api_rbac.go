@@ -84,6 +84,7 @@ var (
 	errUnmappedProcedure       = errors.New("procedure has no permission mapping")
 	errPermissionDenied        = errors.New("permission denied")
 	errInsufficientPermissions = errors.New("insufficient permissions")
+	errAuthenticationRequired  = errors.New("authentication required")
 )
 
 // apiPermissions maps every ApiService procedure to the permission its REST
@@ -191,7 +192,11 @@ func NewConnectRBACInterceptor() connect.UnaryInterceptorFunc {
 	return func(next connect.UnaryFunc) connect.UnaryFunc {
 		return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
 			if err := authorizeProcedure(ctx, req.Spec().Procedure, req.Peer().Addr); err != nil {
-				return nil, connect.NewError(connect.CodePermissionDenied, err)
+				code := connect.CodePermissionDenied
+				if errors.Is(err, errAuthenticationRequired) {
+					code = connect.CodeUnauthenticated
+				}
+				return nil, connect.NewError(code, err)
 			}
 			return next(ctx, req)
 		}
@@ -205,7 +210,11 @@ func NewConnectRBACInterceptor() connect.UnaryInterceptorFunc {
 func NewGRPCRBACInterceptor() grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
 		if err := authorizeProcedure(ctx, info.FullMethod, grpcPeerAddr(ctx)); err != nil {
-			return nil, status.Error(codes.PermissionDenied, err.Error())
+			code := codes.PermissionDenied
+			if errors.Is(err, errAuthenticationRequired) {
+				code = codes.Unauthenticated
+			}
+			return nil, status.Error(code, err.Error())
 		}
 		return handler(ctx, req)
 	}
@@ -232,12 +241,23 @@ func authorizeProcedure(ctx context.Context, procedure, peerAddr string) error {
 		return nil
 	}
 
-	// Mirrors handlers.RequirePermission: no claims means PasetoAuth never ran,
-	// i.e. auth is disabled for this deployment. Diverging here would make the
-	// transports enforce differently again, in the opposite direction.
+	// Mirrors handlers.RequirePermission. No claims used to mean "auth is
+	// disabled" and allow, which also admitted a request that never passed the
+	// base handler: gRPC on a plaintext TCP entrypoint reached this server
+	// directly, so anyone who could reach the port could call UpdateGlobalConfig.
+	// No claims is allowed only where the base handler marked the request as
+	// needing none (see middleware.AuthNotRequired). ADR 0027.
 	claims, err := claimsFrom(ctx)
-	if err != nil || claims == nil {
+	if err != nil {
 		return err
+	}
+	if claims == nil {
+		if middleware.AuthNotRequired(ctx) {
+			return nil
+		}
+		logger.L.LogWarn("no credential on a request the base handler did not waive; denying",
+			"event", "rbac_permission_denied", "procedure", procedure, "peer", peerAddr)
+		return errAuthenticationRequired
 	}
 	if perm.kind == permAuthenticated {
 		return nil
@@ -250,7 +270,7 @@ func authorizeProcedure(ctx context.Context, procedure, peerAddr string) error {
 	return nil
 }
 
-// claimsFrom returns the caller's claims, or (nil, nil) when auth is disabled.
+// claimsFrom returns the caller's claims, or (nil, nil) when there are none.
 func claimsFrom(ctx context.Context) (*auth.Claims, error) {
 	claimsVal := ctx.Value(middleware.UserContextKey)
 	if claimsVal == nil {

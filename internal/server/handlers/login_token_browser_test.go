@@ -42,7 +42,7 @@ func signIn(t *testing.T, path, body, fetchMode string) *httptest.ResponseRecord
 		req.Header.Set("Sec-Fetch-Mode", fetchMode)
 	}
 	rr := httptest.NewRecorder()
-	mux.ServeHTTP(rr, req)
+	mux.ServeHTTP(rr, authWaived(req))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("%s: status %d: %s", path, rr.Code, rr.Body.String())
 	}

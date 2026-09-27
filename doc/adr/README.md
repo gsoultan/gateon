@@ -36,6 +36,7 @@ ADRs follow a lightweight [MADR](https://adr.github.io/madr/)-style format:
 | [0023](./0023-the-trace-archive-has-a-directory-per-node.md) | The trace archive has a directory per node, and every node reads them all | Accepted |
 | [0024](./0024-a-reputation-score-belongs-to-what-a-client-cannot-vary.md) | A reputation score belongs to what a client cannot vary per request | Accepted |
 | [0025](./0025-a-finding-limits-an-address-only-for-harmful-traffic-and-only-when-it-repeats.md) | A finding limits an address only for harmful traffic, and only when it repeats | Accepted |
+| [0027](./0027-no-credential-means-nobody-unless-the-base-handler-waives-it.md) | No credential means nobody, unless the base handler waived it | Accepted |
 
 ## Conventions
 

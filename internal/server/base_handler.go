@@ -104,11 +104,11 @@ func CreateBaseHandler(
 				return
 			}
 			if isLoginPath(r.URL.Path) {
-				handleLoginWithRateLimit(w, r, finalInternal, deps)
+				handleLoginWithRateLimit(w, withAuthNotRequired(r), finalInternal, deps)
 				return
 			}
 			if isPublicAuthPath(r.URL.Path) {
-				finalInternal.ServeHTTP(w, r)
+				finalInternal.ServeHTTP(w, withAuthNotRequired(r))
 				return
 			}
 			// No auth service yet: fail closed. This is the first-run window,
@@ -131,7 +131,11 @@ func CreateBaseHandler(
 			return
 		}
 
-		finalInternal.ServeHTTP(w, r)
+		// Authentication is off for this deployment and this is not the
+		// management entrypoint: the one case in which the API runs with no
+		// caller. The authorization checks allow a request with no claims only
+		// when this mark says so.
+		finalInternal.ServeHTTP(w, withAuthNotRequired(r))
 	})
 
 	var mgmtHandler http.Handler = mgmtLogic
@@ -200,4 +204,10 @@ func CreateBaseHandler(
 	// Apply Telemetry at the edge to ensure it covers all responses.
 	// MgmtCORS is now applied conditionally inside mainHandler for better isolation.
 	return middleware.Telemetry("gateon")(mainHandler)
+}
+
+// withAuthNotRequired marks r as needing no credential; see
+// middleware.AuthNotRequired. Only this file's no-credential branches use it.
+func withAuthNotRequired(r *http.Request) *http.Request {
+	return r.WithContext(middleware.WithAuthNotRequired(r.Context()))
 }

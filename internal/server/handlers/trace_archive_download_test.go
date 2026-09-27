@@ -76,7 +76,7 @@ func download(t *testing.T, path string, claims *auth.Claims) *httptest.Response
 		req = req.WithContext(context.WithValue(req.Context(), middleware.UserContextKey, claims))
 	}
 	rr := httptest.NewRecorder()
-	mux.ServeHTTP(rr, req)
+	mux.ServeHTTP(rr, authWaived(req))
 	return rr
 }
 

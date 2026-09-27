@@ -217,7 +217,9 @@ func TestIntegration_RestApiAndProxy(t *testing.T) {
 	reqCreate := httptest.NewRequest("PUT", "/v1/routes", strings.NewReader(string(rtData)))
 	reqCreate.Header.Set("Content-Type", "application/json")
 	wCreate := httptest.NewRecorder()
-	mux.ServeHTTP(wCreate, reqCreate)
+	// The base handler's decision for a deployment with authentication off,
+	// which is what this test models; the mux does not make it on its own.
+	mux.ServeHTTP(wCreate, reqCreate.WithContext(middleware.WithAuthNotRequired(reqCreate.Context())))
 	if wCreate.Code != http.StatusOK {
 		t.Errorf("create route: %d %s", wCreate.Code, wCreate.Body.String())
 	}

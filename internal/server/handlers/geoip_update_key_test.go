@@ -54,7 +54,7 @@ func TestGeoIPUpdateUsesTheKeyTheSettingsCardSends(t *testing.T) {
 			req := httptest.NewRequest(http.MethodPost, "/v1/geoip/update", strings.NewReader(tc.body))
 			req.Header.Set("Content-Type", "application/json")
 			rr := httptest.NewRecorder()
-			mux.ServeHTTP(rr, req)
+			mux.ServeHTTP(rr, authWaived(req))
 
 			if rr.Code != http.StatusOK {
 				t.Fatalf("status = %d, want 200: %s", rr.Code, rr.Body)

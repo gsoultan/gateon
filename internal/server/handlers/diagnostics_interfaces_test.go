@@ -44,7 +44,7 @@ func TestSystemInterfacesReportsEBPFUnderTheDashboardsKeys(t *testing.T) {
 		Attached: true, Interface: "ens5", AttachMode: "tcx", LoadError: "native XDP refused",
 	}}}, &Deps{})
 	rr := httptest.NewRecorder()
-	mux.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/v1/system/interfaces", nil))
+	mux.ServeHTTP(rr, authWaived(httptest.NewRequest(http.MethodGet, "/v1/system/interfaces", nil)))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d: %s", rr.Code, rr.Body)
 	}

@@ -7,7 +7,6 @@ import (
 	"context"
 	"net"
 	"net/http"
-	"strings"
 	"sync"
 
 	"github.com/gsoultan/gateon/internal/logger"
@@ -101,15 +100,14 @@ func (d *sharedHTTPDispatcher) Addr() net.Addr {
 
 // buildPlainHTTPHandler builds the HTTP handler chain for an entrypoint (plaintext).
 func buildPlainHTTPHandler(ep *gateonv1.EntryPoint, deps *Deps) http.Handler {
-	var epHandler http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		isGRPC := (r.ProtoMajor == 2 || r.ProtoMajor == 3) && strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc")
-		isGRPCWeb := deps.Wrapped.IsGrpcWebRequest(r) || deps.Wrapped.IsAcceptableGrpcCorsRequest(r) || deps.Wrapped.IsGrpcWebSocketRequest(r)
-		if isGRPC || isGRPCWeb {
-			deps.Wrapped.ServeHTTP(w, r)
-			return
-		}
-		deps.BaseHandler.ServeHTTP(w, r)
-	})
+	// Every request, gRPC included, goes to the base handler: it proxies a
+	// request a route matches -- gRPC routes too -- and it is where a data-plane
+	// entrypoint refuses the management API and where that API authenticates.
+	// gRPC and gRPC-Web used to be handed straight to the internal gRPC server
+	// ahead of it, and that server's permission check read "no caller" as "auth
+	// disabled": anyone who could reach this port could call the management
+	// API, UpdateGlobalConfig included, with no credential. ADR 0027.
+	epHandler := deps.BaseHandler
 	// The HTTP entrypoint's chain, not a copy of it. The copy this used to be
 	// had fallen behind: no global honeypot, no global GeoIP country block and
 	// no per-IP connection limit, so plain HTTP to a TCP entrypoint skipped all

@@ -96,7 +96,7 @@ func postImport(t *testing.T, mux *http.ServeMux, query string) *httptest.Respon
 	req := httptest.NewRequest(http.MethodPost, "/v1/config/import"+query, strings.NewReader(importBody))
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
-	mux.ServeHTTP(rr, req)
+	mux.ServeHTTP(rr, authWaived(req))
 	return rr
 }
 
