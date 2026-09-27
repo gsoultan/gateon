@@ -6,6 +6,7 @@ package api
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
@@ -123,7 +124,8 @@ func TestListTraceArchives_ReportsTheArchive(t *testing.T) {
 // was "rpc error: code = NotFound desc = ...".
 func TestTraceRPCs_KeepTheirCodesOverConnect(t *testing.T) {
 	t.Setenv(tracearchive.EnvDir, t.TempDir())
-	_, handler := gateonv1connect.NewApiServiceHandler(NewConnectHandler(&ApiService{}))
+	_, handler := gateonv1connect.NewApiServiceHandler(NewConnectHandler(&ApiService{}),
+		connect.WithInterceptors(StatusInterceptor()))
 	srv := httptest.NewServer(handler)
 	defer srv.Close()
 	client := gateonv1connect.NewApiServiceClient(srv.Client(), srv.URL)
@@ -144,5 +146,42 @@ func TestTraceRPCs_KeepTheirCodesOverConnect(t *testing.T) {
 	}))
 	if connect.CodeOf(err) != connect.CodeInvalidArgument || !errors.As(err, &ce) || strings.Contains(ce.Message(), "rpc error") {
 		t.Fatalf("QueryTraces with a backwards period: %v, want InvalidArgument with a plain reason", err)
+	}
+}
+
+// connectCode converts gRPC statuses and nothing else: a Connect error already
+// says what it means, and an error with no status has no code to carry.
+func TestConnectCode_PassesThroughWhatItDoesNotConvert(t *testing.T) {
+	if connectCode(nil) != nil {
+		t.Fatal("no error became one")
+	}
+	plain := errors.New("request is required")
+	if got := connectCode(plain); got != plain { //nolint:errorlint // identity is the property under test
+		t.Fatalf("a plain error became %v", got)
+	}
+	already := connect.NewError(connect.CodePermissionDenied, errors.New("no"))
+	if got := connectCode(already); got != error(already) { //nolint:errorlint // identity is the property under test
+		t.Fatalf("a Connect error became %v", got)
+	}
+	converted := connectCode(status.Error(codes.ResourceExhausted, "busy"))
+	var ce *connect.Error
+	if !errors.As(converted, &ce) || ce.Code() != connect.CodeResourceExhausted || ce.Message() != "busy" {
+		t.Fatalf("a status became %v", converted)
+	}
+
+	// What a probed backend answered, wrapped by the RPC that probed it, is the
+	// backend's code, not the caller's. Carried across, a backend's
+	// Unauthenticated would sign the dashboard's administrator out.
+	// PermissionDenied is the case that shows it: a code that would convert,
+	// and would tell the administrator their own role lacks access.
+	for _, code := range []codes.Code{codes.PermissionDenied, codes.Unauthenticated} {
+		foreign := fmt.Errorf("failed to create reflection stream: %w", status.Error(code, "backend says no"))
+		if got := connectCode(foreign); got != foreign { //nolint:errorlint // identity is the property under test
+			t.Fatalf("a backend's wrapped %v became %v", code, got)
+		}
+	}
+	own := status.Error(codes.Unauthenticated, "no")
+	if got := connectCode(own); got != own { //nolint:errorlint // identity is the property under test
+		t.Fatalf("Unauthenticated was converted to %v; only a real session expiry may say that", got)
 	}
 }

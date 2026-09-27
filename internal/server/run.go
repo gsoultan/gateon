@@ -200,10 +200,7 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 	// per-endpoint inside the REST handlers, so mounting this handler bare gave
 	// every migrated RPC an unauthorized path to the same service method. See
 	// api_rbac.go.
-	mux.Handle(gateonv1connect.NewApiServiceHandler(
-		api.NewConnectHandler(apiService),
-		connect.WithInterceptors(NewConnectRBACInterceptor()),
-	))
+	mux.Handle(apiConnectHandler(apiService))
 
 	handlers.RegisterRESTHandlers(mux, apiService, &handlers.Deps{
 		RouteService:       routeService,
@@ -460,4 +457,14 @@ func announceSetupToken(ctx context.Context, svc *api.ApiService, token *auth.Se
 	}
 	logger.L.LogWarn("first-run setup is open and requires this setup token",
 		"setup_token", token.Value(), "file", path)
+}
+
+// apiConnectHandler mounts ApiService for ConnectRPC. RBAC is outermost; inside
+// it, api.StatusInterceptor carries the service's gRPC statuses across as
+// Connect codes, so a refusal reaches the dashboard as the answer it is.
+func apiConnectHandler(apiService *api.ApiService) (string, http.Handler) {
+	return gateonv1connect.NewApiServiceHandler(
+		api.NewConnectHandler(apiService),
+		connect.WithInterceptors(NewConnectRBACInterceptor(), api.StatusInterceptor()),
+	)
 }
