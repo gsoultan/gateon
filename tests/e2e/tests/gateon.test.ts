@@ -156,16 +156,33 @@ test.describe('Gateon Comprehensive E2E', () => {
   });
 
   test('Dashboard Realtime and Accuracy', async ({ page, request }) => {
+    // The "Requests / 24h" card shows the metrics snapshot: fetched once when
+    // the page loads, then pushed over /v1/watch on every telemetry refresh.
+    // This used to check that a chart surface existed, which it does with no
+    // traffic at all, so it passed whether or not anything on the page moved.
+    // Now the same page -- never reloaded -- has to show traffic sent after it
+    // loaded.
+    const firstSnapshot = page.waitForResponse(
+      (r) => r.url().includes('/v1/diag/metrics') && r.request().method() === 'GET');
     await page.goto('/', { waitUntil: 'load' });
-    
-    // Trigger some traffic
+    const loaded = Number((await (await firstSnapshot).json()).goldenSignals?.requestsToday ?? 0);
+    const card = page.getByText('Requests / 24h', { exact: true })
+      .locator('xpath=following-sibling::*[1]');
+    const shown = async () => Number((await card.innerText()).replaceAll(',', ''));
+    // The card reads 0 until that snapshot renders; a baseline taken earlier
+    // would let the initial load itself pass for a live update. Nothing but
+    // the push moves it after this: the query has no refetch interval.
+    await expect.poll(shown, { timeout: 20000 }).toBeGreaterThanOrEqual(loaded);
+    const before = await shown();
+    // From 1000 on the card reads "1.2K", which five requests cannot move.
+    expect(before, 'the card is too coarse for this check from 1000 on').toBeLessThan(995);
+
     for (let i = 0; i < 5; i++) {
-        await request.get('http://localhost:8081/test');
+        expect((await request.get('http://localhost:8081/test')).status()).toBe(200);
     }
-    
-    await page.waitForTimeout(5000);
-    // Verify traffic metrics changed or visible
-    // We look for Recharts surface which is what Mantine charts use
-    await expect(page.locator('.recharts-surface').first()).toBeVisible({ timeout: 20000 });
+    await expect.poll(shown, {
+      message: `the dashboard never showed the 5 requests sent after it loaded (it showed ${before} before them)`,
+      timeout: 45000,
+    }).toBeGreaterThanOrEqual(before + 5);
   });
 });
