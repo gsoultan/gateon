@@ -1,0 +1,154 @@
+// Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
+// SPDX-License-Identifier: MIT
+
+package api
+
+import (
+	"slices"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/gsoultan/gateon/internal/ebpf"
+	"github.com/gsoultan/gateon/internal/telemetry"
+	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
+)
+
+// Kernel rate limits appeared nowhere an operator looks. Five components set
+// them and the mitigation page listed none, so an address could be held to a
+// few packets a second with nothing to show it or release it from. Found by
+// the 2026-09-27 AI-analysis review as an open finding (the throttle list);
+// fixed with the move to the RL limiter.
+
+// TestAutomaticThrottleIsVisibleToTheOperator: an address the RL limiter
+// throttled is on the IP mitigation list the dashboard reads -- with its rate,
+// its reason and when it lapses -- and counted in the mitigation total, and the
+// dashboard's Allow on that row takes it off the list.
+//
+// The open version of this test looked in the ip_mitigations table. A throttle
+// is not a block and is not stored; the dashboard's list is ListSecurityThreats,
+// so that is where it is asked for.
+func TestAutomaticThrottleIsVisibleToTheOperator(t *testing.T) {
+	const ip = "10.60.0.3"
+	s, rec := throttleTestService(t)
+	runPasses(s, 3, neuralFinding(ip, 95))
+	if rec.throttled([]string{ip}) != 1 {
+		t.Fatalf("precondition: the findings did not throttle %s", ip)
+	}
+
+	row := listedThrottle(t, s, "ipMitigated", ip)
+	if row == nil {
+		t.Fatalf("%s is throttled in the kernel and appears nowhere on the IP mitigation list", ip)
+	}
+	limits := holderOf(t, s).AdaptiveLimits()
+	expiry := limits[0].Expires.UTC().Format(time.RFC3339)
+	for _, want := range []string{"100 packets a second", "Neural Sentinel", "Lapses at " + expiry} {
+		if !strings.Contains(row.GetDescription(), want) {
+			t.Errorf("the listing does not say %q: %q", want, row.GetDescription())
+		}
+	}
+	if !row.GetMitigated() || row.GetActionTaken() != telemetry.ActionThrottled {
+		t.Errorf("listed as mitigated=%v, action %q", row.GetMitigated(), row.GetActionTaken())
+	}
+	if listedThrottle(t, s, "mitigated", ip) == nil || listedThrottle(t, s, "userMitigated", ip) != nil {
+		t.Errorf("a throttle belongs on the combined and IP lists and not on the user list")
+	}
+	diag, err := s.GetDiagnostics(t.Context(), &gateonv1.GetDiagnosticsRequest{})
+	if err != nil || diag.GetTotalMitigations() != 1 {
+		t.Errorf("the mitigation total is %d (err %v), want the one throttle", diag.GetTotalMitigations(), err)
+	}
+
+	if _, err := s.RemoveMitigatedThreat(t.Context(), &gateonv1.RemoveMitigatedThreatRequest{Source: row.GetSource()}); err != nil {
+		t.Fatal(err)
+	}
+	if listedThrottle(t, s, "ipMitigated", ip) != nil || rec.throttled([]string{ip}) != 0 {
+		t.Errorf("Allow on the listed throttle left it in place")
+	}
+}
+
+// TestMitigationListPagesThroughThrottlesThenStoredMitigations: throttles come
+// first and the stored mitigations carry on after them, one page at a time,
+// with every page counting both.
+func TestMitigationListPagesThroughThrottlesThenStoredMitigations(t *testing.T) {
+	s, _ := throttleTestService(t)
+	holder := holderOf(t, s)
+	for _, ip := range []string{"10.61.0.1", "10.61.0.2"} {
+		if err := holder.SetAdaptiveRateLimitFor(ip, time.Second, "test"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, ip := range []string{"10.62.0.1", "10.62.0.2", "10.62.0.3"} {
+		if err := telemetry.MarkIPMitigated(ip, "test"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var seen []string
+	for offset := 0; offset < 6; offset += 2 {
+		resp, err := s.ListSecurityThreats(t.Context(), &gateonv1.ListSecurityThreatsRequest{
+			Status: "ipMitigated", Limit: 2, Offset: int32(offset),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if resp.GetTotalCount() != 5 {
+			t.Errorf("offset %d: total %d, want 5", offset, resp.GetTotalCount())
+		}
+		for _, a := range resp.GetThreats() {
+			seen = append(seen, a.GetType()+" "+a.GetSource())
+		}
+	}
+	if len(seen) != 5 || !strings.HasPrefix(seen[0], kernelThrottleType) || !strings.HasPrefix(seen[1], kernelThrottleType) ||
+		strings.HasPrefix(seen[2], kernelThrottleType) {
+		t.Errorf("paged through %v; want the 2 throttles, then the 3 stored mitigations", seen)
+	}
+	slices.Sort(seen)
+	if len(slices.Compact(seen)) != 5 {
+		t.Errorf("a row was listed twice or lost between pages: %v", seen)
+	}
+}
+
+// TestAnIPv6ThrottleIsListedAndReleasedByItsSlash64: the kernel limits IPv6 by
+// /64, so that is what is listed, and the row's own Source releases it.
+func TestAnIPv6ThrottleIsListedAndReleasedByItsSlash64(t *testing.T) {
+	s, rec := throttleTestService(t)
+	if err := holderOf(t, s).SetAdaptiveRateLimitFor("fd00:7:8:9::5", 200*time.Millisecond, "test"); err != nil {
+		t.Fatal(err)
+	}
+	row := listedThrottle(t, s, "ipMitigated", "fd00:7:8:9::")
+	if row == nil || !strings.Contains(row.GetDescription(), "fd00:7:8:9::/64") ||
+		!strings.Contains(row.GetDescription(), "5 packets a second") {
+		t.Fatalf("the /64's throttle is not listed as the /64's: %v", row)
+	}
+	if _, err := s.RemoveMitigatedThreat(t.Context(), &gateonv1.RemoveMitigatedThreatRequest{Source: row.GetSource()}); err != nil {
+		t.Fatal(err)
+	}
+	if len(rec.limitedAddresses()) != 0 {
+		t.Errorf("Allow on the /64's row left %v limited", rec.limitedAddresses())
+	}
+}
+
+// listedThrottle is the kernel_throttle row for source on the mitigation list
+// status names, or nil.
+func listedThrottle(t *testing.T, s *ApiService, status, source string) *gateonv1.Anomaly {
+	t.Helper()
+	resp, err := s.ListSecurityThreats(t.Context(), &gateonv1.ListSecurityThreatsRequest{Status: status, Limit: 100})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, a := range resp.GetThreats() {
+		if a.GetType() == kernelThrottleType && a.GetSource() == source {
+			return a
+		}
+	}
+	return nil
+}
+
+// holderOf is the eBPF holder a throttleTestService limits through.
+func holderOf(t *testing.T, s *ApiService) *ebpf.Holder {
+	t.Helper()
+	h, ok := s.EbpfManager.(*ebpf.Holder)
+	if !ok {
+		t.Fatalf("the service does not limit through an ebpf.Holder")
+	}
+	return h
+}

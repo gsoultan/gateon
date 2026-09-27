@@ -192,7 +192,9 @@ func throttleTestService(t *testing.T) (*ApiService, *recordingLimiter) {
 	rec := &recordingLimiter{}
 	holder := ebpf.NewHolder(rec)
 	return NewApiService(ApiServiceConfig{
+		EntryPoints: config.NewEntryPointRegistry(filepath.Join(dir, "entrypoints.json")),
 		Routes:      config.NewRouteRegistry(filepath.Join(dir, "routes.json")),
+		Services:    config.NewServiceRegistry(filepath.Join(dir, "services.json")),
 		Middlewares: config.NewMiddlewareRegistry(filepath.Join(dir, "middlewares.json")),
 		EbpfManager: holder,
 		Throttles:   ai.NewReinforcementLearningLimiter(holder),

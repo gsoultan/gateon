@@ -4,6 +4,7 @@
 package ai
 
 import (
+	"fmt"
 	"sync"
 	"time"
 
@@ -109,6 +110,12 @@ func (st *IPState) isLimited() bool {
 // -- one per analysis pass: callers aggregate a pass's findings first -- and
 // sets, renews or lifts the address's kernel limit accordingly.
 func (rl *ReinforcementLearningLimiter) ProcessFeedback(ip string, score float64) {
+	rl.ProcessFinding(ip, score, "")
+}
+
+// ProcessFinding is ProcessFeedback for a finding the caller can name: the
+// limit it leads to is listed for the operator with that reason.
+func (rl *ReinforcementLearningLimiter) ProcessFinding(ip string, score float64, reason string) {
 	key, ok := ebpf.LimitKey(ip)
 	if !ok || rl.states == nil {
 		return
@@ -139,7 +146,15 @@ func (rl *ReinforcementLearningLimiter) ProcessFeedback(ip string, score float64
 	state.limited = interval > 0
 	state.mu.Unlock()
 
-	rl.applyAdaptiveLimit(key, interval, wasLimited)
+	rl.applyAdaptiveLimit(key, interval, wasLimited, limitReason(reason, q))
+}
+
+// limitReason is what the operator is told a limit is for.
+func limitReason(finding string, q float64) string {
+	if finding == "" {
+		finding = "security findings"
+	}
+	return fmt.Sprintf("%s on repeated analysis passes (threat score %.2f)", finding, q)
 }
 
 // state is key's state, created on first sight.
@@ -180,7 +195,7 @@ func (rl *ReinforcementLearningLimiter) Forget(ip string) {
 	}
 	rl.states.Remove(key)
 	if st, isState := v.(*IPState); isState && st != nil && st.isLimited() {
-		rl.applyAdaptiveLimit(key, 0, true)
+		rl.applyAdaptiveLimit(key, 0, true, "")
 	}
 }
 
@@ -231,13 +246,13 @@ func adaptiveInterval(qValue float64) time.Duration {
 // removed: the comment said "or clear it" and the code did not. An IP
 // throttled once stayed throttled for the life of the process even after its
 // score fell to zero.
-func (rl *ReinforcementLearningLimiter) applyAdaptiveLimit(ip string, interval time.Duration, wasLimited bool) {
+func (rl *ReinforcementLearningLimiter) applyAdaptiveLimit(ip string, interval time.Duration, wasLimited bool, reason string) {
 	if rl.ebpf == nil {
 		return
 	}
 
 	if interval > 0 {
-		if err := rl.ebpf.SetAdaptiveRateLimit(ip, interval); err != nil {
+		if err := ebpf.SetAdaptiveRateLimitFor(rl.ebpf, ip, interval, reason); err != nil {
 			logger.L.LogWarn("failed to set adaptive rate limit", "ip", ip, "error", err)
 		}
 		return

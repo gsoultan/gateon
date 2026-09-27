@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 )
@@ -103,7 +104,7 @@ func TestIPv6LimitsAreLeasedPerSlash64(t *testing.T) {
 	for i := range 5000 {
 		_ = h.SetAdaptiveRateLimit(fmt.Sprintf("2001:db8:1:2::%x", i+1), time.Second)
 	}
-	if n := len(h.leases.expiry); n != 1 {
+	if n := len(h.leases.entries); n != 1 {
 		t.Fatalf("5000 addresses in one /64 hold %d leases, want 1", n)
 	}
 	h.expireAdaptiveLimits(now.Add(AdaptiveLimitLease))
@@ -121,7 +122,7 @@ func TestALimitTheKernelRefusedTakesNoLease(t *testing.T) {
 	if err := h.SetAdaptiveRateLimit("198.51.100.7", time.Second); err == nil {
 		t.Fatal("the kernel's refusal was not reported")
 	}
-	if n := len(h.leases.expiry); n != 0 {
+	if n := len(h.leases.entries); n != 0 {
 		t.Fatalf("a refused limit holds %d leases, want 0", n)
 	}
 }
@@ -166,5 +167,57 @@ func TestSwapForgetsLeases(t *testing.T) {
 	h.expireAdaptiveLimits(now.Add(AdaptiveLimitLease))
 	if len(fresh.cleared) != 0 {
 		t.Fatalf("the new manager was asked to release a limit it never had: %v", fresh.cleared)
+	}
+}
+
+// TestAdaptiveLimitsListWhatIsInForce: the table the dashboard lists as kernel
+// throttles -- key, rate, reason, expiry -- newest first, and only what is in
+// force: a cleared or lapsed limit leaves it.
+func TestAdaptiveLimitsListWhatIsInForce(t *testing.T) {
+	rec := newLimitRecorder()
+	h, now := newLeasedHolder(rec)
+	_ = h.SetAdaptiveRateLimitFor("198.51.100.7", time.Second, "WAF")
+	*now = now.Add(time.Minute)
+	_ = h.SetAdaptiveRateLimitFor("2001:db8:1:2::9", 200*time.Millisecond, "RL")
+	*now = now.Add(time.Minute)
+	_ = h.SetAdaptiveRateLimit("198.51.100.8", 10*time.Millisecond)
+
+	got := h.AdaptiveLimits()
+	want := []AdaptiveLimit{
+		{Key: "198.51.100.8", Interval: 10 * time.Millisecond, SetAt: *now, Expires: now.Add(AdaptiveLimitLease)},
+		{Key: "2001:db8:1:2::", Interval: 200 * time.Millisecond, Reason: "RL",
+			SetAt: now.Add(-time.Minute), Expires: now.Add(AdaptiveLimitLease - time.Minute)},
+		{Key: "198.51.100.7", Interval: time.Second, Reason: "WAF",
+			SetAt: now.Add(-2 * time.Minute), Expires: now.Add(AdaptiveLimitLease - 2*time.Minute)},
+	}
+	if !slices.Equal(got, want) || h.AdaptiveLimitCount() != 3 {
+		t.Fatalf("listed %+v (count %d), want %+v", got, h.AdaptiveLimitCount(), want)
+	}
+
+	_ = h.ClearAdaptiveRateLimit("2001:db8:1:2::1")
+	h.expireAdaptiveLimits(now.Add(AdaptiveLimitLease - 2*time.Minute))
+	if got := h.AdaptiveLimits(); len(got) != 1 || got[0].Key != "198.51.100.8" {
+		t.Errorf("after one clear and one lapse the table lists %+v, want only 198.51.100.8", got)
+	}
+}
+
+// TestALimitsReasonIsBounded: the table can hold twenty thousand entries.
+func TestALimitsReasonIsBounded(t *testing.T) {
+	h, _ := newLeasedHolder(newLimitRecorder())
+	_ = h.SetAdaptiveRateLimitFor("198.51.100.9", time.Second, strings.Repeat("r", 10*maxLimitReasonBytes))
+	if got := h.AdaptiveLimits(); len(got[0].Reason) != maxLimitReasonBytes {
+		t.Errorf("a %d-byte reason was kept at %d bytes", 10*maxLimitReasonBytes, len(got[0].Reason))
+	}
+}
+
+// TestSetAdaptiveRateLimitForFallsBackOnAPlainManager: a writer holding some
+// other Manager still sets its limit.
+func TestSetAdaptiveRateLimitForFallsBackOnAPlainManager(t *testing.T) {
+	rec := newLimitRecorder()
+	if err := SetAdaptiveRateLimitFor(rec, "198.51.100.10", time.Second, "why"); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := rec.limits["198.51.100.10"]; !ok {
+		t.Errorf("the limit was not set on a manager that keeps no reasons")
 	}
 }

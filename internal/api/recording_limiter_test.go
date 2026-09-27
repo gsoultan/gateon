@@ -14,7 +14,9 @@ import (
 )
 
 // recordingLimiter is an eBPF manager that records the adaptive limits it is
-// asked to install and does nothing else.
+// asked to install and does nothing else. It keys them as the kernel does
+// (kernelKey), so a limit set on one IPv6 address and cleared by its /64 is
+// gone, as it would be.
 type recordingLimiter struct {
 	mu      sync.Mutex
 	limits  map[string]time.Duration
@@ -27,7 +29,7 @@ func (r *recordingLimiter) SetAdaptiveRateLimit(ip string, d time.Duration) erro
 	if r.limits == nil {
 		r.limits = map[string]time.Duration{}
 	}
-	r.limits[ip] = d
+	r.limits[kernelKey(ip)] = d
 	return nil
 }
 
@@ -38,7 +40,7 @@ func (r *recordingLimiter) ClearAdaptiveRateLimit(ip string) error {
 		r.cleared = map[string]int{}
 	}
 	r.cleared[ip]++
-	delete(r.limits, ip)
+	delete(r.limits, kernelKey(ip))
 	return nil
 }
 
@@ -47,11 +49,20 @@ func (r *recordingLimiter) throttled(ips []string) int {
 	defer r.mu.Unlock()
 	n := 0
 	for _, ip := range ips {
-		if _, ok := r.limits[ip]; ok {
+		if _, ok := r.limits[kernelKey(ip)]; ok {
 			n++
 		}
 	}
 	return n
+}
+
+// kernelKey is the entry the kernel keeps a limit for ip under: the address,
+// or its /64 for IPv6.
+func kernelKey(ip string) string {
+	if key, ok := ebpf.LimitKey(ip); ok {
+		return key
+	}
+	return ip
 }
 
 func (r *recordingLimiter) Start(context.Context)                     {}

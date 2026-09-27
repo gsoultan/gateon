@@ -133,7 +133,7 @@ func (ad *AnomalyDetector) checkBruteForce(ctx context.Context, now time.Time) {
 				severity = "critical"
 				action = ad.shun(s.IP, details)
 			} else {
-				action = ad.throttle(s.IP, 1*time.Second) // Limit to 1 req/sec
+				action = ad.throttle(s.IP, 1*time.Second, "Anomaly detection: brute force") // Limit to 1 req/sec
 			}
 			RecordSecurityThreat(SecurityThreat{
 				ID:          fmt.Sprintf("anomaly-bruteforce-%s-%d", s.IP, now.Unix()),
@@ -176,7 +176,7 @@ func (ad *AnomalyDetector) checkExploitScanning(ctx context.Context, now time.Ti
 				severity, score = "critical", math.Min(100, s.WafBlocks*10)
 				action = ad.shun(s.IP, details)
 			} else {
-				action = ad.throttle(s.IP, 500*time.Millisecond) // Limit to 2 req/sec
+				action = ad.throttle(s.IP, 500*time.Millisecond, "Anomaly detection: exploit scanning") // Limit to 2 req/sec
 			}
 			RecordSecurityThreat(SecurityThreat{
 				ID:          fmt.Sprintf("anomaly-exploit-%s-%d", s.IP, now.Unix()),
@@ -225,14 +225,14 @@ func (ad *AnomalyDetector) shun(ip, reason string) string {
 // throttle, and the Holder answers nil when there is none, so success is read
 // from the attachment rather than from the call; without one the threat is
 // flagged for review rather than recorded as throttled.
-func (ad *AnomalyDetector) throttle(ip string, interval time.Duration) string {
+func (ad *AnomalyDetector) throttle(ip string, interval time.Duration, reason string) string {
 	if ad.ebpfManager == nil || mitigation.IsAllowlisted(ip) {
 		return ActionFlagged
 	}
 	if st, err := ad.ebpfManager.GetMapStats(); err != nil || !st.Attached {
 		return ActionFlagged
 	}
-	if err := ad.ebpfManager.SetAdaptiveRateLimit(ip, interval); err != nil {
+	if err := ebpf.SetAdaptiveRateLimitFor(ad.ebpfManager, ip, interval, reason); err != nil {
 		logger.L.LogWarn("anomaly throttle was not applied", "ip", ip, "error", err)
 		return ActionFlagged
 	}

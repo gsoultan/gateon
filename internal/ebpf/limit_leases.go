@@ -6,6 +6,8 @@ package ebpf
 import (
 	"context"
 	"net"
+	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -26,31 +28,45 @@ import (
 // one-minute analysis loop) releases an address minutes after it stops.
 const AdaptiveLimitLease = 5 * time.Minute
 
-// limitLeases records when each adaptive limit lapses, keyed as the kernel
-// keys it: a lease is only taken after the kernel accepted the limit, so the
-// set is bounded by the kernel maps' capacity, including for IPv6, where a
-// whole /64 shares one entry however many addresses an attacker rotates
-// through.
-type limitLeases struct {
-	mu     sync.Mutex
-	expiry map[string]time.Time
+// AdaptiveLimit is one adaptive rate limit in the kernel, as the operator is
+// shown it.
+type AdaptiveLimit struct {
+	Key      string        // the address; for IPv6 the network address of its /64
+	Interval time.Duration // the spacing enforced between the source's packets
+	Reason   string        // why it was set; empty when the writer did not say
+	SetAt    time.Time     // when it was last set or renewed
+	Expires  time.Time     // when it lapses unless it is set again
 }
 
-// renew extends key's lease to until.
-func (l *limitLeases) renew(key string, until time.Time) {
+// maxLimitReasonBytes bounds a recorded reason. Reasons are written by code,
+// not clients, but the table can hold twenty thousand of them.
+const maxLimitReasonBytes = 200
+
+// limitLeases records each adaptive limit in force, keyed as the kernel keys
+// it: a lease is only taken after the kernel accepted the limit, so the table
+// is bounded by the kernel maps' capacity (10240 IPv4 addresses and 10240 IPv6
+// /64s), including for IPv6, where a whole /64 shares one entry however many
+// addresses an attacker rotates through.
+type limitLeases struct {
+	mu      sync.Mutex
+	entries map[string]AdaptiveLimit
+}
+
+// renew records limit as the one in force for its key.
+func (l *limitLeases) renew(limit AdaptiveLimit) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if l.expiry == nil {
-		l.expiry = make(map[string]time.Time)
+	if l.entries == nil {
+		l.entries = make(map[string]AdaptiveLimit)
 	}
-	l.expiry[key] = until
+	l.entries[limit.Key] = limit
 }
 
 // drop forgets key's lease.
 func (l *limitLeases) drop(key string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	delete(l.expiry, key)
+	delete(l.entries, key)
 }
 
 // reset forgets every lease: a freshly swapped-in manager starts with empty
@@ -58,21 +74,45 @@ func (l *limitLeases) drop(key string) {
 func (l *limitLeases) reset() {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	clear(l.expiry)
+	clear(l.entries)
 }
 
-// takeExpired removes and returns every key whose lease ended by now.
-func (l *limitLeases) takeExpired(now time.Time) []string {
+// takeExpired removes and returns every lease that ended by now.
+func (l *limitLeases) takeExpired(now time.Time) []AdaptiveLimit {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	var keys []string
-	for key, until := range l.expiry {
-		if !until.After(now) {
-			keys = append(keys, key)
-			delete(l.expiry, key)
+	var expired []AdaptiveLimit
+	for key, limit := range l.entries {
+		if !limit.Expires.After(now) {
+			expired = append(expired, limit)
+			delete(l.entries, key)
 		}
 	}
-	return keys
+	return expired
+}
+
+// snapshot copies the table, most recently set first.
+func (l *limitLeases) snapshot() []AdaptiveLimit {
+	l.mu.Lock()
+	out := make([]AdaptiveLimit, 0, len(l.entries))
+	for _, limit := range l.entries {
+		out = append(out, limit)
+	}
+	l.mu.Unlock()
+	slices.SortFunc(out, func(a, b AdaptiveLimit) int {
+		if c := b.SetAt.Compare(a.SetAt); c != 0 {
+			return c
+		}
+		return strings.Compare(a.Key, b.Key)
+	})
+	return out
+}
+
+// count is how many leases are in force.
+func (l *limitLeases) count() int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return len(l.entries)
 }
 
 // LimitKey names the kernel entry an adaptive limit for s lands in: the
@@ -119,10 +159,40 @@ func (h *Holder) expireAdaptiveLimits(now time.Time) {
 	if m == nil {
 		return
 	}
-	for _, key := range h.leases.takeExpired(now) {
-		if err := m.ClearAdaptiveRateLimit(key); err != nil {
-			logger.L.LogWarn("failed to release an expired adaptive rate limit; will retry", "ip", key, "error", err)
-			h.leases.renew(key, now)
+	for _, limit := range h.leases.takeExpired(now) {
+		if err := m.ClearAdaptiveRateLimit(limit.Key); err != nil {
+			logger.L.LogWarn("failed to release an expired adaptive rate limit; will retry", "ip", limit.Key, "error", err)
+			h.leases.renew(limit)
 		}
 	}
+}
+
+// AdaptiveLimits is every adaptive limit the Holder has in force, most
+// recently set first: what the dashboard lists as kernel throttles. Five
+// components set them and none of them was shown anywhere, so an address could
+// be held to a few packets a second with nothing on the mitigation page to say
+// so or to release it from.
+func (h *Holder) AdaptiveLimits() []AdaptiveLimit {
+	return h.leases.snapshot()
+}
+
+// AdaptiveLimitCount is how many adaptive limits are in force, without copying
+// the table.
+func (h *Holder) AdaptiveLimitCount() int {
+	return h.leases.count()
+}
+
+// ReasonedLimiter is a Manager that records why each adaptive limit was set.
+// The Holder is one.
+type ReasonedLimiter interface {
+	SetAdaptiveRateLimitFor(ip string, interval time.Duration, reason string) error
+}
+
+// SetAdaptiveRateLimitFor sets an adaptive limit through m, recording reason
+// where m keeps one (the Holder does); elsewhere it is SetAdaptiveRateLimit.
+func SetAdaptiveRateLimitFor(m Manager, ip string, interval time.Duration, reason string) error {
+	if r, ok := m.(ReasonedLimiter); ok {
+		return r.SetAdaptiveRateLimitFor(ip, interval, reason)
+	}
+	return m.SetAdaptiveRateLimit(ip, interval)
 }

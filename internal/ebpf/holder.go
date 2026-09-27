@@ -109,8 +109,16 @@ func (h *Holder) UpdateLoadBalancerBackends(ips []string) error {
 
 // SetAdaptiveRateLimit delegates to the active manager, if any, and leases the
 // limit for AdaptiveLimitLease: ExpireAdaptiveLimits lifts it unless it is set
-// again before then.
+// again before then. The limit is listed without a reason; writers that can
+// say why use SetAdaptiveRateLimitFor.
 func (h *Holder) SetAdaptiveRateLimit(ip string, interval time.Duration) error {
+	return h.SetAdaptiveRateLimitFor(ip, interval, "")
+}
+
+// SetAdaptiveRateLimitFor is SetAdaptiveRateLimit, recording reason for the
+// operator (AdaptiveLimits). The last writer's reason is the one listed, as
+// its interval is the one the kernel enforces.
+func (h *Holder) SetAdaptiveRateLimitFor(ip string, interval time.Duration, reason string) error {
 	m := h.Current()
 	if m == nil {
 		return nil
@@ -119,7 +127,13 @@ func (h *Holder) SetAdaptiveRateLimit(ip string, interval time.Duration) error {
 		return err
 	}
 	if key, ok := leaseKey(ip); ok {
-		h.leases.renew(key, h.clock().Add(AdaptiveLimitLease))
+		now := h.clock()
+		if len(reason) > maxLimitReasonBytes {
+			reason = reason[:maxLimitReasonBytes]
+		}
+		h.leases.renew(AdaptiveLimit{
+			Key: key, Interval: interval, Reason: reason, SetAt: now, Expires: now.Add(AdaptiveLimitLease),
+		})
 	}
 	return nil
 }

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/gsoultan/gateon/internal/ebpf"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware/kind"
 	"github.com/gsoultan/gateon/internal/request"
@@ -203,7 +204,7 @@ func (o wafObservation) applyAdaptiveMitigation(clientIP string) {
 	if clientIP == "127.0.0.1" || clientIP == "::1" || clientIP == "localhost" {
 		return
 	}
-	_ = o.cfg.EbpfManager.SetAdaptiveRateLimit(clientIP, time.Second)
+	_ = ebpf.SetAdaptiveRateLimitFor(o.cfg.EbpfManager, clientIP, time.Second, "WAF: a request from this address scored 10 or more")
 }
 
 // wafSeverityAndCategory derives the dashboard's two summary fields.

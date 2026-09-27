@@ -19,6 +19,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/gsoultan/gateon/internal/ai"
+	"github.com/gsoultan/gateon/internal/ebpf"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware"
 	"github.com/gsoultan/gateon/internal/middleware/security"
@@ -171,7 +172,7 @@ func (s *ApiService) GetDiagnostics(ctx context.Context, _ *gateonv1.GetDiagnost
 		System:           systemInfo,
 		Anomalies:        anomalies,
 		Dependencies:     deps,
-		TotalMitigations: int32(totalUserMit + totalIPMit),
+		TotalMitigations: int32(totalUserMit + totalIPMit + s.kernelThrottleCount()),
 	}, nil
 }
 
@@ -336,17 +337,27 @@ func (s *ApiService) RunSecurityAnalysisLoop(ctx context.Context, interval time.
 // limit and forgets an address an operator released. The RL limiter
 // (ai.ReinforcementLearningLimiter) is the one in production.
 type FindingLimiter interface {
-	// ProcessFeedback records one observation of ip at confidence score, 0..1.
-	ProcessFeedback(ip string, score float64)
+	// ProcessFinding records one observation of ip at confidence score, 0..1,
+	// for the named reason.
+	ProcessFinding(ip string, score float64, reason string)
 	// Forget drops ip's history and lifts any limit it earned.
 	Forget(ip string)
 }
 
-// throttlingFindingTypes are the findings that may end in a kernel rate limit.
-// Both require harmful traffic of every address they name: the Neural Sentinel
-// an isolated client with harm evidence, Graph Intelligence a campaign of
-// addresses each caught attacking.
-var throttlingFindingTypes = map[string]bool{neuralSentinelType: true, graphCoordinatedType: true}
+// throttlingFindingTypes are the findings that may end in a kernel rate limit,
+// and what the operator is told the limit is for. Both require harmful traffic
+// of every address they name: the Neural Sentinel an isolated client with harm
+// evidence, Graph Intelligence a campaign of addresses each caught attacking.
+var throttlingFindingTypes = map[string]string{
+	neuralSentinelType:   "Neural Sentinel: harmful traffic unlike the other clients",
+	graphCoordinatedType: "Graph Intelligence: one of a campaign's addresses",
+}
+
+// throttleObservation is one address's strongest finding in a pass.
+type throttleObservation struct {
+	confidence float64
+	reason     string
+}
 
 // throttleRepeatedFindings reports this pass's Neural Sentinel and Graph
 // Intelligence findings to the RL limiter: one observation per address, at the
@@ -363,18 +374,21 @@ func (s *ApiService) throttleRepeatedFindings(anomalies []*gateonv1.Anomaly) {
 	if s.Throttles == nil {
 		return
 	}
-	strongest := make(map[string]float64)
+	strongest := make(map[string]throttleObservation)
 	for _, a := range anomalies {
-		if !throttlingFindingTypes[a.GetType()] {
+		reason, throttles := throttlingFindingTypes[a.GetType()]
+		if !throttles {
 			continue
 		}
 		confidence := math.Min(1, math.Max(0, a.GetScore()/100))
 		for _, ip := range findingAddresses(a) {
-			strongest[ip] = math.Max(strongest[ip], confidence)
+			if confidence > strongest[ip].confidence {
+				strongest[ip] = throttleObservation{confidence, reason}
+			}
 		}
 	}
-	for ip, confidence := range strongest {
-		s.Throttles.ProcessFeedback(ip, confidence)
+	for ip, o := range strongest {
+		s.Throttles.ProcessFinding(ip, o.confidence, o.reason)
 	}
 }
 
@@ -1156,83 +1170,8 @@ func (s *ApiService) ListSecurityThreats(ctx context.Context, req *gateonv1.List
 	}
 	offset := int(req.GetOffset())
 
-	status := req.GetStatus()
-	if status == "mitigated" || status == "user_mitigated" || status == "userMitigated" || status == "ip_mitigated" || status == "ipMitigated" {
-		var mitigations []telemetry.CombinedMitigation
-		var total int
-
-		switch status {
-		case "user_mitigated", "userMitigated":
-			// Fetch only user mitigations
-			userMitigations, t := telemetry.GetUserMitigations(ctx, limit, offset)
-			total = t
-			mitigations = make([]telemetry.CombinedMitigation, len(userMitigations))
-			for i, m := range userMitigations {
-				mitigations[i] = telemetry.CombinedMitigation{
-					SourceType:    "user",
-					Source:        m.Fingerprint,
-					JA4H:          m.JA4H,
-					Type:          m.Type,
-					Category:      m.Category,
-					Status:        m.Status,
-					Reason:        m.Reason,
-					MitigatedAt:   m.MitigatedAt,
-					UnmitigatedAt: m.UnmitigatedAt,
-					UpdatedAt:     m.UpdatedAt,
-				}
-			}
-		case "ip_mitigated", "ipMitigated":
-			// Fetch only IP mitigations
-			ipMitigations, t := telemetry.GetIPMitigations(ctx, limit, offset)
-			total = t
-			mitigations = make([]telemetry.CombinedMitigation, len(ipMitigations))
-			for i, m := range ipMitigations {
-				mitigations[i] = telemetry.CombinedMitigation{
-					SourceType:    "ip",
-					Source:        m.IP,
-					Type:          "ip_shunning",
-					Category:      "threat_intel",
-					Status:        m.Status,
-					Reason:        m.Reason,
-					MitigatedAt:   m.MitigatedAt,
-					UnmitigatedAt: m.UnmitigatedAt,
-					UpdatedAt:     m.UpdatedAt,
-				}
-			}
-		default:
-			// Combined "mitigated" status
-			mitigations, total = telemetry.GetCombinedMitigations(ctx, limit, offset)
-		}
-
-		res := make([]*gateonv1.Anomaly, 0, len(mitigations))
-		for _, m := range mitigations {
-			a := &gateonv1.Anomaly{
-				Source:         m.Source,
-				Type:           m.Type,
-				Mitigated:      true,
-				Timestamp:      m.MitigatedAt.Format(time.RFC3339),
-				Description:    m.Reason,
-				Category:       m.Category,
-				Severity:       severityHigh,
-				ActionTaken:    telemetry.ActionBlocked,
-				Recommendation: "Source is mitigated based on threat intelligence.",
-				Ja4:            m.Source,
-				Ja4H:           m.JA4H,
-				Ja4Plus:        m.Source,
-			}
-			if m.SourceType == "ip" {
-				a.Recommendation = "IP address is mitigated/shunned at the network layer."
-			} else {
-				a.Recommendation = "User/Fingerprint is mitigated based on behavioral patterns."
-			}
-			populateAnomalyGeo(ctx, a, m.Source)
-			res = append(res, a)
-		}
-
-		return &gateonv1.ListSecurityThreatsResponse{
-			Threats:    res,
-			TotalCount: int32(total),
-		}, nil
+	if kind, isMitigationList := mitigationLists[req.GetStatus()]; isMitigationList {
+		return s.listMitigations(ctx, kind, limit, offset), nil
 	}
 
 	filter := &telemetry.ThreatFilter{
@@ -1267,6 +1206,172 @@ func (s *ApiService) ListSecurityThreats(ctx context.Context, req *gateonv1.List
 		Threats:    res,
 		TotalCount: int32(total),
 	}, nil
+}
+
+// mitigationList is which mitigations a ListSecurityThreats status asks for.
+type mitigationList int
+
+const (
+	mitigationsAll mitigationList = iota
+	mitigationsUser
+	mitigationsIP
+)
+
+// mitigationLists maps the statuses that ask for mitigations, in both the
+// spellings clients send, to what they list.
+var mitigationLists = map[string]mitigationList{
+	"mitigated":      mitigationsAll,
+	"user_mitigated": mitigationsUser, "userMitigated": mitigationsUser,
+	"ip_mitigated": mitigationsIP, "ipMitigated": mitigationsIP,
+}
+
+// listMitigations pages through what is blocking or limiting sources now. The
+// address and combined lists start with the kernel's adaptive rate limits
+// (kernelThrottles), then carry on into the stored mitigations; the count is
+// both together.
+func (s *ApiService) listMitigations(ctx context.Context, kind mitigationList, limit, offset int) *gateonv1.ListSecurityThreatsResponse {
+	var throttles []ebpf.AdaptiveLimit
+	if kind != mitigationsUser {
+		throttles = s.kernelThrottles()
+	}
+	res := make([]*gateonv1.Anomaly, 0, limit)
+	if offset < len(throttles) {
+		for _, l := range throttles[offset:min(len(throttles), offset+limit)] {
+			res = append(res, throttleAnomaly(l))
+		}
+	}
+	stored, storedTotal := storedMitigations(ctx, kind, limit-len(res), max(0, offset-len(throttles)))
+	for _, m := range stored {
+		res = append(res, storedMitigationAnomaly(ctx, m))
+	}
+	return &gateonv1.ListSecurityThreatsResponse{Threats: res, TotalCount: int32(len(throttles) + storedTotal)}
+}
+
+// storedMitigations is a page of the mitigations the telemetry store holds, and
+// how many there are. A page of none still counts them: the stores read a
+// limit of 0 as their default page.
+func storedMitigations(ctx context.Context, kind mitigationList, limit, offset int) ([]telemetry.CombinedMitigation, int) {
+	fetch := max(limit, 1)
+	var page []telemetry.CombinedMitigation
+	var total int
+	switch kind {
+	case mitigationsUser:
+		var rows []telemetry.UserMitigation
+		rows, total = telemetry.GetUserMitigations(ctx, fetch, offset)
+		for _, m := range rows {
+			page = append(page, telemetry.CombinedMitigation{
+				SourceType: "user", Source: m.Fingerprint, JA4H: m.JA4H, Type: m.Type, Category: m.Category,
+				Status: m.Status, Reason: m.Reason, MitigatedAt: m.MitigatedAt, UnmitigatedAt: m.UnmitigatedAt, UpdatedAt: m.UpdatedAt,
+			})
+		}
+	case mitigationsIP:
+		var rows []telemetry.IPMitigation
+		rows, total = telemetry.GetIPMitigations(ctx, fetch, offset)
+		for _, m := range rows {
+			page = append(page, telemetry.CombinedMitigation{
+				SourceType: "ip", Source: m.IP, Type: "ip_shunning", Category: "threat_intel",
+				Status: m.Status, Reason: m.Reason, MitigatedAt: m.MitigatedAt, UnmitigatedAt: m.UnmitigatedAt, UpdatedAt: m.UpdatedAt,
+			})
+		}
+	default:
+		page, total = telemetry.GetCombinedMitigations(ctx, fetch, offset)
+	}
+	if limit <= 0 {
+		return nil, total
+	}
+	return page, total
+}
+
+// storedMitigationAnomaly is how a stored mitigation is listed.
+func storedMitigationAnomaly(ctx context.Context, m telemetry.CombinedMitigation) *gateonv1.Anomaly {
+	a := &gateonv1.Anomaly{
+		Source:         m.Source,
+		Type:           m.Type,
+		Mitigated:      true,
+		Timestamp:      m.MitigatedAt.Format(time.RFC3339),
+		Description:    m.Reason,
+		Category:       m.Category,
+		Severity:       severityHigh,
+		ActionTaken:    telemetry.ActionBlocked,
+		Recommendation: "User/Fingerprint is mitigated based on behavioral patterns.",
+		Ja4:            m.Source,
+		Ja4H:           m.JA4H,
+		Ja4Plus:        m.Source,
+	}
+	if m.SourceType == "ip" {
+		a.Recommendation = "IP address is mitigated/shunned at the network layer."
+	}
+	populateAnomalyGeo(ctx, a, m.Source)
+	return a
+}
+
+// adaptiveLimitLister is the eBPF holder's view of the kernel's adaptive rate
+// limits (ebpf.Holder.AdaptiveLimits).
+type adaptiveLimitLister interface {
+	AdaptiveLimits() []ebpf.AdaptiveLimit
+	AdaptiveLimitCount() int
+}
+
+// kernelThrottles is every adaptive rate limit in the kernel. Five components
+// set them -- the WAF, the HTTP rate limiter, anomaly detection and the RL
+// limiter the AI findings feed -- and none was listed anywhere, so an address
+// could be held to a few packets a second with nothing on the mitigation page
+// to show it or to release it from.
+func (s *ApiService) kernelThrottles() []ebpf.AdaptiveLimit {
+	if l, ok := s.EbpfManager.(adaptiveLimitLister); ok {
+		return l.AdaptiveLimits()
+	}
+	return nil
+}
+
+// kernelThrottleCount is how many adaptive rate limits are in the kernel.
+func (s *ApiService) kernelThrottleCount() int {
+	if l, ok := s.EbpfManager.(adaptiveLimitLister); ok {
+		return l.AdaptiveLimitCount()
+	}
+	return 0
+}
+
+// kernelThrottleType is how an adaptive rate limit is listed among mitigations.
+const kernelThrottleType = "kernel_throttle"
+
+// throttleAnomaly is how an adaptive rate limit is listed: its address (for
+// IPv6, its /64), its rate, why it was set, and when it lapses. Releasing it is
+// the ordinary release of its Source.
+func throttleAnomaly(l ebpf.AdaptiveLimit) *gateonv1.Anomaly {
+	reason := l.Reason
+	if reason == "" {
+		reason = "not recorded by what set it"
+	}
+	who := l.Key
+	if ip := net.ParseIP(l.Key); ip != nil && ip.To4() == nil {
+		who += "/64"
+	}
+	return &gateonv1.Anomaly{
+		Id:          kernelThrottleType + ":" + l.Key,
+		Type:        kernelThrottleType,
+		Source:      l.Key,
+		Mitigated:   true,
+		ActionTaken: telemetry.ActionThrottled,
+		Category:    "kernel_rate_limit",
+		Severity:    severityMedium,
+		Timestamp:   l.SetAt.UTC().Format(time.RFC3339),
+		Description: fmt.Sprintf("%s is rate-limited in the kernel to %s, after a burst of 64. Why: %s. "+
+			"Lapses at %s unless set again.", who, packetRate(l.Interval), reason, l.Expires.UTC().Format(time.RFC3339)),
+		Recommendation: "Allow lifts the limit now and resets the automatic history behind it. Left alone, it " +
+			"lapses on its own once nothing sets it again.",
+	}
+}
+
+// packetRate says how many packets a second an interval allows.
+func packetRate(interval time.Duration) string {
+	if interval <= 0 {
+		return "no limit"
+	}
+	if interval >= time.Second {
+		return fmt.Sprintf("one packet every %s", interval)
+	}
+	return fmt.Sprintf("%d packets a second", time.Second/interval)
 }
 
 func (s *ApiService) GetSecurityThreat(ctx context.Context, req *gateonv1.GetSecurityThreatRequest) (*gateonv1.GetSecurityThreatResponse, error) {

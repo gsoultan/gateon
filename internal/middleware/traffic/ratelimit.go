@@ -256,7 +256,8 @@ func (rl *LocalRateLimiter) Handler(keyFunc func(*http.Request) string) func(htt
 					}
 					// The kernel limits by address; key is a tenant or a
 					// fingerprint under those strategies, never an address.
-					_ = rl.ebpf.SetAdaptiveRateLimit(request.GetClientIP(r, config.EffectiveTrustCloudflare()), interval)
+					_ = ebpf.SetAdaptiveRateLimitFor(rl.ebpf, request.GetClientIP(r, config.EffectiveTrustCloudflare()), interval,
+						"HTTP rate limit: requests refused for exceeding the configured rate")
 				}
 				if !kind.ShouldSkipMetrics(r) {
 					routeID := kind.GetRouteName(r)

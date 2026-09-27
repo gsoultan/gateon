@@ -53,6 +53,12 @@ import { usePermissions } from "../../hooks/usePermissions";
 
 const PAGE_SIZE = 15;
 
+// A kernel rate limit, listed among the IP mitigations: its row's description
+// is the rate, the reason and when it lapses, which is what an operator needs
+// in place of a URL. See throttleAnomaly in internal/api.
+const KERNEL_THROTTLE = "kernel_throttle";
+const isKernelThrottle = (threat: Anomaly | null) => threat?.type === KERNEL_THROTTLE;
+
 export function ThreatExplorerTab() {
   const { canWrite } = usePermissions();
   const [search, setSearch] = useState("");
@@ -199,11 +205,19 @@ export function ThreatExplorerTab() {
           </Group>
         </Table.Td>
         <Table.Td>
-          <Tooltip label={threat.requestUri || '/'}>
-            <Text size="xs" c="dimmed" style={{ maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {threat.requestUri || '/'}
-            </Text>
-          </Tooltip>
+          {isKernelThrottle(threat) ? (
+            <Tooltip label={threat.description} multiline w={320}>
+              <Text size="xs" c="dimmed" style={{ maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {threat.description}
+              </Text>
+            </Tooltip>
+          ) : (
+            <Tooltip label={threat.requestUri || '/'}>
+              <Text size="xs" c="dimmed" style={{ maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {threat.requestUri || '/'}
+              </Text>
+            </Tooltip>
+          )}
         </Table.Td>
         <Table.Td>
           <Group gap="sm" wrap="nowrap">
@@ -228,9 +242,13 @@ export function ThreatExplorerTab() {
           </Badge>
         </Table.Td>
         <Table.Td>
-          <Badge color={threat.mitigated ? "teal" : "orange"} variant="light" size="xs">
-            {threat.mitigated ? "Mitigated" : "Detected"}
-          </Badge>
+          {isKernelThrottle(threat) ? (
+            <Badge color="yellow" variant="light" size="xs">Throttled</Badge>
+          ) : (
+            <Badge color={threat.mitigated ? "teal" : "orange"} variant="light" size="xs">
+              {threat.mitigated ? "Mitigated" : "Detected"}
+            </Badge>
+          )}
         </Table.Td>
         <Table.Td>
           <Group gap={4}>
@@ -365,11 +383,18 @@ export function ThreatExplorerTab() {
         size="sm"
       >
         <Stack gap="md">
-          <Alert color="red" icon={<IconAlertTriangle size={16} />}>
-            This removes the mitigation for <b>{pendingAllow?.source}</b>
-            {pendingAllow?.ja4plus ? ` (fingerprint ${pendingAllow.ja4plus})` : ""}. It will be able to
-            reach your services again.
-          </Alert>
+          {isKernelThrottle(pendingAllow) ? (
+            <Alert color="red" icon={<IconAlertTriangle size={16} />}>
+              This lifts the kernel rate limit on <b>{pendingAllow?.source}</b> and resets the automatic
+              history that set it. It will be able to send at full rate again.
+            </Alert>
+          ) : (
+            <Alert color="red" icon={<IconAlertTriangle size={16} />}>
+              This removes the mitigation for <b>{pendingAllow?.source}</b>
+              {pendingAllow?.ja4plus ? ` (fingerprint ${pendingAllow.ja4plus})` : ""}. It will be able to
+              reach your services again.
+            </Alert>
+          )}
           <Group justify="flex-end" gap="sm">
             <Button variant="default" onClick={() => setPendingAllow(null)}>
               Cancel
