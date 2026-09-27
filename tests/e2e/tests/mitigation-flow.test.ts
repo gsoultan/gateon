@@ -109,15 +109,16 @@ test.describe('Threat Mitigation E2E Flow', () => {
     // 4. The outcome, not the absence of a 403: the fix used to answer success
     // and change nothing, and a path nothing routes was never 403 to begin
     // with. There must now be exactly one route for this path -- an exact
-    // Path rule on the entrypoint the request arrived at, pointed at the
-    // service that serves it -- and it must be paused.
+    // Path rule, on the host the request named, on the entrypoint it arrived
+    // at, pointed at the service that serves it -- and it must be paused.
+    const rule = `Host(\`localhost\`) && Path(\`${path}\`)`;
     const listed = await page.request.get(`/v1/routes?pageSize=100&search=${encodeURIComponent(path)}`);
     expect(listed.ok(), `listing routes failed: ${listed.status()}`).toBe(true);
     const routes: Array<Record<string, unknown>> = (await listed.json()).routes ?? [];
-    const created = routes.filter((r) => r.rule === `Path(\`${path}\`)`);
+    const created = routes.filter((r) => r.rule === rule);
     expect(created, `routes for ${path}: ${JSON.stringify(routes)}`).toHaveLength(1);
     expect(created[0]).toMatchObject({
-      name: `unlisted ${path}`,
+      name: `unlisted localhost${path}`,
       disabled: true,
       entrypoints: ['http-plain'],
       serviceId: 'mock-service',
@@ -132,6 +133,6 @@ test.describe('Threat Mitigation E2E Flow', () => {
     await expect(page.getByText(/already exists/i).first()).toBeVisible({ timeout: 10000 });
     const relisted = await page.request.get(`/v1/routes?pageSize=100&search=${encodeURIComponent(path)}`);
     const again: Array<Record<string, unknown>> = (await relisted.json()).routes ?? [];
-    expect(again.filter((r) => r.rule === `Path(\`${path}\`)`)).toHaveLength(1);
+    expect(again.filter((r) => r.rule === rule)).toHaveLength(1);
   });
 });

@@ -115,11 +115,19 @@ func unlistedRouteAnomaly(tr *telemetry.TraceRecord, honeypot bool) *gateonv1.An
 // past any path an application routes by.
 const maxUnlistedRoutePathLen = 1024
 
+// maxRouteHostLen bounds the host written into a rule: a DNS name is at most
+// 253 bytes.
+const maxRouteHostLen = 253
+
 // routeTarget is the service a route for an unlisted path points at, and why
-// that one: the choice is a guess the operator should check.
+// that one: the choice is a guess the operator should check. middlewares are
+// the ones the routes that chose it all carry, and note says what became of
+// them.
 type routeTarget struct {
-	service *gateonv1.Service
-	why     string
+	service     *gateonv1.Service
+	why         string
+	middlewares []string
+	note        string
 }
 
 // unlistedRequest is the request an unlisted_route finding describes, once
@@ -155,7 +163,11 @@ func (s *ApiService) applyCreateRouteRecommendation(ctx context.Context, req *ga
 	if problem != "" {
 		return refuseFix(problem), nil
 	}
-	seen := unlistedRequest{path: path, ep: ep, host: req.GetHost()}
+	host, problem := unlistedRouteHost(req.GetHost())
+	if problem != "" {
+		return refuseFix(problem), nil
+	}
+	seen := unlistedRequest{path: path, ep: ep, host: host}
 	routes := s.Routes.List(ctx)
 	if problem := existingRouteFor(routes, seen); problem != "" {
 		return refuseFix(problem), nil
@@ -209,9 +221,42 @@ func ruleSafePath(p string) bool {
 	return true
 }
 
-func unlistedRouteLabel(path string) string { return "unlisted " + path }
+// unlistedRouteHost returns the host the request named -- without its port or
+// a trailing root dot, in lower case -- for a Host() condition on the route,
+// or "" when the trace recorded none. The Host header is the client's to
+// write, so anything that is not plainly a name or an address is refused
+// rather than written into a rule.
+func unlistedRouteHost(raw string) (string, string) {
+	if raw == "" {
+		return "", ""
+	}
+	h := strings.TrimSuffix(strings.ToLower(httputil.StripPort(raw)), ".")
+	if h == "" || len(h) > maxRouteHostLen || strings.ContainsFunc(h, notHostRune) {
+		return "", fmt.Sprintf("The request's host %q cannot be written as a route rule. Create the route in the Routes panel if it is real.", raw)
+	}
+	return h, ""
+}
 
-func pathRule(path string) string { return "Path(`" + path + "`)" }
+// notHostRune reports a rune no host name or address (IPv6 included, its
+// brackets already stripped) contains.
+func notHostRune(r rune) bool {
+	return (r < 'a' || r > 'z') && (r < '0' || r > '9') && r != '.' && r != '-' && r != '_' && r != ':'
+}
+
+// unlistedRouteLabel names the route after what it answers: the host when the
+// request named one, and the path. SaveRoute keeps labels unique, so the same
+// path on two hosts gets two routes.
+func unlistedRouteLabel(seen unlistedRequest) string { return "unlisted " + seen.host + seen.path }
+
+// unlistedRouteRule is the exact path, on the request's host when it named one,
+// so that once enabled the route answers that host and nothing else.
+func unlistedRouteRule(seen unlistedRequest) string {
+	rule := "Path(`" + seen.path + "`)"
+	if seen.host == "" {
+		return rule
+	}
+	return "Host(`" + seen.host + "`) && " + rule
+}
 
 func entrypointLabel(ep *gateonv1.EntryPoint) string { return cmp.Or(ep.GetName(), ep.GetId()) }
 
@@ -286,7 +331,7 @@ func servesEntrypoint(rt *gateonv1.Route, epID string) bool {
 // matches the request today. Applying a finding twice, or one a newer route
 // has since answered, says so instead of adding a route.
 func existingRouteFor(routes []*gateonv1.Route, seen unlistedRequest) string {
-	label, rule := unlistedRouteLabel(seen.path), pathRule(seen.path)
+	label, rule := unlistedRouteLabel(seen), unlistedRouteRule(seen)
 	probe := &http.Request{Method: http.MethodGet, Host: seen.host, URL: &url.URL{Path: seen.path}, Header: http.Header{}}
 	for _, rt := range routes {
 		onEP := servesEntrypoint(rt, seen.ep.GetId())
@@ -326,7 +371,43 @@ func (s *ApiService) unlistedRouteTarget(ctx context.Context, routes []*gateonv1
 	if others > 0 {
 		why = fmt.Sprintf("the most used of the %d services routed %s: %d of those %d routes point at it", others+1, scope, uses, len(pool))
 	}
-	return routeTarget{service: svc, why: why}, ""
+	mws, agree := sharedMiddlewares(pool, id)
+	return routeTarget{service: svc, why: why, middlewares: mws, note: middlewareNote(mws, agree)}, ""
+}
+
+// sharedMiddlewares returns the middleware list that every route in pool
+// pointing at serviceID carries, in its order, and whether they all agree. A
+// route for the same service should be guarded as its siblings are -- a WAF,
+// authentication, a rate limit -- and a paused route that is enabled without
+// them would be the one door to that service left open.
+func sharedMiddlewares(pool []*gateonv1.Route, serviceID string) ([]string, bool) {
+	var shared []string
+	seen := false
+	for _, rt := range pool {
+		if rt.GetServiceId() != serviceID {
+			continue
+		}
+		if !seen {
+			shared, seen = rt.GetMiddlewares(), true
+			continue
+		}
+		if !slices.Equal(shared, rt.GetMiddlewares()) {
+			return nil, false
+		}
+	}
+	return slices.Clone(shared), true
+}
+
+// middlewareNote says what the new route carries and why.
+func middlewareNote(mws []string, agree bool) string {
+	switch {
+	case !agree:
+		return "Those routes carry different middlewares, so it carries none: review its middlewares before enabling it."
+	case len(mws) == 0:
+		return "Those routes carry no middlewares, and neither does it."
+	default:
+		return "It carries the middlewares those routes share: " + strings.Join(mws, ", ") + "."
+	}
 }
 
 // routesServing returns the enabled routes on ep that serve requests like the
@@ -380,11 +461,12 @@ func mostUsedService(pool []*gateonv1.Route) (string, int, int) {
 // matches nothing until the operator enables it.
 func (s *ApiService) createPausedRoute(ctx context.Context, seen unlistedRequest, target routeTarget) *gateonv1.ApplyRecommendationResponse {
 	rt := &gateonv1.Route{
-		Name:        unlistedRouteLabel(seen.path),
+		Name:        unlistedRouteLabel(seen),
 		Type:        routeKind(seen.ep),
 		Entrypoints: []string{seen.ep.GetId()},
-		Rule:        pathRule(seen.path),
+		Rule:        unlistedRouteRule(seen),
 		ServiceId:   target.service.GetId(),
+		Middlewares: target.middlewares,
 		Disabled:    true,
 	}
 	if err := s.routeService().SaveRoute(ctx, rt); err != nil {
@@ -397,8 +479,18 @@ func (s *ApiService) createPausedRoute(ctx context.Context, seen unlistedRequest
 	s.logAudit(ctx, "create", "route", fmt.Sprintf("Created paused route %s (%q) for unlisted path %s", rt.Id, rt.Name, seen.path))
 	return &gateonv1.ApplyRecommendationResponse{
 		Success: true,
-		Message: fmt.Sprintf("Created route %q, paused: %s on entrypoint %s, pointing at service %s, %s. "+
-			"It has no middlewares. Review it in Routes and enable it there.",
-			rt.Name, rt.Rule, entrypointLabel(seen.ep), serviceLabel(target.service), target.why),
+		Message: fmt.Sprintf("Created route %q, paused: %s on entrypoint %s, pointing at service %s, %s. %s%s "+
+			"Review it in Routes and enable it there.",
+			rt.Name, rt.Rule, entrypointLabel(seen.ep), serviceLabel(target.service), target.why,
+			target.note, anyHostNote(seen)),
 	}
+}
+
+// anyHostNote warns when no host was recorded for the request: the route then
+// answers its path for every host the entrypoint serves once it is enabled.
+func anyHostNote(seen unlistedRequest) string {
+	if seen.host != "" {
+		return ""
+	}
+	return " No host was recorded for the request, so once enabled it answers this path for every host on the entrypoint."
 }

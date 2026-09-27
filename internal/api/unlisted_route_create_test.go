@@ -124,17 +124,18 @@ func TestUnlistedRouteFixCreatesAPausedRouteForThePath(t *testing.T) {
 		t.Fatalf("the fix was refused: %s", resp.GetMessage())
 	}
 
-	created := f.routesWithRule(t, "Path(`/unlisted-path-1`)")
+	created := f.routesWithRule(t, "Host(`localhost`) && Path(`/unlisted-path-1`)")
 	if len(created) != 1 {
 		t.Fatalf("routes with the path's rule: %d, want 1; message: %s", len(created), resp.GetMessage())
 	}
 	rt := created[0]
-	if !rt.GetDisabled() || rt.GetServiceId() != "mock-service" || rt.GetName() != "unlisted /unlisted-path-1" ||
+	if !rt.GetDisabled() || rt.GetServiceId() != "mock-service" || rt.GetName() != "unlisted localhost/unlisted-path-1" ||
 		!slices.Equal(rt.GetEntrypoints(), []string{"http-plain"}) || rt.GetType() != "http" || rt.GetId() == "" {
-		t.Errorf("created route = %v, want a paused http route \"unlisted /unlisted-path-1\" on http-plain to mock-service", rt)
+		t.Errorf("created route = %v, want a paused http route \"unlisted localhost/unlisted-path-1\" on http-plain to mock-service", rt)
 	}
-	for _, want := range []string{`"unlisted /unlisted-path-1"`, "paused", "Path(`/unlisted-path-1`)", "http-plain",
-		"Mock Service (mock-service)", "the only service routed on entrypoint http-plain"} {
+	for _, want := range []string{`"unlisted localhost/unlisted-path-1"`, "paused", "Host(`localhost`) && Path(`/unlisted-path-1`)",
+		"http-plain", "Mock Service (mock-service)", "the only service routed on entrypoint http-plain",
+		"Those routes carry no middlewares, and neither does it."} {
 		if !strings.Contains(resp.GetMessage(), want) {
 			t.Errorf("message does not say %s: %s", want, resp.GetMessage())
 		}
@@ -161,10 +162,10 @@ func TestUnlistedRouteFixAnswersASecondApplyTruthfully(t *testing.T) {
 	if second.GetSuccess() {
 		t.Errorf("a second apply claimed to create a route: %s", second.GetMessage())
 	}
-	if !strings.Contains(second.GetMessage(), `"unlisted /unlisted-path-2" already exists`) || !strings.Contains(second.GetMessage(), "paused") {
+	if !strings.Contains(second.GetMessage(), `"unlisted localhost/unlisted-path-2" already exists`) || !strings.Contains(second.GetMessage(), "paused") {
 		t.Errorf("second apply does not say the paused route exists: %s", second.GetMessage())
 	}
-	if n := len(f.routesWithRule(t, "Path(`/unlisted-path-2`)")); n != 1 {
+	if n := len(f.routesWithRule(t, "Host(`localhost`) && Path(`/unlisted-path-2`)")); n != 1 {
 		t.Errorf("routes for the path after two applies: %d, want 1", n)
 	}
 }
@@ -183,7 +184,7 @@ func TestUnlistedRouteFixPointsAtTheServiceOfTheHost(t *testing.T) {
 	if !resp.GetSuccess() {
 		t.Fatalf("the fix was refused: %s", resp.GetMessage())
 	}
-	created := f.routesWithRule(t, "Path(`/new-page`)")
+	created := f.routesWithRule(t, "Host(`app.example.com`) && Path(`/new-page`)")
 	if len(created) != 1 || created[0].GetServiceId() != "svc-app" || !slices.Equal(created[0].GetEntrypoints(), []string{"websecure"}) {
 		t.Fatalf("created %v, want one route on websecure to svc-app", created)
 	}
@@ -203,7 +204,7 @@ func TestUnlistedRouteFixSaysWhenEveryRouteThereIsForAnotherHost(t *testing.T) {
 	if !resp.GetSuccess() {
 		t.Fatalf("the fix was refused: %s", resp.GetMessage())
 	}
-	if created := f.routesWithRule(t, "Path(`/new-page`)"); len(created) != 1 || created[0].GetServiceId() != "svc-api" {
+	if created := f.routesWithRule(t, "Host(`app.example.com`) && Path(`/new-page`)"); len(created) != 1 || created[0].GetServiceId() != "svc-api" {
 		t.Fatalf("created %v, want one route to svc-api", created)
 	}
 	if !strings.Contains(resp.GetMessage(), "on entrypoint Public HTTPS, where every route names another host") {
@@ -287,6 +288,8 @@ func TestUnlistedRouteFixRefusesWhatItCannotRouteSafely(t *testing.T) {
 		{"no entrypoint", unlistedFinding("/fine", "", ""), "does not say which entrypoint"},
 		{"an entrypoint that is gone", unlistedFinding("/fine", "gone", ""), "no longer exists"},
 		{"a TCP entrypoint", unlistedFinding("/fine", "tcp", ""), "not routed by path"},
+		{"a host that would end the rule", unlistedFinding("/fine", "http-plain", "a`) || PathPrefix(`/"), "cannot be written as a route rule"},
+		{"a host with a space", unlistedFinding("/fine", "http-plain", "a b"), "cannot be written as a route rule"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newUnlistedFixture(t, e2eRoutes())
@@ -430,5 +433,84 @@ func TestUnlistedRouteDetectorSaysWhereTheRequestArrived(t *testing.T) {
 			t.Errorf("finding %d = {type %q source %q path %q entrypoint %q host %q}, want %v",
 				i, a.GetType(), a.GetSource(), a.GetRequestUri(), a.GetEntrypoint(), a.GetHost(), want)
 		}
+	}
+}
+
+// TestUnlistedRouteFixAnswersOnlyTheRequestsHost: a Path rule on its own
+// answers that path on every host the entrypoint serves, so once enabled the
+// route would expose the service under hosts nobody asked about. With the host
+// the request named, it answers that host alone.
+func TestUnlistedRouteFixAnswersOnlyTheRequestsHost(t *testing.T) {
+	f := newUnlistedFixture(t, e2eRoutes())
+	if resp := f.apply(t, t.Context(), unlistedFinding("/new-page", "http-plain", "App.Example.com:8081")); !resp.GetSuccess() {
+		t.Fatalf("the fix was refused: %s", resp.GetMessage())
+	}
+	created := f.routesWithRule(t, "Host(`app.example.com`) && Path(`/new-page`)")
+	if len(created) != 1 {
+		t.Fatalf("no route scoped to the request's host was created")
+	}
+	m := router.GetMatcher(created[0].GetRule())
+	for host, want := range map[string]bool{"app.example.com": true, "app.example.com:8081": true, "other.example.com": false} {
+		req := &http.Request{Method: http.MethodGet, Host: host, URL: &url.URL{Path: "/new-page"}, Header: http.Header{}}
+		if got := m.Match(req); got != want {
+			t.Errorf("the route's rule matches host %s: %v, want %v", host, got, want)
+		}
+	}
+}
+
+// TestUnlistedRouteFixSaysWhenNoHostWasRecorded: a trace written before hosts
+// were recorded leaves the route answering every host; the answer says so.
+func TestUnlistedRouteFixSaysWhenNoHostWasRecorded(t *testing.T) {
+	f := newUnlistedFixture(t, e2eRoutes())
+	resp := f.apply(t, t.Context(), unlistedFinding("/any-host", "http-plain", ""))
+	if !resp.GetSuccess() || len(f.routesWithRule(t, "Path(`/any-host`)")) != 1 {
+		t.Fatalf("success=%v, want one Path-only route; message: %s", resp.GetSuccess(), resp.GetMessage())
+	}
+	if !strings.Contains(resp.GetMessage(), "No host was recorded for the request, so once enabled it answers this path for every host on the entrypoint.") {
+		t.Errorf("message does not warn that the route answers every host: %s", resp.GetMessage())
+	}
+}
+
+// TestUnlistedRouteFixCarriesTheMiddlewaresItsSiblingsShare: routes to the
+// same service are guarded alike -- a WAF, authentication, a rate limit -- and a
+// route enabled without them would be the one open door to that service. Only
+// the routes that chose the service count; another service's do not.
+func TestUnlistedRouteFixCarriesTheMiddlewaresItsSiblingsShare(t *testing.T) {
+	f := newUnlistedFixture(t, []*gateonv1.Route{
+		{Id: "a1", Rule: "PathPrefix(`/a`)", ServiceId: "svc-api", Middlewares: []string{"waf-1", "auth-1"}},
+		{Id: "a2", Rule: "PathPrefix(`/b`)", ServiceId: "svc-api", Middlewares: []string{"waf-1", "auth-1"}},
+		{Id: "b1", Rule: "PathPrefix(`/c`)", ServiceId: "svc-b", Middlewares: []string{"cors-1"}},
+	})
+	resp := f.apply(t, t.Context(), unlistedFinding("/guarded", "http-plain", "api.example.com"))
+	created := f.routesWithRule(t, "Host(`api.example.com`) && Path(`/guarded`)")
+	if !resp.GetSuccess() || len(created) != 1 {
+		t.Fatalf("success=%v created=%v; message: %s", resp.GetSuccess(), created, resp.GetMessage())
+	}
+	if got := created[0].GetMiddlewares(); !slices.Equal(got, []string{"waf-1", "auth-1"}) {
+		t.Errorf("middlewares = %v, want the ones every svc-api route carries, in their order", got)
+	}
+	if !strings.Contains(resp.GetMessage(), "It carries the middlewares those routes share: waf-1, auth-1.") {
+		t.Errorf("message does not name the middlewares: %s", resp.GetMessage())
+	}
+}
+
+// TestUnlistedRouteFixCopiesNoMiddlewaresWhenTheSiblingsDisagree: with no one
+// list to copy, any choice would be a guess about security; it copies none and
+// says they must be reviewed before the route is enabled.
+func TestUnlistedRouteFixCopiesNoMiddlewaresWhenTheSiblingsDisagree(t *testing.T) {
+	f := newUnlistedFixture(t, []*gateonv1.Route{
+		{Id: "a1", Rule: "PathPrefix(`/a`)", ServiceId: "svc-api", Middlewares: []string{"waf-1", "auth-1"}},
+		{Id: "a2", Rule: "PathPrefix(`/b`)", ServiceId: "svc-api", Middlewares: []string{"waf-1"}},
+	})
+	resp := f.apply(t, t.Context(), unlistedFinding("/unsure", "http-plain", "api.example.com"))
+	created := f.routesWithRule(t, "Host(`api.example.com`) && Path(`/unsure`)")
+	if !resp.GetSuccess() || len(created) != 1 {
+		t.Fatalf("success=%v created=%v; message: %s", resp.GetSuccess(), created, resp.GetMessage())
+	}
+	if got := created[0].GetMiddlewares(); len(got) != 0 {
+		t.Errorf("middlewares = %v, want none when the routes disagree", got)
+	}
+	if !strings.Contains(resp.GetMessage(), "review its middlewares before enabling it") {
+		t.Errorf("message does not say the middlewares need review: %s", resp.GetMessage())
 	}
 }
