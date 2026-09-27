@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gsoultan/gateon/internal/telemetry"
@@ -152,6 +153,31 @@ func (tf *traffic) wafBlock(ip string, at time.Time) {
 	tf.threats = append(tf.threats, &telemetry.SecurityThreat{
 		SourceIP: ip, Type: "waf_blocked", Mitigated: true, Time: at, Category: "sqli", ActionTaken: telemetry.ActionBlocked,
 	})
+}
+
+// classVisitor adds a person loading three pages with a browser of client
+// class class (its JA4+), as the trace store records it: JA4 and JA4H, and the
+// fingerprint too when behavioural fingerprinting is on.
+func (tf *traffic) classVisitor(ip, class string, at time.Time) {
+	ja4, ja4h, _ := strings.Cut(class, "_")
+	for r, page := range []string{"/", "/app.js", "/style.css"} {
+		tf.traces = append(tf.traces, &telemetry.TraceRecord{
+			SourceIP: ip, Method: http.MethodGet, Path: page, Status: "200", DurationMs: 20,
+			Timestamp: at.Add(time.Duration(r) * time.Second), UserAgent: "Mozilla/5.0",
+			JA4: ja4, JA4H: ja4h, Fingerprint: class,
+		})
+	}
+}
+
+// classAttacker adds blocks requests from ip, presenting client class class,
+// that the WAF blocked on an attack payload, a second apart from at.
+func (tf *traffic) classAttacker(ip, class string, blocks int, at time.Time) {
+	for b := range blocks {
+		tf.threats = append(tf.threats, &telemetry.SecurityThreat{
+			SourceIP: ip, Fingerprint: class, Type: "waf_blocked", Mitigated: true, Category: "sqli",
+			ActionTaken: telemetry.ActionBlocked, Time: at.Add(time.Duration(b) * time.Second),
+		})
+	}
 }
 
 // credentialStuffer adds a script POSTing a leaked credential list to /login

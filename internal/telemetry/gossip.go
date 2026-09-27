@@ -6,7 +6,9 @@ package telemetry
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"net"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -112,29 +114,54 @@ func (d *ReputationDelegate) NotifyMsg(msg []byte) {
 	} else if _, ok := raw["source_node"]; ok {
 		var payload gateonv1.GraphEdgeSyncPayload
 		if err := json.Unmarshal(msg, &payload); err == nil {
-			AddGraphEdge(payload.SourceNode, payload.TargetNode, payload.Weight)
+			applyRemoteAttackLink(&payload, time.Now())
 		}
 	}
 }
 
-func BroadcastGraphEdge(u, v string, weight float64, edgeType string) {
+// Graph Intelligence's gossip. A peer sends the attack links it observed --
+// address, client class, evidence -- and a node files them as it files its own
+// (ObserveAttackLink), so a campaign spread across gateways forms one cluster.
+//
+// It used to send every address's fingerprint as an ip -> fp edge, and the
+// detector read fp -> ip, so nothing a peer sent ever reached a detection. Peers
+// on that release still send those, as type "fp_ip" with no evidence behind
+// them; they are ignored, since counting them would bring back the
+// browser-class clusters the store exists to avoid.
+const (
+	attackLinkEdgeType    = "attack_evidence"
+	attackClassNodePrefix = "fp:"
+	// maxRemoteAttackEvidence caps what one gossiped link may claim, so a
+	// peer's arithmetic cannot outweigh every local observation.
+	maxRemoteAttackEvidence = 100.0
+)
+
+// BroadcastAttackLink gossips one attack link to the cluster, when gossip runs.
+func BroadcastAttackLink(fp, ip string, evidence float64) {
 	if gossipManager == nil {
 		return
 	}
-
-	payload := &gateonv1.GraphEdgeSyncPayload{
-		SourceNode: u,
-		TargetNode: v,
-		Weight:     weight,
-		Type:       edgeType,
-	}
-
-	data, err := json.Marshal(payload)
+	data, err := json.Marshal(&gateonv1.GraphEdgeSyncPayload{
+		SourceNode: ip,
+		TargetNode: attackClassNodePrefix + fp,
+		Weight:     evidence,
+		Type:       attackLinkEdgeType,
+	})
 	if err != nil {
 		return
 	}
+	// Named by the link, so a newer measure replaces one still queued rather
+	// than queueing behind it.
+	gossipManager.delegate.enqueue("graph|"+fp+"|"+ip, data)
+}
 
-	gossipManager.delegate.Enqueue(data)
+// applyRemoteAttackLink files a peer's attack link, as observed at at.
+func applyRemoteAttackLink(p *gateonv1.GraphEdgeSyncPayload, at time.Time) {
+	fp, isClass := strings.CutPrefix(p.GetTargetNode(), attackClassNodePrefix)
+	if p.GetType() != attackLinkEdgeType || !isClass || net.ParseIP(p.GetSourceNode()) == nil {
+		return
+	}
+	ObserveAttackLink(fp, p.GetSourceNode(), math.Min(p.GetWeight(), maxRemoteAttackEvidence), at)
 }
 
 func (d *ReputationDelegate) GetBroadcasts(overhead, limit int) [][]byte {

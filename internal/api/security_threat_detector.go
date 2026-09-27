@@ -62,10 +62,11 @@ func (d *SecurityThreatDetector) Detect(ctx context.Context, data *DiagnosticDat
 		mu.Unlock()
 	}
 
-	// 2. Multi-IP attacks via fingerprinting
-	mu.Lock()
-	anomalies = append(anomalies, d.detectMultiIPAttacks(ctx, data, threshold)...)
-	mu.Unlock()
+	// 2. Multi-IP attacks by fingerprint are Graph Intelligence's
+	// (HybridGraphAnomalyDetector). This detector used to report every client
+	// class seen from more than three addresses as one actor rotating them --
+	// which a JA4+ value, a browser class, is on any site with four visitors on
+	// one Chrome build -- and recorded a threat for it on every pass.
 
 	// 3. Impossible Travel detection
 	if d.Config == nil || d.Config.EnableImpossibleTravel {
@@ -794,58 +795,4 @@ func (d *SecurityThreatDetector) getAdaptiveRecommendation(score int, primaryTyp
 	default:
 		return "ADAPTIVE: Behavioral anomaly detected. Review logs and consider implementing a challenge (e.g., JS/Cookie challenge) to verify the client."
 	}
-}
-
-func (d *SecurityThreatDetector) detectMultiIPAttacks(ctx context.Context, data *DiagnosticData, threshold float64) []*gateonv1.Anomaly {
-	var anomalies []*gateonv1.Anomaly
-	for fp, stats := range data.FingerprintStats {
-		if len(stats.IPs) > 3 {
-			mitigated := true
-			for ip := range stats.IPs {
-				if !data.IsIPMitigated(ip) {
-					mitigated = false
-					break
-				}
-			}
-
-			anomaly := &gateonv1.Anomaly{
-				Type:           "security_threat",
-				Severity:       severityHigh,
-				Description:    fmt.Sprintf("Multi-IP attack detected via fingerprinting: actor rotated %d IPs for the same client profile", len(stats.IPs)),
-				Timestamp:      stats.LastSeen.Format(time.RFC3339),
-				Source:         fp,
-				Recommendation: "This actor is rotating IPs to bypass rate limits. Consider blocking the entire fingerprint or implementing more aggressive bot challenges.",
-				Mitigated:      mitigated,
-			}
-			anomalies = append(anomalies, anomaly)
-
-			actionTaken := ""
-			if mitigated {
-				actionTaken = "blocked"
-			}
-			threat := telemetry.SecurityThreat{
-				Type:        "security_threat",
-				Fingerprint: fp,
-				Score:       threshold + 10,
-				Details:     fmt.Sprintf("Client fingerprint %s used across %d IPs", fp, len(stats.IPs)),
-				Time:        stats.LastSeen,
-				ActionTaken: actionTaken,
-			}
-
-			if stats.LastTrace != nil {
-				threat.RequestHeaders = stats.LastTrace.RequestHeaders
-				threat.RequestBody = stats.LastTrace.RequestBody
-				threat.ResponseHeaders = stats.LastTrace.ResponseHeaders
-				threat.ResponseBody = stats.LastTrace.ResponseBody
-				threat.UserAgent = stats.LastTrace.UserAgent
-				threat.Method = stats.LastTrace.Method
-				threat.SourceIP = stats.LastTrace.SourceIP
-				threat.RouteID = stats.LastTrace.RouteID
-				threat.RequestURI = stats.LastTrace.Path
-			}
-
-			telemetry.RecordSecurityThreat(threat)
-		}
-	}
-	return anomalies
 }
