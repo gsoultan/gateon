@@ -20,6 +20,7 @@ import (
 	"github.com/gsoultan/gateon/internal/ai"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware/security"
+	"github.com/gsoultan/gateon/internal/security/mitigation"
 	"github.com/gsoultan/gateon/internal/security/waf"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	"github.com/gsoultan/gateon/internal/telemetry/repid"
@@ -346,6 +347,11 @@ func (s *ApiService) applyAutomaticMitigation(ctx context.Context, anomalies []*
 			for _, ip := range ips {
 				ip = strings.TrimSpace(ip)
 				if ip == "" || net.ParseIP(ip) == nil {
+					continue
+				}
+				// The operator's allowlist, which the anomaly detector's own
+				// throttle and every shun already honour.
+				if mitigation.IsAllowlisted(ip) {
 					continue
 				}
 
@@ -894,6 +900,12 @@ func (s *ApiService) RemoveMitigatedThreat(ctx context.Context, req *gateonv1.Re
 			logger.L.LogWarn("Failed to unshun IP at XDP level (might not be shunned)", "error", err, "ip", source)
 		} else {
 			logger.L.LogInfo("IP unshunned at XDP level", "ip", source)
+		}
+		// And its kernel rate limit. Automatic mitigation throttles as well as
+		// shuns, and the release lifted only the shun: the operator was told
+		// the address was released while it stayed held to 100 packets a second.
+		if err := s.EbpfManager.ClearAdaptiveRateLimit(source); err != nil {
+			logger.L.LogWarn("Failed to lift the kernel rate limit (might not be limited)", "error", err, "ip", source)
 		}
 	}
 
