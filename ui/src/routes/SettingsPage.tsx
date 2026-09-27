@@ -270,12 +270,17 @@ export default function SettingsPage() {
   const otel = config.otel || { enabled: false };
   const transport = config.transport || {};
 
+  // A preset sets the fields it names and keeps the rest of each section. It
+  // used to replace log and transport outright, so applying one and saving
+  // reset every retention period, the trace archive settings and the
+  // transport timeouts it never mentioned to their defaults.
   const applyPreset = (preset: "development" | "production" | "high-throughput") => {
     const base = { ...config };
+    const log = config.log || {};
     if (preset === "development") {
       setConfig({
         ...base,
-        log: { level: "debug", development: true, format: "text", pathStatsRetentionDays: 7 },
+        log: { ...log, level: "debug", development: true, format: "text", pathStatsRetentionDays: 7 },
         tls: { ...tls, enabled: false },
         redis: { ...redis, enabled: false },
         otel: { ...otel, enabled: false },
@@ -283,7 +288,7 @@ export default function SettingsPage() {
     } else if (preset === "production") {
       setConfig({
         ...base,
-        log: { level: "info", development: false, format: "json", pathStatsRetentionDays: 30 },
+        log: { ...log, level: "info", development: false, format: "json", pathStatsRetentionDays: 30 },
         tls: { ...tls, enabled: true },
         redis: { ...redis, enabled: true },
         otel: { ...otel, enabled: true },
@@ -291,11 +296,12 @@ export default function SettingsPage() {
     } else if (preset === "high-throughput") {
       setConfig({
         ...base,
-        log: { level: "warn", development: false, format: "json", pathStatsRetentionDays: 7 },
+        log: { ...log, level: "warn", development: false, format: "json", pathStatsRetentionDays: 7 },
         tls: tls,
         redis: redis,
         otel: otel,
         transport: {
+          ...(config.transport || {}),
           maxIdleConns: 20000,
           maxIdleConnsPerHost: 2000,
           idleConnTimeoutSeconds: 90,
@@ -345,7 +351,12 @@ export default function SettingsPage() {
       />
 
       <ResourceProfileCard
-        profile={config.profile || ""}
+        // The profile the gateway runs, where the configured one is not it:
+        // GATEON_PROFILE pins the tier over config.profile, and an empty
+        // config.profile is resolved by the gateway. The card used to show
+        // config.profile (or "standard" when empty) beside "Pinned by
+        // Environment", naming a profile the gateway was not running.
+        profile={status?.profilePinned || !config.profile ? status?.profile || config.profile || "" : config.profile}
         pinned={status?.profilePinned}
         disabled={formDisabled}
         onChange={(val) => setConfig({ ...config, profile: val })}
