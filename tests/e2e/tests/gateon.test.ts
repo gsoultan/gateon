@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
 // SPDX-License-Identifier: MIT
 
-import { test, expect } from '@playwright/test';
+import { test, expect, type APIResponse } from '@playwright/test';
 import { execSync } from 'child_process';
 
 test.describe('Gateon Comprehensive E2E', () => {
@@ -81,13 +81,31 @@ test.describe('Gateon Comprehensive E2E', () => {
     });
     expect(resp2.status()).toBe(403);
 
-    // Rate Limiting
-    // Send multiple requests quickly
-    for (let i = 0; i < 15; i++) {
-        await request.get('http://localhost:8081/ratelimit');
+    // Rate limiting. /ratelimit carries ratelimit-strict: 10 requests a minute
+    // with a burst of 20, keyed by client address. This used to send 16
+    // requests, which fit inside the burst, and only logged the status of the
+    // last one, so it passed whether or not the limiter was on the route. The
+    // fixture also set "average", a key the limiter never reads.
+    //
+    // Keep asking until refused, and bound how many were served first: the
+    // burst plus at most one token refilled while the loop runs (one every six
+    // seconds). Counting served-before-refusal rather than asserting the first
+    // request succeeds keeps a CI retry honest: a retry meets the bucket this
+    // attempt drained, and is refused sooner, which is the limit working.
+    let served = 0;
+    let refusal: APIResponse | undefined;
+    for (let i = 0; i < 40 && !refusal; i++) {
+        const resp = await request.get('http://localhost:8081/ratelimit');
+        if (resp.status() === 429) refusal = resp;
+        else {
+            expect(resp.status(), `request ${i + 1} to /ratelimit`).toBe(200);
+            served++;
+        }
     }
-    const resp3 = await request.get('http://localhost:8081/ratelimit');
-    console.log(`Rate limit response status: ${resp3.status()}`);
+    expect(refusal, `40 requests against a burst of 20: none was refused (${served} served)`).toBeDefined();
+    expect(served).toBeLessThanOrEqual(21);
+    expect(refusal!.headers()['retry-after']).toBe('1');
+    expect((await refusal!.json()).error).toBe('too many requests');
   });
 
   test('WAF Security Threat Detection', async ({ page, request }) => {
