@@ -36,6 +36,13 @@ type IPReputationStore struct {
 	// has just been replaced, and switching feeds off has to wait for it.
 	cancelMu      sync.Mutex
 	refreshCancel context.CancelFunc
+
+	// loopOnce starts the refresh loop once, from Start. rescheduled carries a
+	// configuration change to it, so a new interval takes effect at once, and
+	// loopDone is closed when the loop has returned.
+	loopOnce    sync.Once
+	rescheduled chan struct{}
+	loopDone    chan struct{}
 }
 
 // ReputationClient is the interface for external IP reputation providers.
@@ -146,8 +153,9 @@ func (t *ipTrie) search(addr netip.Addr) (bool, float64) {
 // before a listener opened.
 func NewIPReputationStore(cfg *gateonv1.IPReputationConfig) *IPReputationStore {
 	store := &IPReputationStore{
-		badIPs: make(map[string]float64),
-		trie:   newIPTrie(),
+		badIPs:      make(map[string]float64),
+		trie:        newIPTrie(),
+		rescheduled: make(chan struct{}, 1),
 	}
 	store.configure(cfg)
 	return store
@@ -158,6 +166,7 @@ func (s *IPReputationStore) Reconfigure(cfg *gateonv1.IPReputationConfig) {
 	s.configure(cfg)
 	// Whatever is being fetched now is for the configuration just replaced.
 	s.cancelRefresh()
+	s.reschedule()
 
 	// Nothing left to load means nothing left in force. This used to start a
 	// refresh only when enabled, and a refresh with no feeds returned without
@@ -302,26 +311,61 @@ func (s *IPReputationStore) GetBlockThreshold() float64 {
 	return 80.0 // Default
 }
 
+// Start loads the configured feeds, then keeps them refreshed until ctx ends.
+//
+// The refresh loop runs whether or not IP reputation is enabled at boot. It
+// used to be built only when it was, from the interval in force at that moment,
+// so feeds switched on later from the dashboard -- the ordinary path, since the
+// stock configuration ships with IP reputation off -- were loaded once by the
+// save and never again, and a changed interval never took effect. The loop now
+// reads the interval every time it waits, and Reconfigure moves it onto a new
+// one.
 func (s *IPReputationStore) Start(ctx context.Context) {
-	if s.config == nil || !s.config.Enabled {
-		return
-	}
-
-	ticker := time.NewTicker(updateInterval(s.config.UpdateIntervalHours))
-
 	s.update(ctx)
+	s.loopOnce.Do(func() {
+		// Armed here rather than in the goroutine, so the first wait is the
+		// interval configured when Start ran, not whatever a Reconfigure that
+		// raced the goroutine's start left behind.
+		timer := time.NewTimer(s.refreshInterval())
+		s.loopDone = make(chan struct{})
+		go s.refreshLoop(ctx, timer)
+	})
+}
 
-	go func() {
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				s.update(ctx)
-			}
+// refreshLoop refreshes the feeds each time timer fires until ctx ends. A store
+// with no feed wanted costs one timer: update returns at once.
+func (s *IPReputationStore) refreshLoop(ctx context.Context, timer *time.Timer) {
+	defer close(s.loopDone)
+	defer timer.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-s.rescheduled:
+			// Reconfigure has already refreshed for the new configuration;
+			// only the schedule moves onto it.
+		case <-timer.C:
+			s.update(ctx)
 		}
-	}()
+		timer.Reset(s.refreshInterval())
+	}
+}
+
+// refreshInterval is the configured update interval as a timer period.
+func (s *IPReputationStore) refreshInterval() time.Duration {
+	s.mu.RLock()
+	hours := s.config.GetUpdateIntervalHours()
+	s.mu.RUnlock()
+	return updateInterval(hours)
+}
+
+// reschedule tells the refresh loop the configuration changed. It never
+// blocks: one pending signal is as good as several.
+func (s *IPReputationStore) reschedule() {
+	select {
+	case s.rescheduled <- struct{}{}:
+	default:
+	}
 }
 
 // feedFetchTimeout bounds one feed fetch, body included.
@@ -334,16 +378,20 @@ func (s *IPReputationStore) Start(ctx context.Context) {
 // preventing it. A variable so a test does not have to wait it out.
 var feedFetchTimeout = 30 * time.Second
 
-// Feed refresh period when update_interval_hours is unset, and the most it may
-// be set to: a larger value wraps time.Duration.
+// Feed refresh period, in hours, when update_interval_hours is unset, and the
+// most it may be set to: a larger value wraps time.Duration.
 const (
-	defaultUpdateInterval  = 24 * time.Hour
-	maxUpdateIntervalHours = 24 * 365
+	defaultUpdateIntervalHours = 24
+	maxUpdateIntervalHours     = 24 * 365
 )
 
-// updateInterval turns update_interval_hours into a ticker period.
+// refreshUnit is the length of one update_interval_hours: an hour. A variable so
+// a test can run a schedule measured in hours in milliseconds.
+var refreshUnit = time.Hour
+
+// updateInterval turns update_interval_hours into a timer period.
 //
-// time.NewTicker panics on anything but a positive duration, and Start runs
+// A timer or ticker panics on anything but a positive duration, and Start runs
 // synchronously at boot. The hours used to be converted and handed to it before
 // anything looked at them, so zero -- what an operator gets by enabling IP
 // reputation without touching the interval -- crashed the gateway on every
@@ -351,17 +399,17 @@ const (
 func updateInterval(hours int32) time.Duration {
 	switch {
 	case hours == 0:
-		return defaultUpdateInterval
+		hours = defaultUpdateIntervalHours
 	case hours < 0:
 		logger.L.LogWarn("ip_reputation.update_interval_hours is negative; using the default",
-			"configured", hours, "default_hours", int(defaultUpdateInterval/time.Hour))
-		return defaultUpdateInterval
+			"configured", hours, "default_hours", defaultUpdateIntervalHours)
+		hours = defaultUpdateIntervalHours
 	case hours > maxUpdateIntervalHours:
 		logger.L.LogWarn("ip_reputation.update_interval_hours is above the maximum; using the maximum",
 			"configured", hours, "max_hours", maxUpdateIntervalHours)
-		return maxUpdateIntervalHours * time.Hour
+		hours = maxUpdateIntervalHours
 	}
-	return time.Duration(hours) * time.Hour
+	return time.Duration(hours) * refreshUnit
 }
 
 // update refreshes the blocklist from every configured feed.

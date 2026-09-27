@@ -83,10 +83,13 @@ func TestStartIsNotHeldByAFeedThatNeverAnswers(t *testing.T) {
 		Enabled:  true,
 		FeedUrls: []string{feed.URL},
 	})
-	if !returnsWithin(5*time.Second, func() { store.Start(t.Context()) }) {
+	ctx, cancel := context.WithCancel(context.Background())
+	if !returnsWithin(5*time.Second, func() { store.Start(ctx) }) {
+		cancel()
 		t.Fatal("Start is still waiting on a feed that accepted the connection and " +
 			"never answered; the gateway never finishes booting")
 	}
+	joinOnCleanup(t, store, cancel)
 }
 
 // TestSwitchingFeedsOffIsNotHeldByAStalledFetch is the regression test for a

@@ -326,7 +326,8 @@ func NewApiService(cfg ApiServiceConfig) *ApiService {
 	} else if cfg.Globals != nil {
 		if gc := cfg.Globals.Get(context.Background()); gc != nil && gc.SecurityAdvanced != nil && gc.SecurityAdvanced.IpReputation != nil {
 			s.IPReputation = reputation.NewIPReputationStore(gc.SecurityAdvanced.IpReputation)
-			s.IPReputation.Start(context.Background())
+			// Its refresh loop lives as long as the gateway, and no longer.
+			s.IPReputation.Start(s.detached())
 		}
 	}
 
