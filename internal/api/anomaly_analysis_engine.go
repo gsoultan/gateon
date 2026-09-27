@@ -601,4 +601,3 @@ func capAnomalies(anomalies []*gateonv1.Anomaly) []*gateonv1.Anomaly {
 
 	return anomalies[:maxAnomaliesPerPass]
 }
-

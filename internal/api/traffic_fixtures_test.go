@@ -110,6 +110,50 @@ func (tf *traffic) ciRunner(ip string) {
 	}
 }
 
+// natEgress adds one address carrying an office: 800 requests from fifty
+// browsers over 150 pages, 3% missing, 1% expired sessions, 11% cached.
+func (tf *traffic) natEgress(ip string) {
+	at := tf.base
+	for i := range 800 {
+		status := "200"
+		switch r := tf.rng.IntN(100); {
+		case r < 3:
+			status = "404"
+		case r < 4:
+			status = "401"
+		case r < 15:
+			status = "304"
+		}
+		method := http.MethodGet
+		if tf.rng.IntN(20) == 0 {
+			method = http.MethodPost
+		}
+		tf.request(ip, method, fmt.Sprintf("/page-%d", tf.rng.IntN(150)), status, 5+tf.rng.Float64()*200, at,
+			fmt.Sprintf("Mozilla/5.0 (user %d)", i%50))
+		at = at.Add(time.Duration(tf.rng.ExpFloat64()*700) * time.Millisecond)
+	}
+}
+
+// scanner adds a vulnerability scanner: n missing paths probed every 100ms,
+// and wafBlocks requests the WAF blocked on an attack payload.
+func (tf *traffic) scanner(ip string, n, wafBlocks int) {
+	at := tf.base
+	for r := range n {
+		tf.request(ip, http.MethodGet, fmt.Sprintf("/probe-%d.php", r), "404", 2, at, "Mozilla/5.0")
+		at = at.Add(100 * time.Millisecond)
+	}
+	for w := range wafBlocks {
+		tf.wafBlock(ip, tf.base.Add(time.Duration(w)*time.Second))
+	}
+}
+
+// wafBlock records a request the WAF blocked on an attack payload.
+func (tf *traffic) wafBlock(ip string, at time.Time) {
+	tf.threats = append(tf.threats, &telemetry.SecurityThreat{
+		SourceIP: ip, Type: "waf_blocked", Mitigated: true, Time: at, Category: "sqli", ActionTaken: telemetry.ActionBlocked,
+	})
+}
+
 // credentialStuffer adds a script POSTing a leaked credential list to /login
 // every 600ms or so; one in twenty works.
 func (tf *traffic) credentialStuffer(ip string, attempts int) {
@@ -121,6 +165,23 @@ func (tf *traffic) credentialStuffer(ip string, attempts int) {
 		}
 		tf.request(ip, http.MethodPost, "/login", status, 80+tf.rng.Float64()*10, at, "Mozilla/5.0")
 		at = at.Add(tf.jitter(550, 100))
+	}
+}
+
+// authOutage adds n clients all failing to log in at once -- the identity
+// provider is down -- each retrying POST /login every few seconds.
+func (tf *traffic) authOutage(prefix string, n int) {
+	for v := range n {
+		ip := fmt.Sprintf("%s.%d.%d", prefix, v/200, v%200+1)
+		at := tf.base.Add(time.Duration(tf.rng.IntN(60)) * time.Second)
+		for i := range 12 + tf.rng.IntN(10) {
+			status := "401"
+			if i%7 == 6 {
+				status = "200"
+			}
+			tf.request(ip, http.MethodPost, "/login", status, 60+tf.rng.Float64()*40, at, "Mozilla/5.0")
+			at = at.Add(tf.jitter(2000, 8000))
+		}
 	}
 }
 
