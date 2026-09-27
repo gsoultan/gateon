@@ -33,6 +33,11 @@ import { COOKIE_SESSION, useAuthStore } from "../store/useAuthStore";
 import { useIsMobile } from "../hooks/useMobile";
 import { getApiBaseUrl } from "../store/useApiConfigStore";
 import type { Enroll2FAResponse } from "../services/gen/gateon/v1/auth_pb";
+import {
+  enrolmentRefusalMessage,
+  signInCodeRefusalMessage,
+  signInRefusalMessage,
+} from "../components/signInMessages";
 
 export default function LoginPage() {
   const [error, setError] = useState<string | null>(null);
@@ -124,11 +129,8 @@ export default function LoginPage() {
           setAuth(COOKIE_SESSION, data.user);
           navigate({ to: "/" });
         }
-      } else if (res.status === 401) {
-        setError("Invalid username or password");
       } else {
-        const text = await res.text();
-        setError(`Access denied: ${text || res.statusText}`);
+        setError(signInRefusalMessage(res.status));
       }
     } catch (err) {
       setError(
@@ -160,13 +162,13 @@ export default function LoginPage() {
           setAuth(COOKIE_SESSION, data.user);
           navigate({ to: "/" });
         } else {
-          setError("Invalid 2FA code");
+          setError(signInCodeRefusalMessage(401));
         }
       } else {
-        setError("Failed to verify 2FA code");
+        setError(signInCodeRefusalMessage(res.status));
       }
     } catch (err) {
-      setError("Connection error");
+      setError("The gateway could not be reached. Check your connection and try again.");
     } finally {
       setLoading(false);
     }
@@ -188,11 +190,10 @@ export default function LoginPage() {
         setTfaCode("");
         setStep("2fa-setup");
       } else {
-        const text = await res.text();
-        setError(`Could not start 2FA setup: ${text || res.statusText}`);
+        setError(enrolmentRefusalMessage(res.status));
       }
     } catch (err) {
-      setError("Connection error while starting 2FA setup");
+      setError("The gateway could not be reached. Check your connection and try again.");
     }
   };
 
