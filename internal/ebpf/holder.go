@@ -30,6 +30,11 @@ type Holder struct {
 	// every manager swapped in receives it, not only the one present when it
 	// was installed.
 	rlFeedback atomic.Pointer[func(ip string, score float64)]
+
+	// leases is when each adaptive rate limit set through the Holder lapses;
+	// see AdaptiveLimitLease.
+	leases limitLeases
+	now    func() time.Time // injectable for tests
 }
 
 type managerContainer struct {
@@ -39,7 +44,7 @@ type managerContainer struct {
 // NewHolder returns a Holder seeded with the (optional) initial manager. Pass
 // nil to start with the eBPF subsystem disabled.
 func NewHolder(initial Manager) *Holder {
-	h := &Holder{}
+	h := &Holder{now: time.Now}
 	h.Swap(initial)
 	return h
 }
@@ -51,6 +56,7 @@ func NewHolder(initial Manager) *Holder {
 // different one was installed while it was being swapped in, so no ordering
 // of Swap and SetRLFeedbackHandler leaves the active manager without it.
 func (h *Holder) Swap(m Manager) {
+	h.leases.reset()
 	before := h.rlFeedback.Load()
 	if m != nil && before != nil {
 		m.SetRLFeedbackHandler(*before)
@@ -117,18 +123,34 @@ func (h *Holder) UpdateLoadBalancerBackends(ips []string) error {
 	return nil
 }
 
-// SetAdaptiveRateLimit delegates to the active manager, if any.
+// SetAdaptiveRateLimit delegates to the active manager, if any, and leases the
+// limit for AdaptiveLimitLease: ExpireAdaptiveLimits lifts it unless it is set
+// again before then.
 func (h *Holder) SetAdaptiveRateLimit(ip string, interval time.Duration) error {
-	if m := h.Current(); m != nil {
-		return m.SetAdaptiveRateLimit(ip, interval)
+	m := h.Current()
+	if m == nil {
+		return nil
+	}
+	if err := m.SetAdaptiveRateLimit(ip, interval); err != nil {
+		return err
+	}
+	if key, ok := leaseKey(ip); ok {
+		h.leases.renew(key, h.clock().Add(AdaptiveLimitLease))
 	}
 	return nil
 }
 
 // ClearAdaptiveRateLimit delegates to the active manager, if any.
 func (h *Holder) ClearAdaptiveRateLimit(ip string) error {
-	if m := h.Current(); m != nil {
-		return m.ClearAdaptiveRateLimit(ip)
+	m := h.Current()
+	if m == nil {
+		return nil
+	}
+	if err := m.ClearAdaptiveRateLimit(ip); err != nil {
+		return err
+	}
+	if key, ok := leaseKey(ip); ok {
+		h.leases.drop(key)
 	}
 	return nil
 }
@@ -186,4 +208,12 @@ func (h *Holder) GetMapStats() (MapStats, error) {
 		return m.GetMapStats()
 	}
 	return MapStats{}, nil
+}
+
+// clock is the Holder's time source; a zero Holder reads the wall clock.
+func (h *Holder) clock() time.Time {
+	if h.now == nil {
+		return time.Now()
+	}
+	return h.now()
 }

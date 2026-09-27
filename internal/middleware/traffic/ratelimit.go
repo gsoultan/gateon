@@ -246,8 +246,10 @@ func (rl *LocalRateLimiter) Handler(keyFunc func(*http.Request) string) func(htt
 			limiter := rl.getLimiter(key, reputation)
 			if !limiter.Allow() {
 				if rl.ebpf != nil {
-					// Offload this IP to eBPF for 1 minute of hard rate limiting at the kernel level.
-					// We calculate the minimum interval based on the current limit.
+					// Offload this IP to eBPF for hard rate limiting at the kernel
+					// level, at the configured rate. The limit is leased
+					// (ebpf.AdaptiveLimitLease): each rejection renews it, and it
+					// lapses once the client stays under the limit.
 					interval := time.Second / 10 // Default fallback: 10 pps
 					if rl.rate > 0 {
 						interval = time.Duration(float64(time.Second) / float64(rl.rate))

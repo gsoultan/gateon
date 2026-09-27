@@ -151,6 +151,9 @@ func main() {
 	// boot-time config (privilege gating, Start, poll loop).
 	ebpfHolder := ebpf.GlobalHolder
 	telemetry.SetEbpfManager(&ebpfAdapter{ebpfHolder})
+	// Every adaptive rate limit is leased; this is what lifts the ones whose
+	// writer stopped renewing them. See ebpf.AdaptiveLimitLease.
+	go ebpfHolder.ExpireAdaptiveLimits(ctx, adaptiveLimitSweep)
 	var wafUpdater *wafmw.WAFUpdater
 	var clamavManager *security.ClamAVManager
 
@@ -478,6 +481,10 @@ func getEnvDefault(key, def string) string {
 
 // Version is set at build time via -ldflags "-X main.Version=<tag>".
 var Version string
+
+// adaptiveLimitSweep is how often expired adaptive rate limits are lifted: a
+// limit outlives its lease by at most this much.
+const adaptiveLimitSweep = 30 * time.Second
 
 func version() string {
 	if Version != "" {

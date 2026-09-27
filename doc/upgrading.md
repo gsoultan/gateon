@@ -224,6 +224,26 @@ Addresses not in `mgmt_whitelist_ips` lose the management port, as the setting
 always said they would. Check the list before upgrading. The flag is still
 never switched on against an empty list.
 
+### Automatic kernel rate limits lapse five minutes after they were last set — **they never lapsed**
+
+With eBPF on, the WAF (a request scoring 10 or more), the HTTP rate limiter (a
+rejected request), anomaly detection, the diagnostics loop's automatic
+mitigation and the reinforcement-learning limiter each throttle a source in the
+kernel. Only the last ever lifted a throttle, and only its own, so the others
+lasted until the process restarted or eBPF was reconfigured. One WAF hit from an
+office's shared address held everyone behind it to a packet a second, and once
+the kernel map filled, no new throttle could be installed at all.
+
+Every such throttle is now a five-minute lease. A writer whose reason persists
+sets it again and keeps it; one whose reason has passed lets it lapse, and it is
+lifted within half a minute of lapsing. IPv6 throttles are leased per /64, as
+the kernel applies them. Shunned addresses and the management allowlist are not
+affected.
+
+**Who is affected:** installs with eBPF enabled. A source stops being throttled
+about five minutes after it stops misbehaving, where before it stayed throttled
+until a restart.
+
 ### `ai_predictive` load balancing balances — **it sent every request to the first target**
 
 The `ai_predictive` policy (also spelled `intelligent`) sent every request to
