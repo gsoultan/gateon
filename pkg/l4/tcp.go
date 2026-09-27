@@ -243,25 +243,54 @@ func (p *TCPBackendPool) ProxyTCP(ctx context.Context, client net.Conn) {
 			return
 		}
 	}
+	if client, err = takeReadAhead(client, backend); err != nil {
+		return
+	}
+	pipeHalfClose(client, backend)
+}
 
+// takeReadAhead sends a ReadAheadConn's unread bytes to backend and returns the
+// connection underneath, so that both directions can splice and the client can
+// be half-closed; any other connection comes back as it is. Through the
+// wrapper, neither was possible: its type is not *net.TCPConn, so every byte
+// went through a 32 KiB user-space buffer each way, and it has no CloseWrite,
+// so a backend that answered and hung up left the client waiting for more.
+func takeReadAhead(client net.Conn, backend io.Writer) (net.Conn, error) {
+	ra, ok := client.(ReadAheadConn)
+	if !ok {
+		return client, nil
+	}
+	pending, conn := ra.ReadAhead()
+	if len(pending) > 0 {
+		if _, err := backend.Write(pending); err != nil {
+			return conn, err
+		}
+	}
+	return conn, nil
+}
+
+// pipeHalfClose copies client and backend into each other until both
+// directions are done. When one side stops sending, the other is half-closed,
+// so it reads EOF while its own direction carries on.
+func pipeHalfClose(client, backend net.Conn) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		// Attempt Splice for Zero-Copy on Linux, fallback to io.Copy
-		if _, err := SpliceCopy(backend, client); err != nil {
-			_, _ = io.Copy(backend, client)
-		}
-		if c, ok := backend.(interface{ CloseWrite() error }); ok {
-			_ = c.CloseWrite()
-		}
+		copyThenCloseWrite(backend, client)
 	}()
-	if _, err := SpliceCopy(client, backend); err != nil {
-		_, _ = io.Copy(client, backend)
+	copyThenCloseWrite(client, backend)
+	<-done
+}
+
+// copyThenCloseWrite copies src to dst -- by splice(2) when both are TCP
+// sockets on Linux, through a buffer otherwise -- and then half-closes dst.
+func copyThenCloseWrite(dst, src net.Conn) {
+	if _, err := SpliceCopy(dst, src); err != nil {
+		_, _ = io.Copy(dst, src)
 	}
-	if c, ok := client.(interface{ CloseWrite() error }); ok {
+	if c, ok := dst.(interface{ CloseWrite() error }); ok {
 		_ = c.CloseWrite()
 	}
-	<-done
 }
 
 // writeProxyHeader sends HAProxy PROXY protocol v1 header so the backend sees the original client IP.

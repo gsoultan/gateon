@@ -5,7 +5,6 @@ package entrypoint
 
 import (
 	"context"
-	"io"
 	"net"
 	"net/http"
 	"strings"
@@ -14,39 +13,44 @@ import (
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware"
 	"github.com/gsoultan/gateon/internal/middleware/traffic"
+	"github.com/gsoultan/gateon/pkg/l4"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
-// peekedConn wraps a connection and returns buffered data first.
+// The L4 proxy finds the socket beneath an inspected connection through this
+// interface; renaming either side must break the build, not silently put every
+// plaintext L4 session back on a user-space copy.
+var _ l4.ReadAheadConn = (*peekedConn)(nil)
+
+// peekedConn is a connection whose first bytes were read to identify its
+// protocol. Read returns those bytes first, then the connection's own.
 type peekedConn struct {
 	net.Conn
-	r io.Reader
+	peeked []byte // read during inspection and not yet returned by Read
 }
 
 func newPeekedConn(conn net.Conn, peeked []byte) *peekedConn {
-	r := io.MultiReader(
-		&bufFix{b: peeked},
-		conn,
-	)
-	return &peekedConn{Conn: conn, r: r}
+	return &peekedConn{Conn: conn, peeked: peeked}
 }
 
 func (p *peekedConn) Read(b []byte) (int, error) {
-	return p.r.Read(b)
-}
-
-type bufFix struct {
-	b []byte
-	i int
-}
-
-func (b *bufFix) Read(p []byte) (int, error) {
-	if b.i >= len(b.b) {
-		return 0, io.EOF
+	if len(p.peeked) > 0 {
+		n := copy(b, p.peeked)
+		p.peeked = p.peeked[n:]
+		return n, nil
 	}
-	n := copy(p, b.b[b.i:])
-	b.i += n
-	return n, nil
+	return p.Conn.Read(b)
+}
+
+// ReadAhead implements l4.ReadAheadConn: the L4 proxy sends the unread bytes
+// itself and then moves the rest between the sockets directly -- by splice(2)
+// on Linux, which it cannot do through this wrapper's type -- and half-closes
+// the client when the backend is done, which it cannot do either, since the
+// wrapper has no CloseWrite.
+func (p *peekedConn) ReadAhead() ([]byte, net.Conn) {
+	pending := p.peeked
+	p.peeked = nil
+	return pending, p.Conn
 }
 
 // sharedHTTPDispatcher implements net.Listener to feed connections into a shared http.Server.
