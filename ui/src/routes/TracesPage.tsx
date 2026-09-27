@@ -11,9 +11,6 @@ import {
   Stack,
   ActionIcon,
   Tooltip,
-  Paper,
-  Box,
-  Divider,
   ScrollArea,
   Code,
   TextInput,
@@ -29,8 +26,6 @@ import {
 import {
   IconSearch,
   IconRefresh,
-  IconExternalLink,
-  IconTimeline,
   IconCircleCheck,
   IconCircleX,
   IconCopy,
@@ -190,11 +185,6 @@ export default function TracesPage() {
               </Text>
             </Stack>
           )}
-          <Tooltip label="Open in Jaeger">
-            <ActionIcon variant="light" color="blue" size="lg" component="a" href="#" onClick={(e) => e.preventDefault()}>
-              <IconExternalLink size={20} />
-            </ActionIcon>
-          </Tooltip>
         </Group>
       </Group>
 
@@ -414,67 +404,6 @@ export default function TracesPage() {
                 )}
               </Stack>
             </Card>
-
-            <Paper withBorder p="xl" radius="md">
-              <Stack align="center" gap="sm">
-                <IconTimeline size={48} stroke={1.5} color="var(--mantine-color-blue-6)" />
-                <Title order={3}>Live Trace Visualization</Title>
-                <Text c="dimmed" ta="center" style={{ maxWidth: 500 }}>
-                  Gateon is currently exporting telemetry via OpenTelemetry Protocol (OTLP).
-                  For full visualization of spans and child relationships, we recommend
-                  integrating with a dedicated store like Jaeger or Honeycomb.
-                </Text>
-                <Box mt="md" w="100%">
-                   <Divider label="Visualization Preview" labelPosition="center" mb="xl" />
-                   <Stack gap="xs" style={{ maxWidth: 800, margin: '0 auto' }}>
-                      <Paper withBorder p="sm" radius="md" style={{ backgroundColor: "light-dark(var(--mantine-color-gray-0), var(--mantine-color-dark-6))", borderLeft: '4px solid var(--mantine-color-blue-6)' }}>
-                         <Group justify="space-between">
-                            <Group gap="xs">
-                              <Badge size="sm" color="blue" variant="filled">GATEWAY</Badge>
-                              <Text size="sm" fw={500}>ingress-request</Text>
-                            </Group>
-                            <Text size="xs" fw={700} c="blue">42.4ms</Text>
-                         </Group>
-                         <Box mt="xs" style={{ height: 6, backgroundColor: "light-dark(var(--mantine-color-gray-2), var(--mantine-color-dark-4))", borderRadius: 3, overflow: 'hidden' }}>
-                            <Box style={{ width: '100%', height: '100%', backgroundColor: "var(--mantine-color-blue-6)" }} />
-                         </Box>
-                      </Paper>
-
-                      <Paper withBorder p="sm" radius="md" ml={40} style={{ backgroundColor: "light-dark(var(--mantine-color-gray-0), var(--mantine-color-dark-6))", borderLeft: '4px solid var(--mantine-color-violet-6)' }}>
-                         <Group justify="space-between">
-                            <Group gap="xs">
-                              <Badge size="sm" color="violet" variant="filled">AUTH-MW</Badge>
-                              <Text size="sm" fw={500}>validate-token</Text>
-                            </Group>
-                            <Text size="xs" fw={700} c="violet">8.2ms</Text>
-                         </Group>
-                         <Box mt="xs" style={{ height: 6, backgroundColor: "light-dark(var(--mantine-color-gray-2), var(--mantine-color-dark-4))", borderRadius: 3, overflow: 'hidden' }}>
-                            <Group justify="flex-start" h="100%" gap={0}>
-                              <Box style={{ width: '10%', height: '100%' }} />
-                              <Box style={{ width: '20%', height: '100%', backgroundColor: "var(--mantine-color-violet-6)" }} />
-                            </Group>
-                         </Box>
-                      </Paper>
-
-                      <Paper withBorder p="sm" radius="md" ml={80} style={{ backgroundColor: "light-dark(var(--mantine-color-gray-0), var(--mantine-color-dark-6))", borderLeft: '4px solid var(--mantine-color-teal-6)' }}>
-                         <Group justify="space-between">
-                            <Group gap="xs">
-                              <Badge size="sm" color="teal" variant="filled">USER-SVC</Badge>
-                              <Text size="sm" fw={500}>fetch-profile</Text>
-                            </Group>
-                            <Text size="xs" fw={700} c="teal">25.1ms</Text>
-                         </Group>
-                         <Box mt="xs" style={{ height: 6, backgroundColor: "light-dark(var(--mantine-color-gray-2), var(--mantine-color-dark-4))", borderRadius: 3, overflow: 'hidden' }}>
-                            <Group justify="flex-start" h="100%" gap={0}>
-                              <Box style={{ width: '35%', height: '100%' }} />
-                              <Box style={{ width: '60%', height: '100%', backgroundColor: "var(--mantine-color-teal-6)" }} />
-                            </Group>
-                         </Box>
-                      </Paper>
-                   </Stack>
-                </Box>
-              </Stack>
-            </Paper>
           </Stack>
         </Tabs.Panel>
 
