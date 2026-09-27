@@ -1,8 +1,6 @@
 // Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
 // SPDX-License-Identifier: MIT
 
-//go:build openfinding
-
 package api
 
 import (
@@ -17,13 +15,11 @@ import (
 	"github.com/gsoultan/gateon/internal/telemetry"
 )
 
-// OPEN: with no MaxMind licence key -- the default, so no local GeoIP database
-// -- every finding's geo lookup falls back to http://ip-api.com, in plaintext, one
-// request per uncached client address, spaced a second apart. The unlisted-route
-// detector has no config gate, so this runs on every analysis pass of a default
-// install. Removing the fallback empties the dashboard's map for installs
-// without a database, so it is a product decision.
-// Run with: go test -tags openfinding -run GeoEnrichment ./internal/api/
+// With no MaxMind licence key -- the default, so no local GeoIP database --
+// every finding's geo lookup fell back to http://ip-api.com, in plaintext, one
+// request per uncached client address, spaced a second apart, on every
+// analysis pass. Found by the 2026-09-27 AI-analysis review as an open
+// finding; the owner chose local-only lookups.
 
 // TestGeoEnrichmentKeepsClientAddressesLocal: five internet clients each ask
 // for a path no route serves -- ordinary background scanning.

@@ -224,6 +224,19 @@ Addresses not in `mgmt_whitelist_ips` lose the management port, as the setting
 always said they would. Check the list before upgrading. The flag is still
 never switched on against an empty list.
 
+### Client addresses are no longer sent to ip-api.com — **without a GeoIP database, findings have no location**
+
+With no local MaxMind database -- the default, since the database needs a
+licence key -- every client address the anomaly analysis looked up was sent in
+plaintext to `http://ip-api.com`, one request a second on the analysis path.
+Client addresses are personal data, and nobody configured that service. Geo
+lookups are now local only: without a database a finding's location is unknown,
+and the dashboard's map says so and where locations come from.
+
+**Who is affected:** installs without a GeoLite2 database, whose map showed
+locations from ip-api.com. Add a MaxMind licence key (Settings → GeoIP, or
+`geoip.maxmind_license_key`) to get them back from a local database.
+
 ### Automatic kernel rate limits lapse five minutes after they were last set — **they never lapsed**
 
 With eBPF on, the WAF (a request scoring 10 or more), the HTTP rate limiter (a

@@ -8,7 +8,6 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -29,14 +28,6 @@ import (
 // GeoLite2-City database is ~70 MiB; 256 MiB leaves generous headroom while
 // still refusing an archive that decompresses without end.
 const maxMMDBBytes int64 = 256 << 20
-
-type publicIPInfo struct {
-	Status      string  `json:"status"`
-	CountryCode string  `json:"countryCode"`
-	City        string  `json:"city"`
-	Lat         float64 `json:"lat"`
-	Lon         float64 `json:"lon"`
-}
 
 // MaxMind GeoLite2 edition identifiers and their default on-disk locations.
 const (
@@ -61,10 +52,6 @@ var (
 	countryCache *lru.ARCCache
 	asnCache     *lru.ARCCache
 	geoCacheOnce sync.Once
-
-	ipCache   = make(map[string]publicIPInfo)
-	cacheMu   sync.RWMutex
-	lastFetch time.Time
 
 	publicIPCache   string
 	lastIPFetch     time.Time
@@ -189,7 +176,10 @@ func ResolveIPInfoFast(ipStr string) (country, city string, lat, lon float64) {
 	return ResolveIPInfoCustom(context.Background(), ipStr, true)
 }
 
-// ResolveIPInfoCustom resolves an IP address to country code, city name, latitude and longitude.
+// ResolveIPInfoCustom resolves an IP address to country code, city name,
+// latitude and longitude from the local database only; "XX" when there is none
+// or it does not know the address. fastOnly is kept for callers and no longer
+// changes anything: every lookup is local.
 func ResolveIPInfoCustom(ctx context.Context, ipStr string, fastOnly bool) (country, city string, lat, lon float64) {
 	geoMu.RLock()
 	dbLoaded := geoDB != nil
@@ -223,86 +213,13 @@ func ResolveIPInfoCustom(ctx context.Context, ipStr string, fastOnly bool) (coun
 	}
 	geoMu.RUnlock()
 
-	// Fallback to public API if DB is missing or IP not found in DB
-	// Only for non-local IPs
-	if !fastOnly && isPublicIP(ipStr) {
-		return resolveIPPublic(ctx, ipStr)
-	}
-
+	// Unknown, not asked about elsewhere. Without a local database every
+	// client address used to be sent in plaintext to http://ip-api.com, one
+	// request a second on the analysis path: personal data shipped to a third
+	// party nobody configured, on every default install (the database needs a
+	// licence key). Locations need a local MaxMind database; see the GeoIP
+	// settings.
 	return "XX", "", 0, 0
-}
-
-func isPublicIP(ipStr string) bool {
-	ip := net.ParseIP(ipStr)
-	if ip == nil {
-		return false
-	}
-	if ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsPrivate() {
-		return false
-	}
-	return true
-}
-
-func resolveIPPublic(ctx context.Context, ipStr string) (country, city string, lat, lon float64) {
-	cacheMu.RLock()
-	if info, ok := ipCache[ipStr]; ok {
-		cacheMu.RUnlock()
-		return info.CountryCode, info.City, info.Lat, info.Lon
-	}
-	cacheMu.RUnlock()
-
-	// Rate limit: 1 request per second to public API
-	cacheMu.Lock()
-	elapsed := time.Since(lastFetch)
-	if elapsed < time.Second {
-		wait := time.Second - elapsed
-		cacheMu.Unlock()
-		time.Sleep(wait)
-		cacheMu.Lock()
-		lastFetch = time.Now()
-		cacheMu.Unlock()
-	} else {
-		lastFetch = time.Now()
-		cacheMu.Unlock()
-	}
-
-	url := fmt.Sprintf("http://ip-api.com/json/%s", ipStr)
-	resp, err := httpGet(ctx, url, 2*time.Second)
-	if err != nil {
-		return "XX", "", 0, 0
-	}
-	defer resp.Body.Close()
-
-	var info publicIPInfo
-	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
-		return "XX", "", 0, 0
-	}
-
-	if info.Status != "success" {
-		return "XX", "", 0, 0
-	}
-
-	cacheMu.Lock()
-	if len(ipCache) > 1000 { // Simple cache eviction
-		for k := range ipCache {
-			delete(ipCache, k)
-			break
-		}
-	}
-	ipCache[ipStr] = info
-	cacheMu.Unlock()
-
-	return info.CountryCode, info.City, info.Lat, info.Lon
-}
-
-// Wrapper for http.Get with timeout and context
-func httpGet(ctx context.Context, url string, timeout time.Duration) (*http.Response, error) {
-	client := &http.Client{Timeout: timeout}
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
-	if err != nil {
-		return nil, err
-	}
-	return client.Do(req)
 }
 
 func initGeoCaches() {
