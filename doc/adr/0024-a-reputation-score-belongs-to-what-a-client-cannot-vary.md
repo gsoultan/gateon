@@ -168,10 +168,11 @@ call; none is in code this change owns, so each is recorded rather than fixed:
   `exploit_scan` with an address and no fingerprint, so their penalties land
   under the bare address, which nothing on the request path reads.
 - `internal/telemetry/zerotrust.go` (`impossible_travel`,
-  `device_posture_change`) and the detector's graph threats record a
-  fingerprint and no address, so their penalties land under `Class|?`. The
-  device-posture check also compares whole JA4+ strings, which change with the
-  method, cookie and referer of each request, so ordinary browsing raises it.
+  `device_posture_change`) records a fingerprint and no address, as does the
+  detector's one-fingerprint-many-addresses threat when no trace supplies an
+  address, so their penalties land under `Class|?`. The device-posture check
+  also compares whole JA4+ strings, which change with the method, cookie and
+  referer of each request, so ordinary browsing raises it.
 - `internal/middleware/standard.go` (the trace's trust score) reads
   `GetReputation` of the bare JA4+ or the address, and `otel.go` asserts
   `rs.Fingerprint.(string)` on a `*ClientFingerprint` and falls back to the
