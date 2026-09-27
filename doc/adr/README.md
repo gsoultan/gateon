@@ -35,6 +35,7 @@ ADRs follow a lightweight [MADR](https://adr.github.io/madr/)-style format:
 | [0022](./0022-traces-are-archived-an-hour-at-a-time.md) | Traces are archived an hour at a time, in files named for the hour | Accepted |
 | [0023](./0023-the-trace-archive-has-a-directory-per-node.md) | The trace archive has a directory per node, and every node reads them all | Accepted |
 | [0024](./0024-a-reputation-score-belongs-to-what-a-client-cannot-vary.md) | A reputation score belongs to what a client cannot vary per request | Accepted |
+| [0025](./0025-a-finding-limits-an-address-only-for-harmful-traffic-and-only-when-it-repeats.md) | A finding limits an address only for harmful traffic, and only when it repeats | Accepted |
 
 ## Conventions
 
