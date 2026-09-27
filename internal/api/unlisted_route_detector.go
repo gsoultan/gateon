@@ -354,7 +354,7 @@ func routesServing(routes []*gateonv1.Route, ep *gateonv1.EntryPoint, host strin
 	case len(anyHost) > 0:
 		return anyHost, "on entrypoint " + epl
 	default:
-		return all, fmt.Sprintf("on entrypoint %s, all of them for other hosts", epl)
+		return all, fmt.Sprintf("on entrypoint %s, where every route names another host", epl)
 	}
 }
 

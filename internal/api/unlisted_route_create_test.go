@@ -192,6 +192,25 @@ func TestUnlistedRouteFixPointsAtTheServiceOfTheHost(t *testing.T) {
 	}
 }
 
+// TestUnlistedRouteFixSaysWhenEveryRouteThereIsForAnotherHost: with no route
+// for the request's host and none that serves any host, the choice is the
+// weakest one the fix makes, and the answer has to say so.
+func TestUnlistedRouteFixSaysWhenEveryRouteThereIsForAnotherHost(t *testing.T) {
+	f := newUnlistedFixture(t, []*gateonv1.Route{
+		{Id: "api-1", Rule: "Host(`api.example.com`) && PathPrefix(`/v1`)", ServiceId: "svc-api", Entrypoints: []string{"websecure"}},
+	})
+	resp := f.apply(t, t.Context(), unlistedFinding("/new-page", "websecure", "app.example.com"))
+	if !resp.GetSuccess() {
+		t.Fatalf("the fix was refused: %s", resp.GetMessage())
+	}
+	if created := f.routesWithRule(t, "Path(`/new-page`)"); len(created) != 1 || created[0].GetServiceId() != "svc-api" {
+		t.Fatalf("created %v, want one route to svc-api", created)
+	}
+	if !strings.Contains(resp.GetMessage(), "on entrypoint Public HTTPS, where every route names another host") {
+		t.Errorf("message does not say the only routes there are for other hosts: %s", resp.GetMessage())
+	}
+}
+
 // TestUnlistedRouteFixFallsBackToTheMostUsedService: when more than one service
 // serves the entrypoint, the one most of its routes use, and the message says
 // it was a choice.
