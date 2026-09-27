@@ -425,11 +425,11 @@ const DiagnosticsPage: React.FC = () => {
                 </Box>
                 <Stack gap={4}>
                   <Group justify="space-between">
-                    <Tooltip label="Enable via -ai-model flag at startup">
+                    <Tooltip label="The latency forecast the ai_predictive load-balancing policy weighs backends by. Load a custom WASM model with --ai-model.">
                       <Text size="xs" c="dimmed" fw={800} style={{ textTransform: "uppercase", cursor: 'help' }}>Predictive AI</Text>
                     </Tooltip>
                     <Badge size="xs" color={data.system.titan.aiPredictorEnabled ? "indigo" : "gray"}>
-                      {data.system.titan.aiPredictorEnabled ? "LEARNING" : "OFF"}
+                      {data.system.titan.aiPredictorEnabled ? "ON" : "OFF"}
                     </Badge>
                   </Group>
                   <Text fw={900} size="xl">{data.system.titan.aiModelStatus || "Inactive"}</Text>
@@ -443,15 +443,17 @@ const DiagnosticsPage: React.FC = () => {
                 </Box>
                 <Stack gap={4}>
                   <Group justify="space-between">
-                    <Tooltip label="Quantum-Safe ML-KEM and ML-DSA active">
+                    <Tooltip label="TLS 1.3 handshakes offer hybrid post-quantum key exchange (X25519MLKEM768), Go's default. Certificates and signatures are classical.">
                       <Text size="xs" c="dimmed" fw={800} style={{ textTransform: "uppercase", cursor: 'help' }}>Quantum Security</Text>
                     </Tooltip>
                     <Badge size="xs" color={data.system.titan.pqcEnabled ? "teal" : "gray"}>
-                      {data.system.titan.pqcEnabled ? "ENABLED" : "OFF"}
+                      {data.system.titan.pqcEnabled ? "OFFERED" : "OFF"}
                     </Badge>
                   </Group>
-                  <Text fw={900} size="xl">ML-KEM / ML-DSA</Text>
-                  <Text size="10px" c="dimmed">Post-Quantum Cryptography Active</Text>
+                  <Text fw={900} size="xl">ML-KEM key exchange</Text>
+                  <Text size="10px" c="dimmed">
+                    {data.system.titan.pqcEnabled ? "Offered to TLS 1.3 clients" : "Turned off (GODEBUG=tlsmlkem=0)"}
+                  </Text>
                 </Stack>
               </Paper>
 

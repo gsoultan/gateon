@@ -166,3 +166,23 @@ func TestAModelThatCannotAnswerIsRefused(t *testing.T) {
 		}
 	}
 }
+
+// TestActiveModelNamesWhatIsAnswering backs the dashboard's model status: it
+// said "Running (WASM)" for any installed predictor, including the built-in
+// one, which never runs as WASM.
+func TestActiveModelNamesWhatIsAnswering(t *testing.T) {
+	ctx := context.Background()
+	if err := InitGlobalPredictor(ctx, wasmModel(modelSpec{start: "_initialize", initSets: 0.25})); err != nil {
+		t.Fatalf("install a custom model: %v", err)
+	}
+	t.Cleanup(func() { _ = InitGlobalPredictor(ctx, DefaultModelWasm) })
+	if got := ActiveModel(); got != "Custom WASM model" {
+		t.Errorf("with a custom WASM model installed: %q, want %q", got, "Custom WASM model")
+	}
+	if err := InitGlobalPredictor(ctx, DefaultModelWasm); err != nil {
+		t.Fatal(err)
+	}
+	if got := ActiveModel(); got != "Built-in forecast" {
+		t.Errorf("with the built-in model installed: %q, want %q", got, "Built-in forecast")
+	}
+}

@@ -202,6 +202,21 @@ func GlobalPredictor() TrafficPredictor {
 	return *p
 }
 
+// ActiveModel names the installed traffic predictor for the dashboard: which
+// model is answering, not merely that one is installed.
+func ActiveModel() string {
+	switch GlobalPredictor().(type) {
+	case nil:
+		return "Not loaded"
+	case *NativePredictor:
+		return "Built-in forecast"
+	case *WasmTransformerPredictor:
+		return "Custom WASM model"
+	default:
+		return "Custom model"
+	}
+}
+
 // isDefaultModel reports whether wasmBytes is the embedded default model.
 //
 // This used to compare lengths. Any custom model that happened to compile to

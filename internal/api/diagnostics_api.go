@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -436,19 +437,14 @@ func (s *ApiService) getSystemInfo(ctx context.Context) *gateonv1.SystemInfo {
 		titanStats.PhantomEngine = engine
 		titanStats.ActivePhantomPorts = int32(ports)
 	}
-	if ai.GlobalPredictor() != nil {
-		titanStats.AiPredictorEnabled = true
-		titanStats.AiModelStatus = "Running (WASM)"
-	} else {
-		titanStats.AiModelStatus = "Not Loaded"
-	}
+	titanStats.AiPredictorEnabled = ai.GlobalPredictor() != nil
+	titanStats.AiModelStatus = ai.ActiveModel()
 	if s.EbpfManager != nil {
 		if stats, err := s.EbpfManager.GetMapStats(); err == nil {
 			titanStats.ShunnedIpCount = int32(stats.ShunnedIPsCount)
 		}
 	}
-	// circl library is always available for PQC in this build
-	titanStats.PqcEnabled = true
+	titanStats.PqcEnabled = tlsOffersPostQuantumKeyExchange()
 
 	if s.Governor != nil {
 		active, memHooks, cpuHooks, memPressure, cpuPressure := s.Governor.GetStatus(ctx)
@@ -1428,4 +1424,19 @@ func (s *ApiService) TriggerWafUpdate(ctx context.Context, _ *gateonv1.TriggerWa
 	s.logAudit(ctx, "update", "waf", "Triggered manual WAF rules update")
 
 	return &gateonv1.TriggerWafUpdateResponse{Success: true, Message: "WAF rules updated successfully"}, nil
+}
+
+// tlsOffersPostQuantumKeyExchange reports whether TLS 1.3 handshakes offer the
+// hybrid ML-KEM key exchanges. They are Go's default and nothing in the gateway
+// sets CurvePreferences, so they are offered unless GODEBUG=tlsmlkem=0 turned
+// them off. That is all the post-quantum cryptography the gateway does: the
+// panel used to report "ML-KEM / ML-DSA active" unconditionally, and no
+// certificate or signature anywhere uses ML-DSA.
+func tlsOffersPostQuantumKeyExchange() bool {
+	for _, setting := range strings.Split(os.Getenv("GODEBUG"), ",") {
+		if strings.TrimSpace(setting) == "tlsmlkem=0" {
+			return false
+		}
+	}
+	return true
 }
