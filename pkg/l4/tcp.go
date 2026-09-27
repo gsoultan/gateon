@@ -238,7 +238,7 @@ func (p *TCPBackendPool) ProxyTCP(ctx context.Context, client net.Conn) {
 	defer backend.Close()
 
 	if p.proxyProtocol {
-		if err := writeProxyHeader(backend, client.RemoteAddr(), backend.RemoteAddr()); err != nil {
+		if err := writeProxyHeader(backend, client.RemoteAddr(), client.LocalAddr()); err != nil {
 			_ = client.Close()
 			return
 		}
@@ -361,6 +361,12 @@ func copyPooled(dst io.Writer, src io.Reader) {
 
 // writeProxyHeader sends HAProxy PROXY protocol v1 header so the backend sees the original client IP.
 // Format: "PROXY TCP4 src_ip dst_ip src_port dst_port\r\n" (or TCP6 for IPv6).
+//
+// The destination is serverAddr, the address the client connected to -- the
+// client connection's local address. It was the backend's own address, which
+// told the backend nothing it did not know, and came from a different socket
+// than the source, so a client and a backend of different address families
+// produced a header naming one of each.
 func writeProxyHeader(backend net.Conn, clientAddr, serverAddr net.Addr) error {
 	srcIP, srcPort := parseAddr(clientAddr)
 	dstIP, dstPort := parseAddr(serverAddr)
