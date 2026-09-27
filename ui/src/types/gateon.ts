@@ -844,6 +844,10 @@ export type Anomaly = {
   score?: number;
   routeId?: string;
   requestUri?: string;
+  // Where an unrouted request arrived: the entrypoint (its name, or its id
+  // when it has none) and the host it named. Set on unlisted_route findings.
+  entrypoint?: string;
+  host?: string;
   mitigated?: boolean;
   category?: string;
   actionTaken?: string;

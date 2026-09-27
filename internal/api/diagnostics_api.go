@@ -549,62 +549,86 @@ func (s *ApiService) getRecentTLSErrors(epNames map[string]string) []*gateonv1.H
 	return diagErrors
 }
 
+// Finding types the detectors emit in more than one place and that have a fix.
+const (
+	findingSecurityThreat = "security_threat"
+	findingHighTraffic    = "high_traffic"
+	findingBruteForce     = "brute_force_attempt"
+	findingSecurityScan   = "security_scan"
+)
+
+// recommendationFix applies the recommendation of one type of finding.
+type recommendationFix func(s *ApiService, ctx context.Context, req *gateonv1.ApplyRecommendationRequest) (*gateonv1.ApplyRecommendationResponse, error)
+
+// recommendationFixes are the finding types ApplyRecommendation acts on. The
+// dashboard offers "Apply automatic fix" for exactly these -- the list in
+// ui/src/components/SecurityCenter/automaticFixes.ts, which a test holds to this
+// one. It used to offer the button on every finding, and for nine types the
+// click could only answer that the fix was not implemented.
+var recommendationFixes = map[string]recommendationFix{
+	"waf_block":           fixWAFFinding,
+	"waf_blocked":         fixWAFFinding,
+	"waf_violation":       fixWAFFinding,
+	findingSecurityThreat: fixWAFFinding,
+	"sqli_detected":       fixWAFFinding,
+	"xss_detected":        fixWAFFinding,
+
+	findingHighTraffic:              fixByBlockingSource,
+	findingBruteForce:               fixByBlockingSource,
+	findingSecurityScan:             fixByBlockingSource,
+	"scanner":                       fixByBlockingSource,
+	"slow_client_anomaly":           fixByBlockingSource,
+	"security_block_recommendation": fixByBlockingSource,
+
+	"management_access_violation": func(s *ApiService, ctx context.Context, _ *gateonv1.ApplyRecommendationRequest) (*gateonv1.ApplyRecommendationResponse, error) {
+		return s.applyDisablePublicManagementRecommendation(ctx)
+	},
+	"shadowed_route": func(s *ApiService, ctx context.Context, req *gateonv1.ApplyRecommendationRequest) (*gateonv1.ApplyRecommendationResponse, error) {
+		return s.applyFixShadowedRouteRecommendation(ctx, req.GetSource())
+	},
+	"unlisted_route": (*ApiService).applyCreateRouteRecommendation,
+	"geofence_violation": func(s *ApiService, ctx context.Context, req *gateonv1.ApplyRecommendationRequest) (*gateonv1.ApplyRecommendationResponse, error) {
+		return s.applyBlockCountryRecommendation(ctx, req.GetSource())
+	},
+	"security_vulnerability": func(s *ApiService, ctx context.Context, req *gateonv1.ApplyRecommendationRequest) (*gateonv1.ApplyRecommendationResponse, error) {
+		return s.applyWafHardeningRecommendation(ctx, req.GetSource())
+	},
+	"cors_violation": func(s *ApiService, ctx context.Context, req *gateonv1.ApplyRecommendationRequest) (*gateonv1.ApplyRecommendationResponse, error) {
+		if req.GetThreatId() == "" {
+			return refuseFix("Threat ID is required for CORS resolution"), nil
+		}
+		return s.applyCORSRecommendation(ctx, req.GetThreatId())
+	},
+}
+
+func fixWAFFinding(s *ApiService, ctx context.Context, req *gateonv1.ApplyRecommendationRequest) (*gateonv1.ApplyRecommendationResponse, error) {
+	if req.GetThreatId() != "" {
+		return s.applyWafExclusionRecommendation(ctx, req.GetThreatId())
+	}
+	return s.applyBlockIPRecommendation(ctx, req.GetSource())
+}
+
+func fixByBlockingSource(s *ApiService, ctx context.Context, req *gateonv1.ApplyRecommendationRequest) (*gateonv1.ApplyRecommendationResponse, error) {
+	s.mitigateFingerprintFromThreat(ctx, req.GetThreatId())
+	return s.applyBlockIPRecommendation(ctx, req.GetSource())
+}
+
 func (s *ApiService) ApplyRecommendation(ctx context.Context, req *gateonv1.ApplyRecommendationRequest) (*gateonv1.ApplyRecommendationResponse, error) {
 	if req == nil {
 		return &gateonv1.ApplyRecommendationResponse{Success: false, Message: "Request is required"}, nil
 	}
-
-	s.logAudit(ctx, "apply_recommendation", "diagnostics", fmt.Sprintf("Applied resolution for %s: %s", req.AnomalyType, req.Source))
-
-	var resp *gateonv1.ApplyRecommendationResponse
-	var err error
-
-	switch req.AnomalyType {
-	case "waf_block", "waf_blocked", "waf_violation", "security_threat", "sqli_detected", "xss_detected":
-		if req.ThreatId != "" {
-			resp, err = s.applyWafExclusionRecommendation(ctx, req.ThreatId)
-		} else {
-			// Try to also mitigate fingerprint if possible
-			s.mitigateFingerprintFromThreat(ctx, req.ThreatId)
-			resp, err = s.applyBlockIPRecommendation(ctx, req.Source)
-		}
-
-	case "high_traffic", "brute_force_attempt", "security_scan", "scanner", "slow_client_anomaly", "security_block_recommendation":
-		s.mitigateFingerprintFromThreat(ctx, req.ThreatId)
-		resp, err = s.applyBlockIPRecommendation(ctx, req.Source)
-
-	case "management_access_violation":
-		resp, err = s.applyDisablePublicManagementRecommendation(ctx)
-
-	case "shadowed_route":
-		resp, err = s.applyFixShadowedRouteRecommendation(ctx, req.Source)
-
-	case "unlisted_route":
-		resp, err = s.applyCreateRouteRecommendation(ctx, req.Source)
-
-	case "geofence_violation":
-		resp, err = s.applyBlockCountryRecommendation(ctx, req.Source)
-
-	case "security_vulnerability":
-		resp, err = s.applyWafHardeningRecommendation(ctx, req.Source)
-
-	case "cors_violation":
-		if req.ThreatId != "" {
-			resp, err = s.applyCORSRecommendation(ctx, req.ThreatId)
-		} else {
-			resp = &gateonv1.ApplyRecommendationResponse{Success: false, Message: "Threat ID is required for CORS resolution"}
-		}
-
-	default:
-		resp = &gateonv1.ApplyRecommendationResponse{
-			Success: false,
-			Message: fmt.Sprintf("Automatic resolution for '%s' is not implemented yet. Please follow the recommendation manually.", req.AnomalyType),
+	resp := refuseFix(fmt.Sprintf("Automatic resolution for '%s' is not implemented yet. Please follow the recommendation manually.", req.GetAnomalyType()))
+	if fix, ok := recommendationFixes[req.GetAnomalyType()]; ok {
+		var err error
+		if resp, err = fix(s, ctx, req); err != nil {
+			resp = refuseFix(err.Error())
 		}
 	}
-
-	if err != nil {
-		return &gateonv1.ApplyRecommendationResponse{Success: false, Message: err.Error()}, nil
-	}
+	// What happened, not what was asked for: this entry used to read "Applied
+	// resolution" before anything had run, including for fixes that did
+	// nothing and for types that have none.
+	s.logAudit(ctx, "apply_recommendation", "diagnostics", fmt.Sprintf("Recommendation for %s (%s): success=%t: %s",
+		req.GetAnomalyType(), req.GetSource(), resp.GetSuccess(), resp.GetMessage()))
 	return resp, nil
 }
 
@@ -1272,24 +1296,6 @@ func (s *ApiService) applyBlockCountryRecommendation(ctx context.Context, countr
 	return &gateonv1.ApplyRecommendationResponse{
 		Success: true,
 		Message: fmt.Sprintf("Country %s has been added to the blocklist.", countryCode),
-	}, nil
-}
-
-func (s *ApiService) applyCreateRouteRecommendation(ctx context.Context, path string) (*gateonv1.ApplyRecommendationResponse, error) {
-	// For unlisted_route, path is passed in 'source' (we updated detector to set RequestUri but ApplyRecommendationRequest uses source)
-	// Wait, I should check what is passed in req.Source in ApplyRecommendation
-	if path == "" {
-		return &gateonv1.ApplyRecommendationResponse{Success: false, Message: "Path is required"}, nil
-	}
-
-	// Automated route creation is complex, for now we suggest blocking the IP if it's suspicious
-	// or directing the user to the Route creation page.
-	// But the requirement is "fully implemented".
-	// Let's implement a simple "Trap" route if it looks like a scanner, or a placeholder route.
-
-	return &gateonv1.ApplyRecommendationResponse{
-		Success: true,
-		Message: fmt.Sprintf("Route for '%s' has been flagged. Please complete the registration in the Routes panel.", path),
 	}, nil
 }
 

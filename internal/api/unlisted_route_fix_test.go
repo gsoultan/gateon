@@ -1,8 +1,6 @@
 // Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
 // SPDX-License-Identifier: MIT
 
-//go:build openfinding
-
 package api
 
 import (
@@ -18,18 +16,19 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// OPEN, needs a product decision. The Security Hub's "Apply automatic fix" on
-// an unlisted_route anomaly is answered with success -- the dashboard shows
-// "Recommendation applied" and "Route for '<source>' has been flagged. Please
-// complete the registration in the Routes panel." -- and the audit log records
-// "Applied resolution", but applyCreateRouteRecommendation changes nothing: no
-// route, no middleware, no global setting, nothing a Routes panel could show.
-// The source it names as a route is the client's IP: UnlistedRouteDetector sets
-// Anomaly.Source to tr.SourceIP, and the dashboard sends anomaly.source.
+// The Security Hub's "Apply automatic fix" on an unlisted_route anomaly was
+// answered with success -- the dashboard showed "Recommendation applied" and
+// "Route for '<source>' has been flagged. Please complete the registration in
+// the Routes panel." -- and the audit log recorded "Applied resolution", but
+// applyCreateRouteRecommendation changed nothing: no route, no middleware, no
+// global setting, nothing a Routes panel could show. The source it named as a
+// route was the client's IP: UnlistedRouteDetector sets Anomaly.Source to
+// tr.SourceIP, and the dashboard sent anomaly.source.
 //
-// Either decision satisfies this test: make the fix do something, or answer
-// Success=false with an honest message (and stop offering the button for this
-// type). What it rejects is reporting a no-op as applied.
+// Decided: the fix creates a paused route for the finding's path (the tests
+// below). A request that carries only what the dashboard used to send -- no
+// path -- has nothing to route and must say so. What this test rejects is
+// reporting a no-op as applied.
 func TestApplyRecommendationUnlistedRouteSucceedsOnlyIfItChangedSomething(t *testing.T) {
 	ctx := t.Context()
 	stores := newFixStores(t)

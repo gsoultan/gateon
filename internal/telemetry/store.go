@@ -421,6 +421,14 @@ type TraceRecord struct {
 	RouteDelay      float64 `json:"routeDelayMs"`
 	MiddlewareDelay float64 `json:"middlewareDelayMs"`
 	ServiceDelay    float64 `json:"serviceDelayMs"`
+
+	// Host is the host the request named, taken from RequestURI when the
+	// trace is recorded (see requestHost). It is stored on its own because the
+	// analysis reads summary traces, which leave RequestURI -- query string and
+	// all -- undecoded. omitempty: traces written before it existed decode to
+	// "", which every reader treats as "not recorded".
+	Host string `json:"host,omitempty"`
+
 	// Internal fields for lazy formatting in background worker
 	rawReqHeader  map[string][]string
 	rawRespHeader map[string][]string
@@ -2862,6 +2870,7 @@ func UnmarshalTraceSummary(data []byte, tr *TraceRecord) error {
 		Timestamp       time.Time `json:"timestamp"`
 		Status          string    `json:"status"`
 		Path            string    `json:"path"`
+		Host            string    `json:"host"`
 		SourceIP        string    `json:"sourceIp"`
 		Method          string    `json:"method"`
 		UserAgent       string    `json:"userAgent"`
@@ -2888,6 +2897,7 @@ func UnmarshalTraceSummary(data []byte, tr *TraceRecord) error {
 	tr.Timestamp = s.Timestamp
 	tr.Status = s.Status
 	tr.Path = s.Path
+	tr.Host = s.Host
 	tr.SourceIP = s.SourceIP
 	tr.Method = s.Method
 	tr.UserAgent = s.UserAgent

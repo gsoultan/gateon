@@ -157,6 +157,27 @@ func RecordDomainRequest(domain string, latencySeconds float64, bytesTotal uint6
 	recordDomainToStore(domain, latencySeconds, bytesTotal, time.Now())
 }
 
+// maxRecordedHostLen bounds the host a trace keeps. A DNS name is at most 253
+// bytes, and a port and IPv6 brackets add at most nine more. The Host header is
+// the client's to write, up to the server's header limit, so anything longer is
+// not a host and is not stored on every trace.
+const maxRecordedHostLen = 262
+
+// requestHost returns the host at the front of a trace's requestURI, which the
+// metrics middleware records as the request's host followed by its request
+// target (origHost + r.URL.RequestURI()). It is "" when there is none -- a
+// request with no Host, an asterisk-form target -- or when the value is too long
+// to be a host. It slices requestURI rather than copying it, and looks no
+// further than a host can reach, so recording it allocates nothing.
+func requestHost(requestURI string) string {
+	head := requestURI[:min(len(requestURI), maxRecordedHostLen+1)]
+	i := strings.IndexByte(head, '/')
+	if i <= 0 {
+		return ""
+	}
+	return requestURI[:i]
+}
+
 // RecordTrace records a trace for an operation.
 func RecordTrace(id, operationName, serviceName, routeID string, durationMs float64, timestamp time.Time, status, path, sourceIP, fingerprint, countryCode, userAgent, method, referer, requestURI, ja4, ja4h string, reqHeader, respHeader map[string][]string, recommendation string, reputation float64, entrypointDelay, routeDelay, middlewareDelay, serviceDelay float64) {
 	tr := GetTraceRecord()
@@ -175,6 +196,7 @@ func RecordTrace(id, operationName, serviceName, routeID string, durationMs floa
 	tr.Method = method
 	tr.Referer = referer
 	tr.RequestURI = requestURI
+	tr.Host = requestHost(requestURI)
 	tr.JA4 = ja4
 	tr.JA4H = ja4h
 	tr.rawReqHeader = CloneHeader(reqHeader)
@@ -208,6 +230,7 @@ func RecordTraceDetailed(id, operationName, serviceName, routeID string, duratio
 	tr.Method = method
 	tr.Referer = referer
 	tr.RequestURI = requestURI
+	tr.Host = requestHost(requestURI)
 	tr.JA4 = ja4
 	tr.JA4H = ja4h
 	tr.rawReqHeader = CloneHeader(reqHeader)
