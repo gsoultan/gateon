@@ -63,16 +63,27 @@ type runningEntrypoint struct {
 func mixedEntrypoint(t *testing.T, backend string) *runningEntrypoint {
 	t.Helper()
 	deps := mockDepsForInspection(t)
-	e := &runningEntrypoint{addr: freeAddr(t), reg: deps.ShutdownRegistry, wg: &syncutil.WaitGroup{}}
-	ep := &gateonv1.EntryPoint{
-		Id:        "mixed-tcp",
-		Address:   e.addr,
-		Type:      gateonv1.EntryPoint_TCP,
-		Protocols: []gateonv1.EntryPoint_Protocol{gateonv1.EntryPoint_TCP_PROTO},
-	}
+	ep := tcpEntrypoint(t, "mixed-tcp")
 	if backend != "" {
 		deps.L4Resolver = l4Resolver(t, ep.Id, backend)
 	}
+	return runEntrypoint(ep, deps)
+}
+
+// tcpEntrypoint is a TCP entrypoint on a free loopback port.
+func tcpEntrypoint(t *testing.T, id string) *gateonv1.EntryPoint {
+	t.Helper()
+	return &gateonv1.EntryPoint{
+		Id:        id,
+		Address:   freeAddr(t),
+		Type:      gateonv1.EntryPoint_TCP,
+		Protocols: []gateonv1.EntryPoint_Protocol{gateonv1.EntryPoint_TCP_PROTO},
+	}
+}
+
+// runEntrypoint starts ep with deps, the way cmd/gateon starts a TCP entrypoint.
+func runEntrypoint(ep *gateonv1.EntryPoint, deps *Deps) *runningEntrypoint {
+	e := &runningEntrypoint{addr: ep.Address, reg: deps.ShutdownRegistry, wg: &syncutil.WaitGroup{}}
 	startTCPServer(e.addr, ep, deps, e.wg, e.reg) // binds before it returns
 	return e
 }
@@ -260,6 +271,30 @@ func TestASilentClientOfAnEntrypointWithoutATCPRouteIsToldSo(t *testing.T) {
 		!strings.Contains(line, "bytes=0") {
 		t.Errorf("the silent unrouted client's DEBUG line does not say what happened to it: %q", line)
 	}
+}
+
+// TestATLSEntrypointWithoutARouteSaysSo: an entrypoint that terminates TLS and
+// has no route answers each connection with the line a plaintext one gives --
+// over TLS -- where it used to give the entrypoint's name and the time.
+func TestATLSEntrypointWithoutARouteSaysSo(t *testing.T) {
+	serverTLS, clientTLS := selfSignedTLS(t)
+	deps := mockDepsForInspection(t)
+	deps.TLSConfig = serverTLS
+	ep := tcpEntrypoint(t, "tls-tcp")
+	ep.Tls = &gateonv1.TlsConfig{Enabled: true}
+	e := runEntrypoint(ep, deps)
+
+	c, err := tls.DialWithDialer(&net.Dialer{Timeout: sessionBound}, "tcp", e.addr, clientTLS)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	_ = c.SetDeadline(time.Now().Add(sessionBound))
+	got, err := io.ReadAll(c)
+	if err != nil || string(got) != noRouteReply {
+		t.Errorf("a TLS client with no route for it read %q (%v), want %q", got, err, noRouteReply)
+	}
+	_ = c.Close()
+	e.drained(t)
 }
 
 // logLineWith returns the last line of logs containing s.
