@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net"
 	"os"
 	"slices"
@@ -21,7 +22,6 @@ import (
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware"
 	"github.com/gsoultan/gateon/internal/middleware/security"
-	"github.com/gsoultan/gateon/internal/security/mitigation"
 	"github.com/gsoultan/gateon/internal/security/waf"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	"github.com/gsoultan/gateon/internal/telemetry/repid"
@@ -327,47 +327,72 @@ func (s *ApiService) RunSecurityAnalysisLoop(ctx context.Context, interval time.
 			// Store results in cache so Diagnostics UI is instantaneous
 			anomalies := s.detectAnomalies(ctx, routes)
 			s.anomaliesCache.Store(&anomalies)
-
-			// Step 5: Closed-Loop Mitigation (EAGLE Phase)
-			// Automatically apply eBPF rate limits for high-confidence anomalies.
-			s.applyAutomaticMitigation(ctx, anomalies)
+			s.throttleRepeatedFindings(anomalies)
 		}
 	}
 }
 
-func (s *ApiService) applyAutomaticMitigation(ctx context.Context, anomalies []*gateonv1.Anomaly) {
-	if s.EbpfManager == nil {
+// FindingLimiter turns repeated findings against an address into a kernel rate
+// limit and forgets an address an operator released. The RL limiter
+// (ai.ReinforcementLearningLimiter) is the one in production.
+type FindingLimiter interface {
+	// ProcessFeedback records one observation of ip at confidence score, 0..1.
+	ProcessFeedback(ip string, score float64)
+	// Forget drops ip's history and lifts any limit it earned.
+	Forget(ip string)
+}
+
+// throttlingFindingTypes are the findings that may end in a kernel rate limit.
+// Both require harmful traffic of every address they name: the Neural Sentinel
+// an isolated client with harm evidence, Graph Intelligence a campaign of
+// addresses each caught attacking.
+var throttlingFindingTypes = map[string]bool{neuralSentinelType: true, graphCoordinatedType: true}
+
+// throttleRepeatedFindings reports this pass's Neural Sentinel and Graph
+// Intelligence findings to the RL limiter: one observation per address, at the
+// strongest finding's confidence.
+//
+// This replaces the loop's own throttle, which rate-limited every address such
+// a finding scored above 80 to 100 packets a second the moment it appeared --
+// one pass, one finding, no history. The RL limiter limits an address only
+// after findings on repeated passes, renews the limit while they continue,
+// lets it decay and lapse when they stop, and skips the mitigation allowlist.
+// One observation per pass, because two findings about one address in the same
+// pass are one piece of evidence seen twice, not repetition.
+func (s *ApiService) throttleRepeatedFindings(anomalies []*gateonv1.Anomaly) {
+	if s.Throttles == nil {
 		return
 	}
-
+	strongest := make(map[string]float64)
 	for _, a := range anomalies {
-		// Only mitigate high-score anomalies from the Neural Sentinel or Graph Intelligence
-		if a.Score > 80 && (a.Type == "neural_sentinel" || a.Type == "graph_coordinated_fp") {
-			// Extract IP from Source (it could be a list for graph clusters)
-			ips := strings.Split(a.Source, ", ")
-			for _, ip := range ips {
-				ip = strings.TrimSpace(ip)
-				if ip == "" || net.ParseIP(ip) == nil {
-					continue
-				}
-				// The operator's allowlist, which the anomaly detector's own
-				// throttle and every shun already honour.
-				if mitigation.IsAllowlisted(ip) {
-					continue
-				}
-
-				// Apply a strict rate limit in eBPF (e.g. 10ms interval = 100 pps)
-				// This is "soft" blocking - it allows some traffic but slows down the attacker
-				// drastically at the kernel level.
-				err := s.EbpfManager.SetAdaptiveRateLimit(ip, 10*time.Millisecond)
-				if err != nil {
-					logger.L.LogWarn("failed to apply automatic eBPF mitigation", "ip", ip, "error", err)
-				} else {
-					logger.L.LogInfo("Automatically applied eBPF rate limit for anomalous actor", "ip", ip, "score", a.Score, "type", a.Type)
-				}
-			}
+		if !throttlingFindingTypes[a.GetType()] {
+			continue
+		}
+		confidence := math.Min(1, math.Max(0, a.GetScore()/100))
+		for _, ip := range findingAddresses(a) {
+			strongest[ip] = math.Max(strongest[ip], confidence)
 		}
 	}
+	for ip, confidence := range strongest {
+		s.Throttles.ProcessFeedback(ip, confidence)
+	}
+}
+
+// findingAddresses is every address a finding names: a Graph Intelligence
+// cluster's members, or the Neural Sentinel's one. Anything that does not parse
+// as an address is dropped.
+func findingAddresses(a *gateonv1.Anomaly) []string {
+	candidates := a.GetSourceIps()
+	if len(candidates) == 0 {
+		candidates = strings.Split(a.GetSource(), ",")
+	}
+	addresses := make([]string, 0, len(candidates))
+	for _, ip := range candidates {
+		if ip = strings.TrimSpace(ip); net.ParseIP(ip) != nil {
+			addresses = append(addresses, ip)
+		}
+	}
+	return addresses
 }
 
 func (s *ApiService) refreshNetworkStatus(ctx context.Context) {
@@ -404,16 +429,6 @@ func (s *ApiService) detectAnomalies(ctx context.Context, routes []*gateonv1.Rou
 		ManagementHosts: mgmtHosts,
 		TraceSampleRate: middleware.TraceSampleRate(),
 	})
-
-	// Process neural sentinel anomalies through the RL feedback loop in eBPF.
-	if s.EbpfManager != nil {
-		for _, a := range anomalies {
-			if a.Type == "neural_sentinel" {
-				_ = s.EbpfManager.ApplyRLFeedback(a.Source, a.Score/100.0)
-			}
-		}
-	}
-
 	return anomalies
 }
 
@@ -943,6 +958,11 @@ func (s *ApiService) RemoveMitigatedThreat(ctx context.Context, req *gateonv1.Re
 		if err := s.EbpfManager.ClearAdaptiveRateLimit(source); err != nil {
 			logger.L.LogWarn("Failed to lift the kernel rate limit (might not be limited)", "error", err, "ip", source)
 		}
+	}
+	// And the history that earned the limit, or the next analysis pass would
+	// find the same address and set it again.
+	if isIP && s.Throttles != nil {
+		s.Throttles.Forget(source)
 	}
 
 	if isIP {

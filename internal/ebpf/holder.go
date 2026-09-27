@@ -26,11 +26,6 @@ var (
 type Holder struct {
 	current atomic.Value // holds *managerContainer
 
-	// rlFeedback is the reinforcement-learning feedback handler, kept here so
-	// every manager swapped in receives it, not only the one present when it
-	// was installed.
-	rlFeedback atomic.Pointer[func(ip string, score float64)]
-
 	// leases is when each adaptive rate limit set through the Holder lapses;
 	// see AdaptiveLimitLease.
 	leases limitLeases
@@ -51,20 +46,9 @@ func NewHolder(initial Manager) *Holder {
 
 // Swap atomically installs m as the active underlying manager. Passing nil
 // disables delegation so all subsequent calls become no-ops.
-//
-// m receives the feedback handler before it becomes visible, and again if a
-// different one was installed while it was being swapped in, so no ordering
-// of Swap and SetRLFeedbackHandler leaves the active manager without it.
 func (h *Holder) Swap(m Manager) {
 	h.leases.reset()
-	before := h.rlFeedback.Load()
-	if m != nil && before != nil {
-		m.SetRLFeedbackHandler(*before)
-	}
 	h.current.Store(&managerContainer{m: m})
-	if after := h.rlFeedback.Load(); m != nil && after != nil && after != before {
-		m.SetRLFeedbackHandler(*after)
-	}
 }
 
 // Current returns the active underlying manager, or nil when none is installed.
@@ -153,28 +137,6 @@ func (h *Holder) ClearAdaptiveRateLimit(ip string) error {
 		h.leases.drop(key)
 	}
 	return nil
-}
-
-// ApplyRLFeedback delegates to the active manager, if any.
-func (h *Holder) ApplyRLFeedback(ip string, score float64) error {
-	if m := h.Current(); m != nil {
-		return m.ApplyRLFeedback(ip, score)
-	}
-	return nil
-}
-
-// SetRLFeedbackHandler installs f on the active manager and on every manager
-// swapped in after it.
-//
-// It used to reach only the active manager. The server installs the handler
-// once at startup and the security supervisor builds a new manager on every
-// eBPF settings change, so the first change -- or turning eBPF on after boot
-// -- silently disconnected the closed loop until the process restarted.
-func (h *Holder) SetRLFeedbackHandler(f func(ip string, score float64)) {
-	h.rlFeedback.Store(&f)
-	if m := h.Current(); m != nil {
-		m.SetRLFeedbackHandler(f)
-	}
 }
 
 // RegisterPhantomPort delegates to the active manager, if any.

@@ -5,6 +5,8 @@ package api
 
 import (
 	"context"
+	"maps"
+	"slices"
 	"sync"
 	"time"
 
@@ -36,6 +38,7 @@ func (r *recordingLimiter) ClearAdaptiveRateLimit(ip string) error {
 		r.cleared = map[string]int{}
 	}
 	r.cleared[ip]++
+	delete(r.limits, ip)
 	return nil
 }
 
@@ -51,15 +54,20 @@ func (r *recordingLimiter) throttled(ips []string) int {
 	return n
 }
 
-func (r *recordingLimiter) Start(context.Context)                      {}
-func (r *recordingLimiter) ShunIP(string) error                        { return nil }
-func (r *recordingLimiter) UnshunIP(string) error                      { return nil }
-func (r *recordingLimiter) UpdateManagementWhitelist([]string) error   { return nil }
-func (r *recordingLimiter) SetPortKnockingSequence([]int32) error      { return nil }
-func (r *recordingLimiter) UpdateLoadBalancerBackends([]string) error  { return nil }
-func (r *recordingLimiter) ApplyRLFeedback(string, float64) error      { return nil }
-func (r *recordingLimiter) SetRLFeedbackHandler(func(string, float64)) {}
-func (r *recordingLimiter) RegisterPhantomPort(uint32) error           { return nil }
-func (r *recordingLimiter) UnregisterPhantomPort(uint32) error         { return nil }
-func (r *recordingLimiter) GetTopIPs(int) ([]ebpf.IPStat, error)       { return nil, nil }
-func (r *recordingLimiter) GetMapStats() (ebpf.MapStats, error)        { return ebpf.MapStats{}, nil }
+func (r *recordingLimiter) Start(context.Context)                     {}
+func (r *recordingLimiter) ShunIP(string) error                       { return nil }
+func (r *recordingLimiter) UnshunIP(string) error                     { return nil }
+func (r *recordingLimiter) UpdateManagementWhitelist([]string) error  { return nil }
+func (r *recordingLimiter) SetPortKnockingSequence([]int32) error     { return nil }
+func (r *recordingLimiter) UpdateLoadBalancerBackends([]string) error { return nil }
+func (r *recordingLimiter) RegisterPhantomPort(uint32) error          { return nil }
+func (r *recordingLimiter) UnregisterPhantomPort(uint32) error        { return nil }
+func (r *recordingLimiter) GetTopIPs(int) ([]ebpf.IPStat, error)      { return nil, nil }
+func (r *recordingLimiter) GetMapStats() (ebpf.MapStats, error)       { return ebpf.MapStats{}, nil }
+
+// limitedAddresses is every address with a limit in force, sorted.
+func (r *recordingLimiter) limitedAddresses() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Sorted(maps.Keys(r.limits))
+}

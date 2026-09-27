@@ -85,9 +85,12 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 	}
 	fimScanner := startFIM(ctx, &wg)
 
+	// The RL limiter is what the analysis loop reports its Neural Sentinel and
+	// Graph Intelligence findings to (api.FindingLimiter); it sets its limits
+	// through the eBPF holder, which leases them.
+	var rlLimiter *ai.ReinforcementLearningLimiter
 	if s.EbpfManager != nil {
-		rlLimiter := ai.NewReinforcementLearningLimiter(s.EbpfManager)
-		s.EbpfManager.SetRLFeedbackHandler(rlLimiter.ProcessFeedback)
+		rlLimiter = ai.NewReinforcementLearningLimiter(s.EbpfManager)
 
 		// Reclaim state for IPs that have gone quiet. The limiter's LRU already
 		// bounds memory, but an entry only evicts under pressure: without this
@@ -150,6 +153,7 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 
 		MiddlewareValidator: mwFactory,
 		SetupToken:          setupToken,
+		Throttles:           findingLimiter(rlLimiter),
 	})
 	announceSetupToken(ctx, apiService, setupToken)
 	if gov != nil {
@@ -467,4 +471,14 @@ func apiConnectHandler(apiService *api.ApiService) (string, http.Handler) {
 		api.NewConnectHandler(apiService),
 		connect.WithInterceptors(NewConnectRBACInterceptor(), api.StatusInterceptor()),
 	)
+}
+
+// findingLimiter is rl as the API's FindingLimiter, or nil when there is none:
+// a nil *ReinforcementLearningLimiter inside the interface would not compare
+// equal to nil, and the analysis loop would call it.
+func findingLimiter(rl *ai.ReinforcementLearningLimiter) api.FindingLimiter {
+	if rl == nil {
+		return nil
+	}
+	return rl
 }

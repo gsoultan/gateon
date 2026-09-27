@@ -67,6 +67,10 @@ type ApiService struct {
 	// SetupToken is the one-time token Setup requires; nil keeps setup closed.
 	SetupToken *auth.SetupToken
 
+	// Throttles is the RL limiter the analysis loop reports its findings to;
+	// see throttleRepeatedFindings. Nil throttles nothing.
+	Throttles FindingLimiter
+
 	// Performance caches for Diagnostics & Security Hub
 	publicIPCache    atomic.Pointer[string]
 	cfReachableCache atomic.Bool
@@ -324,6 +328,7 @@ func NewApiService(cfg ApiServiceConfig) *ApiService {
 
 		MiddlewareValidator: cfg.MiddlewareValidator,
 		SetupToken:          cfg.SetupToken,
+		Throttles:           cfg.Throttles,
 	}
 
 	if cfg.IPReputation != nil {

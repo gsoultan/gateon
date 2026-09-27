@@ -49,8 +49,6 @@ type EbpfManager struct {
 	attached bool
 	iface    string
 	loadErr  string
-	// RL feedback handler (injected from internal/ai to avoid circular deps)
-	rlFeedbackHandler func(ip string, score float64)
 	// attachMode records how the program attached: "native" (driver-level, the
 	// only mode that pays for itself), "generic" (SKB-level, opt-in only — see
 	// allow_generic_xdp), or "tcx"/"clsact" for the TC ingress path.
@@ -104,8 +102,6 @@ type Manager interface {
 	UpdateLoadBalancerBackends(ips []string) error
 	SetAdaptiveRateLimit(ip string, interval time.Duration) error
 	ClearAdaptiveRateLimit(ip string) error
-	ApplyRLFeedback(ip string, score float64) error
-	SetRLFeedbackHandler(h func(ip string, score float64))
 	RegisterPhantomPort(port uint32) error
 	UnregisterPhantomPort(port uint32) error
 	GetTopIPs(limit int) ([]IPStat, error)
@@ -123,25 +119,6 @@ func NewEbpfManager(conf *gateonv1.EbpfConfig) *EbpfManager {
 		config: conf,
 		maps:   make(map[string]*ebpf.Map),
 	}
-}
-
-// SetRLFeedbackHandler injects the reinforcement learning feedback processor.
-func (m *EbpfManager) SetRLFeedbackHandler(h func(ip string, score float64)) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.rlFeedbackHandler = h
-}
-
-// ApplyRLFeedback forwards security feedback to the reinforcement learning agent.
-func (m *EbpfManager) ApplyRLFeedback(ip string, score float64) error {
-	m.mu.RLock()
-	handler := m.rlFeedbackHandler
-	m.mu.RUnlock()
-
-	if handler != nil {
-		handler(ip, score)
-	}
-	return nil
 }
 
 // close detaches the XDP program and frees the loaded objects, then clears the

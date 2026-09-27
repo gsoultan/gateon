@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"github.com/gsoultan/gateon/internal/telemetry"
-	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
 // OPEN: the kernel rate limits applyAutomaticMitigation installs on
@@ -24,7 +23,7 @@ import (
 func TestAutomaticThrottleIsVisibleToTheOperator(t *testing.T) {
 	const ip = "10.60.0.3"
 	s, rec := throttleTestService(t)
-	s.applyAutomaticMitigation(t.Context(), []*gateonv1.Anomaly{{Type: throttledFinding, Score: 85, Source: ip}})
+	runPasses(s, 3, neuralFinding(ip, 95))
 	if rec.throttled([]string{ip}) != 1 {
 		t.Fatalf("precondition: the finding did not throttle %s", ip)
 	}

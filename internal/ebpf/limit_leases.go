@@ -75,9 +75,16 @@ func (l *limitLeases) takeExpired(now time.Time) []string {
 	return keys
 }
 
-// leaseKey names the kernel entry a limit for s lands in: the address for
-// IPv4, the /64 for IPv6, spelled as that network's address so that
-// ClearAdaptiveRateLimit on it removes the same entry.
+// LimitKey names the kernel entry an adaptive limit for s lands in: the
+// address for IPv4, the /64 for IPv6, spelled as that network's address so that
+// ClearAdaptiveRateLimit on it removes the same entry. Anything that keeps
+// state per limit keys it this way, or an attacker walking a /64 is a new
+// entry per address to it and one entry to the kernel.
+func LimitKey(s string) (string, bool) {
+	return leaseKey(s)
+}
+
+// leaseKey is LimitKey.
 func leaseKey(s string) (string, bool) {
 	ip, is4, err := parseAddress(s)
 	if err != nil {

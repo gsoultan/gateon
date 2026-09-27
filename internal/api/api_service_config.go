@@ -56,4 +56,9 @@ type ApiServiceConfig struct {
 	// SetupToken is the one-time token Setup requires on every transport. Nil
 	// keeps setup closed.
 	SetupToken *auth.SetupToken
+
+	// Throttles turns repeated high-confidence detector findings into kernel
+	// rate limits (the RL limiter, internal/ai). Nil leaves findings as
+	// findings: nothing is rate-limited automatically.
+	Throttles FindingLimiter
 }
