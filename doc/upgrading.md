@@ -245,6 +245,20 @@ other targets start receiving traffic. The policy costs about 0.3 µs more per
 request than before, because it now prices every target instead of only the
 first, and no longer allocates.
 
+### A custom `--ai-model` must be a WASI reactor — **a model built as a command never predicted**
+
+`make models`, and so anyone following it, built the WASM traffic model as a
+WASI command. A command's `_start` runs `main` and exits when it returns, taking
+the module with it: the model loaded without error, the log said it was
+initialised, and every prediction failed, so the balancer silently used its own
+average instead. The gateway now runs a model's `_initialize`, asks it for one
+prediction at startup, and refuses a model that cannot answer, saying why.
+
+**Who is affected:** anyone passing `--ai-model`. Rebuild the model as a reactor:
+`GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared`. A model that still
+cannot answer is logged as not installed and the predictor stays off, rather
+than being reported as running. Without `--ai-model` nothing changes.
+
 ---
 
 ## v2.7.0

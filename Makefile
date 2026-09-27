@@ -18,8 +18,12 @@ proto:
 	./scripts/buf-generate.sh
 
 ## models: compile the default WASM-based AI traffic prediction model.
+##         A reactor (-buildmode=c-shared), not a command: a command's _start
+##         exits when main returns and takes the module with it, so it can
+##         never answer a prediction. Build custom models (--ai-model) the
+##         same way.
 models:
-	GOOS=wasip1 GOARCH=wasm go build -o internal/ai/models/default/model.wasm internal/ai/models/default/main.go
+	GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -trimpath -o internal/ai/models/default/model.wasm ./internal/ai/models/default
 
 ## ebpf: compile the XDP/eBPF C program and (re)generate the bpf2go Go bindings.
 ##       Requires a Linux host with clang/llvm + libbpf headers + kernel headers.
