@@ -1359,11 +1359,23 @@ func throttleAnomaly(l ebpf.AdaptiveLimit) *gateonv1.Anomaly {
 		Category:    "kernel_rate_limit",
 		Severity:    severityMedium,
 		Timestamp:   l.SetAt.UTC().Format(time.RFC3339),
+		// The lease's end as a field of its own, so the dashboard can count
+		// down to it; it used to exist only inside the description's prose.
+		ExpiresAt: rfc3339OrEmpty(l.Expires),
 		Description: fmt.Sprintf("%s is rate-limited in the kernel to %s, after a burst of 64. Why: %s. "+
 			"Lapses at %s unless set again.", who, packetRate(l.Interval), reason, l.Expires.UTC().Format(time.RFC3339)),
 		Recommendation: "Allow lifts the limit now and resets the automatic history behind it. Left alone, it " +
 			"lapses on its own once nothing sets it again.",
 	}
+}
+
+// rfc3339OrEmpty formats t as RFC 3339 in UTC, or "" for the zero time, which
+// would otherwise read as a moment two thousand years ago.
+func rfc3339OrEmpty(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.UTC().Format(time.RFC3339)
 }
 
 // packetRate says how many packets a second an interval allows.

@@ -74,6 +74,50 @@ export function formatHourLabel(ts: number): string {
   return `${month}/${day} ${hour}:00`;
 }
 
+const SECOND_MS = 1000;
+const MINUTE_MS = 60 * SECOND_MS;
+
+// msUntilExpiry is how long until an RFC 3339 expiry, or null when there is
+// none or it cannot be read.
+function msUntilExpiry(expiresAt: string | undefined, nowMs: number): number | null {
+  if (!expiresAt) return null;
+  const at = Date.parse(expiresAt);
+  return Number.isNaN(at) ? null : at - nowMs;
+}
+
+/**
+ * When a mitigation lifts, as the mitigation list says it: "lifts in 4m",
+ * "lifts in 45s", "lifts in 1h 5m". Minutes and seconds round up, so it never
+ * says a limit lifts sooner than it does. "lifting now" once the moment has
+ * passed: the gateway sweeps expired kernel limits every 30 seconds, and one
+ * that was set again shows its new expiry on the next refresh. "" when there is
+ * no expiry.
+ */
+export function formatLiftsIn(expiresAt: string | undefined, nowMs: number): string {
+  const rem = msUntilExpiry(expiresAt, nowMs);
+  if (rem === null) return "";
+  if (rem <= 0) return "lifting now";
+  if (rem <= MINUTE_MS) return `lifts in ${Math.ceil(rem / SECOND_MS)}s`;
+  const minutes = Math.ceil(rem / MINUTE_MS);
+  if (minutes < 60) return `lifts in ${minutes}m`;
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return `lifts in ${h}h${m ? ` ${m}m` : ""}`;
+}
+
+/**
+ * How long until formatLiftsIn's text for this expiry next changes, or null
+ * when it never will. A countdown sleeps exactly that long instead of polling
+ * on an interval: once a minute while minutes are shown, once a second for the
+ * last minute, and not at all after "lifting now".
+ */
+export function msUntilLiftsInChanges(expiresAt: string | undefined, nowMs: number): number | null {
+  const rem = msUntilExpiry(expiresAt, nowMs);
+  if (rem === null || rem <= 0) return null;
+  const unit = rem <= MINUTE_MS ? SECOND_MS : MINUTE_MS;
+  return rem % unit || unit;
+}
+
 export function getCountryFlag(countryCode: string): string {
   if (!countryCode || countryCode.length !== 2 || countryCode === "XX") {
     return "🌐";

@@ -66,6 +66,10 @@ message Anomaly {
   // its path, entrypoint and host in the pass, with the latest one's time and
   // source. Zero where a detector does not count.
   int32 occurrences = 40;
+  // expires_at is when a mitigation lapses on its own unless something sets it
+  // again, RFC 3339 in UTC: the lease on a kernel_throttle row. Empty where
+  // what is listed has no expiry of its own.
+  string expires_at = 41;
 }
 
 message GossipStatus {

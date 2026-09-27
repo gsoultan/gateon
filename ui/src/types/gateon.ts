@@ -851,6 +851,9 @@ export type Anomaly = {
   host?: string;
   // How many requests this finding stands for, when the detector folds repeats.
   occurrences?: number;
+  // When a mitigation lapses on its own unless set again, RFC 3339: the lease
+  // on a kernel_throttle row. Absent where the mitigation has no expiry.
+  expiresAt?: string;
   mitigated?: boolean;
   category?: string;
   actionTaken?: string;

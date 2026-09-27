@@ -155,4 +155,43 @@ describe("ThreatExplorerTab mitigated rows", () => {
     expect(html).not.toContain(">Mitigated<");
     expect(html).toContain(">Allow<");
   });
+
+  // The expiry was only in the description, as a timestamp to read and
+  // subtract. The row counts down to the structured expires_at instead.
+  test("counts down to a kernel throttle's expiry", () => {
+    const throttle: Anomaly = {
+      id: "kernel_throttle:10.60.0.4",
+      type: "kernel_throttle",
+      severity: "medium",
+      description: "10.60.0.4 is rate-limited in the kernel to 100 packets a second.",
+      timestamp: new Date().toISOString(),
+      source: "10.60.0.4",
+      recommendation: "",
+      mitigated: true,
+      actionTaken: "throttled",
+      expiresAt: new Date(Date.now() + 4 * 60_000 - 5_000).toISOString(),
+    };
+    const blocked: Anomaly = {
+      id: "t-2",
+      type: "ip_shunning",
+      severity: "high",
+      description: "blocked",
+      timestamp: "2026-09-27T14:00:00Z",
+      source: "10.60.0.5",
+      recommendation: "",
+      mitigated: true,
+    };
+    threatsQuery = {
+      data: { threats: [throttle, blocked], totalCount: 2 },
+      isLoading: false,
+      error: null,
+      refetch: async () => undefined,
+    };
+
+    const html = render();
+
+    expect(html).toContain("lifts in 4m");
+    // A block with no expiry of its own says nothing about lifting.
+    expect(html.match(/data-testid="lifts-in"/g)?.length).toBe(1);
+  });
 });

@@ -46,7 +46,7 @@ import { ManualMitigationModal } from "./ManualMitigationModal";
 import TraceVisualizer from "../Diagnostics/TraceVisualizer";
 import { QueryError } from "../QueryError";
 import type { Anomaly } from "../../types/gateon";
-import { safeFormatDate } from "../../utils/format";
+import { formatLiftsIn, msUntilLiftsInChanges, safeFormatDate } from "../../utils/format";
 import { getSeverityColor } from "../../utils/security";
 import { notifications } from "@mantine/notifications";
 import { usePermissions } from "../../hooks/usePermissions";
@@ -58,6 +58,27 @@ const PAGE_SIZE = 15;
 // in place of a URL. See throttleAnomaly in internal/api.
 const KERNEL_THROTTLE = "kernel_throttle";
 const isKernelThrottle = (threat: Anomaly | null) => threat?.type === KERNEL_THROTTLE;
+
+// LiftsIn counts down to a mitigation's expiry and stays right while the page
+// is open. It keeps no interval: it sleeps until its own text would change
+// (msUntilLiftsInChanges), and the timer is cleared with the row.
+function LiftsIn({ expiresAt }: { expiresAt: string }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const wait = msUntilLiftsInChanges(expiresAt, now);
+    if (wait === null) return;
+    const timer = setTimeout(() => setNow(Date.now()), wait);
+    return () => clearTimeout(timer);
+  }, [expiresAt, now]);
+
+  const text = formatLiftsIn(expiresAt, now);
+  if (!text) return null;
+  return (
+    <Tooltip label={safeFormatDate(expiresAt, "MMM d, HH:mm:ss")}>
+      <Text size="xs" c="dimmed" data-testid="lifts-in">{text}</Text>
+    </Tooltip>
+  );
+}
 
 export function ThreatExplorerTab() {
   const { canWrite } = usePermissions();
@@ -242,13 +263,16 @@ export function ThreatExplorerTab() {
           </Badge>
         </Table.Td>
         <Table.Td>
-          {isKernelThrottle(threat) ? (
-            <Badge color="yellow" variant="light" size="xs">Throttled</Badge>
-          ) : (
-            <Badge color={threat.mitigated ? "teal" : "orange"} variant="light" size="xs">
-              {threat.mitigated ? "Mitigated" : "Detected"}
-            </Badge>
-          )}
+          <Stack gap={2}>
+            {isKernelThrottle(threat) ? (
+              <Badge color="yellow" variant="light" size="xs">Throttled</Badge>
+            ) : (
+              <Badge color={threat.mitigated ? "teal" : "orange"} variant="light" size="xs">
+                {threat.mitigated ? "Mitigated" : "Detected"}
+              </Badge>
+            )}
+            {threat.expiresAt && <LiftsIn expiresAt={threat.expiresAt} />}
+          </Stack>
         </Table.Td>
         <Table.Td>
           <Group gap={4}>
