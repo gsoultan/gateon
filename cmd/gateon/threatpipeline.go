@@ -83,7 +83,9 @@ func startThreatPipeline(ctx context.Context, version string, shun mitigation.Sh
 	// Only subscribe to the threat broadcaster if there is a consumer: the
 	// correlation engine and/or raw SIEM shipping.
 	if correlate || shipRaw {
-		go consumeThreats(ctx, signals, shipper, shipRaw, correlate)
+		go consumeThreats(ctx, threatSinks{
+			signals: signals, shipper: shipper, shipRaw: shipRaw, correlate: correlate,
+		})
 	}
 }
 
@@ -193,7 +195,7 @@ func initMitigator(shun mitigation.Shunner) *mitigation.Responder {
 
 // consumeThreats subscribes to the threat broadcaster and feeds the correlation
 // engine, optionally shipping raw threats too.
-func consumeThreats(ctx context.Context, signals chan<- correlation.Signal, shipper *siem.Shipper, shipRaw, correlate bool) {
+func consumeThreats(ctx context.Context, sinks threatSinks) {
 	ch := telemetry.ThreatBroadcaster.Subscribe()
 	defer telemetry.ThreatBroadcaster.Unsubscribe(ch)
 
@@ -202,15 +204,33 @@ func consumeThreats(ctx context.Context, signals chan<- correlation.Signal, ship
 		case <-ctx.Done():
 			return
 		case t := <-ch:
-			if shipRaw {
-				shipper.Ship(threatToEvent(&t))
-			}
-			if correlate {
-				select {
-				case signals <- threatToSignal(&t):
-				default: // drop on backpressure; never block the broadcaster
-				}
-			}
+			sinks.forward(&t)
+		}
+	}
+}
+
+// threatSinks is where a recorded threat goes after the store: the SIEM
+// exporter, as a raw event, and the correlation engine, as a signal.
+type threatSinks struct {
+	signals   chan<- correlation.Signal
+	shipper   *siem.Shipper
+	shipRaw   bool
+	correlate bool
+}
+
+// forward hands one threat to each sink that wants it.
+//
+// An unattributed threat is shipped but not correlated: an incident's response
+// degrades the source's reputation and can shun it, and this threat's source
+// did not choose to send it (see telemetry.SecurityThreat.Unattributed).
+func (s threatSinks) forward(t *telemetry.SecurityThreat) {
+	if s.shipRaw {
+		s.shipper.Ship(threatToEvent(t))
+	}
+	if s.correlate && !t.Unattributed {
+		select {
+		case s.signals <- threatToSignal(t):
+		default: // drop on backpressure; never block the broadcaster
 		}
 	}
 }

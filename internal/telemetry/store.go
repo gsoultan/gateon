@@ -467,6 +467,15 @@ type SecurityThreat struct {
 	Recommendation  string    `json:"recommendation"`
 	TriggeredRules  string    `json:"triggeredRules"`
 	Reputation      float64   `json:"reputation"`
+	// Unattributed marks a threat whose source did not choose to send it: a
+	// cross-site subresource load that a page on another site made a visitor's
+	// browser issue (see the honeypot). It is recorded, counted, broadcast and
+	// shipped like any other threat, and held against nobody -- no reputation
+	// penalty, no escalation to a fingerprint or address block, no correlation
+	// signal -- because the only identity it carries is the visitor's, and each
+	// of those would be a ban on the visitor. Not persisted; the threat's
+	// Details say it instead.
+	Unattributed bool `json:"unattributed,omitzero"`
 	// Internal fields for lazy formatting in background worker
 	rawReqHeader  map[string][]string
 	rawRespHeader map[string][]string
@@ -1974,7 +1983,9 @@ func (s *pathStatsStore) processThreat(st *SecurityThreat) {
 		st.ActionTaken = ActionDetected
 	}
 	st.Mitigated = isMitigatingAction(st.ActionTaken)
-	escalateMitigation(st)
+	if !st.Unattributed {
+		escalateMitigation(st)
+	}
 	enrichThreatOrigin(st)
 
 	// Log to audit trail
@@ -2004,7 +2015,7 @@ func (s *pathStatsStore) processThreat(st *SecurityThreat) {
 	// the same function on purpose: if they ever diverge, every lookup returns
 	// the neutral 100 and the control reports "clean" while checking nothing.
 	repID := repid.For(st.Fingerprint, st.SourceIP)
-	if repID != "" {
+	if repID != "" && !st.Unattributed {
 		DecreaseReputation(repID, st.Score/2, st.Type) // Penalty is half the threat score
 	}
 

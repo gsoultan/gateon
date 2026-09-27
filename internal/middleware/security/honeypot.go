@@ -249,9 +249,13 @@ func ReleaseHoneypotBan(ip string) bool {
 // drops loopback sources for the same reason.
 //
 // The request itself is still refused; only the durable ban is skipped.
-func blockHoneypotIP(clientIP string, until time.Time) {
+//
+// It reports the key the ban is filed under -- the address, or an IPv6
+// client's /64 -- and whether a ban was recorded at all, so the log line and
+// the threat record say what actually happened.
+func blockHoneypotIP(clientIP string, until time.Time) (key string, banned bool) {
 	if httputil.IsLoopback(clientIP) {
-		return
+		return "", false
 	}
 	// An allowlisted source is not banned. A trap hit from the customer's own
 	// scanner, or from a monitoring vendor they told us about, is exactly the
@@ -259,9 +263,9 @@ func blockHoneypotIP(clientIP string, until time.Time) {
 	// address, so without this it takes out everything sharing that egress.
 	// The security event is still recorded; only the ban is skipped.
 	if mitigation.IsAllowlisted(clientIP) {
-		return
+		return "", false
 	}
-	key := honeypotKey(clientIP)
+	key = honeypotKey(clientIP)
 
 	blocklistMu.Lock()
 	defer blocklistMu.Unlock()
@@ -274,10 +278,77 @@ func blockHoneypotIP(clientIP string, until time.Time) {
 			}
 		}
 		if len(honeypotBlocklist) >= maxHoneypotBlocklist {
-			return
+			return key, false
 		}
 	}
 	honeypotBlocklist[key] = until
+	return key, true
+}
+
+// Fetch Metadata request headers (https://www.w3.org/TR/fetch-metadata/),
+// which a browser attaches to every request it makes. The honeypot reads them
+// to recognise a subresource that a page on another site embedded.
+const (
+	headerSecFetchSite = "Sec-Fetch-Site"
+	headerSecFetchMode = "Sec-Fetch-Mode"
+	headerSecFetchDest = "Sec-Fetch-Dest"
+)
+
+// crossSiteSubresource reports whether r is what a browser sends when a page
+// on another site embeds something from this gateway -- <img src>, <script
+// src>, <link rel=stylesheet>, <audio>, <video>, <track>, <embed>, <object>, a
+// font: Sec-Fetch-Site cross-site, Sec-Fetch-Mode no-cors, and a Sec-Fetch-Dest
+// naming one of those subresources.
+//
+// Deliberately that narrow. A navigation (a clicked link, an iframe) and a
+// script's own fetch() are not on the list: they are not what an image in a
+// forum post produces, and every value added is one more a scanner can claim.
+func crossSiteSubresource(r *http.Request) bool {
+	h := r.Header
+	if h.Get(headerSecFetchSite) != "cross-site" || h.Get(headerSecFetchMode) != "no-cors" {
+		return false
+	}
+	switch h.Get(headerSecFetchDest) {
+	case "image", "script", "style", "font", "audio", "video", "track", "embed", "object":
+		return true
+	default:
+		return false
+	}
+}
+
+// honeypotHit answers a request that reached a trap. It is refused and
+// recorded as a threat, always; whether its source is also struck and banned
+// depends on whether the source chose to send it.
+//
+// A page on any other site can make its visitors' browsers request a trap
+// path -- an <img src="https://gateway/.env"> in a forum post is enough -- and
+// the browser sends that request from the visitor's address, with the
+// visitor's fingerprint. Held against the source, one page view banned the
+// visitor, a page left open walked them up the ladder to a day, and behind
+// CGNAT or an office egress it took everyone sharing the address. So a
+// cross-site no-cors subresource load adds no strike and no ban, and its threat
+// is recorded Unattributed: no reputation penalty and no escalation to a
+// fingerprint block either, because each of those is a ban by another name --
+// two trap images took a visitor's reputation to zero, and three had their
+// browser's fingerprint refused on every route, before this.
+//
+// Those headers are written by the client, so a scanner can send them too. A
+// scanner forging those headers gains only a missing ban -- its request is
+// still refused and recorded. The ban it misses is every consequence that
+// outlives the request (the honeypot's ban, the reputation penalty, the
+// fingerprint escalation); the deny decision itself is never skipped, which is
+// the line invariant 7 draws for client-written headers.
+func honeypotHit(w http.ResponseWriter, r *http.Request, trap string) {
+	if crossSiteSubresource(r) {
+		recordHoneypotThreat(r, trap, honeypotOutcome{unattributed: true})
+	} else {
+		clientIP := request.GetClientIP(r, config.EffectiveTrustCloudflare())
+		now := time.Now()
+		ban := honeypotBanFor(clientIP, now)
+		key, banned := blockHoneypotIP(clientIP, now.Add(ban))
+		recordHoneypotThreat(r, trap, honeypotOutcome{key: key, ban: ban, banned: banned})
+	}
+	http.Error(w, "Forbidden", http.StatusForbidden)
 }
 
 // HoneypotConfig defines the configuration for the Honeypot middleware.
@@ -303,10 +374,7 @@ func serveHoneypotGlobal(globalStore config.GlobalConfigStore, next http.Handler
 
 	paths, deceptionEnabled := honeypotPaths(globalStore, r)
 	if trap, hit := honeypotTrapFor(r.URL.Path, paths); hit {
-		recordHoneypotThreat(r, trap)
-		blockHoneypotIP(clientIP, time.Now().Add(honeypotBanFor(clientIP, time.Now())))
-		// Return 403 Forbidden to the attacker
-		http.Error(w, "Forbidden", http.StatusForbidden)
+		honeypotHit(w, r, trap)
 		return
 	}
 
@@ -491,11 +559,7 @@ func Honeypot(cfg HoneypotConfig) kind.Middleware {
 				}
 				// Exact match or prefix match for directories
 				if path == trapPath || strings.HasPrefix(path, trapPath+"/") {
-					recordHoneypotThreat(r, trapPath)
-					blockHoneypotIP(clientIP, time.Now().Add(honeypotBanFor(clientIP, time.Now())))
-
-					// Return 403 Forbidden to the attacker
-					http.Error(w, "Forbidden", http.StatusForbidden)
+					honeypotHit(w, r, trapPath)
 					return
 				}
 			}
@@ -504,26 +568,51 @@ func Honeypot(cfg HoneypotConfig) kind.Middleware {
 	}
 }
 
-func recordHoneypotThreat(r *http.Request, trapPath string) {
+// honeypotOutcome is what a trap hit did to its source, for the log line and
+// the threat record.
+type honeypotOutcome struct {
+	key          string        // what the ban is filed under: the address, or an IPv6 /64
+	ban          time.Duration // the rung of the ladder applied
+	banned       bool          // a ban was recorded (not loopback, allowlisted or at capacity)
+	unattributed bool          // a cross-site subresource load: no strike and no ban
+}
+
+// describe says what happened to the source, in the words the log line and the
+// threat's Details use. It used to say "IP blocked for 24h" whatever rung
+// applied, and whether or not anything was banned at all.
+func (o honeypotOutcome) describe() string {
+	switch {
+	case o.unattributed:
+		return "cross-site subresource load another site's page made a browser send: " +
+			"refused and recorded, not held against the source (no strike, no ban)"
+	case o.banned:
+		return "banned " + o.key + " for " + o.ban.String()
+	default:
+		return "source not banned (loopback, allowlisted, or the ban list is full)"
+	}
+}
+
+func recordHoneypotThreat(r *http.Request, trapPath string, outcome honeypotOutcome) {
 	clientIP := request.GetClientIP(r, config.EffectiveTrustCloudflare())
 	routeID := kind.GetRouteName(r)
 	if routeID == "" {
 		routeID = "global-honeypot"
 	}
 
-	logger.SecurityEvent("honeypot_triggered", r, "access to trap path: "+trapPath+"; IP blocked for 24h")
+	logger.SecurityEvent("honeypot_triggered", r, "access to trap path: "+trapPath+"; "+outcome.describe())
 
 	telemetry.RecordSecurityThreat(telemetry.RecordSecurityThreatWithJA4(r, telemetry.SecurityThreat{
-		Type:        "honeypot_triggered",
-		SourceIP:    clientIP,
-		Score:       100,
-		Details:     "Access to deception trap path: " + trapPath,
-		Time:        time.Now(),
-		RouteID:     routeID,
-		RequestURI:  r.URL.Path,
-		Category:    "deception",
-		Severity:    kind.SeverityHigh,
-		ActionTaken: kind.ActionBlocked,
+		Type:         "honeypot_triggered",
+		SourceIP:     clientIP,
+		Score:        100,
+		Details:      "Access to deception trap path: " + trapPath + "; " + outcome.describe(),
+		Time:         time.Now(),
+		RouteID:      routeID,
+		RequestURI:   r.URL.Path,
+		Category:     "deception",
+		Severity:     kind.SeverityHigh,
+		ActionTaken:  kind.ActionBlocked,
+		Unattributed: outcome.unattributed,
 	}))
 }
 
