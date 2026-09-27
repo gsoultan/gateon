@@ -834,6 +834,18 @@ the item and its id.
 Creating, editing, disabling or deleting a user that the gateway refused used to
 do nothing visible. It now shows the gateway's message and keeps the form open.
 
+### The Docs page renders its tables, and its guide links open the guide
+
+The guides' tables -- the Introduction's index among them -- showed as raw
+`| Document | Description |` text: react-markdown renders GitHub tables only with
+the `remark-gfm` plugin, which is now included (it adds about 13 kB gzipped to the
+Docs page's own chunk, nothing to the rest of the dashboard). The index's links
+pointed at files the gateway does not serve and opened a window reading "Not
+Found"; each now opens its guide's tab, and the two guides that had no tab --
+Management Entrypoint and WebSockets & SSE -- have one.
+
+**Who is affected:** readers of the Docs page.
+
 ### Quick Presets keep the settings they do not name
 
 Applying a preset in Settings replaced the whole logging section (and, for

@@ -4,8 +4,8 @@
 import { test, expect, type Page } from '@playwright/test';
 
 /**
- * The Docs page: four bundled markdown guides (ui/docs), one per tab, rendered
- * with react-markdown into Mantine components.
+ * The Docs page: six bundled markdown guides (ui/docs), one per tab, rendered
+ * with react-markdown (and remark-gfm, for tables) into Mantine components.
  *
  * The content is shipped with the dashboard, not observed from traffic, so
  * rendering it as markdown is the feature rather than a hazard.
@@ -23,6 +23,8 @@ const GUIDES: Guide[] = [
   { tab: 'Proxy Protocol', title: 'Proxy Protocol in Gateon', section: 'Versions: v1 vs v2', code: 'PROXY TCP4' },
   { tab: 'Email Backend (SMTP, IMAP, POP3)', title: 'Email Backend Setup (SMTP, IMAP, POP3)', section: 'Enable PROXY Protocol in Gateon' },
   { tab: 'Running as a Service', title: 'Running Gateon as a Service', section: 'Built-in install command', code: 'gateon install' },
+  { tab: 'Management Entrypoint', title: 'Secure Management Entrypoint', section: 'Security Features' },
+  { tab: 'WebSockets & SSE', title: 'WebSockets and Server-Sent Events (SSE) Support', section: 'Server-Sent Events (SSE) Support' },
 ];
 
 async function openGuide(page: Page, tab: string) {
@@ -53,9 +55,11 @@ test.describe('Docs page', () => {
     }
   });
 
-  test('links open in a new tab without handing it this page', async ({ page }) => {
+  test('links to other sites open in a new tab without handing it this page', async ({ page }) => {
     await page.goto('/docs');
-    const panel = await openGuide(page, 'Introduction');
+    // The Introduction links only to other guides, which open their tab; the
+    // service guide links out to other sites.
+    const panel = await openGuide(page, 'Running as a Service');
     const links = panel.getByRole('link');
     await expect(links.first()).toBeVisible();
     for (const link of await links.all()) {
@@ -65,13 +69,8 @@ test.describe('Docs page', () => {
   });
 
   test('tables in the guides render as tables', async ({ page }) => {
-    // OPEN: react-markdown renders GitHub tables only with the remark-gfm
-    // plugin, which ui/package.json does not include, so the guide index on
-    // the Introduction tab and the tables in Proxy Protocol and Email Backend
-    // show as raw "| Document | Description | |---|" text. The DocsPage table
-    // components are never used. Fixing it is a new dependency; left for a
-    // decision. When it is fixed this test passes and the annotation must go.
-    test.fail();
+    // react-markdown parses GitHub tables only with remark-gfm; without it the
+    // guide index showed as raw "| Document | Description |" text.
     await page.goto('/docs');
     const intro = await openGuide(page, 'Introduction');
     await expect(intro.getByRole('table')).toBeVisible({ timeout: 3000 });
@@ -79,19 +78,26 @@ test.describe('Docs page', () => {
     await expect(intro.getByText('|----------|')).toHaveCount(0);
   });
 
-  test("the Introduction's guide links lead to a guide", async ({ page }) => {
-    // OPEN: the index links to ./services.md and friends, which the gateway
-    // does not serve, so each opens a tab reading "Not Found". Two of the five
-    // (management-entrypoint.md, websockets-sse.md) have no tab on this page
-    // at all. When it is fixed this test passes and the annotation must go.
-    test.fail();
+  test("the Introduction's guide links open each guide's tab", async ({ page }) => {
+    // The index links to its guides as files (./services.md), which the gateway
+    // does not serve: followed as links, each opened a window reading "Not
+    // Found", and two of the five guides had no tab at all.
     await page.goto('/docs');
-    const intro = await openGuide(page, 'Introduction');
-    const [guide] = await Promise.all([
-      page.waitForEvent('popup'),
-      intro.getByRole('link', { name: 'services.md' }).click(),
-    ]);
-    await guide.waitForLoadState();
-    await expect(guide.getByRole('heading', { name: 'Running Gateon as a Service' })).toBeVisible({ timeout: 3000 });
+    const links: Array<[string, string, string]> = [
+      ['management-entrypoint.md', 'Management Entrypoint', 'Secure Management Entrypoint'],
+      ['services.md', 'Running as a Service', 'Running Gateon as a Service'],
+      ['email-backend-setup.md', 'Email Backend (SMTP, IMAP, POP3)', 'Email Backend Setup (SMTP, IMAP, POP3)'],
+      ['proxy-protocol.md', 'Proxy Protocol', 'Proxy Protocol in Gateon'],
+      ['websockets-sse.md', 'WebSockets & SSE', 'WebSockets and Server-Sent Events (SSE) Support'],
+    ];
+    for (const [link, tab, title] of links) {
+      const intro = await openGuide(page, 'Introduction');
+      const popups: unknown[] = [];
+      page.on('popup', (p) => popups.push(p));
+      await intro.getByRole('button', { name: link, exact: true }).click();
+      await expect(page.getByRole('tab', { name: tab, exact: true }), `${link}: its tab is selected`).toHaveAttribute('aria-selected', 'true');
+      await expect(page.getByRole('tabpanel', { name: tab, exact: true }).getByRole('heading', { name: title, exact: true })).toBeVisible();
+      expect(popups, `${link}: opened a window`).toHaveLength(0);
+    }
   });
 });
