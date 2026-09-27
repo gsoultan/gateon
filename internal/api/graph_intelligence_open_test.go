@@ -112,8 +112,9 @@ func reportedAsBotnet(t *testing.T, anomalies []*gateonv1.Anomaly, fp string, vi
 // recordingLimiter is an eBPF manager that records the adaptive limits it is
 // asked to install and does nothing else.
 type recordingLimiter struct {
-	mu     sync.Mutex
-	limits map[string]time.Duration
+	mu      sync.Mutex
+	limits  map[string]time.Duration
+	cleared map[string]int
 }
 
 func (r *recordingLimiter) SetAdaptiveRateLimit(ip string, d time.Duration) error {
@@ -123,6 +124,16 @@ func (r *recordingLimiter) SetAdaptiveRateLimit(ip string, d time.Duration) erro
 		r.limits = map[string]time.Duration{}
 	}
 	r.limits[ip] = d
+	return nil
+}
+
+func (r *recordingLimiter) ClearAdaptiveRateLimit(ip string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.cleared == nil {
+		r.cleared = map[string]int{}
+	}
+	r.cleared[ip]++
 	return nil
 }
 
@@ -144,7 +155,6 @@ func (r *recordingLimiter) UnshunIP(string) error                      { return 
 func (r *recordingLimiter) UpdateManagementWhitelist([]string) error   { return nil }
 func (r *recordingLimiter) SetPortKnockingSequence([]int32) error      { return nil }
 func (r *recordingLimiter) UpdateLoadBalancerBackends([]string) error  { return nil }
-func (r *recordingLimiter) ClearAdaptiveRateLimit(string) error        { return nil }
 func (r *recordingLimiter) ApplyRLFeedback(string, float64) error      { return nil }
 func (r *recordingLimiter) SetRLFeedbackHandler(func(string, float64)) {}
 func (r *recordingLimiter) RegisterPhantomPort(uint32) error           { return nil }
