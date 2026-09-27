@@ -85,8 +85,44 @@ func isMitigatingAction(action string) bool {
 	}
 }
 
-// RedactHeaders masks sensitive headers like Authorization and X-Api-Key.
-// It is optimized to minimize allocations by using a pooled strings.Builder and avoiding strings.Split.
+// credentialHeaders name the headers whose values are credentials -- by
+// standard, or by a convention common enough to assume -- lower-cased. A trace
+// keeps that one was sent, which is what a debugging session needs, and not
+// what it said: the trace store is read from the dashboard, kept for days, and
+// with the trace archive on, for months.
+var credentialHeaders = [...]string{
+	"authorization",
+	"proxy-authorization",
+	"cookie",
+	"set-cookie",
+	"x-api-key",
+	"x-auth-token",
+	"x-access-token",
+	"x-refresh-token",
+	"x-amz-security-token",      // AWS STS session token
+	"x-goog-api-key",            // Google APIs
+	"api-key",                   // Azure OpenAI and Cognitive Services
+	"ocp-apim-subscription-key", // Azure API Management
+	"x-functions-key",           // Azure Functions
+	"x-vault-token",             // HashiCorp Vault
+	"private-token",             // GitLab
+	"x-csrf-token",
+	"x-xsrf-token",
+}
+
+func isCredentialHeader(name string) bool {
+	for _, h := range credentialHeaders {
+		if len(name) == len(h) && strings.EqualFold(name, h) {
+			return true
+		}
+	}
+	return false
+}
+
+// RedactHeaders replaces the value of each credential header in a header
+// block -- one "Name: value" per line, as FormatHeaders writes it -- with
+// [REDACTED]. It runs on the store's goroutine, and builds into a pooled
+// strings.Builder rather than splitting the block.
 func RedactHeaders(headers string) string {
 	if headers == "" {
 		return ""
@@ -99,37 +135,16 @@ func RedactHeaders(headers string) string {
 	start := 0
 	for {
 		end := strings.IndexByte(headers[start:], '\n')
-		var line string
-		if end == -1 {
-			line = headers[start:]
-		} else {
+		line := headers[start:]
+		if end != -1 {
 			line = headers[start : start+end]
 		}
-
-		// Fast path: check for common sensitive header prefixes case-insensitively without allocations
-		isSensitive := false
-		if len(line) >= 7 { // shortest is "cookie:"
-			if (len(line) >= 14 && strings.EqualFold(line[:14], "authorization:")) ||
-				(len(line) >= 10 && strings.EqualFold(line[:10], "x-api-key:")) ||
-				(len(line) >= 7 && strings.EqualFold(line[:7], "cookie:")) ||
-				(len(line) >= 11 && strings.EqualFold(line[:11], "set-cookie:")) ||
-				(len(line) >= 13 && strings.EqualFold(line[:13], "x-auth-token:")) ||
-				(len(line) >= 20 && strings.EqualFold(line[:20], "proxy-authorization:")) {
-				isSensitive = true
-			}
-		}
-
-		if isSensitive {
-			if colon := strings.IndexByte(line, ':'); colon != -1 {
-				sb.WriteString(line[:colon])
-				sb.WriteString(": [REDACTED]")
-			} else {
-				sb.WriteString(line)
-			}
+		if colon := strings.IndexByte(line, ':'); colon > 0 && isCredentialHeader(line[:colon]) {
+			sb.WriteString(line[:colon])
+			sb.WriteString(": [REDACTED]")
 		} else {
 			sb.WriteString(line)
 		}
-
 		if end == -1 {
 			break
 		}
