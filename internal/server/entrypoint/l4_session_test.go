@@ -102,9 +102,23 @@ func plaintextTCPEntrypoint(tb testing.TB, backend string) (addr string, stop fu
 	return l4Entrypoint(tb, backend, nil)
 }
 
-// l4Entrypoint starts a TCP entrypoint whose one route leads to backend,
-// terminating TLS with serverTLS when it is not nil.
+// l4Entrypoint starts a TCP entrypoint whose tcp route leads to backend,
+// beside an HTTP route, terminating TLS with serverTLS when it is not nil.
 func l4Entrypoint(tb testing.TB, backend string, serverTLS *tls.Config) (addr string, stop func()) {
+	tb.Helper()
+	return startL4Entrypoint(tb, serverTLS, func(epID string) L4Resolver { return l4Resolver(tb, epID, backend) })
+}
+
+// tcpOnlyL4Entrypoint starts a plaintext TCP entrypoint whose one route is a
+// tcp route to backend.
+func tcpOnlyL4Entrypoint(tb testing.TB, backend string) (addr string, stop func()) {
+	tb.Helper()
+	return startL4Entrypoint(tb, nil, func(epID string) L4Resolver { return routesResolver(tb, epID, backend, false) })
+}
+
+// startL4Entrypoint starts a TCP entrypoint wired the way cmd/gateon wires
+// one, with the resolver resolve builds for its ID.
+func startL4Entrypoint(tb testing.TB, serverTLS *tls.Config, resolve func(epID string) L4Resolver) (addr string, stop func()) {
 	tb.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -128,7 +142,7 @@ func l4Entrypoint(tb testing.TB, backend string, serverTLS *tls.Config) (addr st
 		TLSManager:       gtls.NewManager(gtls.Config{}),
 		Limiter:          traffic.NoopRateLimiter{},
 		ShutdownRegistry: reg,
-		L4Resolver:       l4Resolver(tb, ep.Id, backend),
+		L4Resolver:       resolve(ep.Id),
 		GlobalStore:      config.NewGlobalRegistry(filepath.Join(tb.TempDir(), "global.json")),
 		Phantom:          phantom.NewPhantomCore(),
 	}

@@ -359,17 +359,22 @@ func TestATLSEntrypointCarriesAServerFirstSession(t *testing.T) {
 
 // BenchmarkServerFirstSession is one server-first session per operation:
 // connect, wait for the backend's greeting, one echo, close -- against the
-// backend itself ("direct") and through a plaintext TCP entrypoint whose TCP
-// route leads to it ("entrypoint"). The difference is what the entrypoint
-// makes a server-first client wait for its greeting: serverFirstWait, in which
-// the client proves it is not going to speak, and the backend dial.
+// backend itself ("direct"), through a plaintext TCP entrypoint that serves an
+// HTTP route beside the tcp route to it ("entrypoint"), and through one that
+// serves only the tcp route ("tcp-only"). The differences are what each makes a
+// server-first client wait for its greeting: on the mixed entrypoint,
+// serverFirstWait -- in which the client shows it is not going to speak -- and
+// the dial; on the tcp-only one, the dial.
 func BenchmarkServerFirstSession(b *testing.B) {
 	backend, stopBackend := serveBackend(b, greetThenEcho)
 	defer stopBackend()
 	addr, stop := plaintextTCPEntrypoint(b, backend)
 	defer stop()
+	only, stopOnly := tcpOnlyL4Entrypoint(b, backend)
+	defer stopOnly()
 	b.Run("direct", func(b *testing.B) { benchServerFirstSession(b, backend) })
 	b.Run("entrypoint", func(b *testing.B) { benchServerFirstSession(b, addr) })
+	b.Run("tcp-only", func(b *testing.B) { benchServerFirstSession(b, only) })
 }
 
 func benchServerFirstSession(b *testing.B, addr string) {

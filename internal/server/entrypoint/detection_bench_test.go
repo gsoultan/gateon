@@ -49,8 +49,11 @@ func BenchmarkTCPEntrypointHTTPSession(b *testing.B) {
 	reportBenchCPU(b, start)
 }
 
-// httpOverTCPEntrypoint starts a plaintext TCP entrypoint with no TCP route,
-// whose HTTP server answers every request with "ok".
+// httpOverTCPEntrypoint starts a plaintext TCP entrypoint whose HTTP server
+// answers every request with "ok", with the resolver the other fixtures use
+// -- an HTTP route and a tcp route on it -- so that each connection pays for
+// deciding whether the entrypoint has anything to inspect. The tcp route's
+// backend is never dialled: every request here speaks first.
 func httpOverTCPEntrypoint(b *testing.B) (addr string, stop func()) {
 	b.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -72,6 +75,7 @@ func httpOverTCPEntrypoint(b *testing.B) (addr string, stop func()) {
 		TLSManager:       gtls.NewManager(gtls.Config{}),
 		Limiter:          traffic.NoopRateLimiter{},
 		ShutdownRegistry: reg,
+		L4Resolver:       l4Resolver(b, ep.Id, "127.0.0.1:1"),
 		GlobalStore:      config.NewGlobalRegistry(filepath.Join(b.TempDir(), "global.json")),
 	}
 	wg := &syncutil.WaitGroup{}
