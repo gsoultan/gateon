@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gsoultan/gateon/internal/logger"
@@ -16,9 +17,79 @@ import (
 )
 
 // ReputationDelegate implements memberlist.Delegate for broadcasting reputation updates.
+//
+// Its queue is memberlist's own TransmitLimitedQueue. It used to be a plain
+// slice that GetBroadcasts handed over whole and emptied, and memberlist asks
+// once per node it gossips to in a round, so every update reached the first
+// node asked and no other: in a cluster of three or more, a penalty or an
+// operator's release reached one random peer and nothing retransmitted it. The
+// whole slice went out whatever limit memberlist offered, too, so a burst under
+// attack left as datagrams far past the path MTU and was lost after the queue
+// had been emptied. The transmit-limited queue retransmits each update to a
+// number of nodes that grows with the cluster, and never hands out more than
+// fits.
+//
+// The zero value is usable; startGossip attaches the member list so the
+// retransmit count follows the cluster's size.
 type ReputationDelegate struct {
-	mu       sync.Mutex
-	messages [][]byte
+	queueOnce      sync.Once
+	queue          *memberlist.TransmitLimitedQueue
+	retransmitMult int
+	list           atomic.Pointer[memberlist.Memberlist]
+}
+
+// maxQueuedGossipUpdates bounds the queue: past it the oldest updates are
+// dropped. Updates arrive at the rate threats are recorded, which an attacker
+// sets, and gossip drains a packet's worth per node per round.
+const maxQueuedGossipUpdates = 1000
+
+// defaultGossipRetransmitMult is memberlist's LAN default, for a delegate built
+// without a configuration.
+const defaultGossipRetransmitMult = 4
+
+// broadcasts returns the delegate's queue, building it on first use.
+func (d *ReputationDelegate) broadcasts() *memberlist.TransmitLimitedQueue {
+	d.queueOnce.Do(func() {
+		mult := d.retransmitMult
+		if mult <= 0 {
+			mult = defaultGossipRetransmitMult
+		}
+		d.queue = &memberlist.TransmitLimitedQueue{NumNodes: d.numNodes, RetransmitMult: mult}
+	})
+	return d.queue
+}
+
+// numNodes is the cluster size the retransmit count is computed from.
+func (d *ReputationDelegate) numNodes() int {
+	if list := d.list.Load(); list != nil {
+		return list.NumMembers()
+	}
+	return 1
+}
+
+// gossipUpdate is one queued message. A named one -- a reputation update, named
+// by the identity it scores -- replaces a queued update for the same identity,
+// since peers only need the latest score; an unnamed one replaces nothing.
+type gossipUpdate struct {
+	name string
+	msg  []byte
+}
+
+func (u *gossipUpdate) Invalidates(other memberlist.Broadcast) bool {
+	o, ok := other.(*gossipUpdate)
+	return ok && u.name != "" && o.name == u.name
+}
+
+func (u *gossipUpdate) Message() []byte { return u.msg }
+func (u *gossipUpdate) Finished()       {}
+
+// enqueue queues msg under name, keeping the queue bounded.
+func (d *ReputationDelegate) enqueue(name string, msg []byte) {
+	q := d.broadcasts()
+	q.QueueBroadcast(&gossipUpdate{name: name, msg: msg})
+	if q.NumQueued() > maxQueuedGossipUpdates {
+		q.Prune(maxQueuedGossipUpdates)
+	}
 }
 
 func (d *ReputationDelegate) NodeMeta(limit int) []byte {
@@ -67,16 +138,7 @@ func BroadcastGraphEdge(u, v string, weight float64, edgeType string) {
 }
 
 func (d *ReputationDelegate) GetBroadcasts(overhead, limit int) [][]byte {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-
-	if len(d.messages) == 0 {
-		return nil
-	}
-
-	res := d.messages
-	d.messages = nil
-	return res
+	return d.broadcasts().GetBroadcasts(overhead, limit)
 }
 
 func (d *ReputationDelegate) LocalState(join bool) []byte {
@@ -86,14 +148,9 @@ func (d *ReputationDelegate) LocalState(join bool) []byte {
 func (d *ReputationDelegate) MergeRemoteState(buf []byte, join bool) {
 }
 
+// Enqueue queues a message that no later message replaces.
 func (d *ReputationDelegate) Enqueue(msg []byte) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	// Limit queue size to avoid memory exhaustion under heavy attack.
-	if len(d.messages) > 1000 {
-		d.messages = d.messages[1:]
-	}
-	d.messages = append(d.messages, msg)
+	d.enqueue("", msg)
 }
 
 var (
@@ -151,8 +208,8 @@ func interfaceIPv4(name string) string {
 
 // startGossip creates the memberlist and joins the configured peers.
 func startGossip(conf *gateonv1.HaConfig, settings gossipSettings) error {
-	delegate := &ReputationDelegate{}
 	mconf := memberlist.DefaultLANConfig()
+	delegate := &ReputationDelegate{retransmitMult: mconf.RetransmitMult}
 	mconf.Delegate = delegate
 	mconf.BindPort = settings.BindPort
 	mconf.AdvertisePort = settings.BindPort
@@ -168,6 +225,7 @@ func startGossip(conf *gateonv1.HaConfig, settings gossipSettings) error {
 	if err != nil {
 		return err
 	}
+	delegate.list.Store(list)
 
 	gossipManager = &GossipManager{
 		list:     list,
@@ -221,7 +279,8 @@ func BroadcastReputation(fingerprint string, score float64, violations int, hist
 		return
 	}
 
-	gossipManager.delegate.Enqueue(data)
+	// Named by the identity, so a newer score replaces one still queued.
+	gossipManager.delegate.enqueue(fingerprint, data)
 }
 
 func GetGossipStatus() *gateonv1.GossipStatus {
