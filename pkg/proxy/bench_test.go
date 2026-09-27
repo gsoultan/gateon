@@ -4,10 +4,12 @@
 package proxy
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	"github.com/gsoultan/gateon/internal/ai"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
@@ -83,6 +85,25 @@ func BenchmarkLeastConnLB_Next(b *testing.B) {
 	b.ResetTimer()
 	for b.Loop() {
 		lb.Next()
+	}
+}
+
+// BenchmarkAIPredictiveLB_NextAndRecord is one request's worth of balancer
+// work under ai_predictive: the pick, and the latency report after the
+// response. The predictor is installed, as it is in every running gateway.
+func BenchmarkAIPredictiveLB_NextAndRecord(b *testing.B) {
+	if err := ai.InitGlobalPredictor(context.Background(), ai.DefaultModelWasm); err != nil {
+		b.Fatal(err)
+	}
+	lb := NewAIPredictiveLB([]*gateonv1.Target{
+		{Url: "http://localhost:8001", Weight: 1},
+		{Url: "http://localhost:8002", Weight: 1},
+		{Url: "http://localhost:8003", Weight: 1},
+	})
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := range b.N {
+		lb.RecordLatency(lb.Next(), 0.01+float64(i%7)*0.001)
 	}
 }
 

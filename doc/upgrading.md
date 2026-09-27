@@ -224,6 +224,27 @@ Addresses not in `mgmt_whitelist_ips` lose the management port, as the setting
 always said they would. Check the list before upgrading. The flag is still
 never switched on against an empty list.
 
+### `ai_predictive` load balancing balances — **it sent every request to the first target**
+
+The `ai_predictive` policy (also spelled `intelligent`) sent every request to
+the first target in the service and never tried the others. It assumed half a
+second for a backend it had not measured, broke every tie in favour of the first
+target, and ranked backends by the traffic predictor's spike score, which is 0
+for any backend whose latency is steady -- so a backend answering in 500 ms
+every time beat one answering in 5 ms.
+
+It now routes each request to the target with the lowest predicted latency
+times one more than its requests in flight. A target not yet measured is priced
+like the best measured one, so every target is tried; the estimate of a target
+that gets no traffic decays by half every ten seconds, so a backend that was
+slow once is retried; and a latency spike, as the predictor sees it, weighs up
+to double. Before any target has been measured it behaves as least-connections.
+
+**Who is affected:** any service using `ai_predictive` or `intelligent`. Its
+other targets start receiving traffic. The policy costs about 0.3 µs more per
+request than before, because it now prices every target instead of only the
+first, and no longer allocates.
+
 ---
 
 ## v2.7.0
