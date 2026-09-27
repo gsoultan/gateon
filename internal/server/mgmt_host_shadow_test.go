@@ -10,7 +10,6 @@ import (
 	"strings"
 	"testing"
 
-	"connectrpc.com/connect"
 	"github.com/gsoultan/gateon/internal/api"
 	"github.com/gsoultan/gateon/internal/auth"
 	"github.com/gsoultan/gateon/internal/config"
@@ -19,7 +18,6 @@ import (
 	"github.com/gsoultan/gateon/internal/middleware/transform"
 	"github.com/gsoultan/gateon/internal/server/handlers"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
-	"github.com/gsoultan/gateon/proto/gateon/v1/gateonv1connect"
 	"google.golang.org/grpc"
 )
 
@@ -75,8 +73,7 @@ func buildManagementHandler(t *testing.T, extraRoutes ...*gateonv1.Route) (http.
 	gateonv1.RegisterApiServiceServer(grpcServer, apiSvc)
 	internalAPI := transform.NewDefaultGRPCWebDetector(grpcServer)
 	mux := http.NewServeMux()
-	mux.Handle(gateonv1connect.NewApiServiceHandler(api.NewConnectHandler(apiSvc),
-		connect.WithInterceptors(NewConnectRBACInterceptor())))
+	mux.Handle(apiConnectHandler(apiSvc)) // as Run mounts it, interceptors and all
 	handlers.RegisterRESTHandlers(mux, apiSvc, handlerDeps(s))
 	proxyHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		s.HandleProxyOrLocal(w, r, grpcServer, internalAPI, mux)
