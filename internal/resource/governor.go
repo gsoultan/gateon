@@ -12,7 +12,6 @@ import (
 
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/shirou/gopsutil/v3/cpu"
-	"github.com/shirou/gopsutil/v3/mem"
 )
 
 // ScavengeHook defines a callback function triggered under resource pressure.
@@ -42,20 +41,13 @@ const memoryScavengeCooldown = time.Minute
 
 // usageFunc reports how much of a resource is in use, as a percentage.
 //
-// The two live implementations read the machine through gopsutil. They are
-// swappable because they are also the reason this package used to be
-// untestable: the branches below only run above 80% and 90%, so whether they
-// executed depended on how loaded the machine happened to be, and coverage of
-// this package swung 17 points between CI runs on one commit.
+// The live samplers are swappable because they are also the reason this
+// package used to be untestable: the branches below only run above 80% and
+// 90%, so whether they executed depended on how loaded the machine happened to
+// be, and coverage of this package swung 17 points between CI runs on one
+// commit. Memory is measured by a memoryGauge, which also names its yardstick
+// (memory_budget.go).
 type usageFunc func(context.Context) (float64, error)
-
-func liveMemoryUsage(ctx context.Context) (float64, error) {
-	v, err := mem.VirtualMemoryWithContext(ctx)
-	if err != nil {
-		return 0, err
-	}
-	return v.UsedPercent, nil
-}
 
 func liveCPUUsage(ctx context.Context) (float64, error) {
 	percentages, err := cpu.PercentWithContext(ctx, 0, false)
@@ -79,9 +71,12 @@ type Governor struct {
 	cpuHooks    map[string]ScavengeHook
 	mu          sync.RWMutex
 	interval    time.Duration
-	memUsage    usageFunc
+	memUsage    memoryGauge
 	cpuUsage    usageFunc
 	now         func() time.Time // injectable for tests
+
+	// yardstick names the budget the last memory sample was measured against.
+	yardstick atomic.Pointer[string]
 
 	// lastScavenge is when the memory scavengers last ran in the current spell
 	// of pressure, in UnixNano; 0 outside one.
@@ -94,7 +89,7 @@ func NewGovernor() *Governor {
 		memoryHooks: make(map[string]ScavengeHook),
 		cpuHooks:    make(map[string]ScavengeHook),
 		interval:    defaultInterval,
-		memUsage:    liveMemoryUsage,
+		memUsage:    liveMemoryBudget().usage,
 		cpuUsage:    liveCPUUsage,
 		now:         time.Now,
 	}
@@ -118,8 +113,7 @@ func (g *Governor) RegisterCPUHook(name string, hook ScavengeHook) {
 func (g *Governor) Start(ctx context.Context) {
 	ticker := time.NewTicker(g.interval)
 	defer ticker.Stop()
-
-	logger.L.LogInfo("resource governor started")
+	g.logStart(ctx)
 
 	for {
 		select {
@@ -130,6 +124,19 @@ func (g *Governor) Start(ctx context.Context) {
 			g.check(ctx)
 		}
 	}
+}
+
+// logStart says what memory pressure will be measured against, which is the
+// first thing to check when the governor purges caches, or does not.
+func (g *Governor) logStart(ctx context.Context) {
+	used, yardstick, err := g.sampleMemory(ctx)
+	if err != nil {
+		logger.L.LogWarn("resource governor started, but memory cannot be read",
+			"memory_yardstick", yardstick, "error", err)
+		return
+	}
+	logger.L.LogInfo("resource governor started",
+		"memory_yardstick", yardstick, "memory_used_percent", used)
 }
 
 // Stop manually stops the governor. (Context-based Start usually handles this).
@@ -143,7 +150,7 @@ func (g *Governor) check(ctx context.Context) {
 }
 
 func (g *Governor) checkMemory(ctx context.Context) {
-	used, err := g.memUsage(ctx)
+	used, yardstick, err := g.sampleMemory(ctx)
 	if err != nil {
 		logger.L.LogWarn("governor failed to get memory stats", "error", err)
 		return
@@ -160,7 +167,7 @@ func (g *Governor) checkMemory(ctx context.Context) {
 		return
 	}
 	g.lastScavenge.Store(now.UnixNano())
-	logger.L.LogWarn("high memory pressure detected", "used_percent", used)
+	logger.L.LogWarn("high memory pressure detected", "used_percent", used, "of", yardstick)
 	for name, hook := range g.snapshot(g.memoryHooks) {
 		logger.L.LogDebug("triggering memory scavenge hook", "name", name)
 		hook()
@@ -204,7 +211,25 @@ func (g *Governor) GetStatus(ctx context.Context) (active bool, memHooks, cpuHoo
 	g.mu.RUnlock()
 
 	active = true
-	memPressure, _ = g.memUsage(ctx)
+	memPressure, _, _ = g.sampleMemory(ctx)
 	cpuPressure, _ = g.cpuUsage(ctx)
 	return
+}
+
+// sampleMemory takes one memory sample and remembers what it was measured
+// against.
+func (g *Governor) sampleMemory(ctx context.Context) (float64, string, error) {
+	used, yardstick, err := g.memUsage(ctx)
+	g.yardstick.Store(&yardstick)
+	return used, yardstick, err
+}
+
+// MemoryYardstick names the budget memory pressure was last measured against:
+// the Go memory limit, the cgroup's memory.max, or the host's memory. Empty
+// until the first sample.
+func (g *Governor) MemoryYardstick() string {
+	if y := g.yardstick.Load(); y != nil {
+		return *y
+	}
+	return ""
 }
