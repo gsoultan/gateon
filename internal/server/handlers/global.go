@@ -590,6 +590,17 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 			// Set HttpOnly secure cookie for session (24h)
 			middleware.SetSessionCookie(w, r, resp.Token, int(auth.TokenLifetime.Seconds()))
 		}
+		if !isLoginStep {
+			// The caller is enrolling their own account and already holds a
+			// session, in a cookie script cannot read. The service mints a token
+			// on every successful verification, and it went back in the body:
+			// script in the dashboard -- the stored-XSS case the cookie exists
+			// for -- could call setup, derive a code from the secret it was
+			// handed, call verify, and read a 24-hour bearer token out of the
+			// answer. Enabling 2FA does not end the current session, so the
+			// caller loses nothing.
+			resp.Token = ""
+		}
 
 		data, _ := ProtojsonOptions().Marshal(resp)
 		_, _ = w.Write(data)
