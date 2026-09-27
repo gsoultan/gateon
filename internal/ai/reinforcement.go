@@ -4,16 +4,19 @@
 package ai
 
 import (
+	"fmt"
 	"sync"
 	"time"
 
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/ebpf"
 	"github.com/gsoultan/gateon/internal/logger"
+	"github.com/gsoultan/gateon/internal/security/mitigation"
 	lru "github.com/hashicorp/golang-lru"
 )
 
-// IPState holds the reinforcement learning state for a specific IP address.
+// IPState holds the reinforcement learning state for one kernel limit entry:
+// an IPv4 address, or an IPv6 /64 (ebpf.LimitKey).
 type IPState struct {
 	mu           sync.Mutex
 	QValue       float64
@@ -38,15 +41,30 @@ const qValueDecayHalfLife = 10 * time.Minute
 // eligible for eviction. Well past the point its score has decayed to noise.
 const idleStateTTL = time.Hour
 
-// ReinforcementLearningLimiter implements RL logic for adaptive rate limiting.
-// It learns from security feedback to dynamically adjust eBPF rate limits.
+// The limits, as the minimum spacing the kernel enforces between an address's
+// packets. The kernel's token bucket earns one packet per interval (after a
+// 64-packet burst), so a LONGER interval is a TIGHTER limit.
+const (
+	intervalModerate = 10 * time.Millisecond  // 100 packets a second
+	intervalHigh     = 50 * time.Millisecond  // 20
+	intervalCritical = 200 * time.Millisecond // 5
+)
+
+// ReinforcementLearningLimiter turns repeated high-confidence findings into
+// adaptive kernel rate limits, and lets them go again.
+//
+// Each observation moves an address's score a fifth of the way towards the
+// finding's confidence, and the score halves every qValueDecayHalfLife without
+// one. From zero, no single finding -- nor two -- reaches the first limit: an
+// address is limited only after findings on repeated analysis passes, and the
+// limit is set again on each, which renews its lease (ebpf.AdaptiveLimitLease)
+// for as long as the findings last. The mitigation allowlist is never limited,
+// and Forget -- an operator's release -- clears both the limit and the history.
 //
 // The state map is an LRU with a hard capacity rather than an unbounded
-// sync.Map. Its keys are remote IP addresses supplied by the eBPF feedback
-// path, i.e. chosen by whoever is sending traffic: a single host walking an
-// IPv6 /64 can mint effectively unlimited distinct keys. Unbounded, that is a
-// memory-exhaustion path on a machine whose whole budget is a couple of
-// gigabytes, and it is reachable by anyone who can send packets.
+// sync.Map. Its keys are remote addresses chosen by whoever is sending traffic,
+// and they are the kernel's keys (ebpf.LimitKey): an IPv6 /64 is one entry,
+// however many addresses a host walks through in it.
 type ReinforcementLearningLimiter struct {
 	ebpf   ebpf.Manager
 	states *lru.Cache
@@ -57,19 +75,16 @@ type ReinforcementLearningLimiter struct {
 func NewReinforcementLearningLimiter(ebpfMgr ebpf.Manager) *ReinforcementLearningLimiter {
 	capacity := config.CurrentTierDefaults().RLLimiterStates
 	cache, err := lru.NewWithEvict(capacity, func(key, value any) {
-		// An evicted IP loses its Go-side state, so nothing would ever clear
-		// its kernel-side limit again. Release it on the way out rather than
-		// stranding a throttle with no owner.
+		// An evicted IP loses its Go-side state, so nothing here would clear
+		// its kernel-side limit again. It is not stranded: the Holder leased it
+		// (ebpf.AdaptiveLimitLease), and with nobody renewing it, it lapses.
 		ip, _ := key.(string)
 		st, _ := value.(*IPState)
 		if ip == "" || st == nil {
 			return
 		}
-		st.mu.Lock()
-		limited := st.limited
-		st.mu.Unlock()
-		if limited {
-			logger.L.LogDebug("evicting rate-limit state, releasing kernel limit", "ip", ip)
+		if st.isLimited() {
+			logger.L.LogDebug("evicting rate-limit state; its kernel limit lapses with its lease", "ip", ip)
 		}
 	})
 	if err != nil {
@@ -84,33 +99,36 @@ func NewReinforcementLearningLimiter(ebpfMgr ebpf.Manager) *ReinforcementLearnin
 	}
 }
 
-// ProcessFeedback updates the RL model with feedback score (0.0 to 1.0) and
-// adjusts rate limits.
+// isLimited reports whether the state has a kernel limit installed.
+func (st *IPState) isLimited() bool {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	return st.limited
+}
+
+// ProcessFeedback records one observation of ip at confidence score (0 to 1)
+// -- one per analysis pass: callers aggregate a pass's findings first -- and
+// sets, renews or lifts the address's kernel limit accordingly.
 func (rl *ReinforcementLearningLimiter) ProcessFeedback(ip string, score float64) {
-	if ip == "" || rl.states == nil {
+	rl.ProcessFinding(ip, score, "")
+}
+
+// ProcessFinding is ProcessFeedback for a finding the caller can name: the
+// limit it leads to is listed for the operator with that reason.
+func (rl *ReinforcementLearningLimiter) ProcessFinding(ip string, score float64, reason string) {
+	key, ok := ebpf.LimitKey(ip)
+	if !ok || rl.states == nil {
+		return
+	}
+	// The operator's allowlist is never limited, whatever the evidence; and an
+	// address allowlisted after it was limited is released on its next finding.
+	if mitigation.IsAllowlisted(ip) {
+		rl.Forget(key)
 		return
 	}
 
 	now := rl.now()
-
-	// LoadOrStore semantics, not Load-then-Store. Two goroutines reporting the
-	// same IP concurrently used to each build their own IPState, lock their own
-	// mutex and race to Store; one update was silently lost and the winner's
-	// state was not necessarily the one left in the map. The race detector
-	// could not see it because each goroutine held a different lock.
-	var state *IPState
-	if v, ok := rl.states.Get(ip); ok {
-		state, _ = v.(*IPState)
-	}
-	if state == nil {
-		state = &IPState{LastFeedback: now}
-		if prev, existed, _ := rl.states.PeekOrAdd(ip, state); existed {
-			if s, ok := prev.(*IPState); ok && s != nil {
-				state = s
-			}
-		}
-	}
-
+	state := rl.state(key, now)
 	state.mu.Lock()
 
 	// Decay first, so the update is applied to a score that reflects how long
@@ -118,7 +136,6 @@ func (rl *ReinforcementLearningLimiter) ProcessFeedback(ip string, score float64
 	state.QValue = decayQValue(state.QValue, now.Sub(state.LastFeedback))
 
 	// Q-Learning update rule (simplified): Q(s) = Q(s) + alpha * (reward - Q(s))
-	// Here, the 'score' from Neural Sentinel acts as the perceived 'threat reward'.
 	const alpha = 0.2
 	state.QValue += alpha * (score - state.QValue)
 	state.LastFeedback = now
@@ -129,7 +146,57 @@ func (rl *ReinforcementLearningLimiter) ProcessFeedback(ip string, score float64
 	state.limited = interval > 0
 	state.mu.Unlock()
 
-	rl.applyAdaptiveLimit(ip, interval, wasLimited)
+	rl.applyAdaptiveLimit(key, interval, wasLimited, limitReason(reason, q))
+}
+
+// limitReason is what the operator is told a limit is for.
+func limitReason(finding string, q float64) string {
+	if finding == "" {
+		finding = "security findings"
+	}
+	return fmt.Sprintf("%s on repeated analysis passes (threat score %.2f)", finding, q)
+}
+
+// state is key's state, created on first sight.
+//
+// LoadOrStore semantics, not Load-then-Store. Two goroutines reporting the same
+// IP concurrently used to each build their own IPState, lock their own mutex and
+// race to Store; one update was silently lost and the winner's state was not
+// necessarily the one left in the map. The race detector could not see it
+// because each goroutine held a different lock.
+func (rl *ReinforcementLearningLimiter) state(key string, now time.Time) *IPState {
+	if v, ok := rl.states.Get(key); ok {
+		if s, isState := v.(*IPState); isState && s != nil {
+			return s
+		}
+	}
+	state := &IPState{LastFeedback: now}
+	if prev, existed, _ := rl.states.PeekOrAdd(key, state); existed {
+		if s, isState := prev.(*IPState); isState && s != nil {
+			return s
+		}
+	}
+	return state
+}
+
+// Forget drops ip's state -- its kernel entry's, so for IPv6 its /64's -- and
+// lifts the limit it installed. An operator who releases an address is saying
+// the findings against it were wrong; a history kept through that release would
+// limit it again on the very next pass. Findings made after it start from zero,
+// and need repeated passes again before anything is limited.
+func (rl *ReinforcementLearningLimiter) Forget(ip string) {
+	key, ok := ebpf.LimitKey(ip)
+	if !ok || rl.states == nil {
+		return
+	}
+	v, found := rl.states.Peek(key)
+	if !found {
+		return
+	}
+	rl.states.Remove(key)
+	if st, isState := v.(*IPState); isState && st != nil && st.isLimited() {
+		rl.applyAdaptiveLimit(key, 0, true, "")
+	}
 }
 
 // decayQValue applies exponential decay with qValueDecayHalfLife.
@@ -152,19 +219,21 @@ func decayQValue(q float64, elapsed time.Duration) float64 {
 	return q
 }
 
-// adaptiveInterval maps a threat score to a per-IP minimum packet interval.
-// Zero means "no limit", which is a state that must be applied, not skipped.
+// adaptiveInterval maps a threat score to the address's limit. Zero means "no
+// limit", which is a state that must be applied, not skipped.
+//
+// The table used to run the other way -- 10ms for the most dangerous addresses,
+// 200ms for the least -- on the belief that a shorter interval was the harsher
+// limit. The kernel earns one packet per interval, so it gave a score above 0.9
+// twenty times the packets of a score above 0.4.
 func adaptiveInterval(qValue float64) time.Duration {
 	switch {
 	case qValue > 0.9:
-		// Critical threat: 10ms interval (very aggressive)
-		return 10 * time.Millisecond
+		return intervalCritical
 	case qValue > 0.7:
-		// High threat: 50ms interval
-		return 50 * time.Millisecond
+		return intervalHigh
 	case qValue > 0.4:
-		// Moderate threat: 200ms interval
-		return 200 * time.Millisecond
+		return intervalModerate
 	default:
 		return 0
 	}
@@ -177,13 +246,13 @@ func adaptiveInterval(qValue float64) time.Duration {
 // removed: the comment said "or clear it" and the code did not. An IP
 // throttled once stayed throttled for the life of the process even after its
 // score fell to zero.
-func (rl *ReinforcementLearningLimiter) applyAdaptiveLimit(ip string, interval time.Duration, wasLimited bool) {
+func (rl *ReinforcementLearningLimiter) applyAdaptiveLimit(ip string, interval time.Duration, wasLimited bool, reason string) {
 	if rl.ebpf == nil {
 		return
 	}
 
 	if interval > 0 {
-		if err := rl.ebpf.SetAdaptiveRateLimit(ip, interval); err != nil {
+		if err := ebpf.SetAdaptiveRateLimitFor(rl.ebpf, ip, interval, reason); err != nil {
 			logger.L.LogWarn("failed to set adaptive rate limit", "ip", ip, "error", err)
 		}
 		return

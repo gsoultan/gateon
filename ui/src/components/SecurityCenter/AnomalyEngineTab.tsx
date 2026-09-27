@@ -40,12 +40,13 @@ import {
   IconX,
 } from "@tabler/icons-react";
 
-import { applyRecommendation } from "../../hooks/api";
+import { applyAnomalyFix } from "../../hooks/api";
 import { useDiagnostics } from "../../hooks/useDiagnostics";
 import { usePermissions } from "../../hooks/usePermissions";
 import type { Anomaly } from "../../types/gateon";
 import { SecurityAnomalyModal } from "../SecurityAnomalyModal";
 import TraceVisualizer from "../Diagnostics/TraceVisualizer";
+import { offersAutomaticFix } from "./automaticFixes";
 
 // Leaflet lives in the heavy viz-vendor chunk, so the map is only pulled in when
 // this tab is actually opened.
@@ -123,10 +124,9 @@ export function AnomalyEngineTab() {
   const mitigatedStats = useMemo(() => severityCounts(mitigatedThreats), [mitigatedThreats]);
 
   const handleApply = async (anomaly: Anomaly) => {
-    const key = `${anomaly.type}-${anomaly.source}`;
     try {
-      setApplying(key);
-      const res = await applyRecommendation(anomaly.type, anomaly.source, anomaly.id);
+      setApplying(applyKey(anomaly));
+      const res = await applyAnomalyFix(anomaly);
       notifications.show({
         title: res.success ? "Recommendation applied" : "Could not apply the fix",
         message: res.message,
@@ -172,7 +172,7 @@ export function AnomalyEngineTab() {
                 key={`${a.type}-${a.source}-${a.timestamp}`}
                 anomaly={a}
                 onApply={() => handleApply(a)}
-                applying={applying === `${a.type}-${a.source}`}
+                applying={applying === applyKey(a)}
                 onTrace={openVisualizer}
                 onClick={() => onAnomalyClick(a)}
                 canWrite={canWrite}
@@ -280,6 +280,18 @@ export function AnomalyEngineTab() {
   );
 }
 
+// Which card's fix is in flight. The path is part of it: one client probing
+// many unlisted paths produces a card per path, and each is its own fix.
+const applyKey = (a: Anomaly) => `${a.type}-${a.source}-${a.requestUri ?? ""}`;
+
+// The gateway lists at most ten of a folded finding's clients.
+const MAX_LISTED_CLIENTS = 10;
+
+function clientsNote(listed: number): string {
+  if (listed < 2) return "";
+  return listed >= MAX_LISTED_CLIENTS ? ` from ${MAX_LISTED_CLIENTS} or more clients` : ` from ${listed} clients`;
+}
+
 function severityCounts(threats: Anomaly[]) {
   const count = (sev: string) => threats.filter((t) => t.severity.toLowerCase() === sev).length;
   return { critical: count("critical"), high: count("high"), medium: count("medium"), low: count("low") };
@@ -308,7 +320,8 @@ const SeverityStatCard: React.FC<{ label: string; count: number; color: string; 
   </Paper>
 );
 
-const AnomalyCard: React.FC<{
+/** One finding: what the engine saw, its recommendation, and the fix when there is one. */
+export const AnomalyCard: React.FC<{
   anomaly: Anomaly;
   onApply: () => void;
   applying: boolean;
@@ -408,6 +421,11 @@ const AnomalyCard: React.FC<{
           <Code color="blue.0" c="blue.8" style={{ cursor: "pointer" }} onClick={() => onTrace(anomaly.source)}>
             {anomaly.source}
           </Code>
+          {(anomaly.occurrences ?? 0) > 1 && (
+            <Text size="xs" c="dimmed">
+              {`· seen ${anomaly.occurrences} times${clientsNote(anomaly.sourceIps?.length ?? 0)}`}
+            </Text>
+          )}
         </Group>
 
         <Alert variant="light" color="indigo" radius="md" p="sm" icon={<IconRobot size={18} />}>
@@ -416,13 +434,18 @@ const AnomalyCard: React.FC<{
               System recommendation:
             </Text>
             <Text size="xs">{anomaly.recommendation}</Text>
-            {!anomaly.mitigated && canWrite && (
+            {canWrite && offersAutomaticFix(anomaly) && (
               <Group justify="flex-end">
                 <Anchor
                   component="button"
                   size="xs"
                   fw={800}
-                  onClick={onApply}
+                  onClick={(e) => {
+                    // The card opens the details dialog on click; applying a
+                    // fix is not a request for it.
+                    e.stopPropagation();
+                    onApply();
+                  }}
                   style={{ display: "flex", alignItems: "center", gap: 4 }}
                 >
                   {applying && <Loader size={10} mr={4} />}

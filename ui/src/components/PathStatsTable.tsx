@@ -22,11 +22,12 @@ import {
 } from "@mantine/core";
 import { IconActivity, IconSearch } from "@tabler/icons-react";
 import { useTableDensity } from "../hooks/useTableDensity";
+import { QueryError } from "./QueryError";
 
 const PAGE_SIZE = 15;
 
 export function PathStatsTable() {
-  const { data, isLoading } = usePathStats();
+  const { data, isLoading, error, refetch } = usePathStats({ live: true });
   const [hostFilter, setHostFilter] = useState("");
   const [deferredFilter, setDeferredFilter] = useState("");
   const [pathFilter, setPathFilter] = useState<string | null>(null);
@@ -78,6 +79,13 @@ export function PathStatsTable() {
 
   if (isLoading) {
     return <Skeleton h={200} />;
+  }
+
+  // A failed load used to fall through to the empty state below, so an
+  // unreachable gateway or an expired session read as "nothing collected
+  // yet". A snapshot pushed over the live stream fills `data` and wins.
+  if (error && !data) {
+    return <QueryError error={error} what="path metrics" onRetry={() => void refetch()} />;
   }
 
   if (!data || data.length === 0) {

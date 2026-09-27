@@ -21,7 +21,7 @@ ADRs follow a lightweight [MADR](https://adr.github.io/madr/)-style format:
 | [0008](./0008-response-inspection-must-control-its-own-encoding.md) | Response inspection must control its own content encoding | Accepted |
 | [0009](./0009-authenticated-ha-heartbeats.md) | Authenticated HA heartbeats and gossip | Accepted |
 | [0010](./0010-package-size-ratchet.md) | The package-size limit is a ratchet, not a wall | Accepted |
-| [0011](./0011-reputation-is-scoped-to-a-network.md) | A reputation score belongs to a browser on a network, not to a browser | Accepted |
+| [0011](./0011-reputation-is-scoped-to-a-network.md) | A reputation score belongs to a browser on a network, not to a browser | Accepted; class amended by 0024 |
 | [0012](./0012-session-revocation-propagates-but-expiry-guarantees.md) | Session revocation propagates over Redis, but expiry is what guarantees it | Accepted |
 | [0013](./0013-fingerprint-identity-is-its-own-package.md) | Fingerprint identity is its own package | Accepted |
 | [0014](./0014-backend-client-identity-is-the-gateways-choice.md) | The backend client identity is the gateway's choice | Accepted |
@@ -34,6 +34,8 @@ ADRs follow a lightweight [MADR](https://adr.github.io/madr/)-style format:
 | [0021](./0021-first-run-setup-requires-a-token.md) | First-run setup requires a one-time token | Accepted |
 | [0022](./0022-traces-are-archived-an-hour-at-a-time.md) | Traces are archived an hour at a time, in files named for the hour | Accepted |
 | [0023](./0023-the-trace-archive-has-a-directory-per-node.md) | The trace archive has a directory per node, and every node reads them all | Accepted |
+| [0024](./0024-a-reputation-score-belongs-to-what-a-client-cannot-vary.md) | A reputation score belongs to what a client cannot vary per request | Accepted |
+| [0025](./0025-a-finding-limits-an-address-only-for-harmful-traffic-and-only-when-it-repeats.md) | A finding limits an address only for harmful traffic, and only when it repeats | Accepted |
 
 ## Conventions
 

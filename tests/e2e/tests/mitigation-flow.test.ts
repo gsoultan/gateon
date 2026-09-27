@@ -78,39 +78,61 @@ test.describe('Threat Mitigation E2E Flow', () => {
   });
 
   test('Unlisted Route Mitigation from Diagnostics', async ({ page, request }) => {
-    // 1. Trigger Unlisted Route
-    const unlistedUrl = 'http://localhost:8081/unlisted-path-' + Date.now();
-    await request.get(unlistedUrl, asAttacker);
-    
+    // 1. Trigger Unlisted Route: a path no route serves, on the plain HTTP
+    // entrypoint, whose only HTTP service is mock-service.
+    const path = '/unlisted-path-' + Date.now();
+    const unlistedUrl = 'http://localhost:8081' + path;
+    const before = await request.get(unlistedUrl, asAttacker);
+    expect(before.status(), 'the path has to start out unrouted').toBe(404);
+
     // 2. Go to Diagnostics
     await gotoAnomalyEngine(page);
-    
+
     // Wait for the anomaly to appear.
     await page.waitForTimeout(10000);
     await gotoAnomalyEngine(page);
 
-    // Scope to the unlisted-route card, not just the first Apply button on the
-    // page. Every non-mitigated anomaly renders its own "Apply Automatic Fix",
-    // the list is ordered by score, and an unlisted route scores 0.5 against a
-    // WAF block's 0.9 — so `.first()` reliably clicked the WAF anomaly instead.
-    // ApplyRecommendation has no case for that type, so it answered
-    // success=false, the UI showed "Fix Failed", and this test waited out its
-    // timeout looking for "Recommendation Applied" on a fix it never asked for.
+    // Scope to this path's card, not just the first Apply button on the page:
+    // the list is ordered by time and score, and other findings -- including
+    // other unlisted paths -- carry their own buttons.
     const unlistedCard = page
       .locator('[data-testid="anomaly-card"]')
       .filter({ hasText: /UNLISTED ROUTE/i })
+      .filter({ hasText: path })
       .first();
     await expect(unlistedCard).toBeVisible({ timeout: 20000 });
 
     // 3. Apply Automatic Fix
-    const blockBtn = unlistedCard.getByRole('button', { name: /Apply Automatic Fix/i });
-    await blockBtn.click();
-    
+    await unlistedCard.getByRole('button', { name: /Apply Automatic Fix/i }).click();
     await expect(page.getByText(/Recommendation Applied/i)).toBeVisible({ timeout: 10000 });
-    
-    // 4. Verify Immediate Effect (Route should now exist and not be unlisted)
-    await page.waitForTimeout(3000);
-    const resp = await request.get(unlistedUrl, asAttacker);
-    expect(resp.status()).not.toBe(403);
+
+    // 4. The outcome, not the absence of a 403: the fix used to answer success
+    // and change nothing, and a path nothing routes was never 403 to begin
+    // with. There must now be exactly one route for this path -- an exact
+    // Path rule, on the host the request named, on the entrypoint it arrived
+    // at, pointed at the service that serves it -- and it must be paused.
+    const rule = `Host(\`localhost\`) && Path(\`${path}\`)`;
+    const listed = await page.request.get(`/v1/routes?pageSize=100&search=${encodeURIComponent(path)}`);
+    expect(listed.ok(), `listing routes failed: ${listed.status()}`).toBe(true);
+    const routes: Array<Record<string, unknown>> = (await listed.json()).routes ?? [];
+    const created = routes.filter((r) => r.rule === rule);
+    expect(created, `routes for ${path}: ${JSON.stringify(routes)}`).toHaveLength(1);
+    expect(created[0]).toMatchObject({
+      name: `unlisted localhost${path}`,
+      disabled: true,
+      entrypoints: ['http-plain'],
+      serviceId: 'mock-service',
+    });
+
+    // Paused means exposed to nobody until an operator enables it.
+    const after = await request.get(unlistedUrl, asAttacker);
+    expect(after.status(), 'a paused route must not serve the path').toBe(404);
+
+    // Applying the same finding again says the route exists; it adds nothing.
+    await unlistedCard.getByRole('button', { name: /Apply Automatic Fix/i }).click();
+    await expect(page.getByText(/already exists/i).first()).toBeVisible({ timeout: 10000 });
+    const relisted = await page.request.get(`/v1/routes?pageSize=100&search=${encodeURIComponent(path)}`);
+    const again: Array<Record<string, unknown>> = (await relisted.json()).routes ?? [];
+    expect(again.filter((r) => r.rule === rule)).toHaveLength(1);
   });
 });

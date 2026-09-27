@@ -259,6 +259,11 @@ func lowerASCII2(s string) (byte, byte) {
 
 // GenerateJA4H builds the JA4H fingerprint. Allocation-free apart from the
 // returned string, which is assembled in one pass rather than concatenated.
+//
+// The layout is load-bearing beyond this package: repid cuts the reputation
+// class out of it by position, leaving out the method, cookie and referer bytes
+// a client varies per request (ADR 0024). It cannot import this package, so
+// TestReputationIdentityFollowsTheJA4HLayout is what fails if the two drift.
 func GenerateJA4H(r *http.Request) string {
 	m0, m1 := lowerASCII2(r.Method)
 

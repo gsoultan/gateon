@@ -49,7 +49,7 @@
     "id": "ratelimit-strict",
     "type": "ratelimit",
     "config": {
-      "average": "10",
+      "requests_per_minute": "10",
       "burst": "20"
     }
   },

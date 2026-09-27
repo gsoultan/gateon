@@ -23,6 +23,8 @@ import (
 	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -35,6 +37,74 @@ func decodeGlobalConfig(body []byte, conf *gateonv1.GlobalConfig) error {
 		return errors.New("invalid json")
 	}
 	return nil
+}
+
+// sentByBrowser reports whether r was sent by a browser.
+//
+// Sec-Fetch-Mode is a forbidden request header: every current browser sets it
+// on every request it sends -- a navigation, fetch(), XMLHttpRequest -- and page
+// script can neither set nor remove it. So its presence means a browser sent
+// the request and its absence means a program that is not one did, whatever the
+// script behind a browser request would like the server to believe. A browser
+// too old to send it is treated as an API client, which is what it was before.
+func sentByBrowser(r *http.Request) bool {
+	return r.Header.Get("Sec-Fetch-Mode") != ""
+}
+
+// wrongCodeStatus is the status for a second factor that did not verify.
+//
+// During sign-in there is no session yet, and 401 says so. A caller enrolling
+// their own account is signed in: the dashboard's apiFetch reads any 401 as
+// "the session is over" and signs the user out, so a mistyped code in the
+// enrolment dialog ended the session it was meant to protect. The session is
+// fine; it is this code that was refused.
+func wrongCodeStatus(isLoginStep bool) int {
+	if isLoginStep {
+		return http.StatusUnauthorized
+	}
+	return http.StatusForbidden
+}
+
+// writeSetup2FARefusal answers a self-service 2FA setup the service refused.
+//
+// A wrong password is 403, not 401, for the reason wrongCodeStatus gives: the
+// caller is signed in, and it is the re-authentication that failed. Nothing
+// the service produced is written, and neither is its error text, which for an
+// unexpected failure could be a database error.
+func writeSetup2FARefusal(w http.ResponseWriter, r *http.Request, err error) {
+	switch {
+	case errors.Is(err, auth.ErrAccountLocked):
+		logger.SecurityEvent("auth_2fa_setup_locked", r, "account_locked")
+		WriteHTTPError(w, http.StatusTooManyRequests, err.Error())
+	case errors.Is(err, auth.ErrInvalidCredentials):
+		logger.SecurityEvent("auth_2fa_setup_failure", r, "invalid_password")
+		WriteHTTPError(w, http.StatusForbidden, "the current password is incorrect")
+	case errors.Is(err, auth.ErrAccountDisabled):
+		WriteHTTPError(w, http.StatusForbidden, err.Error())
+	default:
+		logger.L.LogError("2FA setup failed", "error", err)
+		WriteHTTPError(w, http.StatusInternalServerError, "2FA setup could not be started")
+	}
+}
+
+// writeServiceRefusal answers an error ApiService returned with the HTTP status
+// its gRPC code stands for. The service's message is passed on only for the
+// codes it writes messages for callers under -- a refusal, not a failure; an
+// unexpected failure's text can be a database error, and is logged instead. A
+// refused password is 403 and never 401, for the reason wrongCodeStatus gives.
+func writeServiceRefusal(w http.ResponseWriter, err error) {
+	st, _ := status.FromError(err)
+	switch st.Code() {
+	case codes.InvalidArgument:
+		WriteHTTPError(w, http.StatusBadRequest, st.Message())
+	case codes.PermissionDenied:
+		WriteHTTPError(w, http.StatusForbidden, st.Message())
+	case codes.ResourceExhausted:
+		WriteHTTPError(w, http.StatusTooManyRequests, st.Message())
+	default:
+		logger.L.LogError("management request failed", "error", err)
+		WriteHTTPError(w, http.StatusInternalServerError, "the request could not be completed")
+	}
 }
 
 // registerGlobalHandlers registers global configuration and utility handlers.
@@ -527,10 +597,17 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 				return
 			}
 		}
+		// The session is not enough: see auth.Manager.Setup2FA. A missing
+		// password is refused here without being counted, because it is not a
+		// guess; a wrong one is counted by the service like a failed sign-in.
+		if req.Password == "" {
+			WriteHTTPError(w, http.StatusBadRequest, "your current password is required to set up 2FA")
+			return
+		}
 
 		resp, err := svc.Setup2FA(r.Context(), &req)
 		if err != nil {
-			WriteHTTPError(w, http.StatusInternalServerError, err.Error())
+			writeSetup2FARefusal(w, r, err)
 			return
 		}
 		data, err := ProtojsonOptions().Marshal(resp)
@@ -579,7 +656,7 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 			case errors.Is(err, auth.ErrInvalidTwoFactorCode):
 				logger.SecurityEvent("auth_2fa_failure", r, "invalid_2fa_code")
 				audit.Log(r.Context(), req.Id, "2fa_failed", "auth", "Invalid 2FA code", request.ClientAddr(r))
-				WriteHTTPError(w, http.StatusUnauthorized, err.Error())
+				WriteHTTPError(w, wrongCodeStatus(isLoginStep), err.Error())
 			default:
 				WriteHTTPError(w, http.StatusInternalServerError, err.Error())
 			}
@@ -589,6 +666,22 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 		if resp.Success && isLoginStep {
 			// Set HttpOnly secure cookie for session (24h)
 			middleware.SetSessionCookie(w, r, resp.Token, int(auth.TokenLifetime.Seconds()))
+		}
+		// The second step of a browser's sign-in gets the session only as the
+		// cookie, as /v1/login does; see sentByBrowser.
+		if isLoginStep && sentByBrowser(r) {
+			resp.Token = ""
+		}
+		if !isLoginStep {
+			// The caller is enrolling their own account and already holds a
+			// session, in a cookie script cannot read. The service mints a token
+			// on every successful verification, and it went back in the body:
+			// script in the dashboard -- the stored-XSS case the cookie exists
+			// for -- could call setup, derive a code from the secret it was
+			// handed, call verify, and read a 24-hour bearer token out of the
+			// answer. Enabling 2FA does not end the current session, so the
+			// caller loses nothing.
+			resp.Token = ""
 		}
 
 		data, _ := ProtojsonOptions().Marshal(resp)
@@ -660,6 +753,15 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 			// Set HttpOnly secure cookie for session (24h) to reduce XSS exposure
 			middleware.SetSessionCookie(w, r, resp.Token, int(auth.TokenLifetime.Seconds()))
 		}
+		// A browser gets the session only as that cookie. A token in the body
+		// is a string any script in the page can read -- including script that
+		// wrapped fetch before the sign-in form was submitted -- and carry off
+		// as a bearer credential that outlives the tab; the cookie it cannot
+		// read. API clients, which have no cookie jar to speak of, still read
+		// the token from the body.
+		if sentByBrowser(r) {
+			resp.Token = ""
+		}
 
 		data, _ := ProtojsonOptions().Marshal(resp)
 		_, _ = w.Write(data)
@@ -695,7 +797,7 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 		}
 		resp, err := svc.UpdateUser(r.Context(), &gateonv1.UpdateUserRequest{User: &req})
 		if err != nil {
-			WriteHTTPError(w, http.StatusInternalServerError, err.Error())
+			writeServiceRefusal(w, err)
 			return
 		}
 
@@ -738,7 +840,7 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 
 		resp, err := svc.ChangePassword(r.Context(), &req)
 		if err != nil {
-			WriteHTTPError(w, http.StatusInternalServerError, err.Error())
+			writeServiceRefusal(w, err)
 			return
 		}
 		data, _ := ProtojsonOptions().Marshal(resp)

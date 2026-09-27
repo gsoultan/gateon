@@ -68,11 +68,8 @@ func main() {
 			}
 			return
 		case "top":
-			apiURL := "http://localhost:" + getPort()
-			if len(os.Args) >= 3 {
-				apiURL = os.Args[2]
-			}
-			if err := tui.RunTop(context.Background(), apiURL); err != nil {
+			apiURL, token := tui.TopArgs(os.Args[2:], "http://localhost:"+getPort())
+			if err := tui.RunTop(context.Background(), apiURL, token); err != nil {
 				fmt.Fprintf(os.Stderr, "top: %v\n", err)
 				os.Exit(1)
 			}
@@ -151,6 +148,9 @@ func main() {
 	// boot-time config (privilege gating, Start, poll loop).
 	ebpfHolder := ebpf.GlobalHolder
 	telemetry.SetEbpfManager(&ebpfAdapter{ebpfHolder})
+	// Every adaptive rate limit is leased; this is what lifts the ones whose
+	// writer stopped renewing them. See ebpf.AdaptiveLimitLease.
+	go ebpfHolder.ExpireAdaptiveLimits(ctx, adaptiveLimitSweep)
 	var wafUpdater *wafmw.WAFUpdater
 	var clamavManager *security.ClamAVManager
 
@@ -203,8 +203,8 @@ func main() {
 		ipReputation.Start(ctx)
 	}
 
-	// Initialize TITAN Phantom core for hardware acceleration.
-	phantomCore := phantom.NewPhantomCore(ebpfHolder)
+	// The data-path engine the listeners and the Diagnostics page consult.
+	phantomCore := phantom.NewPhantomCore()
 
 	// Load AI model if provided, or use default.
 	var wasmBytes []byte
@@ -478,6 +478,10 @@ func getEnvDefault(key, def string) string {
 
 // Version is set at build time via -ldflags "-X main.Version=<tag>".
 var Version string
+
+// adaptiveLimitSweep is how often expired adaptive rate limits are lifted: a
+// limit outlives its lease by at most this much.
+const adaptiveLimitSweep = 30 * time.Second
 
 func version() string {
 	if Version != "" {

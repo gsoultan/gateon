@@ -81,3 +81,29 @@ func TestTwoFactorVerifyStillServesOwnAccount(t *testing.T) {
 		t.Errorf("status %d, want 200: %s", rr.Code, rr.Body.String())
 	}
 }
+
+// TestTwoFactorEnrolmentDoesNotHandOutASessionToken: an authenticated user
+// completing their own enrolment already has a session, in an HttpOnly cookie
+// script cannot read. The response carried a freshly minted token in its
+// body anyway, so script running in the dashboard -- the stored-XSS case the
+// cookie exists for -- could call setup, derive a code from the secret it was
+// handed, call verify, and read a 24-hour bearer token out of the answer.
+func TestTwoFactorEnrolmentDoesNotHandOutASessionToken(t *testing.T) {
+	svc := &verify2FAAPI{}
+	mux := http.NewServeMux()
+	registerGlobalHandlers(mux, svc, &Deps{})
+
+	self := &auth.Claims{ID: "the-admin", Username: "admin", Role: auth.RoleAdmin}
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, claimsRequest(t, "/v1/auth/2fa/verify", `{"id":"the-admin","code":"123456"}`, self))
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status %d, want 200: %s", rr.Code, rr.Body.String())
+	}
+	if strings.Contains(rr.Body.String(), "SESSION-FOR-the-admin") {
+		t.Errorf("enrolment answered an already-authenticated caller with a session token: %s", rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), `"success":true`) {
+		t.Errorf("enrolment no longer reports success: %s", rr.Body.String())
+	}
+}

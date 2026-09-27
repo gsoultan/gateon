@@ -25,7 +25,17 @@ import (
 // drive that shared score to zero and take every other user of that browser
 // down with them, everywhere. The attacker's advantage was looking *ordinary*.
 //
-// The fix is to make the identity a pair: which software, on which network.
+// The fix is to make the identity a pair: which software, on which network
+// (ADR 0011).
+//
+// And "which software" is only the part of the fingerprint a client does not
+// vary from one request to the next (ADR 0024). The whole JA4+ carried JA4H's
+// per-request bits -- the method, whether a Cookie and a Referer were sent --
+// so a client the blocker refused became a new, neutral-scored client by
+// dropping its Referer: the control was weakest against exactly the client it
+// exists to catch. The class a score is kept for is the TLS fingerprint when
+// there is one, since the TLS stack fixes it for the connection whatever the
+// request says, and otherwise JA4H with those bits taken out (see appendClass).
 
 const (
 	// separator joins the fingerprint to the network scope. It is a byte
@@ -62,17 +72,38 @@ const (
 // one function called from both the threat-recording path and every enforcement
 // site rather than a convention.
 //
-// The composite keeps the fingerprint as its prefix on purpose. Cross-address
-// attribution — the genuine strength of JA4+, and the reason it was chosen — is
-// still available as a query over keys sharing a prefix. What changes is that it
-// is no longer the thing a 403 hangs on.
+// The composite keeps the fingerprint's class (Class) as its prefix on purpose.
+// Cross-address attribution — the genuine strength of JA4+, and the reason it was
+// chosen — is still available as a query over keys sharing a prefix. What
+// changes is that it is no longer the thing a 403 hangs on.
+//
+// Every caller hands over the whole fingerprint and this decides which part of
+// it counts, so the recording path, every enforcement site and every release
+// agree on the class without having to agree on how to cut it.
 func For(fingerprint, sourceIP string) string {
 	if fingerprint == "" {
 		// No fingerprint at all: the address is the only identity available and
 		// is already as narrow as this function could make it.
 		return sourceIP
 	}
-	return fingerprint + separator + networkScope(sourceIP)
+	// Built in place and converted once: this runs for the first reputation
+	// consumer on every request, and it costs the one allocation the key needs
+	// whichever class the fingerprint reduces to.
+	var buf [forBufLen]byte
+	b := appendClass(buf[:0], fingerprint)
+	b = append(b, separator...)
+	b = append(b, networkScope(sourceIP)...)
+	return string(b)
+}
+
+// Class returns the part of a fingerprint a reputation score is kept for: the
+// prefix of For's identity, and what ClassOf recovers from one.
+//
+// An operator's release names the fingerprint a threat recorded, which is the
+// whole JA4+; this is how it finds the scores that fingerprint was scored under.
+func Class(fingerprint string) string {
+	var buf [forBufLen]byte
+	return string(appendClass(buf[:0], fingerprint))
 }
 
 // ClassOf returns the fingerprint half of a composite identity.
@@ -86,6 +117,110 @@ func ClassOf(repID string) string {
 	}
 	return repID
 }
+
+// The layout of a JA4H as telemetry.GenerateJA4H writes it, which is what the
+// class is cut from: "ge11cr0200_7e33b58890ac" is the method's first two
+// letters, the HTTP version, c or n for a Cookie, r or n for a Referer, how many
+// of the tracked headers were sent, the ALPN, '_', and a hash of which ones.
+// A JA4+ is a JA4, '_', then a JA4H; without TLS the JA4 is empty.
+const (
+	ja4hLen        = 23 // ten prefix bytes, '_', twelve hash bytes
+	ja4hVersionAt  = 2  // two digits
+	ja4hCookieAt   = 4  // 'c' or 'n'
+	ja4hRefererAt  = 5  // 'r' or 'n'
+	ja4hCountAt    = 6  // two digits
+	ja4hHashSepAt  = 10 // '_'
+	ja4PlusSepChar = '_'
+
+	// volatileMark stands where the class leaves a JA4H field out, so the
+	// class keeps JA4H's shape and anyone who can read one can read this.
+	volatileMark = '-'
+
+	// forBufLen holds every identity real traffic produces without spilling
+	// to the heap: a JA4 is 36 bytes and an IPv6 scope at most 43.
+	forBufLen = 96
+)
+
+// appendClass appends the part of fingerprint a reputation score is kept for.
+//
+// With a TLS fingerprint the class is the JA4 alone. The TLS stack writes it
+// once per connection from the ClientHello, and nothing a client puts in a
+// request can change it; JA4H's half of the JA4+ is exactly the part a request
+// can. A stock browser presents one JA4 for every request it makes.
+//
+// Without one -- plaintext, or TLS terminated in front of the gateway by a
+// proxy that does not forward a fingerprint -- the class is JA4H with the bits
+// a browser varies from one request to the next marked out: the method (GET for
+// a page, POST for its form, OPTIONS for a preflight), and whether a Cookie and
+// a Referer were sent (a first visit has no cookie, a typed URL has no referer).
+// "ge11cr0200_7e33b58890ac" and "po11nn0200_7e33b58890ac" are one client:
+// "_--11--0200_7e33b58890ac". What stays -- the HTTP version, which of
+// User-Agent and Accept-Language were sent, and the ALPN -- does not change
+// between one browser's requests, and still tells a browser from curl.
+//
+// Anything that is not a JA4+ or a JA4H is its own class, whole, as before.
+func appendClass(dst []byte, fingerprint string) []byte {
+	ja4, ja4h, ok := splitJA4Plus(fingerprint)
+	switch {
+	case !ok:
+		return append(dst, fingerprint...)
+	case ja4 != "":
+		return append(dst, ja4...)
+	default:
+		dst = append(dst, ja4PlusSepChar)
+		start := len(dst)
+		dst = append(dst, ja4h...)
+		dst[start], dst[start+1] = volatileMark, volatileMark
+		dst[start+ja4hCookieAt], dst[start+ja4hRefererAt] = volatileMark, volatileMark
+		return dst
+	}
+}
+
+// splitJA4Plus splits a JA4+ into its JA4 and JA4H, reporting false for
+// anything that does not end in a JA4H. A bare JA4H is accepted too, with an
+// empty JA4, so that a key built from the HTTP half alone lands on the same
+// class as the JA4+ it came from.
+func splitJA4Plus(fp string) (ja4, ja4h string, ok bool) {
+	n := len(fp)
+	if n < ja4hLen || !isJA4H(fp[n-ja4hLen:]) {
+		return "", "", false
+	}
+	ja4h = fp[n-ja4hLen:]
+	switch {
+	case n == ja4hLen:
+		return "", ja4h, true
+	case fp[n-ja4hLen-1] != ja4PlusSepChar:
+		return "", "", false
+	default:
+		return fp[:n-ja4hLen-1], ja4h, true
+	}
+}
+
+// isJA4H reports whether s has the fixed parts of GenerateJA4H's layout. The
+// method and ALPN bytes are whatever the request carried, so they are not
+// checked; the cookie and referer flags are. A referer flag is never a hex
+// digit, so the tail of a JA4 -- hex hashes either side of a '_' -- never passes
+// for a JA4H even where its digits happen to line up.
+func isJA4H(s string) bool {
+	if len(s) != ja4hLen || s[ja4hHashSepAt] != ja4PlusSepChar {
+		return false
+	}
+	if !isDigit(s[ja4hVersionAt]) || !isDigit(s[ja4hVersionAt+1]) ||
+		!isDigit(s[ja4hCountAt]) || !isDigit(s[ja4hCountAt+1]) {
+		return false
+	}
+	if c, r := s[ja4hCookieAt], s[ja4hRefererAt]; (c != 'c' && c != 'n') || (r != 'r' && r != 'n') {
+		return false
+	}
+	for i := ja4hHashSepAt + 1; i < ja4hLen; i++ {
+		if !isDigit(s[i]) && (s[i] < 'a' || s[i] > 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+func isDigit(c byte) bool { return c >= '0' && c <= '9' }
 
 // networkScope reduces an address to the network it belongs to.
 //

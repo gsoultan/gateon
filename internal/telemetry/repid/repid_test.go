@@ -170,10 +170,150 @@ func TestNetworkScopeHandlesMappedAddresses(t *testing.T) {
 	}
 }
 
+// Fingerprints as the gateway composes them: a JA4, '_', then a JA4H -- with
+// the JA4 empty for a plaintext client.
+const (
+	tlsJA4       = "t13d1516h2_8daaf6152771_b0da82dd1658"
+	otherTLSJA4  = "t13d1715h2_5b57614c22b0_3d5424432f57"
+	browserJA4H  = "ge11cr0200_7e33b58890ac" // GET, HTTP/1.1, cookie, referer, UA + Accept-Language
+	curlJA4H     = "ge11nn0100_c1e8ae8b2d9b" // GET, HTTP/1.1, no cookie, no referer, UA only
+	plaintextKey = "_--11--0200_7e33b58890ac"
+)
+
+// TestClassIgnoresWhatABrowserVariesPerRequest is the property ADR 0024 adds:
+// the bits of JA4H a browser changes from one request to the next -- the
+// method, and whether a Cookie and a Referer were sent -- are not part of the
+// identity, so changing them does not make a refused client someone new.
+func TestClassIgnoresWhatABrowserVariesPerRequest(t *testing.T) {
+	variants := []string{
+		"ge11cr0200_7e33b58890ac", // the page
+		"ge11nr0200_7e33b58890ac", // first visit: no cookie yet
+		"ge11cn0200_7e33b58890ac", // typed URL: no referer
+		"po11cr0200_7e33b58890ac", // the page's form
+		"op11nn0200_7e33b58890ac", // a preflight
+		"he11nn0200_7e33b58890ac", // HEAD
+	}
+	for _, ja4 := range []string{"", tlsJA4} {
+		want := For(ja4+"_"+variants[0], "203.0.113.10")
+		for _, v := range variants[1:] {
+			if got := For(ja4+"_"+v, "203.0.113.10"); got != want {
+				t.Errorf("JA4 %q: JA4H %s gives identity %q, %s gives %q: a per-request bit "+
+					"made the same client someone new", ja4, variants[0], want, v, got)
+			}
+		}
+	}
+}
+
+// TestClassIsTheJA4WhenThereIsOne: the TLS stack fixes the JA4 for the
+// connection, so with one the whole of JA4H -- including which headers were
+// sent -- stays out of the class.
+func TestClassIsTheJA4WhenThereIsOne(t *testing.T) {
+	if got, want := For(tlsJA4+"_"+browserJA4H, "203.0.113.10"), tlsJA4+"|203.0.113"; got != want {
+		t.Errorf("For(JA4+) = %q, want %q", got, want)
+	}
+	if For(tlsJA4+"_"+browserJA4H, "203.0.113.10") != For(tlsJA4+"_"+curlJA4H, "203.0.113.10") {
+		t.Error("a TLS client changed its identity by changing which headers it sent")
+	}
+	if For(tlsJA4+"_"+browserJA4H, "203.0.113.10") == For(otherTLSJA4+"_"+browserJA4H, "203.0.113.10") {
+		t.Error("two different TLS stacks on one network share an identity: the class no longer " +
+			"separates client software, and one client's score refuses the whole network")
+	}
+}
+
+// TestClassKeepsWhatABrowserDoesNotVary pins the other side for a plaintext
+// client: the HTTP version and which of User-Agent and Accept-Language were sent
+// stay in the class. They do not change between one browser's requests, and
+// they are what still tells a browser from curl on the same network.
+func TestClassKeepsWhatABrowserDoesNotVary(t *testing.T) {
+	if got := For("_"+browserJA4H, "203.0.113.10"); got != plaintextKey+"|203.0.113" {
+		t.Errorf("For(plaintext JA4+) = %q, want %q", got, plaintextKey+"|203.0.113")
+	}
+	for _, other := range []string{
+		"_" + curlJA4H,             // not a browser
+		"_ge20cr0200_7e33b58890ac", // HTTP/2
+		"_ge11cr0100_2f3d1f8b0a10", // one tracked header fewer
+		"_ge11cr02h2_7e33b58890ac", // TLS without a JA4: its ALPN
+	} {
+		if For(other, "203.0.113.10") == For("_"+browserJA4H, "203.0.113.10") {
+			t.Errorf("%q and %q share an identity; the class dropped a bit that separates clients",
+				other, "_"+browserJA4H)
+		}
+	}
+	// One tracked header each, so the same count: only the hash of which one
+	// was sent tells a client that sends User-Agent from one that sends
+	// Accept-Language.
+	if For("_ge11nn0100_c1e8ae8b2d9b", "203.0.113.10") == For("_ge11nn0100_5f2b8c1a9e30", "203.0.113.10") {
+		t.Error("two plaintext clients sending different headers share an identity: the class dropped the header hash")
+	}
+}
+
+// TestABareJA4HHasItsJA4PlusClass: a key built from the HTTP half alone -- the
+// rate limiter's "ja4h" strategy -- lands on the class of the plaintext JA4+ it
+// came from, and so gets the same immunity to per-request bits.
+func TestABareJA4HHasItsJA4PlusClass(t *testing.T) {
+	if Class(browserJA4H) != Class("_"+browserJA4H) {
+		t.Errorf("Class(%q) = %q but Class(%q) = %q", browserJA4H, Class(browserJA4H),
+			"_"+browserJA4H, Class("_"+browserJA4H))
+	}
+	if Class("po11nn0200_7e33b58890ac") != Class(browserJA4H) {
+		t.Error("a bare JA4H kept its per-request bits")
+	}
+}
+
+// TestClassLeavesOtherFingerprintsWhole: anything that is not a JA4+ or a JA4H
+// is its own class, whole, as before -- including a JA4 on its own, whose hex
+// hash must never be mistaken for a JA4H.
+func TestClassLeavesOtherFingerprintsWhole(t *testing.T) {
+	for _, fp := range []string{
+		tlsJA4,
+		"ja4-shared-browser-A",
+		tlsJA4 + "_scoped",
+		"t13d1516h2_release_by_address_a1_b2",
+		"ge11xr0200_7e33b58890ac", // not a cookie flag
+		"ge11cx0200_7e33b58890ac", // not a referer flag
+		"ge11cr0200_7e33b58890aZ", // not hex
+		"geAAcr0200_7e33b58890ac", // not a version
+		"x" + browserJA4H,         // no separator before the JA4H
+		lookalikeJA4,
+	} {
+		if got := Class(fp); got != fp {
+			t.Errorf("Class(%q) = %q, want it whole", fp, got)
+		}
+	}
+	// Its last 23 bytes put digits, a 'c' and the '_' exactly where a JA4H has
+	// them; only the referer flag, which is never a hex digit, rules the tail out.
+	if tail := lookalikeJA4[len(lookalikeJA4)-ja4hLen:]; isJA4H(tail) {
+		t.Errorf("the tail of the JA4 %q, %q, passed for a JA4H", lookalikeJA4, tail)
+	}
+}
+
+// lookalikeJA4 is a JA4 whose hashes happen to line up with a JA4H's layout.
+const lookalikeJA4 = "t13d1516h2_000012c53400_b0da82dd1658"
+
+// TestClassOfRecoversTheClass keeps For and ClassOf consistent with Class, which
+// is how an operator's release finds a fingerprint's scores.
+func TestClassOfRecoversTheClass(t *testing.T) {
+	for _, fp := range []string{tlsJA4 + "_" + browserJA4H, "_" + browserJA4H, browserJA4H, "ja4-other"} {
+		for _, ip := range []string{"203.0.113.10", "2001:db8::1", ""} {
+			if got, want := ClassOf(For(fp, ip)), Class(fp); got != want {
+				t.Errorf("ClassOf(For(%q, %q)) = %q, want Class = %q", fp, ip, got, want)
+			}
+		}
+	}
+}
+
 func BenchmarkFor(b *testing.B) {
-	const browser = "t13d1516h2_8daaf6152771_b0da82dd1658"
-	b.ReportAllocs()
-	for b.Loop() {
-		_ = For(browser, "203.0.113.10")
+	for _, tc := range []struct{ name, fp, ip string }{
+		{"ja4", tlsJA4, "203.0.113.10"},
+		{"tls-ja4plus", tlsJA4 + "_" + browserJA4H, "203.0.113.10"},
+		{"plaintext-ja4plus", "_" + browserJA4H, "203.0.113.10"},
+		{"tls-ja4plus-ipv6", tlsJA4 + "_" + browserJA4H, "2001:db8:1:2::10"},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				_ = For(tc.fp, tc.ip)
+			}
+		})
 	}
 }

@@ -6,7 +6,6 @@ package entrypoint
 import (
 	"bufio"
 	"context"
-	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -175,10 +174,6 @@ func TestTCPEntrypointShutdownEndsOpenSessions(t *testing.T) {
 // listener was bound to, so a test can start an entrypoint on port 0 and still
 // know where to connect.
 type addrCapture struct{ addrs chan net.Addr }
-
-func (a *addrCapture) ProxyL4(context.Context, net.Conn, string) error {
-	return errors.New("addrCapture does not proxy")
-}
 
 func (a *addrCapture) OptimizeListener(l net.Listener) net.Listener {
 	a.addrs <- l.Addr()

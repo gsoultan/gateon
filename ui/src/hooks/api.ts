@@ -24,6 +24,7 @@ import type {
   InstallClamavResponse,
   UninstallClamavResponse,
   RunDeepScanResponse,
+  Anomaly,
 } from "../types/gateon";
 
 export type PaginationParams = {
@@ -169,6 +170,25 @@ export async function getDiagnostics(): Promise<GetDiagnosticsResponse> {
 
 export async function applyRecommendation(anomalyType: string, source: string, threatId?: string): Promise<{ success: boolean; message: string }> {
   return api.applyRecommendation({ anomalyType, source, threatId });
+}
+
+/**
+ * Applies a finding's recommendation with everything the finding knows about
+ * where it happened. An unlisted_route fix creates a route for requestUri on
+ * entrypoint, so sending only the source -- the client's address -- gave it
+ * nothing to create.
+ */
+export async function applyAnomalyFix(
+  anomaly: Pick<Anomaly, "type" | "source" | "id" | "requestUri" | "entrypoint" | "host">,
+): Promise<{ success: boolean; message: string }> {
+  return api.applyRecommendation({
+    anomalyType: anomaly.type,
+    source: anomaly.source,
+    threatId: anomaly.id,
+    requestUri: anomaly.requestUri,
+    entrypoint: anomaly.entrypoint,
+    host: anomaly.host,
+  });
 }
 
 export async function mitigateThreat(req: MitigateThreatRequest): Promise<MitigateThreatResponse> {

@@ -25,16 +25,23 @@ test.describe('RBAC: Operator', () => {
   });
 
   test('can see logs', async ({ page }) => {
-    await page.goto('/traces', { timeout: 60000 });
-    // The page is titled "Distributed Tracing"; /Traces/i never matched it and
-    // only ever passed against an older heading.
-    await expect(page.getByRole('heading', { name: /Distributed Tracing/i })).toBeVisible({ timeout: 30000 });
+    // This used to open /traces, so it said nothing about the Logs page at
+    // all. The log stream authorizes on its own (isLogsRequestAuthorized, not
+    // the REST middleware), so what an operator can see is the stream
+    // connecting and delivering lines, not the page shell.
+    await page.goto('/logs', { timeout: 60000 });
+    const card = page.locator('.mantine-Card-root').filter({ has: page.getByRole('heading', { name: 'Live Logs' }) });
+    await expect(card.getByText('LIVE', { exact: true }), 'the operator was refused the log stream').toBeVisible({ timeout: 30000 });
+    await expect(card.getByText(/level=(DEBUG|INFO|WARN|ERROR)/).first()).toBeVisible({ timeout: 30000 });
   });
 
   test('can manage WAF rules but NOT users', async ({ page }) => {
     await page.goto('/security-center', { timeout: 60000 });
     await page.getByRole('tab', { name: /WAF Rules/i }).click();
-    await expect(page.getByRole('button', { name: /Add Rule/i })).toBeVisible({ timeout: 20000 });
+    // Enabled, not visible: the button renders for every role and is disabled
+    // for a viewer (rbac_viewer.test.ts), so visibility cannot tell "can
+    // manage" from "cannot".
+    await expect(page.getByRole('button', { name: /Add Rule/i })).toBeEnabled({ timeout: 20000 });
 
     await page.goto('/users', { timeout: 60000 });
     await expect(page.getByText(/Access Denied/i)).toBeVisible({ timeout: 30000 });

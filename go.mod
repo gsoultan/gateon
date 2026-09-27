@@ -8,7 +8,6 @@ require (
 	connectrpc.com/connect v1.20.0
 	github.com/MicahParks/keyfunc/v3 v3.8.0
 	github.com/andybalholm/brotli v1.2.1
-	github.com/asavie/xdp v0.3.3
 	github.com/aws/aws-sdk-go-v2 v1.41.5
 	github.com/aws/aws-sdk-go-v2/config v1.32.13
 	github.com/aws/aws-sdk-go-v2/service/secretsmanager v1.41.5
@@ -20,7 +19,6 @@ require (
 	github.com/e-XpertSolutions/go-iforest/v2 v2.0.0
 	github.com/go-git/go-git/v5 v5.19.2
 	github.com/go-zookeeper/zk v1.0.4
-	github.com/godzie44/go-uring v0.0.0-20250501163612-d16a9e597639
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/go-tpm v0.9.8
 	github.com/google/uuid v1.6.0
@@ -199,7 +197,6 @@ require (
 	github.com/klauspost/pgzip v1.2.6 // indirect
 	github.com/kr/pretty v0.3.1 // indirect
 	github.com/kr/text v0.2.0 // indirect
-	github.com/libp2p/go-sockaddr v0.1.1 // indirect
 	github.com/lufia/plan9stats v0.0.0-20211012122336-39d0f177ccd0 // indirect
 	github.com/magefile/mage v1.17.2 // indirect
 	github.com/mattn/go-colorable v0.1.15 // indirect

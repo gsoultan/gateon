@@ -5,9 +5,38 @@ import { useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "./api";
 import type { StatusResponse } from "../types/gateon";
+import type { SystemMetrics } from "../types/metrics";
 import { useRealTimeStore } from "../store/useRealTimeStore";
 
 const queryKey = ["status"];
+
+/**
+ * statusFromMetrics maps the system block of a metrics snapshot, pushed over
+ * /v1/watch, onto the /v1/status shape the status card reads. Only the fields
+ * this snapshot actually carries: everything else /v1/status returns is merged
+ * from the previous value rather than dropped -- see the setQueryData call.
+ */
+export function statusFromMetrics(sys: SystemMetrics): Partial<StatusResponse> {
+  return {
+    status: sys.status || 'running',
+    version: sys.version || '',
+    uptimeSeconds: sys.uptimeSeconds ?? (sys as any).uptime_seconds ?? 0,
+    cpuUsage: sys.cpuUsagePercent ?? (sys as any).cpu_usage_percent ?? 0,
+    memoryUsageMb: (sys.memoryAllocBytes ?? (sys as any).memory_alloc_bytes ?? 0) / (1024 * 1024),
+    memoryTotalMb: (sys.memoryTotalGB ?? (sys as any).memory_total_gb ?? 0) * 1024,
+    storageUsageGb: sys.storageUsageGB ?? (sys as any).storage_usage_gb ?? 0,
+    storageTotalGb: sys.storageTotalGB ?? (sys as any).storage_total_gb ?? 0,
+    storageUsagePercent: sys.storageUsagePercent ?? (sys as any).storage_usage_percent ?? 0,
+    publicIp: sys.publicIp ?? (sys as any).public_ip ?? '',
+    titanEnabled: sys.titanEnabled ?? (sys as any).titan_enabled ?? false,
+    neuralSentinelEnabled: sys.neuralSentinelEnabled ?? (sys as any).neural_sentinel_enabled ?? false,
+    graphIntelligenceEnabled: sys.graphIntelligenceEnabled ?? (sys as any).graph_intelligence_enabled ?? false,
+    predictiveAiEnabled: sys.predictiveAiEnabled ?? (sys as any).predictive_ai_enabled ?? false,
+    pqcEnabled: sys.pqcEnabled ?? (sys as any).pqc_enabled ?? false,
+    tpmEnabled: sys.tpmEnabled ?? (sys as any).tpm_enabled ?? false,
+    resourceGovernorEnabled: sys.resourceGovernorEnabled ?? (sys as any).resource_governor_enabled ?? false,
+  };
+}
 
 export function useGateonStatus() {
   const queryClient = useQueryClient();
@@ -28,28 +57,7 @@ export function useGateonStatus() {
       const sys = metricsSnap.system;
       if (!sys) return;
 
-      // Only the fields this snapshot actually carries. Everything else that
-      // /v1/status returns is merged from the previous value below rather than
-      // dropped — see the setQueryData call.
-      const fromMetrics = {
-        status: sys.status || 'running',
-        version: sys.version || '',
-        uptimeSeconds: sys.uptimeSeconds ?? (sys as any).uptime_seconds ?? 0,
-        cpuUsage: sys.cpuUsagePercent ?? (sys as any).cpu_usage_percent ?? 0,
-        memoryUsageMb: (sys.memoryAllocBytes ?? (sys as any).memory_alloc_bytes ?? 0) / (1024 * 1024),
-        memoryTotalMb: (sys.memoryTotalGb ?? (sys as any).memory_total_gb ?? 0) * 1024,
-        storageUsageGb: sys.storageUsageGb ?? (sys as any).storage_usage_gb ?? 0,
-        storageTotalGb: sys.storageTotalGb ?? (sys as any).storage_total_gb ?? 0,
-        storageUsagePercent: sys.storageUsagePercent ?? (sys as any).storage_usage_percent ?? 0,
-        publicIp: sys.publicIp ?? (sys as any).public_ip ?? '',
-        titanEnabled: sys.titanEnabled ?? (sys as any).titan_enabled ?? false,
-        neuralSentinelEnabled: sys.neuralSentinelEnabled ?? (sys as any).neural_sentinel_enabled ?? false,
-        graphIntelligenceEnabled: sys.graphIntelligenceEnabled ?? (sys as any).graph_intelligence_enabled ?? false,
-        predictiveAiEnabled: sys.predictiveAiEnabled ?? (sys as any).predictive_ai_enabled ?? false,
-        pqcEnabled: sys.pqcEnabled ?? (sys as any).pqc_enabled ?? false,
-        tpmEnabled: sys.tpmEnabled ?? (sys as any).tpm_enabled ?? false,
-        resourceGovernorEnabled: sys.resourceGovernorEnabled ?? (sys as any).resource_governor_enabled ?? false,
-      };
+      const fromMetrics = statusFromMetrics(sys);
 
       // Merge over the cached value instead of replacing it.
       //

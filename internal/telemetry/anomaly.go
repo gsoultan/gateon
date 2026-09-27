@@ -94,14 +94,34 @@ func (ad *AnomalyDetector) runChecks(ctx context.Context, now time.Time) {
 	ad.aggregator.ResetIPStats()
 }
 
+// The failure rate brute force fires above at the default sensitivity. The
+// dashboard's Sensitivity runs from 0 to 1 and ships at 0.5.
+const (
+	defaultSensitivity      = 0.5
+	bruteForceRateAtDefault = 0.75
+)
+
+// bruteForceRateThreshold is the auth-failure rate above which an address is
+// reported, scaled inversely with sensitivity as the exploit, error-rate and
+// latency bars are: a higher setting lowers the bar, and 0 switches it off.
+//
+// It used to be Sensitivity*1.5, which ran the other way. The default kept its
+// 0.75, but from 0.67 up the bar passed 1.0 -- a rate no client can reach -- so
+// the settings an operator chooses to catch more stopped brute-force detection
+// altogether, while 0 flagged any address with six failed logins.
+func (ad *AnomalyDetector) bruteForceRateThreshold() float64 {
+	return bruteForceRateAtDefault * defaultSensitivity / ad.config.Sensitivity
+}
+
 func (ad *AnomalyDetector) checkBruteForce(ctx context.Context, now time.Time) {
 	stats := ad.aggregator.GetIPStats(10) // IPs with at least 10 requests
+	threshold := ad.bruteForceRateThreshold()
 	for _, s := range stats {
 		if s.Requests == 0 {
 			continue
 		}
 		rate := s.AuthFail / s.Requests
-		if rate > ad.config.Sensitivity*1.5 && s.AuthFail > 5 {
+		if rate > threshold && s.AuthFail > 5 {
 			logger.L.LogWarn("ANOMALY DETECTED: Potential brute force detected from IP",
 				"ip", s.IP,
 				"auth_failure_rate", rate)
@@ -113,7 +133,7 @@ func (ad *AnomalyDetector) checkBruteForce(ctx context.Context, now time.Time) {
 				severity = "critical"
 				action = ad.shun(s.IP, details)
 			} else {
-				action = ad.throttle(s.IP, 1*time.Second) // Limit to 1 req/sec
+				action = ad.throttle(s.IP, 1*time.Second, "Anomaly detection: brute force") // Limit to 1 req/sec
 			}
 			RecordSecurityThreat(SecurityThreat{
 				ID:          fmt.Sprintf("anomaly-bruteforce-%s-%d", s.IP, now.Unix()),
@@ -156,7 +176,7 @@ func (ad *AnomalyDetector) checkExploitScanning(ctx context.Context, now time.Ti
 				severity, score = "critical", math.Min(100, s.WafBlocks*10)
 				action = ad.shun(s.IP, details)
 			} else {
-				action = ad.throttle(s.IP, 500*time.Millisecond) // Limit to 2 req/sec
+				action = ad.throttle(s.IP, 500*time.Millisecond, "Anomaly detection: exploit scanning") // Limit to 2 req/sec
 			}
 			RecordSecurityThreat(SecurityThreat{
 				ID:          fmt.Sprintf("anomaly-exploit-%s-%d", s.IP, now.Unix()),
@@ -205,23 +225,27 @@ func (ad *AnomalyDetector) shun(ip, reason string) string {
 // throttle, and the Holder answers nil when there is none, so success is read
 // from the attachment rather than from the call; without one the threat is
 // flagged for review rather than recorded as throttled.
-func (ad *AnomalyDetector) throttle(ip string, interval time.Duration) string {
+func (ad *AnomalyDetector) throttle(ip string, interval time.Duration, reason string) string {
 	if ad.ebpfManager == nil || mitigation.IsAllowlisted(ip) {
 		return ActionFlagged
 	}
 	if st, err := ad.ebpfManager.GetMapStats(); err != nil || !st.Attached {
 		return ActionFlagged
 	}
-	if err := ad.ebpfManager.SetAdaptiveRateLimit(ip, interval); err != nil {
+	if err := ebpf.SetAdaptiveRateLimitFor(ad.ebpfManager, ip, interval, reason); err != nil {
 		logger.L.LogWarn("anomaly throttle was not applied", "ip", ip, "error", err)
 		return ActionFlagged
 	}
 	return ActionThrottled
 }
 
+// errorRateWindow is the stretch of recent traffic the error-rate check judges
+// against the hour before it.
+const errorRateWindow = 5 * time.Minute
+
 func (ad *AnomalyDetector) checkErrorRate(ctx context.Context, now time.Time) {
-	currentErrors := ad.aggregator.GetRate("errors", 5*time.Minute)
-	currentRequests := ad.aggregator.GetRate("requests", 5*time.Minute)
+	currentErrors := ad.aggregator.GetRate("errors", errorRateWindow)
+	currentRequests := ad.aggregator.GetRate("requests", errorRateWindow)
 
 	if currentRequests < 1 { // Not enough traffic
 		return
@@ -234,7 +258,7 @@ func (ad *AnomalyDetector) checkErrorRate(ctx context.Context, now time.Time) {
 	baselineRequests := ad.aggregator.GetRate("requests", 1*time.Hour)
 
 	if baselineRequests > 5 {
-		z := ad.aggregator.errorZScore(currentErrors)
+		z := ad.aggregator.errorZScore(currentErrors, errorRateWindow)
 		// If Z-Score is > 3.0 (standard statistical anomaly threshold)
 		if z > 3.0/ad.config.Sensitivity && currentErrors > 5 {
 			logger.L.LogWarn("ANOMALY DETECTED: 5xx error rate is statistically anomalous",

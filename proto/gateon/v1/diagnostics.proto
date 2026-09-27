@@ -54,6 +54,18 @@ message Anomaly {
   string ja4plus = 36;
   double reputation = 34;
   repeated string source_ips = 37;
+  // entrypoint is the entrypoint an unrouted request arrived on, as the
+  // gateway labels it: the entrypoint's name, or its id when it has none. Set
+  // on unlisted_route findings, whose fix creates a route there.
+  string entrypoint = 38;
+  // host is the Host header the unrouted request named, as recorded on its
+  // trace (port included); empty when the trace predates the field.
+  string host = 39;
+  // occurrences is how many requests one finding stands for, when a detector
+  // folds repeats into one: an unlisted_route finding covers every request for
+  // its path, entrypoint and host in the pass, with the latest one's time and
+  // source. Zero where a detector does not count.
+  int32 occurrences = 40;
 }
 
 message GossipStatus {
@@ -126,6 +138,13 @@ message ApplyRecommendationRequest {
   string anomaly_type = 1;
   string source = 2;
   string threat_id = 3;
+  // request_uri, entrypoint and host are the finding's own (see Anomaly). An
+  // unlisted_route fix needs them: source is the client's address, not the
+  // path, and the route it creates is for request_uri, on entrypoint, pointed
+  // at the service that already serves that entrypoint or host.
+  string request_uri = 4;
+  string entrypoint = 5;
+  string host = 6;
 }
 
 message ApplyRecommendationResponse {

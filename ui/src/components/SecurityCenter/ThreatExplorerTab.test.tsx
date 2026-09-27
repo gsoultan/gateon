@@ -121,4 +121,38 @@ describe("ThreatExplorerTab mitigated rows", () => {
     // names the source is not on the page yet.
     expect(html).not.toContain("Allow this source again?");
   });
+
+  // Kernel rate limits were listed nowhere, so an address could be held to a
+  // few packets a second with nothing on this page to show it or release it.
+  // The row says how hard, why and until when, where a threat shows its URL,
+  // and is marked throttled rather than blocked.
+  test("shows a kernel throttle's rate, reason and expiry, and offers Allow", () => {
+    const throttle: Anomaly = {
+      id: "kernel_throttle:10.60.0.3",
+      type: "kernel_throttle",
+      severity: "medium",
+      description:
+        "10.60.0.3 is rate-limited in the kernel to 100 packets a second, after a burst of 64. " +
+        "Why: Neural Sentinel on repeated analysis passes. Lapses at 2026-09-27T14:05:00Z unless set again.",
+      timestamp: "2026-09-27T14:00:00Z",
+      source: "10.60.0.3",
+      recommendation: "",
+      mitigated: true,
+      actionTaken: "throttled",
+    };
+    threatsQuery = {
+      data: { threats: [throttle], totalCount: 1 },
+      isLoading: false,
+      error: null,
+      refetch: async () => undefined,
+    };
+
+    const html = render();
+
+    expect(html).toContain("100 packets a second");
+    expect(html).toContain("Lapses at 2026-09-27T14:05:00Z");
+    expect(html).toContain(">Throttled<");
+    expect(html).not.toContain(">Mitigated<");
+    expect(html).toContain(">Allow<");
+  });
 });

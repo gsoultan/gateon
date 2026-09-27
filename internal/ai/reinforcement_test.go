@@ -150,9 +150,9 @@ func TestConcurrentFeedbackDoesNotLoseUpdates(t *testing.T) {
 	if !ok {
 		t.Fatal("no limit installed after sustained concurrent max-threat feedback")
 	}
-	if d != 10*time.Millisecond {
-		t.Errorf("want the critical-band interval (10ms) after %d max-threat observations, got %v — "+
-			"updates were lost", goroutines*perGoroutine, d)
+	if d != intervalCritical {
+		t.Errorf("want the critical-band interval (%v) after %d max-threat observations, got %v — "+
+			"updates were lost", intervalCritical, goroutines*perGoroutine, d)
 	}
 }
 

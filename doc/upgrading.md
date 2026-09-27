@@ -224,6 +224,636 @@ Addresses not in `mgmt_whitelist_ips` lose the management port, as the setting
 always said they would. Check the list before upgrading. The flag is still
 never switched on against an empty list.
 
+### Client addresses are no longer sent to ip-api.com — **without a GeoIP database, findings have no location**
+
+With no local MaxMind database -- the default, since the database needs a
+licence key -- every client address the anomaly analysis looked up was sent in
+plaintext to `http://ip-api.com`, one request a second on the analysis path.
+Client addresses are personal data, and nobody configured that service. Geo
+lookups are now local only: without a database a finding's location is unknown,
+and the dashboard's map says so and where locations come from.
+
+**Who is affected:** installs without a GeoLite2 database, whose map showed
+locations from ip-api.com. Add a MaxMind licence key (Settings → GeoIP, or
+`geoip.maxmind_license_key`) to get them back from a local database.
+
+### Automatic kernel rate limits lapse five minutes after they were last set — **they never lapsed**
+
+With eBPF on, the WAF (a request scoring 10 or more), the HTTP rate limiter (a
+rejected request), anomaly detection, the diagnostics loop's automatic
+mitigation and the reinforcement-learning limiter each throttled a source in the
+kernel. Only the last ever lifted a throttle, and only its own, so the others
+lasted until the process restarted or eBPF was reconfigured. (The automatic
+mitigation's immediate throttle is gone altogether; see "AI findings rate-limit
+an address only after they repeat".) One WAF hit from an
+office's shared address held everyone behind it to a packet a second, and once
+the kernel map filled, no new throttle could be installed at all.
+
+Every such throttle is now a five-minute lease. A writer whose reason persists
+sets it again and keeps it; one whose reason has passed lets it lapse, and it is
+lifted within half a minute of lapsing. IPv6 throttles are leased per /64, as
+the kernel applies them. Shunned addresses and the management allowlist are not
+affected.
+
+**Who is affected:** installs with eBPF enabled. A source stops being throttled
+about five minutes after it stops misbehaving, where before it stayed throttled
+until a restart.
+
+### Under sustained memory pressure the proxy cache is purged once a minute, not every five seconds
+
+Above 80% memory use the resource governor purges the proxy cache, which drops
+every route's balancer and backend connection pool. It did so on every
+five-second sample for as long as the pressure lasted, so every request after
+each purge opened new backend connections -- twelve times a minute, on a host
+already short of memory. It now purges when pressure begins and at most once a
+minute while it lasts; a new spell of pressure still purges at once. The
+"high memory pressure detected" warning follows the purges.
+
+### `ai_predictive` load balancing balances — **it sent every request to the first target**
+
+The `ai_predictive` policy (also spelled `intelligent`) sent every request to
+the first target in the service and never tried the others. It assumed half a
+second for a backend it had not measured, broke every tie in favour of the first
+target, and ranked backends by the traffic predictor's spike score, which is 0
+for any backend whose latency is steady -- so a backend answering in 500 ms
+every time beat one answering in 5 ms.
+
+It now routes each request to the target with the lowest predicted latency
+times one more than its requests in flight. A target not yet measured is priced
+like the best measured one, so every target is tried; the estimate of a target
+that gets no traffic decays by half every ten seconds, so a backend that was
+slow once is retried; and a latency spike, as the predictor sees it, weighs up
+to double. Before any target has been measured it behaves as least-connections.
+
+**Who is affected:** any service using `ai_predictive` or `intelligent`. Its
+other targets start receiving traffic. The policy costs about 0.3 µs more per
+request than before, because it now prices every target instead of only the
+first, and no longer allocates.
+
+### A custom `--ai-model` must be a WASI reactor — **a model built as a command never predicted**
+
+`make models`, and so anyone following it, built the WASM traffic model as a
+WASI command. A command's `_start` runs `main` and exits when it returns, taking
+the module with it: the model loaded without error, the log said it was
+initialised, and every prediction failed, so the balancer silently used its own
+average instead. The gateway now runs a model's `_initialize`, asks it for one
+prediction at startup, and refuses a model that cannot answer, saying why.
+
+**Who is affected:** anyone passing `--ai-model`. Rebuild the model as a reactor:
+`GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared`. A model that still
+cannot answer is logged as not installed and the predictor stays off, rather
+than being reported as running. Without `--ai-model` nothing changes.
+
+### Setting up 2FA for your own account asks for your current password
+
+Self-service 2FA setup (`POST /v1/auth/2fa/setup`, the "Enable 2FA" dialog on the Profile and Users
+pages) used to need only a signed-in session. In the dashboard that session is an HttpOnly cookie
+that script in the page can ride without reading, and setup hands back the TOTP secret -- so a
+stored-XSS payload could enrol the account with a secret it held, and on an account that already
+had 2FA, replace the owner's authenticator. Setup now requires the account's current password
+(`password` in the request body). A missing password is refused with 400; a wrong one with 403,
+and it counts towards the same lockout as a failed sign-in (five failures lock the account for
+fifteen minutes, for sign-in and setup alike), after which setup answers 429. Nothing is
+generated or changed when setup is refused. Enrolment an administrator mandated at sign-in
+(`POST /v1/auth/2fa/enroll`) already asked for the password and is unchanged.
+
+A wrong code while a signed-in user completes their own enrolment (`POST /v1/auth/2fa/verify`
+with a session) is now answered with 403 instead of 401. The dashboard reads any 401 as an
+expired session, so a mistyped code used to sign the user out. During sign-in, when there is no
+session yet, a wrong code is still 401.
+
+**Who is affected:** scripts that enable 2FA for their own account through the API must send the
+account's password with the setup request, and should treat 403 on a signed-in verify as a
+wrong code. Dashboard users are asked for their password in the dialog.
+
+### Changing your own password asks for your current password — **API clients changing their own password must send it**
+
+Changing your own password needed only the session -- over REST (`POST /v1/users/password`) and
+the `ChangePassword` RPC alike -- and in the dashboard the session is an HttpOnly cookie that
+script in the page can use without reading it. A stored-XSS payload could set a password of its
+choosing, one that outlives the session it was set from. It now also takes the current password,
+under the same rules as sign-in: a missing one is refused as a bad request, a wrong one is refused
+with 403 and counts towards the lockout, a locked account gets 429, and nothing changes. Editing
+your own account through `UpdateUser` can no longer set its password. An administrator resetting
+another account's password keeps today's rule. A successful change ends every session the account
+has, this one included, so the dashboard sends you to sign in again.
+
+**Who is affected:** anything that changes its own account's password through the API: send
+`current_password` (`currentPassword` in JSON).
+
+### A browser's sign-in answer no longer carries the session token
+
+`POST /v1/login` and the sign-in step of `POST /v1/auth/2fa/verify` set the HttpOnly
+`gateon_session` cookie and also returned the same token in the JSON body. A browser -- any request
+carrying the `Sec-Fetch-Mode` header, which browsers always send and page script can neither set
+nor remove -- now gets the cookie alone; the body's `token` is empty. Clients that are not
+browsers send no such header and still receive the token in the body, as before. The
+Connect/gRPC `Login` RPC is unchanged.
+
+**Who is affected:** only browser-side code that read `token` from the sign-in response instead
+of relying on the cookie; the dashboard never did. API clients, CLI tools and scripts
+(curl, Go, Python) are unaffected.
+
+### "Apply automatic fix" on an unlisted route creates a paused route
+
+The Security Hub's "Apply automatic fix" on an `unlisted_route` finding answered "Recommendation
+applied" and changed nothing; it was even handed the client's address where it needed the path.
+It now creates a route for the finding: rule `` Path(`<path>`) `` -- the exact path, nothing
+under it -- named `unlisted <path>`, on the entrypoint the request arrived at, pointed at the
+service that already serves that request's host there, or failing that the entrypoint, when one
+service does; otherwise at the service most of those routes use. The route is created **paused**
+(`disabled: true`), so nothing is exposed until an operator has reviewed it and enabled it in
+Routes. When the request named a host, the rule adds `Host()` for it (lower case, without its
+port) and the name carries the host, so the same path on two sites gets two routes. The route
+carries the middlewares every route pointing at the chosen service shares, in their order; when
+those routes disagree it carries none, and the answer says to review them before enabling; the answer names the route, its rule, its entrypoint, its service and
+why that service. It is refused, and nothing is created, when the path is already routed, when a
+route for it already exists (applying the same finding twice says so), when the path cannot be
+written as a rule or is a scanner trap such as `/.env`, when the entrypoint is gone or carries
+TCP/UDP, when no service is routed there, or when the caller's role may not change routes --
+the fix now needs the Routes permission as well as the diagnostics one. `honeypot_triggered` and
+scanner findings never create routes.
+
+`ApplyRecommendationRequest` has three new fields -- `request_uri`, `entrypoint`, `host` -- and
+findings (`Anomaly`) carry `entrypoint` and `host`; the dashboard sends them back. A request
+without `request_uri`, which is what the dashboard used to send, is refused with a message
+saying so. Stored request traces gain a `host` field; traces written before the upgrade decode
+without it.
+The detector now reports an unlisted path once per analysis pass, with how many requests it
+stands for (`Anomaly.occurrences`), instead of once per request.
+
+**Who is affected:** operators who used the button (it now does what it says), and anything
+calling `ApplyRecommendation` with `unlisted_route`, which must now send the finding's
+`request_uri` and `entrypoint`.
+
+### "Apply automatic fix" is offered only where there is a fix
+
+The button was offered on every finding, and for nine types the engine emits --
+`honeypot_triggered`, `honeypot_hit`, `neural_sentinel`, `graph_coordinated_fp`,
+`reputation_hit`, `suspicious_activity`, `coordinated_attack`, `system_integrity_violation` and
+`configuration_recommendation` -- the click could only answer "not implemented". It is now shown
+only for the types `ApplyRecommendation` acts on; the API's answer for the others is unchanged.
+The audit entry for an applied recommendation now records what happened (success or not, and
+the message) instead of "Applied resolution" before anything ran.
+
+**Who is affected:** dashboard users, who no longer see a button that cannot work.
+
+### `gateon top` signs in, and shows per-route numbers
+
+`gateon top` polled `/v1/status` with no credentials, so with authentication on every poll was
+refused and the table stayed empty without an error; with authentication off it was empty anyway,
+since `/v1/status` has no per-route numbers. It now reads `GET /v1/routes/stats` and sends a Bearer
+token given with `--token` or, to keep it out of the process list, `GATEON_TOKEN` -- the token
+`POST /v1/login` returns to an API client. A refused token stops it with a message saying where to
+get one.
+
+**Who is affected:** anyone using `gateon top`: pass a token.
+
+### The honeypot bans an IPv6 client's /64, not its address — **one ban now covers the whole /64**
+
+A honeypot ban and the strikes that escalate it were keyed by the exact client
+address. An IPv6 customer is delegated a /64 -- 2^64 addresses it can send from --
+so a scanner rotating through its own /64 was never refused for more than the one
+request that tripped each ban and never climbed the 15m / 1h / 6h / 24h ladder.
+Ten thousand such hits filled the ban list to its cap, and at the cap no new ban
+is recorded, so from then on nobody who reached a trap was banned -- one customer
+could switch the honeypot off for everyone. IPv6 bans and strikes are now kept per
+/64, the network reputation is already scoped to (ADR 0011); IPv4 bans stay per
+address, and a v4-mapped address (`::ffff:203.0.113.5`) is banned as its IPv4
+address. "Remove Mitigation / Allow IP" on any address of a banned /64 lifts the
+ban on the whole /64. An address in `GATEON_MITIGATION_ALLOWLIST` is not refused
+by a ban its /64 earned through a neighbour.
+
+**Who is affected:** IPv6 clients. A trap hit from one address now refuses every
+address in the same /64 for the length of the ban, and repeat hits from anywhere
+in the /64 climb the ladder together. That is normally one subscriber (a
+household, a phone, a VM); on a hosting provider that puts several customers in
+one /64, or behind a 4-to-6 translator (SIIT/NAT46) that presents every IPv4
+client inside one IPv6 prefix, one client's trap hit refuses the others too, for
+as long as its ban lasts. A holder of a larger block (a /48 has 65,536 /64s) can
+still fill the ban list by rotating across /64s.
+
+### A trap path loaded by another site's page no longer bans the visitor
+
+Any web page can make its visitors' browsers request a trap path -- an
+`<img src="https://your-gateway/.env">` in a forum post is enough -- and the
+honeypot treated that request as a scanner's: one page view banned the visitor's
+address, a page left open walked it up to a day, and behind CGNAT or an office
+egress it took everyone sharing the address. The recorded threat also carried a
+reputation penalty and counted toward blocking the visitor's browser fingerprint,
+so two such images took the visitor's reputation to zero and three had their
+fingerprint refused on every route, even had the ban itself been skipped.
+
+A trap hit that is a cross-site no-cors subresource load -- `Sec-Fetch-Site:
+cross-site`, `Sec-Fetch-Mode: no-cors` and `Sec-Fetch-Dest` one of `image`,
+`script`, `style`, `font`, `audio`, `video`, `track`, `embed` or `object` -- is
+still refused with 403 and still recorded as a `honeypot_triggered` threat (its
+details say "not held against the source"), but adds no strike and no ban, costs
+the source no reputation, does not count toward a fingerprint block, and is not
+fed to the correlation engine. Every other trap hit is banned as before,
+including navigations, iframes and a script's own `fetch()`.
+
+Those headers are written by the client. A scanner forging those headers gains
+only a missing ban -- its request is still refused and recorded. The ban it
+misses is everything that would outlive the request: the honeypot's ban, the
+reputation penalty and the fingerprint escalation.
+
+The honeypot's log line and threat details now say what happened to the source --
+"banned 203.0.113.5 for 15m0s", "banned 2001:0db8:0001:0002:: for 1h0m0s" (an
+IPv6 /64), "source not banned (loopback, allowlisted, or the ban list is full)"
+-- where they said "IP blocked for 24h" whatever happened.
+
+**Who is affected:** sites whose trap paths are linked from other sites' pages.
+Their visitors are no longer refused afterwards, and the threat list shows those
+loads with the third-party page as the Referer in the request headers. A page
+that uses a script's `fetch(url, {mode: "no-cors"})`, an iframe or a link to a
+trap path still gets its visitors banned: those are not covered.
+
+### A reputation block follows a client whatever headers it sends — **scores start clean once, and identities look different**
+
+A reputation score was kept for the client's whole JA4+ fingerprint on its
+network (ADR 0011), and half of JA4+ is written from each request: the method,
+and whether a `Cookie` and a `Referer` were sent. A client the reputation blocker
+refused got a fresh, neutral score by dropping its `Referer`, sending a cookie,
+or switching from GET to POST. A score is now kept for the part of the
+fingerprint a client cannot vary from one request to the next: with TLS, the
+JA4 alone; without it (plaintext, or TLS terminated in front of the gateway by a
+proxy that does not forward a fingerprint), the JA4H with the method, cookie
+and referer marked out -- `_--11--0200_7e33b58890ac`. The same identity drives
+proof-of-work difficulty, deception's troll response, the tarpit, the adaptive
+rate limits and the rate limiter's `fingerprint` and `ja4h` strategies.
+Releasing a fingerprint from the dashboard resets the score of every variant of
+it. A client that controls its own TLS stack can still get a fresh score for
+each distinct ClientHello it offers. See ADR 0024.
+
+**Who is affected:** every install. Scores recorded before the upgrade are
+filed under identities nothing reads afterwards, so every client starts from a
+clean score once -- as a restart already does, since scores live in memory.
+Within one network (/24, /64), clients of the same TLS stack -- or, without TLS,
+of the same HTTP shape (version, and which of `User-Agent` and
+`Accept-Language` they send) -- now share one score for all their requests,
+where before they shared it only for requests whose method, cookie and referer
+also matched; behind a TLS-terminating proxy that does not forward a JA4, that
+is every browser on the network. The rate limiter's `ja4h` strategy now counts a
+client's GET, POST and HEAD in one bucket. The dashboard's reputation list shows
+the new identities (`t13d1516h2_8daaf6152771_b0da82dd1658|203.0.113`). In a
+mixed-version cluster, scores gossiped by a node not yet upgraded are not
+enforced by upgraded nodes until it is upgraded.
+
+### "Inject Invisible Links" off means no trap link in your pages — **pages served with deception on may lose theirs**
+
+With Honey-Potting & Deception on, the honeypot every entrypoint carries
+injected its own hidden `/_gateon_trap_<id>` link into every HTML page whatever
+the "Inject Invisible Links" switch said, so the switch the dashboard showed off
+was not the one in force. The link now follows the switch; the configured
+Invisible Link Paths already did. The injected link also carries
+`rel="nofollow"`, as the configured links always have, so a search crawler that
+reads the markup is asked not to follow it -- one that did was banned. The
+settings card no longer recommends trapping `/wp-admin` (the built-in list
+dropped it because it bans the first administrator to sign in) and says what a
+trap hit does.
+
+**Who is affected:** installs with deception enabled that never turned "Inject
+Invisible Links" on -- it is off unless set. Their pages stop carrying the
+honeypot's trap link; turn the switch on to keep it.
+
+### An external integration's "Confidence Threshold" takes effect — **with the default 80, answers of 21 to 80 stop counting**
+
+Each IP-reputation integration (AbuseIPDB, VirusTotal, AlienVault) has a
+"Confidence Threshold -- Score above which to consider IP malicious", and new
+integrations default to 80. Nothing read it: the security threat detector
+counted any provider answer above a fixed 20. A provider's answer now counts
+only when it is above its integration's threshold; an integration saved with no
+threshold (0) keeps the old floor of 20. An answer that counts still adds half
+its value to the detector's threat score, as before.
+
+**Who is affected:** installs with an external integration whose threshold is
+set -- every one created from the dashboard, at 80 unless changed. Addresses a
+provider scores between 21 and 80 no longer raise the detector's threat score,
+so fewer of them become anomalies; lower the threshold to count them again. A
+threshold below 20 now counts answers the fixed floor ignored.
+
+### The Neural Sentinel reports findings — only for clients that are both unusual and harmful
+
+The Neural Sentinel (an isolation forest over each client's traffic) had never
+reported anything: its forest refused to score, its scores ran the other way
+from its threshold, and the threshold read the dashboard's 0–1 Sensitivity as
+0–100. It now reports a client when the forest isolates it from the rest of the
+window's clients (standard isolation score of at least 0.75 − 0.10 ×
+Sensitivity: 0.70 at the default 0.5, 0.65 at 1.0) **and** its traffic is
+harmful: a scan (10+ failed requests over 10+ paths, at least half its
+requests), credential guessing (10+ POSTs refused with 401/403, at least 30% of
+its requests), or attacks the WAF, traps or anomaly detection caught (at least
+20% of its requests). A CI runner, an office's egress or a status poller is
+unusual but not harmful, and is not reported. Sensitivity 0 now turns the
+detector off (it used to fall through to a more sensitive setting). It needs at
+least 20 clients with five or more traced requests in the window, and it skips
+its pass while the resource governor reports CPU pressure instead of running on
+a quarter of its trees.
+
+**Who is affected:** installs with anomaly detection enabled. Expect
+`neural_sentinel` findings for scanners and credential stuffers; each finding
+names why the traffic is harmful and which measures set the client apart.
+
+### Graph Intelligence reports campaigns, not browsers — and no longer needs behavioural fingerprinting
+
+Graph Intelligence reported any five addresses sharing a JA4+ value as a
+coordinated botnet. A JA4+ value names a browser class, so five people on one
+Chrome build were a "botnet"; it never forgot a link, so visitors days apart
+clustered; and its gossip never reached the detector. It now links an address
+to its client class only when the address carries attack evidence of its own
+from the last 30 minutes (WAF blocks, trap hits, malware uploads, brute-force or
+exploit-scan detections — not rate-limit rejections), lets that evidence fade
+(10-minute half-life, gone after 30 minutes), and reports a class only when five
+or more such addresses are at least half of the addresses that presented it. It
+reads the fingerprint recorded on threats, so it works whenever anomaly
+detection is on; `enable_behavioral_fingerprinting` is no longer needed for it.
+The per-address detector's "Multi-IP attack detected via fingerprinting" finding
+is retired: it was the same browser-class mistake, recorded as a threat on every
+pass.
+
+**Who is affected:** installs with anomaly detection enabled that saw
+`graph_coordinated_fp` or "Multi-IP attack" findings for ordinary visitors: they
+stop. Clusters in a gossip cluster: nodes now exchange attack links (type
+`attack_evidence`) and ignore the evidence-free `fp_ip` edges older nodes send,
+so distributed detection works once every node runs this release.
+
+### AI findings rate-limit an address only after they repeat, and the highest threats get the tightest limit
+
+The analysis loop used to rate-limit, in the kernel, every address a Neural
+Sentinel or Graph Intelligence finding scored above 80 — at once, on one
+finding, to 100 packets a second. That path is removed. These findings now go
+to the reinforcement-learning limiter, which limits an address only after
+findings on three consecutive analysis passes (three minutes at the default
+interval), renews the limit while the findings continue, and lets it decay and
+lapse (five-minute lease) when they stop. The mitigation allowlist
+(`GATEON_MITIGATION_ALLOWLIST`) is never limited, and **Allow** on a mitigation
+now also clears the limiter's history for the address, so the next pass does not
+limit it again. The limiter's table also ran backwards — its most dangerous band
+allowed 100 packets a second and its mildest 5 — and now tightens with the
+threat: 100, 20, then 5 packets a second (after a 64-packet burst). IPv6 is
+tracked per /64, as the kernel limits it.
+
+**Who is affected:** installs running eBPF with anomaly detection enabled. An
+address named by a single finding is no longer limited.
+
+### Every kernel rate limit is on the IP Mitigations list
+
+The WAF, the HTTP rate limiter, anomaly detection and the RL limiter all
+rate-limit addresses in the kernel, and none of those limits was shown anywhere.
+The Security Center's **Mitigated › IP Mitigations** list (and the combined
+`mitigated` status of `ListSecurityThreats`) now starts with every limit in
+force, typed `kernel_throttle` and marked Throttled, with its rate, the reason
+its writer gave and when it lapses; the Mitigated count includes them. **Allow**
+on a throttle lifts it at once (for IPv6, its /64).
+
+**Who is affected:** anyone using eBPF. API clients reading the IP or combined
+mitigation lists will see the new `kernel_throttle` rows first; their `source`
+is the address (or the /64's network address) to release, and the expiry is in
+the description.
+
+### The status snapshot says whether the Neural Sentinel and Graph Intelligence run
+
+`neuralSentinelEnabled` and `graphIntelligenceEnabled` in the status snapshot
+were always true. They now say whether each detector runs under the current
+configuration: the Neural Sentinel when anomaly detection is on at a sensitivity
+above zero, Graph Intelligence whenever anomaly detection is on.
+
+**Who is affected:** dashboards and scripts reading those flags: on the default
+configuration (anomaly detection off) both now read false.
+
+### The request-timing check no longer reports pollers, and the header-consistency check is gone
+
+The per-address detector's timing check had never had an input: the analysis
+read its traces newest first and discarded every gap between requests. With the
+gaps measured, the check gave a steady rhythm 60 points on its own — twice the
+default threat threshold — which would have reported every dashboard poll,
+health check and CI job. A steady rhythm now adds 25 points, and only to
+traffic that is already harmful by the rules above. The check that a client
+calling itself Mozilla sends Accept-Language was removed: it never saw a header
+(the analysis reads trace summaries), reading full traces costs up to a gigabyte
+a pass when clients pad their headers, and it misfired on crawlers and
+gRPC-Web/Connect browsers. The "Inconsistent HTTP headers" reason no longer
+appears.
+
+**Who is affected:** installs with per-address behavioural analysis
+(`security_advanced.behavioral.enabled`). Under `GATEON_TRACE_SAMPLE_RATE` above
+1, failure rates are now judged against the requests an address really sent
+rather than the sample, which keeps every failure and one success in N.
+
+### `GATEON_PHANTOM=1` no longer switches on an io_uring listener — **it was slower on every measurement**
+
+With `GATEON_PHANTOM=1` the management listener and every HTTP entrypoint were
+wrapped in an io_uring reactor. Measured on two CPUs against the standard Go
+listener, it took 6.7x as long per HTTP round trip (222 µs against 33 µs), 31x
+as long per 64-byte L4 echo, moved a tenth of the L4 throughput (247 MiB/s
+against 2.4 GiB/s up, 274 MiB/s against 3.6 GiB/s down), and kept 8% of a core
+busy with no traffic at all. Shortening its polling tick bought latency with
+more idle CPU (15% of a core at 100 µs, 30% at 10 µs) and never caught up. It
+also ignored read deadlines, so a `Connection: close` response never ended and
+an idle client held its connection forever, and closing it did not stop
+`Accept`, so a graceful shutdown hung until the process was killed.
+
+The wrapper is gone and the variable does nothing. If it is set, startup logs
+once, at WARN, that it no longer changes anything. `GATEON_XDP_IFACE`, which
+switched on an AF_XDP path that created a socket and then failed on every
+connection (logging a warning for each one), is retired the same way.
+
+**Who is affected:** installs that set `GATEON_PHANTOM=1` or `GATEON_XDP_IFACE`.
+They now run the standard listener every other install runs, which is faster.
+Remove the variables to silence the startup notice.
+
+### Plaintext TCP routes splice in the kernel, and a backend that hangs up ends the client's session
+
+A plaintext TCP entrypoint reads each connection's first bytes to tell SSH,
+RDP and HTTP apart, and then handed the L4 proxy a wrapper that hid the socket
+underneath. So the proxy never used splice(2): every byte went through a
+32 KiB user-space buffer each way, and each session allocated two of them.
+And it could not half-close the client, so when a backend answered and closed
+-- whois, finger, anything that ends a response by closing -- the client was
+never told and the session stayed open until the client gave up.
+
+Both now work. On two CPUs an L4 route moves 36% more upload and 77% more
+download throughput, uses 28-45% less CPU per MiB, and a session allocates
+4.3 KiB instead of 68.4 KiB. Each spliced session holds two kernel pipes
+(four descriptors) for its lifetime, where it held two 32 KiB heap buffers, so
+an open L4 session now costs six descriptors instead of two. Go raises the soft
+descriptor limit to the hard one at start (524288 under the packaged systemd
+unit's default); only a host with a low hard `nofile` limit needs to raise it.
+
+**Who is affected:** plaintext TCP entrypoints with an L4 route. Clients now
+see the connection close when the backend closes it; before, they waited.
+TLS-terminating TCP entrypoints are unchanged (they cannot splice).
+
+### The L4 resolver no longer prints every connection's backend list to stdout
+
+Every connection a TCP entrypoint accepted printed
+`L4 Resolver: Service <id> has <n> L4 backends: [...]` to standard output,
+outside the logger and regardless of the log level. The line is gone. The
+logger now records `L4 backend pool built` (entrypoint, network, backends) at
+INFO once when a route's backend pool is built or rebuilt after a
+configuration change.
+
+**Who is affected:** anyone who collected or grepped those stdout lines; the
+new log line carries the same information once per change.
+
+### The resource governor measures memory pressure against the gateway's own budget — **not the host's RAM**
+
+Above 80% memory use the governor runs its scavengers (the proxy cache purge
+among them). "Memory use" was the host's RAM used%, so a gateway in a 512 MiB
+container on a large node could reach its OOM line without ever scavenging,
+and on a shared host other processes' memory triggered purges of the
+gateway's caches.
+
+It now measures against, in order: the Go memory limit when one is set
+(`GOMEMLIMIT` or `GATEON_MEMORY_LIMIT`), using the Go runtime's own memory; else
+the process's cgroup v2 `memory.max` when it is limited (a container
+`--memory`, Kubernetes limits, systemd `MemoryMax=`), using the cgroup's working
+set (`memory.current` less reclaimable `inactive_file` page cache); else the
+host's RAM, as before. Startup logs `resource governor started` with
+`memory_yardstick` naming which, and the high-pressure warning names it too.
+
+**Who is affected:** installs with `GOMEMLIMIT`/`GATEON_MEMORY_LIMIT` set or
+running in a memory-limited container or unit. The governor now scavenges
+when the gateway nears its own limit, which may be sooner (a busy small
+container on an idle host) or later (an idle gateway on a busy shared host)
+than before. The Diagnostics card's memory figure is the same percentage.
+
+### The Diagnostics Phantom Core card reports the kernel splice path and its live sessions
+
+The card's engine and badge now describe how proxied bytes actually move: on
+Linux, `splice (zero-copy)` with a ZERO-COPY badge, because plaintext TCP
+routes are spliced by the kernel; elsewhere `standard` with a STANDARD badge
+(it said OPTIMIZED/FALLBACK). Its second line is the number of TCP sessions
+being spliced at that moment. In the API (`SystemInfo.titan`), `phantom_engine`
+changes accordingly and `active_phantom_ports` now carries that session count;
+it was always 0.
+
+**Who is affected:** anyone reading `titan.phantom_engine`,
+`titan.phantom_enabled` or `titan.active_phantom_ports` from the diagnostics API.
+
+### TCP entrypoints log each L4 connection at DEBUG, and a client hanging up early is no longer an ERROR
+
+At the default INFO level a plaintext TCP entrypoint logged every L4 session
+(`TCP inspection: Route found, proxying`, plus `SSH protocol detected on TCP
+entrypoint` or `RDP protocol detected ...`), and a client that disconnected
+before sending anything -- every port scan and TCP health probe -- as
+`level=ERROR msg="TCP inspection initial read error" error=EOF`. These are now
+DEBUG: one `TCP inspection: route found, proxying` line carrying the protocol
+and the client address, and `TCP inspection: client left before sending`. At
+INFO an L4 connection logs nothing.
+
+**Who is affected:** anyone alerting on or counting those lines. Set the log
+level to `debug` to see per-connection routing again; use the Diagnostics
+connection counters for volume.
+
+### An entrypoint with SSH and RDP routes keeps each route's backend pool and its health state
+
+A TCP entrypoint's backend pool was cached per entrypoint, so on an entrypoint
+with several TCP routes (SSH and RDP, or a protocol route beside a generic one)
+each connection that chose a different route than the one before rebuilt the
+pool: every backend was marked healthy again, least-connection counts were
+reset and the health checks restarted. A backend taken out of rotation by
+failed checks returned with the next connection of the other protocol. Pools
+are now kept per route, and the `L4 backend pool built` line appears once per
+route instead of once per alternation.
+
+**Who is affected:** TCP entrypoints carrying more than one TCP route. Health
+checks and `least_conn` now behave as configured.
+
+### TLS-terminated TCP sessions reuse their copy buffers
+
+Sessions through a TCP entrypoint that terminates TLS cannot be spliced; they
+were copied through two freshly allocated 32 KiB buffers each. The buffers are
+now pooled: a short TLS session allocates 117 KiB instead of 181 KiB (most of
+the rest is the TLS handshake), with latency unchanged.
+
+**Who is affected:** TLS-terminating TCP entrypoints; less garbage-collection
+pressure under many short sessions. No configuration change.
+
+### The Logs page's route, status and client filters work on the text-format log
+
+The filters on **Logs** read fields from JSON lines only. The gateway writes
+slog's text format unless `log.format` is `json` or `ENV=production`, so on those
+installs choosing a route, a status or a client address hid every line, and the
+route list was empty. On JSON logs the client filter looked for field names the
+access log never writes, and the status box's own example, `5xx`, matched
+nothing. The page now reads text-format lines too, matches the `client` and
+`remote_addr` fields, and treats `4xx`/`5xx` as status classes.
+
+**Who is affected:** operators using the Logs page. Nothing to change; filters
+that showed nothing now show the matching lines.
+
+### Path Metrics refreshes while it is open, and reports a failed load
+
+The **Path Metrics** page fetched its table once and waited for updates on the
+live metrics stream that the gateway never sends, so it showed the moment it was
+opened, and a path served just before could be missing until a reload. The table
+now refreshes on the dashboard's refresh interval (Settings → Appearance,
+default 10 seconds) while it is on screen, and a failed load shows an error with a
+retry instead of "No path metrics collected yet."
+
+**Who is affected:** operators using Path Metrics. While the page is open it
+requests `/v1/diag/path-stats` once per refresh interval.
+
+### Routes saved from the dashboard serve plain HTTP again — **re-save routes edited in the dashboard**
+
+The route form sent an empty `tls` section with every route it saved, and the
+gateway treats any `tls` section as "HTTPS only": plain-HTTP requests to such a
+route are refused with 403 "HTTPS required". Every route created in the
+dashboard, and every HTTP route opened and saved there (to rename it, say),
+stopped serving plain HTTP. The form now leaves the section out unless the
+route has a TLS option, a certificate or ACME.
+
+**Who is affected:** routes created or edited in the dashboard without a TLS
+option or certificate. They still carry the empty section, and still refuse
+plain HTTP, until they are saved again from the dashboard (or `tls` is removed
+from them through the API or `routes.json`).
+
+### Certificates and Client Authorities cannot save over TLS after a failed load
+
+Both pages kept editing an empty placeholder when they could not read the
+gateway's configuration, and saving from it turned TLS off and removed every
+other certificate or client authority. They now show the load error with a
+Retry, and adding is disabled until the configuration has loaded.
+
+**Who is affected:** nobody needs to act. If TLS was switched off unexpectedly
+after a certificate change, this was the cause.
+
+### Deleting from the dashboard asks first, naming what is deleted
+
+Routes (from the table), services, entrypoints, certificates and client
+authorities were deleted on the first click; TLS options and users asked a
+question that did not say which. All of them now open a confirmation that names
+the item and its id.
+
+**Who is affected:** dashboard users; scripted clients of the API are not.
+
+### The Users page reports refused changes
+
+Creating, editing, disabling or deleting a user that the gateway refused used to
+do nothing visible. It now shows the gateway's message and keeps the form open.
+
+### Quick Presets keep the settings they do not name
+
+Applying a preset in Settings replaced the whole logging section (and, for
+High-Throughput, the transport section), so saving afterwards reset every
+retention period, the trace-archive limits and the transport timeouts to their
+defaults. Presets now change only the fields they name.
+
+**Who is affected:** anyone who applied a preset and saved. Check the retention
+periods and trace-archive settings if you did.
+
+### The WAF rule editor reports rules the gateway refuses
+
+Saving a rule the gateway rejects (for example a regular expression RE2 cannot
+compile) used to show "WAF Rule created successfully" and close the editor,
+although nothing was stored. The editor now shows the gateway's reason and stays
+open.
+
+**Who is affected:** operators writing custom WAF rules; a rule you believed was
+saved may not exist.
+
 ---
 
 ## v2.7.0

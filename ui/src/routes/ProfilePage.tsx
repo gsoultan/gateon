@@ -12,14 +12,12 @@ import {
   Grid,
   Group,
   Paper,
-  PasswordInput,
   Stack,
   Text,
   ThemeIcon,
   Title,
   Tooltip,
 } from "@mantine/core";
-import { useForm } from "@mantine/form";
 import { useDisclosure } from "@mantine/hooks";
 import { notifications } from "@mantine/notifications";
 import { useNavigate } from "@tanstack/react-router";
@@ -32,10 +30,11 @@ import {
   IconUser,
   IconUserCircle,
 } from "@tabler/icons-react";
-import { apiFetch, getApiErrorMessage } from "../hooks/useGateon";
+import { apiFetch } from "../hooks/useGateon";
 import { useAuthStore } from "../store/useAuthStore";
 import { queryClient } from "../queryClient";
 import { TwoFactorModal } from "../components/TwoFactorModal";
+import { ChangePasswordForm } from "../components/ChangePasswordForm";
 
 const ROLE_COLOR: Record<string, string> = {
   admin: "red",
@@ -57,48 +56,21 @@ export default function ProfilePage() {
   const navigate = useNavigate();
 
   const [tfaOpened, { open: tfaOpen, close: tfaClose }] = useDisclosure(false);
-  const [pwLoading, setPwLoading] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
 
-  const passwordForm = useForm({
-    initialValues: {
-      password: "",
-      confirmPassword: "",
-    },
-    validate: {
-      password: (value) =>
-        value.length < 6 ? "Password must be at least 6 characters" : null,
-      confirmPassword: (value, values) =>
-        value !== values.password ? "Passwords do not match" : null,
-    },
-  });
-
-  const handlePasswordSubmit = async (values: typeof passwordForm.values) => {
-    if (!user) return;
-    setPwLoading(true);
-    try {
-      const res = await apiFetch("/v1/users/password", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: user.id, password: values.password }),
-      });
-      if (!res.ok) throw new Error(await res.text());
-      notifications.show({
-        title: "Password updated",
-        message: "Your password has been changed successfully.",
-        color: "green",
-        icon: <IconCheck size={16} />,
-      });
-      passwordForm.reset();
-    } catch (err) {
-      notifications.show({
-        title: "Failed to update password",
-        message: getApiErrorMessage(err),
-        color: "red",
-      });
-    } finally {
-      setPwLoading(false);
-    }
+  // Changing the password ends every session the account has, this one
+  // included (the session is bound to the password), so say so and go to the
+  // sign-in page instead of letting the next request fail.
+  const handlePasswordChanged = () => {
+    notifications.show({
+      title: "Password changed",
+      message: "Sign in again with your new password.",
+      color: "green",
+      icon: <IconCheck size={16} />,
+    });
+    queryClient.clear();
+    logout();
+    void navigate({ to: "/login" });
   };
 
   const handle2FASuccess = () => {
@@ -210,27 +182,14 @@ export default function ProfilePage() {
               </Box>
             </Group>
             <Divider mb="md" />
-            <form onSubmit={passwordForm.onSubmit(handlePasswordSubmit)}>
-              <Stack gap="sm">
-                <PasswordInput
-                  label="New password"
-                  placeholder="Enter new password"
-                  autoComplete="new-password"
-                  {...passwordForm.getInputProps("password")}
-                />
-                <PasswordInput
-                  label="Confirm password"
-                  placeholder="Re-enter new password"
-                  autoComplete="new-password"
-                  {...passwordForm.getInputProps("confirmPassword")}
-                />
-                <Group justify="flex-end" mt="xs">
-                  <Button type="submit" loading={pwLoading}>
-                    Update password
-                  </Button>
-                </Group>
-              </Stack>
-            </form>
+            {user && (
+              <ChangePasswordForm
+                userId={user.id}
+                own
+                onChanged={handlePasswordChanged}
+                submitLabel="Update password"
+              />
+            )}
           </Card>
         </Grid.Col>
 

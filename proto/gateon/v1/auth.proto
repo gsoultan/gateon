@@ -108,6 +108,13 @@ message DeleteUserResponse {
 message ChangePasswordRequest {
   string id = 1;
   string password = 2;
+  // current_password is the account's present password. Changing your own
+  // password requires it: the session alone is a cookie that script in the
+  // dashboard can ride, and a password it chose would outlive the session. A
+  // missing or wrong one is refused, and a wrong one counts towards the same
+  // lockout as a failed sign-in. An administrator resetting another account
+  // does not send it.
+  string current_password = 3;
 }
 
 message ChangePasswordResponse {
@@ -132,6 +139,13 @@ message User {
 
 message Setup2FARequest {
   string id = 1;
+  // password is the account's current password. Setup is self-service, and
+  // the session alone is not enough to start it: script running in the
+  // dashboard rides the session cookie without being able to read it, and
+  // would otherwise enrol the account with a TOTP secret it holds. A missing
+  // or wrong password is refused before a secret is generated, and counts
+  // towards the same lockout as a failed sign-in.
+  string password = 2;
 }
 
 message Setup2FAResponse {

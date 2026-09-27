@@ -70,6 +70,7 @@ export const AuditSettingsCard: React.FC<AuditSettingsCardProps> = ({
           <Switch
             checked={audit.enabled}
             onChange={(e) => updateAudit({ enabled: e.currentTarget.checked })}
+            aria-label="Forensic audit logging"
             disabled={disabled}
             size="lg"
           />
@@ -87,6 +88,7 @@ export const AuditSettingsCard: React.FC<AuditSettingsCardProps> = ({
                 <Switch
                   checked={audit.signEntries}
                   onChange={(e) => updateAudit({ signEntries: e.currentTarget.checked })}
+                  aria-label="Cryptographic signing"
                   disabled={disabled}
                 />
               </Group>
@@ -131,6 +133,7 @@ export const AuditSettingsCard: React.FC<AuditSettingsCardProps> = ({
                     min={0}
                     max={3650}
                     value={retentionDays}
+                    aria-label="Audit log retention in the database (days)"
                     onChange={(val) => updateAudit({ retentionDays: Number(val) })}
                     disabled={disabled}
                     w={100}
@@ -150,6 +153,7 @@ export const AuditSettingsCard: React.FC<AuditSettingsCardProps> = ({
                   </Stack>
                   <Switch
                     checked={archiveOnRetention}
+                    aria-label="Archive on retention"
                     onChange={(e) => updateAudit({ archiveOnRetention: e.currentTarget.checked })}
                     disabled={disabled || retentionDays === 0}
                   />

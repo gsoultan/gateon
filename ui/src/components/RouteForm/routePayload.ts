@@ -22,7 +22,26 @@ export function routeToFormValues(route: Route): Route {
   };
 }
 
-/** The body PUT /v1/routes is sent for the form's values. */
+/**
+ * Whether a route's tls section asks for anything: a TLS option, a
+ * certificate, or ACME.
+ */
+function hasTlsSettings(tls: Route["tls"]): boolean {
+  if (!tls) return false;
+  return Boolean(tls.optionId) || (tls.certificateIds?.length ?? 0) > 0 || tls.acmeEnabled === true;
+}
+
+/**
+ * The body PUT /v1/routes is sent for the form's values.
+ *
+ * The gateway reads the presence of a tls section as "this route is HTTPS
+ * only" and refuses plain HTTP to it with 403 "HTTPS required". The form's
+ * values always carry one, empty, so its fields have something to bind to;
+ * sending that made every route created here, and every HTTP route merely
+ * edited here, stop serving plain HTTP. An empty section is left out.
+ */
 export function formValuesToRoute(values: Route): Route {
-  return isL4(values.type) ? { ...values, rule: "L4()" } : { ...values };
+  const route = isL4(values.type) ? { ...values, rule: "L4()" } : { ...values };
+  if (!hasTlsSettings(route.tls)) delete route.tls;
+  return route;
 }

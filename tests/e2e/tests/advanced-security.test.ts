@@ -172,8 +172,10 @@ test.describe('Advanced Security & Global WAF E2E', () => {
     }
     await page.waitForTimeout(2000);
     
-    // Wait for the TagsInput to appear (it's conditional on deception.enabled)
-    const honeyPathInput = page.locator('input[placeholder="/.env, /wp-admin, /_backup"]');
+    // Wait for the TagsInput to appear (it's conditional on deception.enabled).
+    // Found by its id: the placeholder is example copy, and it changed when the
+    // card stopped suggesting /wp-admin, which bans real administrators.
+    const honeyPathInput = page.locator('#deception-honeypot-paths');
     await expect(honeyPathInput).toBeVisible({ timeout: 30000 });
     await honeyPathInput.fill('/secret-admin');
     await honeyPathInput.press('Enter');

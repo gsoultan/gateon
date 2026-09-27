@@ -7,6 +7,7 @@ import { IconShieldLock, IconLock, IconBug, IconActivity } from "@tabler/icons-r
 import { MapContainer, TileLayer, CircleMarker, Popup } from "react-leaflet";
 import type { Anomaly } from "../../types/gateon";
 import "leaflet/dist/leaflet.css";
+import { mapEmptyMessage } from "./anomalyMapMessages";
 
 // Theme-aware basemaps. The component chrome (legend/empty-state) is tuned for a
 // dark basemap, so in dark mode we use CARTO darkAll; in light mode CARTO lightAll
@@ -134,7 +135,7 @@ const AnomalyMap: React.FC<AnomalyMapProps> = ({ anomalies, onTrace }) => {
       {geoAnomalies.length === 0 && (
         <Stack align="center" justify="center" h="100%" gap="xs" style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, zIndex: 1000, pointerEvents: "none", backgroundColor: isDark ? "rgba(15, 23, 42, 0.5)" : "rgba(229, 231, 235, 0.5)" }}>
           <IconActivity size={40} color="#94a3b8" />
-          <Text c={isDark ? "white" : "dark"} size="sm" fw={500}>No geo-tagged anomalies detected</Text>
+          <Text c={isDark ? "white" : "dark"} size="sm" fw={500}>{mapEmptyMessage(anomalies.length)}</Text>
         </Stack>
       )}
     </Paper>

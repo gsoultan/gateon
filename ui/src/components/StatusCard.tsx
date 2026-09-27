@@ -4,7 +4,7 @@
 import { Card, Group, Text, Title, Notification, Badge, Divider, Stack, SimpleGrid, Paper, Progress, Box, ThemeIcon } from '@mantine/core'
 import { IconActivity, IconRoute, IconClock, IconVersions, IconCpu, IconDeviceDesktop, IconAdjustments } from '@tabler/icons-react'
 import { useGateonStatus } from '../hooks/useGateonStatus'
-import { formatBytes, safeToFixed } from '../utils/format'
+import { formatBytes, formatUptime, safeToFixed } from '../utils/format'
 
 export default function StatusCard() {
   const { data: statusData, error: statusError, isLoading: isStatusLoading } = useGateonStatus()
@@ -136,12 +136,4 @@ export default function StatusCard() {
       </Card>
     </Stack>
   )
-}
-
-function formatUptime(seconds: number) {
-  if (seconds < 60) return `${seconds}s`
-  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${seconds % 60}s`
-  const hours = Math.floor(seconds / 3600)
-  const minutes = Math.floor((seconds % 3600) / 60)
-  return `${hours}h ${minutes}m`
 }

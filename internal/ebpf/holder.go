@@ -25,6 +25,11 @@ var (
 // of a disabled eBPF subsystem.
 type Holder struct {
 	current atomic.Value // holds *managerContainer
+
+	// leases is when each adaptive rate limit set through the Holder lapses;
+	// see AdaptiveLimitLease.
+	leases limitLeases
+	now    func() time.Time // injectable for tests
 }
 
 type managerContainer struct {
@@ -34,7 +39,7 @@ type managerContainer struct {
 // NewHolder returns a Holder seeded with the (optional) initial manager. Pass
 // nil to start with the eBPF subsystem disabled.
 func NewHolder(initial Manager) *Holder {
-	h := &Holder{}
+	h := &Holder{now: time.Now}
 	h.Swap(initial)
 	return h
 }
@@ -42,6 +47,7 @@ func NewHolder(initial Manager) *Holder {
 // Swap atomically installs m as the active underlying manager. Passing nil
 // disables delegation so all subsequent calls become no-ops.
 func (h *Holder) Swap(m Manager) {
+	h.leases.reset()
 	h.current.Store(&managerContainer{m: m})
 }
 
@@ -101,49 +107,48 @@ func (h *Holder) UpdateLoadBalancerBackends(ips []string) error {
 	return nil
 }
 
-// SetAdaptiveRateLimit delegates to the active manager, if any.
+// SetAdaptiveRateLimit delegates to the active manager, if any, and leases the
+// limit for AdaptiveLimitLease: ExpireAdaptiveLimits lifts it unless it is set
+// again before then. The limit is listed without a reason; writers that can
+// say why use SetAdaptiveRateLimitFor.
 func (h *Holder) SetAdaptiveRateLimit(ip string, interval time.Duration) error {
-	if m := h.Current(); m != nil {
-		return m.SetAdaptiveRateLimit(ip, interval)
+	return h.SetAdaptiveRateLimitFor(ip, interval, "")
+}
+
+// SetAdaptiveRateLimitFor is SetAdaptiveRateLimit, recording reason for the
+// operator (AdaptiveLimits). The last writer's reason is the one listed, as
+// its interval is the one the kernel enforces.
+func (h *Holder) SetAdaptiveRateLimitFor(ip string, interval time.Duration, reason string) error {
+	m := h.Current()
+	if m == nil {
+		return nil
+	}
+	if err := m.SetAdaptiveRateLimit(ip, interval); err != nil {
+		return err
+	}
+	if key, ok := leaseKey(ip); ok {
+		now := h.clock()
+		if len(reason) > maxLimitReasonBytes {
+			reason = reason[:maxLimitReasonBytes]
+		}
+		h.leases.renew(AdaptiveLimit{
+			Key: key, Interval: interval, Reason: reason, SetAt: now, Expires: now.Add(AdaptiveLimitLease),
+		})
 	}
 	return nil
 }
 
 // ClearAdaptiveRateLimit delegates to the active manager, if any.
 func (h *Holder) ClearAdaptiveRateLimit(ip string) error {
-	if m := h.Current(); m != nil {
-		return m.ClearAdaptiveRateLimit(ip)
+	m := h.Current()
+	if m == nil {
+		return nil
 	}
-	return nil
-}
-
-// ApplyRLFeedback delegates to the active manager, if any.
-func (h *Holder) ApplyRLFeedback(ip string, score float64) error {
-	if m := h.Current(); m != nil {
-		return m.ApplyRLFeedback(ip, score)
+	if err := m.ClearAdaptiveRateLimit(ip); err != nil {
+		return err
 	}
-	return nil
-}
-
-// SetRLFeedbackHandler delegates to the active manager, if any.
-func (h *Holder) SetRLFeedbackHandler(f func(ip string, score float64)) {
-	if m := h.Current(); m != nil {
-		m.SetRLFeedbackHandler(f)
-	}
-}
-
-// RegisterPhantomPort delegates to the active manager, if any.
-func (h *Holder) RegisterPhantomPort(port uint32) error {
-	if m := h.Current(); m != nil {
-		return m.RegisterPhantomPort(port)
-	}
-	return nil
-}
-
-// UnregisterPhantomPort delegates to the active manager, if any.
-func (h *Holder) UnregisterPhantomPort(port uint32) error {
-	if m := h.Current(); m != nil {
-		return m.UnregisterPhantomPort(port)
+	if key, ok := leaseKey(ip); ok {
+		h.leases.drop(key)
 	}
 	return nil
 }
@@ -163,4 +168,12 @@ func (h *Holder) GetMapStats() (MapStats, error) {
 		return m.GetMapStats()
 	}
 	return MapStats{}, nil
+}
+
+// clock is the Holder's time source; a zero Holder reads the wall clock.
+func (h *Holder) clock() time.Time {
+	if h.now == nil {
+		return time.Now()
+	}
+	return h.now()
 }

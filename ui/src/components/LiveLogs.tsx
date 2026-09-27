@@ -37,6 +37,13 @@ import { useAuthStore } from "../store/useAuthStore";
 import { useApiConfigStore } from "../store/useApiConfigStore";
 import { useDisclosure } from "@mantine/hooks";
 import { LogAIAnalyst } from "./LogAIAnalyst";
+import {
+  clientMatches,
+  logFields,
+  routeOf,
+  statusMatches,
+  type LogFields,
+} from "../utils/logLine";
 
 interface LiveLogsProps {
   height?: number;
@@ -54,7 +61,10 @@ const FLUSH_INTERVAL_MS = 300;
 interface LogEntry {
   id: string;
   raw: string;
+  // The JSON object when the gateway logs JSON; drives the structured view.
   parsed: Record<string, any> | null;
+  // What the filters read, from JSON or from a text-format line alike.
+  fields: LogFields | null;
 }
 
 export default function LiveLogs({ height = 400, fill = false }: LiveLogsProps) {
@@ -123,6 +133,7 @@ export default function LiveLogs({ height = 400, fill = false }: LiveLogsProps) 
         id: `${Date.now()}-${logIdCounter.current++}`,
         raw,
         parsed,
+        fields: logFields(raw, parsed),
       });
       // Cap the buffer too, so a flood while a tab is backgrounded stays bounded.
       if (pending.length > MAX_LOGS) {
@@ -139,44 +150,25 @@ export default function LiveLogs({ height = 400, fill = false }: LiveLogsProps) 
   const routeOptions = useMemo(
     () =>
       Array.from(
-        new Set(
-          logs
-            .map((entry) => {
-              if (!entry.parsed) return "";
-              return String(entry.parsed.route ?? entry.parsed.routeId ?? "").trim();
-            })
-            .filter(Boolean),
-        ),
+        new Set(logs.map((entry) => (entry.fields ? routeOf(entry.fields) : "")).filter(Boolean)),
       ).sort((a, b) => a.localeCompare(b)),
     [logs],
   );
 
+  const filtering = Boolean(search || routeFilter || statusFilter || clientIpFilter);
+
   const filteredLogs = useMemo(() => {
     const searchLower = deferredSearch.toLowerCase();
-    const ipLower = deferredClientIpFilter.toLowerCase();
     return logs.filter((entry) => {
       if (deferredSearch) {
         if (!entry.raw.toLowerCase().includes(searchLower)) return false;
       }
       if (deferredRouteFilter || deferredStatusFilter || deferredClientIpFilter) {
-        if (!entry.parsed) return false;
-        
-        const parsed = entry.parsed;
-        if (deferredRouteFilter) {
-          const route = String(parsed.route ?? parsed.routeId ?? "").trim();
-          if (route !== deferredRouteFilter) return false;
-        }
-        if (deferredStatusFilter) {
-          const s = String(parsed.status ?? "");
-          if (s !== deferredStatusFilter && !s.startsWith(deferredStatusFilter))
-            return false;
-        }
-        if (deferredClientIpFilter) {
-          const ip = String(
-            parsed.ip ?? parsed.remoteAddr ?? parsed.clientIp ?? "",
-          ).toLowerCase();
-          if (!ip.includes(ipLower)) return false;
-        }
+        const fields = entry.fields;
+        if (!fields) return false;
+        if (deferredRouteFilter && routeOf(fields) !== deferredRouteFilter) return false;
+        if (deferredStatusFilter && !statusMatches(fields, deferredStatusFilter)) return false;
+        if (deferredClientIpFilter && !clientMatches(fields, deferredClientIpFilter)) return false;
       }
       return true;
     });
@@ -283,7 +275,7 @@ export default function LiveLogs({ height = 400, fill = false }: LiveLogsProps) 
                 PAUSED
               </Badge>
             )}
-            {search && (
+            {filtering && (
               <Badge size="xs" variant="light" color="gray" fw={600}>
                 {filteredLogs.length} / {logs.length}
               </Badge>
@@ -341,6 +333,7 @@ export default function LiveLogs({ height = 400, fill = false }: LiveLogsProps) 
                 variant="light"
                 color={paused ? "green" : "orange"}
                 onClick={() => setPaused(!paused)}
+                aria-label={paused ? "Resume" : "Pause"}
               >
                 {paused ? (
                   <IconPlayerPlay size={16} />
@@ -385,7 +378,7 @@ export default function LiveLogs({ height = 400, fill = false }: LiveLogsProps) 
                   py="xl"
                   style={{ fontFamily: "monospace" }}
                 >
-                  {search
+                  {filtering
                     ? "No logs match your filter. Change or clear the filter."
                     : "-- Waiting for incoming traffic --"}
                 </Text>

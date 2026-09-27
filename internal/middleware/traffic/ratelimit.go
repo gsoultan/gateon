@@ -246,15 +246,18 @@ func (rl *LocalRateLimiter) Handler(keyFunc func(*http.Request) string) func(htt
 			limiter := rl.getLimiter(key, reputation)
 			if !limiter.Allow() {
 				if rl.ebpf != nil {
-					// Offload this IP to eBPF for 1 minute of hard rate limiting at the kernel level.
-					// We calculate the minimum interval based on the current limit.
+					// Offload this IP to eBPF for hard rate limiting at the kernel
+					// level, at the configured rate. The limit is leased
+					// (ebpf.AdaptiveLimitLease): each rejection renews it, and it
+					// lapses once the client stays under the limit.
 					interval := time.Second / 10 // Default fallback: 10 pps
 					if rl.rate > 0 {
 						interval = time.Duration(float64(time.Second) / float64(rl.rate))
 					}
 					// The kernel limits by address; key is a tenant or a
 					// fingerprint under those strategies, never an address.
-					_ = rl.ebpf.SetAdaptiveRateLimit(request.GetClientIP(r, config.EffectiveTrustCloudflare()), interval)
+					_ = ebpf.SetAdaptiveRateLimitFor(rl.ebpf, request.GetClientIP(r, config.EffectiveTrustCloudflare()), interval,
+						"HTTP rate limit: requests refused for exceeding the configured rate")
 				}
 				if !kind.ShouldSkipMetrics(r) {
 					routeID := kind.GetRouteName(r)
@@ -263,9 +266,10 @@ func (rl *LocalRateLimiter) Handler(keyFunc func(*http.Request) string) func(htt
 					telemetry.RequestFailuresTotal.WithLabelValues(routeID, "ratelimit:local").Inc()
 					telemetry.IncRateLimitRejected("local")
 
-					// Record as security threat
+					// Record as security threat. The source is the client's
+					// address whatever the key: see rateLimitThreatSource.
 					telemetry.RecordSecurityThreat(telemetry.RecordSecurityThreatWithJA4(r, telemetry.SecurityThreat{
-						SourceIP:    key,
+						SourceIP:    rateLimitThreatSource(r),
 						Type:        "rate_limit",
 						Category:    "abuse",
 						Severity:    kind.SeverityMedium,
@@ -388,9 +392,10 @@ func (rl *RedisRateLimiter) Handler(keyFunc func(*http.Request) string) func(htt
 					telemetry.RequestFailuresTotal.WithLabelValues(routeID, "ratelimit:redis").Inc()
 					telemetry.IncRateLimitRejected("redis")
 
-					// Record as security threat
+					// Record as security threat, from the client's address; see
+					// rateLimitThreatSource.
 					telemetry.RecordSecurityThreat(telemetry.RecordSecurityThreatWithJA4(r, telemetry.SecurityThreat{
-						SourceIP:    key,
+						SourceIP:    rateLimitThreatSource(r),
 						Type:        "rate_limit",
 						Category:    "abuse",
 						Severity:    kind.SeverityMedium,
@@ -411,6 +416,20 @@ func (rl *RedisRateLimiter) Handler(keyFunc func(*http.Request) string) func(htt
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// rateLimitThreatSource is the address a rate-limit rejection is recorded
+// against: the one the reputation blocker scopes its score to, never the
+// limiter's key.
+//
+// The key is the client's address only under the "ip" strategy. Under "tenant"
+// it is a tenant id or "ip:<address>", and under "ja4h" and "fingerprint" it is
+// already a fingerprint scoped to a network, so recording it as the source put
+// the reputation penalty under a key no enforcement site reads, and gave the
+// dashboard, the correlation engine and an operator's release a source that is
+// not an address at all. The key stays in the threat's details.
+func rateLimitThreatSource(r *http.Request) string {
+	return telemetry.ClientIPOf(r)
 }
 
 // PerIP returns the client's IP address for rate-limit keys (uses X-Forwarded-For by default).

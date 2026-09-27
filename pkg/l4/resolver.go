@@ -6,14 +6,14 @@ package l4
 
 import (
 	"context"
-	"fmt"
-	"hash/fnv"
 	"net"
-	"sort"
+	"slices"
+	"strconv"
 	"strings"
 	"sync"
 
 	"github.com/gsoultan/gateon/internal/config"
+	"github.com/gsoultan/gateon/internal/logger"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
@@ -22,9 +22,18 @@ type Resolver struct {
 	routeStore   config.RouteStore
 	serviceStore config.ServiceStore
 	mu           sync.RWMutex
-	tcpPools     map[string]*cachedTCPPool
+	tcpPools     map[tcpPoolKey]*cachedTCPPool
 	udpProxies   map[string]*cachedUDPProxy
 }
+
+// tcpPoolKey names a cached TCP pool: one per route per entrypoint. An
+// entrypoint can carry several TCP routes -- one for SSH, one for RDP, a
+// generic one -- and when the key was the entrypoint alone they evicted each
+// other: every connection of the other protocol rebuilt the pool, resetting
+// its health state and connection counts and restarting its health checks.
+// The key space is bounded by configuration, not by traffic: a connection
+// chooses among the routes that exist.
+type tcpPoolKey struct{ entrypoint, route string }
 
 // cachedTCPPool holds a pool and its config hash for invalidation.
 type cachedTCPPool struct {
@@ -43,7 +52,7 @@ func NewResolver(routeStore config.RouteStore, serviceStore config.ServiceStore)
 	return &Resolver{
 		routeStore:   routeStore,
 		serviceStore: serviceStore,
-		tcpPools:     make(map[string]*cachedTCPPool),
+		tcpPools:     make(map[tcpPoolKey]*cachedTCPPool),
 		udpProxies:   make(map[string]*cachedUDPProxy),
 	}
 }
@@ -98,7 +107,6 @@ func BackendsFromService(svc *gateonv1.Service) []string {
 			addrs = append(addrs, addr)
 		}
 	}
-	fmt.Printf("L4 Resolver: Service %s has %d L4 backends: %v\n", svc.Id, len(addrs), addrs)
 	return addrs
 }
 
@@ -161,12 +169,12 @@ func ConfigFromRouteService(rt *gateonv1.Route, svc *gateonv1.Service) *L4Config
 // ResolveTCP resolves the TCP backend pool for an L4 entrypoint from Route → Service.
 // An optional protocol (e.g. "ssh") can be provided for more specific routing.
 func (r *Resolver) ResolveTCP(ep *gateonv1.EntryPoint, protocol string) TCPProxy {
-	cfg := r.resolveConfig(ep, "tcp", protocol)
+	route, cfg := r.resolveConfig(ep, "tcp", protocol)
 	if cfg == nil || len(cfg.Backends) == 0 {
 		return nil
 	}
 	hash := configHash(cfg)
-	key := ep.Id
+	key := tcpPoolKey{entrypoint: ep.Id, route: route}
 	r.mu.RLock()
 	if cached, ok := r.tcpPools[key]; ok && cached.hash == hash {
 		p := cached.pool
@@ -179,6 +187,7 @@ func (r *Resolver) ResolveTCP(ep *gateonv1.EntryPoint, protocol string) TCPProxy
 	if pool != nil && cfg.HealthCheckInterval > 0 && cfg.EnableHealthCheck {
 		go pool.StartHealthChecks()
 	}
+	logPoolBuilt(ep, "tcp", cfg)
 	r.mu.Lock()
 	old := r.tcpPools[key]
 	if old != nil && old.pool != nil {
@@ -191,7 +200,7 @@ func (r *Resolver) ResolveTCP(ep *gateonv1.EntryPoint, protocol string) TCPProxy
 
 // ResolveUDP resolves the UDP proxy for an L4 entrypoint from Route → Service.
 func (r *Resolver) ResolveUDP(ep *gateonv1.EntryPoint) UDPProxy {
-	cfg := r.resolveConfig(ep, "udp", "")
+	_, cfg := r.resolveConfig(ep, "udp", "")
 	if cfg == nil || len(cfg.Backends) == 0 {
 		return nil
 	}
@@ -206,6 +215,7 @@ func (r *Resolver) ResolveUDP(ep *gateonv1.EntryPoint) UDPProxy {
 	r.mu.RUnlock()
 
 	proxy := NewUDPSessionProxy(cfg.Backends, cfg.LoadBalancer, cfg.UDPSessionTimeout, cfg.UDPMaxSessions)
+	logPoolBuilt(ep, "udp", cfg)
 	r.mu.Lock()
 	old := r.udpProxies[key]
 	if old != nil && old.proxy != nil {
@@ -216,22 +226,23 @@ func (r *Resolver) ResolveUDP(ep *gateonv1.EntryPoint) UDPProxy {
 	return proxy
 }
 
-func (r *Resolver) resolveConfig(ep *gateonv1.EntryPoint, routeType string, protocol string) *L4Config {
+// resolveConfig selects the route for ep and returns its ID and the L4
+// configuration of its service; a nil config when nothing matches.
+func (r *Resolver) resolveConfig(ep *gateonv1.EntryPoint, routeType string, protocol string) (string, *L4Config) {
 	rt := SelectL4Route(context.Background(), ep.Id, routeType, protocol, r.routeStore)
 	if rt == nil {
-		return nil
+		return "", nil
 	}
 	svc, ok := r.serviceStore.Get(context.Background(), rt.ServiceId)
 	if !ok {
-		return nil
+		return "", nil
 	}
 	bt := strings.ToLower(svc.BackendType)
 	want := strings.ToLower(routeType)
 	if bt != want {
-		return nil
+		return "", nil
 	}
-	cfg := ConfigFromRouteService(rt, svc)
-	return cfg
+	return rt.Id, ConfigFromRouteService(rt, svc)
 }
 
 // configHash identifies a configuration so the resolver can tell a cached pool
@@ -249,42 +260,73 @@ func (r *Resolver) resolveConfig(ep *gateonv1.EntryPoint, routeType string, prot
 // an address, which is what made the concatenation ambiguous in the first place.
 // Backends stay order-insensitive on purpose: reordering a round-robin list is
 // not a change worth tearing down live connections for.
+//
+// It runs once per accepted connection, so it allocates nothing on the usual
+// path: FNV-1a is computed in place rather than through hash/fnv's
+// constructor, the integers are formatted into a stack buffer, and backends
+// already in order -- one backend always is -- are not copied to be sorted.
 func configHash(cfg *L4Config) uint64 {
-	h := fnv.New64a()
-	write := func(s string) {
-		_, _ = h.Write([]byte(s))
-		_, _ = h.Write([]byte{0})
+	h := fnv64a(fnvOffset64)
+	h.field(cfg.LoadBalancer)
+	for _, n := range [...]int{cfg.HealthCheckInterval, cfg.HealthCheckTimeout, cfg.UDPSessionTimeout, cfg.UDPMaxSessions} {
+		var digits [20]byte
+		h.fieldBytes(strconv.AppendInt(digits[:0], int64(n), 10))
 	}
-
-	write(cfg.LoadBalancer)
-	write(fmt.Sprintf("%d", cfg.HealthCheckInterval))
-	write(fmt.Sprintf("%d", cfg.HealthCheckTimeout))
-	write(fmt.Sprintf("%d", cfg.UDPSessionTimeout))
-	write(fmt.Sprintf("%d", cfg.UDPMaxSessions))
 	if cfg.ProxyProtocol {
-		write("proxy")
+		h.field("proxy")
 	} else {
-		write("noproxy")
+		h.field("noproxy")
 	}
 
-	// Copied before sorting: cfg belongs to the caller, and reordering its
-	// backends underneath them would be a surprising side effect of hashing.
-	backends := append([]string(nil), cfg.Backends...)
-	sort.Strings(backends)
-	for _, b := range backends {
-		write(b)
+	backends := cfg.Backends
+	if !slices.IsSorted(backends) {
+		// Copied before sorting: cfg belongs to the caller, and reordering its
+		// backends underneath them would be a surprising side effect of hashing.
+		backends = slices.Sorted(slices.Values(backends))
 	}
-	return h.Sum64()
+	for _, b := range backends {
+		h.field(b)
+	}
+	return uint64(h)
+}
+
+// fnv64a is a 64-bit FNV-1a hash accumulated in place.
+type fnv64a uint64
+
+const (
+	fnvOffset64 = 14695981039346656037
+	fnvPrime64  = 1099511628211
+)
+
+// field hashes s and then a NUL, so adjacent fields cannot run together.
+func (h *fnv64a) field(s string) {
+	for i := range len(s) {
+		*h ^= fnv64a(s[i])
+		*h *= fnvPrime64
+	}
+	*h *= fnvPrime64 // the NUL: xor with 0, then multiply
+}
+
+func (h *fnv64a) fieldBytes(b []byte) {
+	for _, c := range b {
+		*h ^= fnv64a(c)
+		*h *= fnvPrime64
+	}
+	*h *= fnvPrime64
+}
+
+// logPoolBuilt records a backend pool being built for an entrypoint -- when the
+// configuration it was resolved from changes, not per connection.
+func logPoolBuilt(ep *gateonv1.EntryPoint, network string, cfg *L4Config) {
+	logger.L.LogInfo("L4 backend pool built",
+		"entrypoint", ep.Id, "network", network, "backends", strings.Join(cfg.Backends, ","))
 }
 
 // InvalidateEntrypoint clears the cache for the given entrypoint (call when routes/services change).
 func (r *Resolver) InvalidateEntrypoint(epID string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if c := r.tcpPools[epID]; c != nil && c.pool != nil {
-		c.pool.Stop()
-	}
-	delete(r.tcpPools, epID)
+	r.dropTCPPoolsLocked(epID)
 	if c := r.udpProxies[epID]; c != nil && c.proxy != nil {
 		c.proxy.Stop()
 	}
@@ -299,14 +341,25 @@ func (r *Resolver) InvalidateForRoute(rt *gateonv1.Route) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, epID := range rt.Entrypoints {
-		if c := r.tcpPools[epID]; c != nil && c.pool != nil {
-			c.pool.Stop()
-		}
-		delete(r.tcpPools, epID)
+		r.dropTCPPoolsLocked(epID)
 		if c := r.udpProxies[epID]; c != nil && c.proxy != nil {
 			c.proxy.Stop()
 		}
 		delete(r.udpProxies, epID)
+	}
+}
+
+// dropTCPPoolsLocked stops and forgets every TCP pool of entrypoint epID,
+// whichever route it belongs to. r.mu must be held for writing.
+func (r *Resolver) dropTCPPoolsLocked(epID string) {
+	for key, c := range r.tcpPools {
+		if key.entrypoint != epID {
+			continue
+		}
+		if c.pool != nil {
+			c.pool.Stop()
+		}
+		delete(r.tcpPools, key)
 	}
 }
 

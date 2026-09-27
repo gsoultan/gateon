@@ -136,10 +136,11 @@ export function WAFRulesTab() {
               setOpened(true);
             }}
             disabled={!canWrite}
+            aria-label={`Edit WAF rule ${rule.name || rule.id}`}
           >
             <IconEdit size={16} />
           </ActionIcon>
-          <ActionIcon variant="subtle" color="red" onClick={() => handleDelete(rule)} disabled={!canWrite}>
+          <ActionIcon variant="subtle" color="red" onClick={() => handleDelete(rule)} disabled={!canWrite} aria-label={`Delete WAF rule ${rule.name || rule.id}`}>
             <IconTrash size={16} />
           </ActionIcon>
         </Group>

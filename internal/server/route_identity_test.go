@@ -290,6 +290,17 @@ func TestFileSecurityFilesItsBlocksAgainstItsRoute(t *testing.T) {
 	_ = mw.Close()
 	req := httptest.NewRequest(http.MethodPost, "http://files.test/upload", &body)
 	req.Header.Set("Content-Type", mw.FormDataContentType())
+	// The block is a real threat through a real store, so it costs this client
+	// its reputation -- under the identity every header-less request from
+	// httptest's default address shares, since the method is not part of it
+	// (ADR 0024). Left at zero, the reputation blocker refused whichever test in
+	// this package ran next. Registered after the store's cleanup so it runs
+	// first: the flush waits for the penalty to land before it is reset.
+	id := telemetry.GetReputationID(req)
+	t.Cleanup(func() {
+		telemetry.FlushThreats()
+		telemetry.ResetReputation(id)
+	})
 	if rec := serveRecorded(gw, req); rec.Code != http.StatusRequestEntityTooLarge {
 		t.Fatalf("oversized upload: status %d body %q, want 413 from file_security", rec.Code, rec.Body.String())
 	}

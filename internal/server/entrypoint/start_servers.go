@@ -4,11 +4,13 @@
 package entrypoint
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -98,60 +100,126 @@ func StartServers(
 	}
 }
 
-func startSecureManagementServer(port string, deps *Deps, wg *syncutil.WaitGroup) {
-	bind := "127.0.0.1"
-	if deps.ManagementConfig != nil && deps.ManagementConfig.Bind != "" {
-		bind = deps.ManagementConfig.Bind
-	}
+// ManagementBind is the address the dedicated management listener binds to:
+// GATEON_MANAGEMENT_BIND, else the configured bind, else loopback.
+func ManagementBind(cfg *gateonv1.ManagementConfig) string {
 	if envBind := os.Getenv("GATEON_MANAGEMENT_BIND"); envBind != "" {
-		bind = envBind
+		return envBind
 	}
+	if bind := cfg.GetBind(); bind != "" {
+		return bind
+	}
+	return loopbackIPv4
+}
 
-	mgmtPort := port
-	if deps.ManagementConfig != nil && deps.ManagementConfig.Port != "" {
-		mgmtPort = deps.ManagementConfig.Port
-	}
-	if envPort := os.Getenv("GATEON_MANAGEMENT_PORT"); envPort != "" {
-		mgmtPort = envPort
-	}
+// loopbackIPv4 is where the management listener binds, and whom it admits, when
+// nothing says otherwise.
+const loopbackIPv4 = "127.0.0.1"
 
+// ManagementAllowedIPs is the client allowlist the dedicated management
+// listener enforces: GATEON_MANAGEMENT_ALLOWED_IPS, else the configured list,
+// else loopback only.
+func ManagementAllowedIPs(cfg *gateonv1.ManagementConfig) []string {
+	if allowedIPsStr := os.Getenv("GATEON_MANAGEMENT_ALLOWED_IPS"); allowedIPsStr != "" {
+		return strings.Split(allowedIPsStr, ",")
+	}
+	if allowed := cfg.GetAllowedIps(); len(allowed) > 0 {
+		return allowed
+	}
+	return []string{loopbackIPv4, "::1"}
+}
+
+// ManagementListenerWorldOpen reports whether the dedicated management listener
+// admits a connection from any address: bound to every interface, with an
+// allowlist that constrains nothing. It is the condition the listener warns
+// about at startup, exported so the security advisory reports the same one.
+func ManagementListenerWorldOpen(cfg *gateonv1.ManagementConfig) bool {
+	return isWildcardBind(ManagementBind(cfg)) && allowsEveryAddress(ManagementAllowedIPs(cfg))
+}
+
+func startSecureManagementServer(port string, deps *Deps, wg *syncutil.WaitGroup) {
+	bind := ManagementBind(deps.ManagementConfig)
+	mgmtPort := managementPort(port, deps.ManagementConfig)
 	addr := net.JoinHostPort(bind, mgmtPort)
 
 	// IP Whitelisting for management entrypoint
-	allowedIPs := []string{"127.0.0.1", "::1"}
-	if deps.ManagementConfig != nil && len(deps.ManagementConfig.AllowedIps) > 0 {
-		allowedIPs = deps.ManagementConfig.AllowedIps
-	}
-	if allowedIPsStr := os.Getenv("GATEON_MANAGEMENT_ALLOWED_IPS"); allowedIPsStr != "" {
-		allowedIPs = strings.Split(allowedIPsStr, ",")
-	}
+	allowedIPs := ManagementAllowedIPs(deps.ManagementConfig)
 
 	warnIfManagementWorldOpen(bind, mgmtPort, allowedIPs)
-
-	mgmtHost := ""
-	if bind != "0.0.0.0" && bind != "::" && net.ParseIP(bind) == nil {
-		mgmtHost = bind
-	}
-	if envHost := os.Getenv("GATEON_MANAGEMENT_HOST"); envHost != "" {
-		mgmtHost = envHost
-	}
 
 	handler := middleware.Chain(
 		middleware.EntryPoint("management", "management", true),
 		middleware.Recovery(),
 		middleware.SecurityHeaders(middleware.SecurityHeadersConfig{Preset: "recommended"}),
-		middleware.HostFilter(mgmtHost),
+		middleware.HostFilter(managementHost(bind)),
 		security.IPFilter(allowedIPs, nil),
 		traffic.MaxConnections(500),
 	)(deps.BaseHandler)
 
+	server := newManagementHTTPServer(addr, handler)
+
+	if deps.ShutdownRegistry != nil {
+		deps.ShutdownRegistry.Register(func(ctx context.Context) error {
+			return shutdownHTTPServer(ctx, server)
+		})
+	}
+
+	logger.L.LogInfo("Secure Management Entrypoint started", "addr", addr)
+	wg.Go(func() { serveManagement(server, addr, deps.Phantom) })
+}
+
+// managementPort is GATEON_MANAGEMENT_PORT, else the configured port, else the
+// gateway's own port.
+func managementPort(port string, cfg *gateonv1.ManagementConfig) string {
+	if envPort := os.Getenv("GATEON_MANAGEMENT_PORT"); envPort != "" {
+		return envPort
+	}
+	if p := cfg.GetPort(); p != "" {
+		return p
+	}
+	return port
+}
+
+// managementHost is the Host the management listener answers to:
+// GATEON_MANAGEMENT_HOST, else a named bind address, else any.
+func managementHost(bind string) string {
+	if envHost := os.Getenv("GATEON_MANAGEMENT_HOST"); envHost != "" {
+		return envHost
+	}
+	if !isWildcardBind(bind) && net.ParseIP(bind) == nil {
+		return bind
+	}
+	return ""
+}
+
+// serveManagement listens on addr and serves the management API until the
+// server is shut down.
+func serveManagement(server *http.Server, addr string, phantom PhantomCore) {
+	l, err := net.Listen("tcp", addr)
+	if err != nil {
+		logger.L.LogError("Management listen failed", "error", err)
+		return
+	}
+	defer l.Close()
+
+	if phantom != nil {
+		l = phantom.OptimizeListener(l)
+	}
+
+	if err := server.Serve(l); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		logger.L.LogError("Management server failed", "error", err)
+	}
+}
+
+// newManagementHTTPServer builds the management listener's HTTP server.
+func newManagementHTTPServer(addr string, handler http.Handler) *http.Server {
 	// Enable H2C (HTTP/2 Cleartext) support for gRPC and modern HTTP clients.
 	// In Go 1.26+, this is handled natively via the Protocols field.
 	protocols := new(http.Protocols)
 	protocols.SetHTTP1(true)
 	protocols.SetUnencryptedHTTP2(true)
 
-	server := &http.Server{
+	return &http.Server{
 		Addr:      addr,
 		Handler:   handler,
 		HTTP2:     &http.HTTP2Config{},
@@ -171,30 +239,6 @@ func startSecureManagementServer(port string, deps *Deps, wg *syncutil.WaitGroup
 			}
 		},
 	}
-
-	if deps.ShutdownRegistry != nil {
-		deps.ShutdownRegistry.Register(func(ctx context.Context) error {
-			return shutdownHTTPServer(ctx, server)
-		})
-	}
-
-	logger.L.LogInfo("Secure Management Entrypoint started", "addr", addr)
-	wg.Go(func() {
-		l, err := net.Listen("tcp", addr)
-		if err != nil {
-			logger.L.LogError("Management listen failed", "error", err)
-			return
-		}
-		defer l.Close()
-
-		if deps.Phantom != nil {
-			l = deps.Phantom.OptimizeListener(l)
-		}
-
-		if err := server.Serve(l); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			logger.L.LogError("Management server failed", "error", err)
-		}
-	})
 }
 
 func startTCPServer(addr string, ep *gateonv1.EntryPoint, deps *Deps, wg *syncutil.WaitGroup, shutdownReg *ShutdownRegistry) {
@@ -242,12 +286,6 @@ func startTCPServer(addr string, ep *gateonv1.EntryPoint, deps *Deps, wg *syncut
 				wg.Go(func() {
 					defer conns.remove(c)
 					defer telemetry.GlobalDiagnostics.RecordDisconnect(ep.Id)
-					if deps.Phantom != nil {
-						// For plaintext TCP, attempt TITAN L4 hardware offload (AF_XDP/io_uring)
-						if err := deps.Phantom.ProxyL4(context.Background(), c, ""); err == nil {
-							return
-						}
-					}
 					handleTCPConnWithInspection(c, ep, deps, wg)
 				})
 			} else {
@@ -311,28 +349,49 @@ var (
 )
 
 func handleTCPConnWithInspection(conn net.Conn, ep *gateonv1.EntryPoint, deps *Deps, wg *syncutil.WaitGroup) {
-	logger.L.LogDebug("TCP connection received for inspection", "ep", ep.Id, "remote", conn.RemoteAddr().String())
+	if debugLogging() {
+		logger.L.LogDebug("TCP connection received for inspection", "ep", ep.Id, "remote", conn.RemoteAddr().String())
+	}
+	// The peek buffer goes back to the pool when this returns, which for an L4
+	// session is when the session ends: only a path that hands the bytes to
+	// another goroutine copies them.
+	peekPtr := peekPool.Get().(*[]byte)
+	defer peekPool.Put(peekPtr)
 
+	n, ok := peekFirstBytes(conn, *peekPtr, ep)
+	if !ok {
+		return
+	}
+	first := (*peekPtr)[:n]
+	if n > 0 && routeInspected(conn, first, ep, deps) {
+		return
+	}
+	fallbackTCP(conn, first, ep)
+}
+
+// peekFirstBytes reads the first bytes a client sends, to identify its
+// protocol. A client that sends nothing within a second is handled as generic
+// TCP (n is 0). ok is false when the client went away first, and conn has been
+// closed.
+func peekFirstBytes(conn net.Conn, peek []byte, ep *gateonv1.EntryPoint) (n int, ok bool) {
 	// Use a shorter deadline for the first byte, then a longer one for the rest
 	// to avoid blocking goroutines for slow/idle connections.
 	_ = conn.SetReadDeadline(time.Now().Add(1 * time.Second))
-
-	peekPtr := peekPool.Get().(*[]byte)
-	peek := *peekPtr
-	defer peekPool.Put(peekPtr)
-
-	// Read at least 1 byte to detect protocol early
 	n, err := conn.Read(peek)
 	if err != nil {
 		var netErr net.Error
 		if errors.As(err, &netErr) && netErr.Timeout() {
-			// No data received within 1s, handle as generic TCP
 			_ = conn.SetReadDeadline(time.Time{})
-			goto fallback
+			return 0, true
 		}
-		logger.L.LogError("TCP inspection initial read error", "ep", ep.Id, "error", err)
+		// A client hanging up before it says anything -- a port scan, a TCP
+		// health probe -- is routine. It was logged at ERROR, a line per
+		// connection that buried the errors worth reading.
+		if debugLogging() {
+			logger.L.LogDebug("TCP inspection: client left before sending", "ep", ep.Id, "error", err)
+		}
 		_ = conn.Close()
-		return
+		return 0, false
 	}
 
 	// If we got some data, try to read more if needed for HTTP/2 detection (24 bytes)
@@ -345,49 +404,68 @@ func handleTCPConnWithInspection(conn net.Conn, ep *gateonv1.EntryPoint, deps *D
 		}
 	}
 	_ = conn.SetReadDeadline(time.Time{})
+	return n, true
+}
 
-	if n > 0 {
-		peeked := make([]byte, n)
-		copy(peeked, peek[:n])
-
-		if IsTCPAppHTTP(peeked) {
+// routeInspected hands a connection whose first bytes are first to where they
+// say it goes -- the entrypoint's HTTP server, or the L4 route for its
+// protocol -- and reports whether anything took it.
+func routeInspected(conn net.Conn, first []byte, ep *gateonv1.EntryPoint, deps *Deps) bool {
+	if IsTCPAppHTTP(first) {
+		if debugLogging() {
 			logger.L.LogDebug("TCP inspection: HTTP detected", "ep", ep.Id)
-			serveConnAsHTTP(conn, peeked, ep, deps)
-			return
 		}
-
-		protocol := ""
-		if IsSSH(peeked) {
-			protocol = "ssh"
-			logger.L.Info().Str("ep", ep.Id).Str("remote", conn.RemoteAddr().String()).Msg("SSH protocol detected on TCP entrypoint")
-		} else if IsRDP(peeked) {
-			protocol = "rdp"
-			logger.L.Info().Str("ep", ep.Id).Str("remote", conn.RemoteAddr().String()).Msg("RDP protocol detected on TCP entrypoint")
-		}
-
-		var p l4.TCPProxy
-		if deps.L4Resolver != nil {
-			p = deps.L4Resolver.ResolveTCP(ep, protocol)
-		}
-		if p != nil {
-			logger.L.LogInfo("TCP inspection: Route found, proxying", "ep", ep.Id, "protocol", protocol)
-			handleTCPProxyL4(newPeekedConn(conn, peeked), p)
-			return
-		}
+		// The shared HTTP server reads it on another goroutine, after the
+		// peek buffer has gone back to the pool.
+		serveConnAsHTTP(conn, bytes.Clone(first), ep, deps)
+		return true
 	}
-
-fallback:
-	// No protocol detected or no route found
-	var peeked []byte
-	if n > 0 {
-		peeked = make([]byte, n)
-		copy(peeked, peek[:n])
+	protocol := l4Protocol(first)
+	var p l4.TCPProxy
+	if deps.L4Resolver != nil {
+		p = deps.L4Resolver.ResolveTCP(ep, protocol)
 	}
-	logger.L.LogDebug("TCP inspection fallback to generic TCP", "ep", ep.Id, "bytes", n)
-	pc := newPeekedConn(conn, peeked)
+	if p == nil {
+		return false
+	}
+	// One line per connection: DEBUG. At INFO it was two for SSH and RDP.
+	if debugLogging() {
+		logger.L.LogDebug("TCP inspection: route found, proxying",
+			"ep", ep.Id, "protocol", protocol, "remote", conn.RemoteAddr().String())
+	}
+	handleTCPProxyL4(newPeekedConn(conn, first), p)
+	return true
+}
+
+// l4Protocol names the protocol an L4 route can be chosen by: "ssh", "rdp",
+// or "" for anything else.
+func l4Protocol(first []byte) string {
+	switch {
+	case IsSSH(first):
+		return "ssh"
+	case IsRDP(first):
+		return "rdp"
+	default:
+		return ""
+	}
+}
+
+// fallbackTCP answers a connection nothing claimed -- no protocol detected, or
+// no route for it -- with the entrypoint's banner.
+func fallbackTCP(conn net.Conn, first []byte, ep *gateonv1.EntryPoint) {
+	if debugLogging() {
+		logger.L.LogDebug("TCP inspection fallback to generic TCP", "ep", ep.Id, "bytes", len(first))
+	}
+	pc := newPeekedConn(conn, first)
 	handleTCPConn(pc)
 	_ = pc.Close()
 }
+
+// debugLogging reports whether DEBUG lines are written. The per-connection
+// and per-packet ones ask first, so a disabled line formats nothing: its
+// arguments -- a remote address rendered to a string, values boxed into the
+// variadic slice -- cost allocations on every connection even when dropped.
+func debugLogging() bool { return logger.L.IsEnabled(slog.LevelDebug) }
 
 func handleTCPConn(conn net.Conn) {
 	_, _ = fmt.Fprintf(conn, "Gateon TCP Entrypoint - %s\n", time.Now().String())
@@ -404,7 +482,9 @@ func handleUDPConn(conn *net.UDPConn) {
 		if err != nil {
 			return
 		}
-		logger.L.Debug().Str("addr", addr.String()).Int("bytes", n).Msg("received UDP packet")
+		if debugLogging() {
+			logger.L.Debug().Str("addr", addr.String()).Int("bytes", n).Msg("received UDP packet")
+		}
 	}
 }
 

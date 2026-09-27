@@ -47,6 +47,7 @@ import { notifications } from "@mantine/notifications";
 import { EntryPointForm } from "../components/EntryPointForm";
 import type { EntryPoint } from "../types/gateon";
 import { QueryError } from "../components/QueryError";
+import { ConfirmDeleteModal } from "../components/ConfirmDelete";
 
 export default function EntryPointsPage() {
   const { canWrite } = usePermissions();
@@ -64,6 +65,10 @@ export default function EntryPointsPage() {
   });
   const queryClient = useQueryClient();
 
+  // Deleting used to happen on the menu click itself; it waits for a
+  // confirmation that names the entrypoint now.
+  const [pendingDelete, setPendingDelete] = useState<EntryPoint | null>(null);
+
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
       const res = await apiFetch(
@@ -74,6 +79,7 @@ export default function EntryPointsPage() {
       return true;
     },
     onSuccess: () => {
+      setPendingDelete(null);
       queryClient.invalidateQueries({ queryKey: ["entryPoints"] });
       notifications.show({
         title: "EntryPoint Deleted",
@@ -247,7 +253,7 @@ export default function EntryPointsPage() {
                         {canWrite && (
                           <Menu shadow="md" position="bottom-end">
                             <Menu.Target>
-                              <ActionIcon variant="subtle" color="gray">
+                              <ActionIcon variant="subtle" color="gray" aria-label={`Manage entrypoint ${ep.name || ep.id}`}>
                                 <IconDotsVertical size={16} />
                               </ActionIcon>
                             </Menu.Target>
@@ -262,7 +268,7 @@ export default function EntryPointsPage() {
                               <Menu.Item
                                 leftSection={<IconTrash size={14} />}
                                 color="red"
-                                onClick={() => deleteMutation.mutate(ep.id)}
+                                onClick={() => setPendingDelete(ep)}
                               >
                                 Delete
                               </Menu.Item>
@@ -389,7 +395,7 @@ export default function EntryPointsPage() {
                               transitionProps={{ transition: "pop-top-right" }}
                             >
                               <Menu.Target>
-                                <ActionIcon variant="subtle" color="gray">
+                                <ActionIcon variant="subtle" color="gray" aria-label={`Manage entrypoint ${ep.name || ep.id}`}>
                                   <IconDotsVertical size={16} />
                                 </ActionIcon>
                               </Menu.Target>
@@ -405,7 +411,7 @@ export default function EntryPointsPage() {
                                 <Menu.Item
                                   leftSection={<IconTrash size={14} />}
                                   color="red"
-                                  onClick={() => deleteMutation.mutate(ep.id)}
+                                  onClick={() => setPendingDelete(ep)}
                                 >
                                   Delete
                                 </Menu.Item>
@@ -433,6 +439,14 @@ export default function EntryPointsPage() {
           )}
         </Stack>
       </Card>
+
+      <ConfirmDeleteModal
+        target={pendingDelete ? { kind: "entrypoint", name: pendingDelete.name || pendingDelete.id, id: pendingDelete.id } : null}
+        consequence="Its listener closes when the gateway next restarts."
+        loading={deleteMutation.isPending}
+        onCancel={() => setPendingDelete(null)}
+        onConfirm={() => pendingDelete && deleteMutation.mutate(pendingDelete.id)}
+      />
 
       <Drawer
         opened={opened}

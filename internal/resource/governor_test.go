@@ -41,7 +41,10 @@ func failing(err error) usageFunc {
 func newTestGovernor(mem, cpu usageFunc) *Governor {
 	g := NewGovernor()
 	g.interval = time.Millisecond
-	g.memUsage = mem
+	g.memUsage = func(ctx context.Context) (float64, string, error) {
+		p, err := mem(ctx)
+		return p, "test budget", err
+	}
 	g.cpuUsage = cpu
 	return g
 }
@@ -226,7 +229,7 @@ func TestLiveUsageFuncsAreWiredByDefault(t *testing.T) {
 	if g.interval != defaultInterval {
 		t.Errorf("interval = %v, want %v", g.interval, defaultInterval)
 	}
-	if _, err := g.memUsage(context.Background()); err != nil {
+	if _, _, err := g.memUsage(context.Background()); err != nil {
 		t.Errorf("live memory sampler failed: %v", err)
 	}
 }

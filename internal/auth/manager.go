@@ -368,6 +368,20 @@ func (m *Manager) ChangePassword(id, password string) error {
 	return nil
 }
 
+// ChangeOwnPassword changes account id's password for a caller who presents
+// the current one, checked by confirmPassword under login's rules and lockout.
+//
+// ChangePassword alone needs nothing but an id, which was all a signed-in user
+// changing their own password had to supply -- so the session was enough, and in
+// the dashboard the session is a cookie that script in the page can ride. A
+// password chosen by that script would outlive the session it was set from.
+func (m *Manager) ChangeOwnPassword(id, current, password string) error {
+	if err := m.confirmPassword(id, current); err != nil {
+		return err
+	}
+	return m.ChangePassword(id, password)
+}
+
 func (m *Manager) DeleteUser(id string) error {
 	q := m.dialect.Rebind(QueryDeleteUser)
 	_, err := m.db.Exec(q, id)
@@ -433,14 +447,72 @@ func (m *Manager) EnrollPending2FA(username, password string) (string, string, [
 		return "", "", nil, "", ErrInvalidCredentials
 	}
 
-	secret, qr, codes, err := m.Setup2FA(id)
+	secret, qr, codes, err := m.beginTOTPEnrolment(id)
 	if err != nil {
 		return "", "", nil, "", err
 	}
 	return secret, qr, codes, id, nil
 }
 
-func (m *Manager) Setup2FA(id string) (string, string, []string, error) {
+// Setup2FA begins self-service TOTP enrolment for account id, and only for a
+// caller who presents that account's current password.
+//
+// It used to need nothing but the id, which the handler checks against the
+// session -- so holding the session was enough to enrol, and in the dashboard
+// script can hold the session without being able to read it: the stored-XSS
+// case the HttpOnly cookie exists for. Script could call setup, keep the secret
+// it was handed, verify a code derived from it, and leave the account's second
+// factor in an authenticator it controls (on an enrolled account, in place of
+// the owner's). The password is the one thing script in the page does not have.
+func (m *Manager) Setup2FA(id, password string) (string, string, []string, error) {
+	if err := m.confirmPassword(id, password); err != nil {
+		return "", "", nil, err
+	}
+	return m.beginTOTPEnrolment(id)
+}
+
+// confirmPassword applies login's first-factor rules to an account that is
+// already signed in, in Authenticate's order: a locked account is refused
+// before the password is compared, a wrong password counts towards the same
+// lockout the sign-in form enforces, a disabled account is refused only after
+// a correct one, and a correct one clears the count. Anything looser would make
+// a re-authentication prompt a faster way to guess the password than the
+// sign-in form -- one an attacker who holds a session reaches without a
+// captcha, a rate limit or a login audit entry.
+func (m *Manager) confirmPassword(id, password string) error {
+	var uid, username, hashed, role, secret, recoveryCodes string
+	var failedAttempts int
+	var lockedUntil sql.NullTime
+	var twoFactorEnabled, disabled, twoFactorPending bool
+
+	q := m.dialect.Rebind(QueryUserByID)
+	err := m.db.QueryRow(q, id).Scan(&uid, &username, &hashed, &role, &failedAttempts, &lockedUntil,
+		&twoFactorEnabled, &secret, &recoveryCodes, &disabled, &twoFactorPending)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrInvalidCredentials
+	}
+	if err != nil {
+		return err
+	}
+	if lockedUntil.Valid && time.Now().Before(lockedUntil.Time) {
+		return ErrAccountLocked
+	}
+	if err := bcrypt.CompareHashAndPassword([]byte(hashed), []byte(password)); err != nil {
+		m.handleFailedLogin(username, failedAttempts)
+		return ErrInvalidCredentials
+	}
+	if disabled {
+		return ErrAccountDisabled
+	}
+	m.resetFailedAttempts(username)
+	return nil
+}
+
+// beginTOTPEnrolment generates a TOTP secret and recovery codes for account id
+// and stores them, not yet enabled; Verify2FA enables them. Every caller must
+// already have established the account's first factor: Setup2FA by the
+// password, EnrollPending2FA by the password during a mandated sign-in.
+func (m *Manager) beginTOTPEnrolment(id string) (string, string, []string, error) {
 	var user gateonv1.User
 	var hashed, role, recoveryCodes string
 	var failedAttempts int

@@ -148,6 +148,7 @@ export enum HealthCheckType {
 export type RouteTLSConfig = {
   certificateIds: string[];
   optionId?: string;
+  acmeEnabled?: boolean;
 };
 
 export type TLSOption = {
@@ -335,6 +336,8 @@ export type LoginResponse = {
 
 export type Setup2FARequest = {
   id: string;
+  // The account's current password: setup is refused without it.
+  password: string;
 };
 
 export type Setup2FAResponse = {
@@ -842,6 +845,12 @@ export type Anomaly = {
   score?: number;
   routeId?: string;
   requestUri?: string;
+  // Where an unrouted request arrived: the entrypoint (its name, or its id
+  // when it has none) and the host it named. Set on unlisted_route findings.
+  entrypoint?: string;
+  host?: string;
+  // How many requests this finding stands for, when the detector folds repeats.
+  occurrences?: number;
   mitigated?: boolean;
   category?: string;
   actionTaken?: string;

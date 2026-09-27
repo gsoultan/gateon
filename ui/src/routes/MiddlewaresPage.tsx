@@ -333,6 +333,7 @@ export default function MiddlewaresPage() {
                                 variant="subtle"
                                 color="blue"
                                 onClick={() => startEdit(mw)}
+                                aria-label={`Edit middleware ${mw.name || mw.id}`}
                               >
                                 <IconPencil size={16} />
                               </ActionIcon>
@@ -342,6 +343,7 @@ export default function MiddlewaresPage() {
                                 variant="subtle"
                                 color="red"
                                 onClick={() => setDeleteTarget(mw)}
+                                aria-label={`Delete middleware ${mw.name || mw.id}`}
                               >
                                 <IconTrash size={16} />
                               </ActionIcon>

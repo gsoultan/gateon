@@ -92,7 +92,6 @@ type LocalMetricsAggregator struct {
 
 	// Advanced Stats for Z-Score anomaly detection
 	StatsRequests *RunningStats
-	StatsErrors   *RunningStats
 	StatsLatency  *RunningStats
 }
 
@@ -108,7 +107,6 @@ func GetAggregator() *LocalMetricsAggregator {
 			ipStats:       &sync.Map{},
 			maxBuckets:    60,
 			StatsRequests: &RunningStats{},
-			StatsErrors:   &RunningStats{},
 			StatsLatency:  &RunningStats{},
 		}
 	})
@@ -144,9 +142,9 @@ func (a *LocalMetricsAggregator) takeSnapshot(ctx context.Context) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
-	// Update running stats for Z-Score anomaly detection
+	// Update running stats for Z-Score anomaly detection. The error-rate
+	// baseline is read from the buckets instead; see errorZScore.
 	a.StatsRequests.Update(snap.GoldenSignals.RequestsTotal)
-	a.StatsErrors.Update(snap.GoldenSignals.ErrorsTotal)
 	a.StatsLatency.Update(snap.GoldenSignals.P99LatencyMs / 1000.0)
 
 	// 1. Golden Signals
@@ -167,17 +165,52 @@ func (a *LocalMetricsAggregator) takeSnapshot(ctx context.Context) {
 	a.cachedQPS.Store(uint64(qps))
 }
 
-// errorZScore and latencyZScore score x against the running statistics under
-// the lock takeSnapshot updates them under. The anomaly detector calls them
-// from its own goroutine, and a score is only meaningful if Count, Mean and M2
-// are read as one set -- read without the lock, they could come from two
-// different updates.
-func (a *LocalMetricsAggregator) errorZScore(x float64) float64 {
+// errorRateFloor is the least spread the error-rate baseline is taken to have:
+// one error a minute, the resolution of a minute's sample. A service with no
+// 5xx all hour has no spread at all, and without a floor its first outage would
+// score either zero deviations or infinitely many.
+const errorRateFloor = 1.0 / 60
+
+// errorZScore scores x, a 5xx rate in errors per second over the last window,
+// against the per-minute rates of the hour the buckets hold before that window.
+//
+// It used to score x against running statistics fed the cumulative 5xx
+// counter -- a count, not a rate -- so after an hour at a few errors a minute
+// the "baseline" mean was in the hundreds and an outage at 8/s scored below
+// it: no error spike could ever be reported. Read under the lock takeSnapshot
+// appends buckets under.
+func (a *LocalMetricsAggregator) errorZScore(x float64, window time.Duration) float64 {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
-	return a.StatsErrors.ZScore(x)
+	baseline := a.errorRateBaselineLocked(time.Now().Add(-window))
+	if baseline.Count < 2 {
+		return 0
+	}
+	return (x - baseline.Mean) / max(baseline.StdDev(), errorRateFloor)
 }
 
+// errorRateBaselineLocked returns the statistics of the 5xx rate, in errors per
+// second, over each interval between consecutive buckets that ends by cutoff.
+func (a *LocalMetricsAggregator) errorRateBaselineLocked(cutoff time.Time) RunningStats {
+	var s RunningStats
+	for i := 1; i < len(a.buckets); i++ {
+		prev, cur := a.buckets[i-1], a.buckets[i]
+		if cur.Timestamp.After(cutoff) {
+			break
+		}
+		secs := cur.Timestamp.Sub(prev.Timestamp).Seconds()
+		if secs <= 0 {
+			continue
+		}
+		s.Update(max(0, cur.Errors-prev.Errors) / secs) // a drop is a counter reset
+	}
+	return s
+}
+
+// latencyZScore scores x against the running statistics under the lock
+// takeSnapshot updates them under. The anomaly detector calls it from its own
+// goroutine, and a score is only meaningful if Count, Mean and M2 are read as
+// one set -- read without the lock, they could come from two different updates.
 func (a *LocalMetricsAggregator) latencyZScore(x float64) float64 {
 	a.mu.RLock()
 	defer a.mu.RUnlock()

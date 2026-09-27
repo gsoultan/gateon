@@ -9,6 +9,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"golang.org/x/sync/singleflight"
+
 	"github.com/gsoultan/gateon/internal/audit"
 	"github.com/gsoultan/gateon/internal/auth"
 	"github.com/gsoultan/gateon/internal/config"
@@ -65,17 +67,44 @@ type ApiService struct {
 	// SetupToken is the one-time token Setup requires; nil keeps setup closed.
 	SetupToken *auth.SetupToken
 
+	// Throttles is the RL limiter the analysis loop reports its findings to;
+	// see throttleRepeatedFindings. Nil throttles nothing.
+	Throttles FindingLimiter
+
 	// Performance caches for Diagnostics & Security Hub
 	publicIPCache    atomic.Pointer[string]
 	cfReachableCache atomic.Bool
 	cfLatencyCache   atomic.Pointer[time.Duration]
 	anomaliesCache   atomic.Pointer[[]*gateonv1.Anomaly]
-	mlLowPower       atomic.Bool
+	mlLowPowerUntil  atomic.Int64 // UnixNano when low power lapses; 0 is off
+	// coldAnomalies runs one detection pass for every Diagnostics caller that
+	// arrives before the analysis loop has published its first.
+	coldAnomalies singleflight.Group
 }
 
-// SetMLLowPower toggles the low-power mode for the ML engine.
+// mlLowPowerHold is how long one report of CPU pressure keeps the ML engine in
+// low power: three of the resource governor's five-second samples. The
+// governor reports on every sample while the pressure lasts, so the hold is
+// renewed for as long as the machine is busy and lapses soon after it is not.
+const mlLowPowerHold = 15 * time.Second
+
+// SetMLLowPower puts the ML engine in low-power mode for mlLowPowerHold, or
+// takes it out at once.
+//
+// It used to be a latch. The governor's CPU hook sets it on every sample above
+// 90% and nothing ever cleared it, so one busy moment cut the isolation forest
+// from 100 trees to 25 for the life of the process.
 func (s *ApiService) SetMLLowPower(enabled bool) {
-	s.mlLowPower.Store(enabled)
+	if !enabled {
+		s.mlLowPowerUntil.Store(0)
+		return
+	}
+	s.mlLowPowerUntil.Store(time.Now().Add(mlLowPowerHold).UnixNano())
+}
+
+// mlLowPowerActive reports whether the ML engine is in low-power mode at now.
+func (s *ApiService) mlLowPowerActive(now time.Time) bool {
+	return now.UnixNano() < s.mlLowPowerUntil.Load()
 }
 
 // GetGlobals returns the global config store for REST handlers.
@@ -299,6 +328,7 @@ func NewApiService(cfg ApiServiceConfig) *ApiService {
 
 		MiddlewareValidator: cfg.MiddlewareValidator,
 		SetupToken:          cfg.SetupToken,
+		Throttles:           cfg.Throttles,
 	}
 
 	if cfg.IPReputation != nil {
@@ -306,7 +336,8 @@ func NewApiService(cfg ApiServiceConfig) *ApiService {
 	} else if cfg.Globals != nil {
 		if gc := cfg.Globals.Get(context.Background()); gc != nil && gc.SecurityAdvanced != nil && gc.SecurityAdvanced.IpReputation != nil {
 			s.IPReputation = reputation.NewIPReputationStore(gc.SecurityAdvanced.IpReputation)
-			s.IPReputation.Start(context.Background())
+			// Its refresh loop lives as long as the gateway, and no longer.
+			s.IPReputation.Start(s.detached())
 		}
 	}
 

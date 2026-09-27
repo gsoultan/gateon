@@ -32,7 +32,6 @@ func TestAnomalyChecksDoNotRaceTheAggregator(t *testing.T) {
 		ipStats:       &sync.Map{},
 		maxBuckets:    60,
 		StatsRequests: &RunningStats{},
-		StatsErrors:   &RunningStats{},
 		StatsLatency:  &RunningStats{},
 	}
 	// An older, smaller point inside both windows, so the error-rate check

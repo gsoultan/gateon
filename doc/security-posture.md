@@ -28,10 +28,21 @@ Enabling or disabling 2FA does **not** revoke existing sessions; those factors
 are checked at login, and a session that already cleared them stays valid. If
 you need a user's sessions gone, disable the account or rotate the password.
 
+**A session is not enough to change credentials.** Changing your own password
+(`POST /v1/users/password`, or the `ChangePassword` RPC) and starting your own
+2FA setup both require your current password, and a wrong one counts towards the
+same lockout as a failed sign-in. Editing your own account as a user cannot set
+its password. An administrator resetting another account's password still needs
+only the administrator role.
+
 **Where the token lives.** In the browser it exists only in the HttpOnly,
 `SameSite=Lax` `gateon_session` cookie (`Secure` when served over TLS). It is
 never written to `localStorage` or `sessionStorage`, and no script on the page
-can read it. API and CLI clients send `Authorization: Bearer <token>`; query
+can read it. Sign-in (`POST /v1/login`, and the second step at
+`POST /v1/auth/2fa/verify`) answers a browser -- any request carrying the
+`Sec-Fetch-Mode` header, which browsers always send and page script can neither
+set nor remove -- with the cookie alone; the token appears in the response body
+only for API and CLI clients, which send `Authorization: Bearer <token>`. Query
 parameters are accepted only for WebSocket and SSE, which cannot set headers.
 
 **Multi-instance deployments.** Binding state is cached per process, and a

@@ -43,3 +43,25 @@ test("the route the form saves has no field the gateway would discard", () => {
 
   expect(() => fromJson(RouteSchema, body)).not.toThrow();
 });
+
+// The gateway reads any tls section on a route as "HTTPS only": a plain-HTTP
+// request to it is refused with 403 "HTTPS required" (internal/server/proxy.go).
+// The form keeps an empty one so its fields have values, and used to send it,
+// so a route created in the dashboard -- or an HTTP route merely renamed there
+// -- stopped serving plain HTTP.
+test("a route with no TLS settings is saved without a tls section", () => {
+  const values = routeToFormValues(fromGateway(stored()));
+  const saved = fromJson(RouteSchema, onTheWire(formValuesToRoute(values)));
+
+  expect(values.tls).toEqual({ certificateIds: [], optionId: "" });
+  expect(saved.tls).toBeUndefined();
+});
+
+test("a route with a TLS option or a certificate keeps its tls section", () => {
+  const values = routeToFormValues(fromGateway(stored()));
+  const option = formValuesToRoute({ ...values, tls: { certificateIds: [], optionId: "modern" } });
+  const cert = formValuesToRoute({ ...values, tls: { certificateIds: ["c1"], optionId: "" } });
+
+  expect(fromJson(RouteSchema, onTheWire(option)).tls?.optionId).toBe("modern");
+  expect(fromJson(RouteSchema, onTheWire(cert)).tls?.certificateIds).toEqual(["c1"]);
+});

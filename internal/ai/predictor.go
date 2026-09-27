@@ -37,7 +37,17 @@ type WasmTransformerPredictor struct {
 	mu       sync.Mutex
 }
 
-// NewWasmTransformerPredictor creates a new WASM-based traffic predictor.
+// NewWasmTransformerPredictor loads a WASM traffic model and asks it for one
+// prediction, so a model that cannot answer is refused here rather than
+// failing on every response.
+//
+// A model must stay running after it starts. A Go WASI *command* does not: its
+// _start runs main and exits when main returns, and the module is closed with
+// it. That is what `make models` used to build, so a custom model built the
+// documented way loaded without error, was reported as running, and failed
+// every prediction after -- the balancer quietly used its own average instead.
+// Build a *reactor* (-buildmode=c-shared), whose _initialize sets the runtime
+// up and returns; it is run here, as a command's _start still is.
 func NewWasmTransformerPredictor(ctx context.Context, wasmBytes []byte) (*WasmTransformerPredictor, error) {
 	if len(wasmBytes) == 0 {
 		return nil, errors.New("wasm bytes are empty")
@@ -52,18 +62,34 @@ func NewWasmTransformerPredictor(ctx context.Context, wasmBytes []byte) (*WasmTr
 		return nil, fmt.Errorf("failed to compile wasm module: %w", err)
 	}
 
-	// Instantiate the module.
-	mod, err := r.InstantiateModule(ctx, m, wazero.NewModuleConfig())
+	mod, err := r.InstantiateModule(ctx, m, wazero.NewModuleConfig().WithStartFunctions("_initialize", "_start"))
 	if err != nil {
 		_ = r.Close(ctx)
 		return nil, fmt.Errorf("failed to instantiate module: %w", err)
 	}
 
-	return &WasmTransformerPredictor{
+	p := &WasmTransformerPredictor{
 		runtime:  r,
 		module:   m,
 		instance: mod,
-	}, nil
+	}
+	if err := p.probe(ctx); err != nil {
+		_ = r.Close(ctx)
+		return nil, err
+	}
+	return p, nil
+}
+
+// probe asks a freshly loaded model for one prediction.
+func (p *WasmTransformerPredictor) probe(ctx context.Context) error {
+	if _, err := p.Predict(ctx, []float64{1, 1}); err != nil {
+		if p.instance.IsClosed() {
+			return fmt.Errorf("the model exited as soon as it started, so it can never answer "+
+				"(a WASI command; build it as a reactor with -buildmode=c-shared): %w", err)
+		}
+		return fmt.Errorf("the model did not answer a test prediction: %w", err)
+	}
+	return nil
 }
 
 // NativePredictor is a pure Go implementation of the Holt-Winters spike detection.
@@ -174,6 +200,21 @@ func GlobalPredictor() TrafficPredictor {
 		return nil
 	}
 	return *p
+}
+
+// ActiveModel names the installed traffic predictor for the dashboard: which
+// model is answering, not merely that one is installed.
+func ActiveModel() string {
+	switch GlobalPredictor().(type) {
+	case nil:
+		return "Not loaded"
+	case *NativePredictor:
+		return "Built-in forecast"
+	case *WasmTransformerPredictor:
+		return "Custom WASM model"
+	default:
+		return "Custom model"
+	}
 }
 
 // isDefaultModel reports whether wasmBytes is the embedded default model.

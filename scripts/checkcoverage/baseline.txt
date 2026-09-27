@@ -181,6 +181,7 @@ github.com/gsoultan/gateon/internal/server/handlers 24.5%
 github.com/gsoultan/gateon/internal/syncutil -
 github.com/gsoultan/gateon/internal/telemetry 55.8%
 github.com/gsoultan/gateon/internal/telemetry/repid 97.5%
+github.com/gsoultan/gateon/internal/telemetry/tracearchive 87.7%
 github.com/gsoultan/gateon/internal/testutil -
 github.com/gsoultan/gateon/internal/tls 51.6%
 github.com/gsoultan/gateon/internal/tui -

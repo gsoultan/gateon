@@ -17,6 +17,9 @@ type Service interface {
 	UpsertUser(u *gateonv1.User) error
 	DeleteUser(id string) error
 	ChangePassword(id, password string) error
+	// ChangeOwnPassword is ChangePassword for the account's own user, who must
+	// present the current password; a wrong one counts towards login's lockout.
+	ChangeOwnPassword(id, current, password string) error
 	UpdateSymmetricKey(key string)
 	SetUserDisabled(id string, disabled bool) error
 	SetTwoFactorPending(id string, pending bool) error
@@ -33,7 +36,12 @@ type Service interface {
 	SetBindingPublisher(p BindingPublisher)
 
 	// 2FA methods
-	Setup2FA(id string) (string, string, []string, error)
+
+	// Setup2FA begins self-service TOTP enrolment for account id. It requires
+	// the account's current password and applies login's lockout to it, so a
+	// session alone -- which script in the dashboard can ride without reading
+	// -- is not enough to put the second factor in someone else's hands.
+	Setup2FA(id, password string) (string, string, []string, error)
 	EnrollPending2FA(username, password string) (string, string, []string, string, error)
 	Verify2FA(id, code string) (bool, string, *gateonv1.User, error)
 	Disable2FA(id string) error

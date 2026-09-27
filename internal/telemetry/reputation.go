@@ -421,15 +421,21 @@ func ResetReputation(fingerprint string) {
 //
 // This walks every shard, which is fine for an operator's release and would not
 // be on the request path.
+//
+// The release names the fingerprint a threat recorded -- a whole JA4+ -- while
+// a score is kept for repid.Class of it (ADR 0024), so the match is on that
+// class: every variant of the fingerprint one client presents is one score, and
+// comparing against the JA4+ as written found none of them.
 func ResetReputationClass(class string) int {
 	if class == "" {
 		return 0
 	}
+	stable := repid.Class(class)
 	var keys []string
 	for _, shard := range repShards {
 		shard.mu.RLock()
 		for _, k := range shard.cache.Keys() {
-			if key, ok := k.(string); ok && key != class && repid.ClassOf(key) == class {
+			if key, ok := k.(string); ok && key != class && repid.ClassOf(key) == stable {
 				keys = append(keys, key)
 			}
 		}

@@ -409,13 +409,19 @@ const DiagnosticsPage: React.FC = () => {
                 </Box>
                 <Stack gap={4}>
                   <Group justify="space-between">
-                    <Text size="xs" c="dimmed" fw={800} style={{ textTransform: "uppercase" }}>Phantom Core</Text>
+                    <Tooltip label="How the gateway moves proxied bytes. On Linux, plaintext TCP routes are copied socket to socket by the kernel (splice); TLS and HTTP traffic goes through Go's standard network stack.">
+                      <Text size="xs" c="dimmed" fw={800} style={{ textTransform: "uppercase", cursor: 'help' }}>Phantom Core</Text>
+                    </Tooltip>
                     <Badge size="xs" color={data.system.titan.phantomEnabled ? "teal" : "gray"}>
-                      {data.system.titan.phantomEnabled ? "OPTIMIZED" : "FALLBACK"}
+                      {data.system.titan.phantomEnabled ? "ZERO-COPY" : "STANDARD"}
                     </Badge>
                   </Group>
-                  <Text fw={900} size="xl">{data.system.titan.phantomEngine || "Standard"}</Text>
-                  <Text size="10px" c="dimmed">Active Redirections: {data.system.titan.activePhantomPorts}</Text>
+                  <Text fw={900} size="xl">{data.system.titan.phantomEngine || "standard"}</Text>
+                  <Text size="10px" c="dimmed">
+                    {data.system.titan.phantomEnabled
+                      ? `Spliced TCP sessions now: ${data.system.titan.activePhantomPorts ?? 0}`
+                      : "No kernel splice on this platform"}
+                  </Text>
                 </Stack>
               </Paper>
 
@@ -425,11 +431,11 @@ const DiagnosticsPage: React.FC = () => {
                 </Box>
                 <Stack gap={4}>
                   <Group justify="space-between">
-                    <Tooltip label="Enable via -ai-model flag at startup">
+                    <Tooltip label="The latency forecast the ai_predictive load-balancing policy weighs backends by. Load a custom WASM model with --ai-model.">
                       <Text size="xs" c="dimmed" fw={800} style={{ textTransform: "uppercase", cursor: 'help' }}>Predictive AI</Text>
                     </Tooltip>
                     <Badge size="xs" color={data.system.titan.aiPredictorEnabled ? "indigo" : "gray"}>
-                      {data.system.titan.aiPredictorEnabled ? "LEARNING" : "OFF"}
+                      {data.system.titan.aiPredictorEnabled ? "ON" : "OFF"}
                     </Badge>
                   </Group>
                   <Text fw={900} size="xl">{data.system.titan.aiModelStatus || "Inactive"}</Text>
@@ -443,15 +449,17 @@ const DiagnosticsPage: React.FC = () => {
                 </Box>
                 <Stack gap={4}>
                   <Group justify="space-between">
-                    <Tooltip label="Quantum-Safe ML-KEM and ML-DSA active">
+                    <Tooltip label="TLS 1.3 handshakes offer hybrid post-quantum key exchange (X25519MLKEM768), Go's default. Certificates and signatures are classical.">
                       <Text size="xs" c="dimmed" fw={800} style={{ textTransform: "uppercase", cursor: 'help' }}>Quantum Security</Text>
                     </Tooltip>
                     <Badge size="xs" color={data.system.titan.pqcEnabled ? "teal" : "gray"}>
-                      {data.system.titan.pqcEnabled ? "ENABLED" : "OFF"}
+                      {data.system.titan.pqcEnabled ? "OFFERED" : "OFF"}
                     </Badge>
                   </Group>
-                  <Text fw={900} size="xl">ML-KEM / ML-DSA</Text>
-                  <Text size="10px" c="dimmed">Post-Quantum Cryptography Active</Text>
+                  <Text fw={900} size="xl">ML-KEM key exchange</Text>
+                  <Text size="10px" c="dimmed">
+                    {data.system.titan.pqcEnabled ? "Offered to TLS 1.3 clients" : "Turned off (GODEBUG=tlsmlkem=0)"}
+                  </Text>
                 </Stack>
               </Paper>
 

@@ -62,10 +62,11 @@ func (d *SecurityThreatDetector) Detect(ctx context.Context, data *DiagnosticDat
 		mu.Unlock()
 	}
 
-	// 2. Multi-IP attacks via fingerprinting
-	mu.Lock()
-	anomalies = append(anomalies, d.detectMultiIPAttacks(ctx, data, threshold)...)
-	mu.Unlock()
+	// 2. Multi-IP attacks by fingerprint are Graph Intelligence's
+	// (HybridGraphAnomalyDetector). This detector used to report every client
+	// class seen from more than three addresses as one actor rotating them --
+	// which a JA4+ value, a browser class, is on any site with four visitors on
+	// one Chrome build -- and recorded a threat for it on every pass.
 
 	// 3. Impossible Travel detection
 	if d.Config == nil || d.Config.EnableImpossibleTravel {
@@ -107,7 +108,7 @@ func (d *SecurityThreatDetector) Detect(ctx context.Context, data *DiagnosticDat
 			score += d.analyzeErrors(stats, &reasons, &primaryType)
 			score += d.analyzePatterns(stats, pathIPs, totalIPs, &reasons, &primaryType)
 			score += d.analyzeHeaders(stats, &reasons)
-			score += d.analyzeBehavior(stats, &reasons)
+			score += d.analyzeBehavior(stats, data.TraceSampleRate, &reasons)
 			score += d.analyzeDirectoryBusting(stats, &reasons)
 
 			// Reputation-based Smart Discount: Reduces false positives for trusted clients.
@@ -124,9 +125,11 @@ func (d *SecurityThreatDetector) Detect(ctx context.Context, data *DiagnosticDat
 				}
 			}
 
-			// External Threat Intelligence
+			// External Threat Intelligence. GetExternalScore applies each
+			// integration's configured confidence threshold (20 where none is
+			// set), so any score it returns has cleared it.
 			if d.Reputation != nil && (score > 0 || stats.TotalRequests > 10) {
-				if abuseScore, provider := d.Reputation.GetExternalScore(ctx, ip); abuseScore > 20 {
+				if abuseScore, provider := d.Reputation.GetExternalScore(ctx, ip); abuseScore > 0 {
 					score += abuseScore / 2
 					reasons = append(reasons, fmt.Sprintf("External threat feed (%s) confidence: %d%%", provider, abuseScore))
 				}
@@ -639,15 +642,10 @@ func (d *SecurityThreatDetector) analyzeHeaders(stats *IPStats, reasons *[]strin
 		*reasons = append(*reasons, fmt.Sprintf("Multiple TLS fingerprints (JA4+: %d) from single IP", len(stats.JA4s)))
 	}
 
-	if stats.HeaderAnomaly > 5 {
-		score += 30
-		*reasons = append(*reasons, "Inconsistent HTTP headers for declared User-Agent (potential spoofing)")
-	}
-
 	return score
 }
 
-func (d *SecurityThreatDetector) analyzeBehavior(stats *IPStats, reasons *[]string) int {
+func (d *SecurityThreatDetector) analyzeBehavior(stats *IPStats, sampleRate uint32, reasons *[]string) int {
 	score := 0
 	if stats.TotalRequests > 20 && len(stats.Methods) == 1 {
 		if _, hasPost := stats.Methods["POST"]; hasPost {
@@ -655,29 +653,48 @@ func (d *SecurityThreatDetector) analyzeBehavior(stats *IPStats, reasons *[]stri
 			*reasons = append(*reasons, "Unusual POST-only traffic pattern")
 		}
 	}
+	return score + automatedTimingScore(stats, sampleRate, reasons)
+}
 
-	// IAT (Inter-Arrival Time) Regularity Analysis
-	// Bots often have very low variance in their request timing.
-	if stats.IATCount >= 10 {
-		mean := stats.IATSum / float64(stats.IATCount)
-		variance := (stats.IATSumSq / float64(stats.IATCount)) - (mean * mean)
-		stdDev := math.Sqrt(math.Max(0, variance))
+// The request-timing check. A coefficient of variation (standard deviation of
+// the gaps over their mean) below regularTimingMaxCV is a machine's rhythm;
+// below regularTimingMinMeanMs the gaps are a burst, not a rhythm.
+const (
+	regularTimingMinIntervals = 10
+	regularTimingMinMeanMs    = 100.0
+	regularTimingMaxCV        = 0.15
+	regularTimingScore        = 25
+)
 
-		// If standard deviation is extremely low relative to the mean, it's likely a bot.
-		// Coefficient of Variation (CV) = StdDev / Mean
-		if mean > 100 { // Only check for non-bursty traffic
-			cv := stdDev / mean
-			if cv < 0.05 { // Extremely regular timing (<5% variation)
-				score += 60
-				*reasons = append(*reasons, fmt.Sprintf("Highly regular request intervals (CV: %.3f)", cv))
-			} else if cv < 0.15 {
-				score += 25
-				*reasons = append(*reasons, "Suspiciously regular request timing")
-			}
-		}
+// automatedTimingScore adds weight for a steady machine rhythm, but only to an
+// address whose traffic harmEvidence already found harmful.
+//
+// A steady rhythm is evidence of automation, not of malice. A dashboard polling
+// every five seconds, a health checker, a CI job and an uptime monitor all keep
+// one. The check used to add 60 points for it alone -- twice the default threat
+// threshold -- so once the gaps could be measured at all, every one of them was
+// filed as a threat on every pass. On harmful traffic the rhythm still counts:
+// it is what separates a credential-stuffing script from a person mistyping a
+// password.
+func automatedTimingScore(stats *IPStats, sampleRate uint32, reasons *[]string) int {
+	if stats.IATCount < regularTimingMinIntervals {
+		return 0
 	}
-
-	return score
+	mean := stats.IATSum / float64(stats.IATCount)
+	if mean <= regularTimingMinMeanMs {
+		return 0
+	}
+	variance := stats.IATSumSq/float64(stats.IATCount) - mean*mean
+	cv := math.Sqrt(math.Max(0, variance)) / mean
+	if cv >= regularTimingMaxCV {
+		return 0
+	}
+	harm, harmful := stats.harmEvidence(sampleRate)
+	if !harmful {
+		return 0
+	}
+	*reasons = append(*reasons, fmt.Sprintf("Highly regular request intervals (CV: %.3f) on harmful traffic: %s", cv, harm))
+	return regularTimingScore
 }
 
 func (d *SecurityThreatDetector) analyzeDirectoryBusting(stats *IPStats, reasons *[]string) int {
@@ -778,58 +795,4 @@ func (d *SecurityThreatDetector) getAdaptiveRecommendation(score int, primaryTyp
 	default:
 		return "ADAPTIVE: Behavioral anomaly detected. Review logs and consider implementing a challenge (e.g., JS/Cookie challenge) to verify the client."
 	}
-}
-
-func (d *SecurityThreatDetector) detectMultiIPAttacks(ctx context.Context, data *DiagnosticData, threshold float64) []*gateonv1.Anomaly {
-	var anomalies []*gateonv1.Anomaly
-	for fp, stats := range data.FingerprintStats {
-		if len(stats.IPs) > 3 {
-			mitigated := true
-			for ip := range stats.IPs {
-				if !data.IsIPMitigated(ip) {
-					mitigated = false
-					break
-				}
-			}
-
-			anomaly := &gateonv1.Anomaly{
-				Type:           "security_threat",
-				Severity:       severityHigh,
-				Description:    fmt.Sprintf("Multi-IP attack detected via fingerprinting: actor rotated %d IPs for the same client profile", len(stats.IPs)),
-				Timestamp:      stats.LastSeen.Format(time.RFC3339),
-				Source:         fp,
-				Recommendation: "This actor is rotating IPs to bypass rate limits. Consider blocking the entire fingerprint or implementing more aggressive bot challenges.",
-				Mitigated:      mitigated,
-			}
-			anomalies = append(anomalies, anomaly)
-
-			actionTaken := ""
-			if mitigated {
-				actionTaken = "blocked"
-			}
-			threat := telemetry.SecurityThreat{
-				Type:        "security_threat",
-				Fingerprint: fp,
-				Score:       threshold + 10,
-				Details:     fmt.Sprintf("Client fingerprint %s used across %d IPs", fp, len(stats.IPs)),
-				Time:        stats.LastSeen,
-				ActionTaken: actionTaken,
-			}
-
-			if stats.LastTrace != nil {
-				threat.RequestHeaders = stats.LastTrace.RequestHeaders
-				threat.RequestBody = stats.LastTrace.RequestBody
-				threat.ResponseHeaders = stats.LastTrace.ResponseHeaders
-				threat.ResponseBody = stats.LastTrace.ResponseBody
-				threat.UserAgent = stats.LastTrace.UserAgent
-				threat.Method = stats.LastTrace.Method
-				threat.SourceIP = stats.LastTrace.SourceIP
-				threat.RouteID = stats.LastTrace.RouteID
-				threat.RequestURI = stats.LastTrace.Path
-			}
-
-			telemetry.RecordSecurityThreat(threat)
-		}
-	}
-	return anomalies
 }
