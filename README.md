@@ -49,7 +49,10 @@ Gateon is designed for cloud-native environments, offering native gRPC/gRPC-Web 
 - **AI Anomaly Detection**: Proactive threat detection using traffic pattern analysis and Prometheus metrics.
 - **Deep Visibility**: Prometheus metrics, OpenTelemetry tracing, and structured JSON access logs.
 - **Live Diagnostics**: Real-time log streaming and a built-in **Topology Map** of your services.
-- **Management TUI**: A terminal-based dashboard (`gateon top`) for real-time monitoring.
+- **Management TUI**: A terminal-based dashboard (`gateon top [API URL] [--token TOKEN]`) for real-time
+  per-route traffic. With authentication on it needs a management token: the one `POST /v1/login`
+  returns to an API client, passed with `--token` or, to keep it out of the process list, in
+  `GATEON_TOKEN`.
 
 ### ⚙️ Automation & Scalability
 - **Kubernetes Native** `[experimental]`: Watches **Ingress** and Gateway API **`HTTPRoute`** resources and turns them into routes. `Gateway` and `GatewayClass` objects are not read, so listener and class selection come from Gateon's own entrypoints.

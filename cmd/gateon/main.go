@@ -68,11 +68,8 @@ func main() {
 			}
 			return
 		case "top":
-			apiURL := "http://localhost:" + getPort()
-			if len(os.Args) >= 3 {
-				apiURL = os.Args[2]
-			}
-			if err := tui.RunTop(context.Background(), apiURL); err != nil {
+			apiURL, token := tui.TopArgs(os.Args[2:], "http://localhost:"+getPort())
+			if err := tui.RunTop(context.Background(), apiURL, token); err != nil {
 				fmt.Fprintf(os.Stderr, "top: %v\n", err)
 				os.Exit(1)
 			}
