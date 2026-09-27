@@ -256,11 +256,39 @@ func ConfineSQLite(url, dir string) error {
 	if err != nil {
 		return ErrSQLiteNotConfined
 	}
+	file, base = realPath(file), realPath(base)
 	rel, err := filepath.Rel(base, file)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return fmt.Errorf("%w (%s)", ErrSQLiteNotConfined, base)
 	}
 	return nil
+}
+
+// realPath resolves the symlinks in the longest part of p that exists and puts
+// the rest back unchanged, so a file -- or a directory -- not created yet is
+// still compared by where it would be.
+//
+// ConfineSQLite compared the paths as written, and the two are not written the
+// same way: Abs resolves a relative path against Getwd, which answers with the
+// resolved directory unless PWD happens to name it -- and neither systemd nor a
+// process spawned from Node sets PWD. A data directory reached through a
+// symlink (/var on macOS, a data disk linked in at /var/lib/gateon) therefore
+// put every relative path, the wizard's default gateon.db among them, outside
+// it. And a symlink inside the directory could lead out of it, which the
+// written path never showed.
+func realPath(p string) string {
+	var rest []string
+	for dir := p; ; {
+		if real, err := filepath.EvalSymlinks(dir); err == nil {
+			return filepath.Join(append([]string{real}, rest...)...)
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return p
+		}
+		rest = append([]string{filepath.Base(dir)}, rest...)
+		dir = parent
+	}
 }
 
 func sidecarPaths(path string) []string {

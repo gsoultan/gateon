@@ -281,6 +281,10 @@ export type LogConfig = {
   accessLogRetentionDays?: number;
   securityThreatRetentionDays?: number;
   auditLogRetentionDays?: number;
+  // Trace archive. Zero or absent takes the resource profile's default.
+  traceArchiveEnabled?: boolean;
+  traceArchiveRetentionDays?: number;
+  traceArchiveMaxSizeMb?: number;
 };
 
 export type TransportConfig = {
@@ -367,6 +371,9 @@ export type SetupRequest = {
   // empty keeps the logs in the management database
   loggingDatabaseUrl?: string;
   loggingDatabaseConfig?: DatabaseConfig;
+  // The one-time token first-run setup requires: printed in the gateway's log
+  // at startup and saved as setup-token in its data directory
+  setupToken?: string;
 };
 
 export type SetupResponse = {

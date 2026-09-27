@@ -5,12 +5,14 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/gsoultan/gateon/internal/auth"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
@@ -43,10 +45,36 @@ func (s *setupStateAPI) IsSetupRequired(_ context.Context, _ *gateonv1.IsSetupRe
 	return &gateonv1.IsSetupRequiredResponse{Required: s.required}, nil
 }
 
+// testSetupToken is the setup token postTestDB presents, so a test that means
+// to reach the probe does; setup_testdb_token_test.go covers going without.
+var testSetupToken = func() *auth.SetupToken {
+	tok, err := auth.NewSetupToken("handlers-test-setup-token")
+	if err != nil {
+		panic(err)
+	}
+	return tok
+}()
+
+// postTestDB posts body with the setup token added, when body is a JSON object.
 func postTestDB(t *testing.T, svc GlobalAndAuthAPI, body string) *httptest.ResponseRecorder {
 	t.Helper()
+	var fields map[string]any
+	if json.Unmarshal([]byte(body), &fields) == nil && fields != nil {
+		fields["setupToken"] = testSetupToken.Value()
+		b, err := json.Marshal(fields)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body = string(b)
+	}
+	return postTestDBWith(t, svc, &Deps{SetupToken: testSetupToken}, body)
+}
+
+// postTestDBWith posts body exactly as given.
+func postTestDBWith(t *testing.T, svc GlobalAndAuthAPI, d *Deps, body string) *httptest.ResponseRecorder {
+	t.Helper()
 	mux := http.NewServeMux()
-	registerGlobalHandlers(mux, svc, &Deps{})
+	registerGlobalHandlers(mux, svc, d)
 	req := httptest.NewRequest(http.MethodPost, "/v1/setup/test-db", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()

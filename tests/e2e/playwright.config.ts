@@ -28,6 +28,23 @@ for (const f of fs.readdirSync('config')) {
 // they have to be absolute.
 const cfg = (name: string) => path.join(configDir, name);
 
+// A second gateway that has never been set up, for the first-run wizard
+// (tests/first-run.spec.ts): its own data and working directory, so it shares no
+// users and no global.json with the suite's. The spec reads what setup saved
+// from here, so the path travels in the environment -- and a worker, which
+// evaluates this file again, reuses it rather than making another.
+const firstRunDir =
+  process.env.GATEON_E2E_FIRST_RUN_DIR ?? fs.mkdtempSync(path.join(os.tmpdir(), 'gateon-e2e-first-run-'));
+process.env.GATEON_E2E_FIRST_RUN_DIR = firstRunDir;
+
+// The suite gateway's trace archive, outside the checkout. Before the gateway
+// starts, seed_trace_archive archives an hour of traces into it as another
+// node, gw-seed -- the way gateways sharing an archive's storage see each
+// other's hours (tests/trace-archive.spec.ts). A worker reuses it, as above.
+const archiveDir =
+  process.env.GATEON_E2E_ARCHIVE_DIR ?? fs.mkdtempSync(path.join(os.tmpdir(), 'gateon-e2e-archive-'));
+process.env.GATEON_E2E_ARCHIVE_DIR = archiveDir;
+
 export default defineConfig({
   testDir: './tests',
   fullyParallel: false,
@@ -71,6 +88,7 @@ export default defineConfig({
     { name: 'setup', testMatch: /.*\.setup\.ts/ },
     {
       name: 'e2e',
+      testIgnore: /first-run\.spec\.ts/,
       use: {
         ...devices['Desktop Chrome'],
         // The default identity for specs that do not pin one. The rbac specs
@@ -79,10 +97,16 @@ export default defineConfig({
       },
       dependencies: ['setup'],
     },
+    {
+      // The never-set-up gateway below, with no identity: none exists yet.
+      name: 'first-run',
+      testMatch: /first-run\.spec\.ts/,
+      use: { ...devices['Desktop Chrome'], baseURL: 'http://127.0.0.1:8090' },
+    },
   ],
   webServer: [
     {
-      command: 'rm -rf ../../telemetry_pebble/ && rm -f ../../gateon_test.db* && cd ../.. && GATEON_TEST=1 go run tests/e2e/create_user/main.go && GATEON_TEST=1 ./gateon',
+      command: 'rm -rf ../../telemetry_pebble/ && rm -f ../../gateon_test.db* && cd ../.. && GATEON_TEST=1 go run tests/e2e/create_user/main.go && GATEON_TEST=1 go run tests/e2e/seed_trace_archive/main.go && GATEON_TEST=1 ./gateon',
       port: 8080,
       reuseExistingServer: !process.env.CI,
       stdout: 'pipe',
@@ -100,6 +124,8 @@ export default defineConfig({
         GATEON_TEST: '1',
         GATEON_TRACE_SAMPLE_RATE: '1',
         GATEON_PROFILE: 'enterprise',
+        GATEON_TRACE_ARCHIVE_DIR: archiveDir,
+        GATEON_NODE_NAME: 'gw-e2e',
       },
     },
     {
@@ -125,6 +151,26 @@ export default defineConfig({
       stdout: 'pipe',
       stderr: 'pipe',
       timeout: 120000,
-    }
+    },
+    {
+      // The first-run gateway: no global.json, no users, the management plane on
+      // loopback. Never an existing server, which would have been set up.
+      command: path.resolve('../../gateon'),
+      cwd: firstRunDir,
+      port: 8090,
+      reuseExistingServer: false,
+      stdout: 'pipe',
+      stderr: 'pipe',
+      timeout: 120000,
+      env: {
+        PATH: `${process.cwd()}/mockbin:${process.env.PATH}`,
+        GATEON_DATA_DIR: firstRunDir,
+        GLOBAL_CONFIG_FILE: path.join(firstRunDir, 'global.json'),
+        GATEON_MANAGEMENT_BIND: '127.0.0.1',
+        GATEON_MANAGEMENT_PORT: '8090',
+        PORT: '8091',
+        GATEON_TEST: '1',
+      },
+    },
   ],
 });

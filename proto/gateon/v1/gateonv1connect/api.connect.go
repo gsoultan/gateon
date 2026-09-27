@@ -42,6 +42,11 @@ const (
 	ApiServiceListTracesProcedure = "/gateon.v1.ApiService/ListTraces"
 	// ApiServiceGetTraceProcedure is the fully-qualified name of the ApiService's GetTrace RPC.
 	ApiServiceGetTraceProcedure = "/gateon.v1.ApiService/GetTrace"
+	// ApiServiceQueryTracesProcedure is the fully-qualified name of the ApiService's QueryTraces RPC.
+	ApiServiceQueryTracesProcedure = "/gateon.v1.ApiService/QueryTraces"
+	// ApiServiceListTraceArchivesProcedure is the fully-qualified name of the ApiService's
+	// ListTraceArchives RPC.
+	ApiServiceListTraceArchivesProcedure = "/gateon.v1.ApiService/ListTraceArchives"
 	// ApiServiceListRoutesProcedure is the fully-qualified name of the ApiService's ListRoutes RPC.
 	ApiServiceListRoutesProcedure = "/gateon.v1.ApiService/ListRoutes"
 	// ApiServiceUpdateRouteProcedure is the fully-qualified name of the ApiService's UpdateRoute RPC.
@@ -179,6 +184,8 @@ type ApiServiceClient interface {
 	GetStatus(context.Context, *connect.Request[v1.GetStatusRequest]) (*connect.Response[v1.GetStatusResponse], error)
 	ListTraces(context.Context, *connect.Request[v1.ListTracesRequest]) (*connect.Response[v1.ListTracesResponse], error)
 	GetTrace(context.Context, *connect.Request[v1.GetTraceRequest]) (*connect.Response[v1.GetTraceResponse], error)
+	QueryTraces(context.Context, *connect.Request[v1.QueryTracesRequest]) (*connect.Response[v1.QueryTracesResponse], error)
+	ListTraceArchives(context.Context, *connect.Request[v1.ListTraceArchivesRequest]) (*connect.Response[v1.ListTraceArchivesResponse], error)
 	ListRoutes(context.Context, *connect.Request[v1.ListRoutesRequest]) (*connect.Response[v1.ListRoutesResponse], error)
 	UpdateRoute(context.Context, *connect.Request[v1.UpdateRouteRequest]) (*connect.Response[v1.UpdateRouteResponse], error)
 	DeleteRoute(context.Context, *connect.Request[v1.DeleteRouteRequest]) (*connect.Response[v1.DeleteRouteResponse], error)
@@ -258,6 +265,18 @@ func NewApiServiceClient(httpClient connect.HTTPClient, baseURL string, opts ...
 			httpClient,
 			baseURL+ApiServiceGetTraceProcedure,
 			connect.WithSchema(apiServiceMethods.ByName("GetTrace")),
+			connect.WithClientOptions(opts...),
+		),
+		queryTraces: connect.NewClient[v1.QueryTracesRequest, v1.QueryTracesResponse](
+			httpClient,
+			baseURL+ApiServiceQueryTracesProcedure,
+			connect.WithSchema(apiServiceMethods.ByName("QueryTraces")),
+			connect.WithClientOptions(opts...),
+		),
+		listTraceArchives: connect.NewClient[v1.ListTraceArchivesRequest, v1.ListTraceArchivesResponse](
+			httpClient,
+			baseURL+ApiServiceListTraceArchivesProcedure,
+			connect.WithSchema(apiServiceMethods.ByName("ListTraceArchives")),
 			connect.WithClientOptions(opts...),
 		),
 		listRoutes: connect.NewClient[v1.ListRoutesRequest, v1.ListRoutesResponse](
@@ -556,6 +575,8 @@ type apiServiceClient struct {
 	getStatus             *connect.Client[v1.GetStatusRequest, v1.GetStatusResponse]
 	listTraces            *connect.Client[v1.ListTracesRequest, v1.ListTracesResponse]
 	getTrace              *connect.Client[v1.GetTraceRequest, v1.GetTraceResponse]
+	queryTraces           *connect.Client[v1.QueryTracesRequest, v1.QueryTracesResponse]
+	listTraceArchives     *connect.Client[v1.ListTraceArchivesRequest, v1.ListTraceArchivesResponse]
 	listRoutes            *connect.Client[v1.ListRoutesRequest, v1.ListRoutesResponse]
 	updateRoute           *connect.Client[v1.UpdateRouteRequest, v1.UpdateRouteResponse]
 	deleteRoute           *connect.Client[v1.DeleteRouteRequest, v1.DeleteRouteResponse]
@@ -619,6 +640,16 @@ func (c *apiServiceClient) ListTraces(ctx context.Context, req *connect.Request[
 // GetTrace calls gateon.v1.ApiService.GetTrace.
 func (c *apiServiceClient) GetTrace(ctx context.Context, req *connect.Request[v1.GetTraceRequest]) (*connect.Response[v1.GetTraceResponse], error) {
 	return c.getTrace.CallUnary(ctx, req)
+}
+
+// QueryTraces calls gateon.v1.ApiService.QueryTraces.
+func (c *apiServiceClient) QueryTraces(ctx context.Context, req *connect.Request[v1.QueryTracesRequest]) (*connect.Response[v1.QueryTracesResponse], error) {
+	return c.queryTraces.CallUnary(ctx, req)
+}
+
+// ListTraceArchives calls gateon.v1.ApiService.ListTraceArchives.
+func (c *apiServiceClient) ListTraceArchives(ctx context.Context, req *connect.Request[v1.ListTraceArchivesRequest]) (*connect.Response[v1.ListTraceArchivesResponse], error) {
+	return c.listTraceArchives.CallUnary(ctx, req)
 }
 
 // ListRoutes calls gateon.v1.ApiService.ListRoutes.
@@ -866,6 +897,8 @@ type ApiServiceHandler interface {
 	GetStatus(context.Context, *connect.Request[v1.GetStatusRequest]) (*connect.Response[v1.GetStatusResponse], error)
 	ListTraces(context.Context, *connect.Request[v1.ListTracesRequest]) (*connect.Response[v1.ListTracesResponse], error)
 	GetTrace(context.Context, *connect.Request[v1.GetTraceRequest]) (*connect.Response[v1.GetTraceResponse], error)
+	QueryTraces(context.Context, *connect.Request[v1.QueryTracesRequest]) (*connect.Response[v1.QueryTracesResponse], error)
+	ListTraceArchives(context.Context, *connect.Request[v1.ListTraceArchivesRequest]) (*connect.Response[v1.ListTraceArchivesResponse], error)
 	ListRoutes(context.Context, *connect.Request[v1.ListRoutesRequest]) (*connect.Response[v1.ListRoutesResponse], error)
 	UpdateRoute(context.Context, *connect.Request[v1.UpdateRouteRequest]) (*connect.Response[v1.UpdateRouteResponse], error)
 	DeleteRoute(context.Context, *connect.Request[v1.DeleteRouteRequest]) (*connect.Response[v1.DeleteRouteResponse], error)
@@ -941,6 +974,18 @@ func NewApiServiceHandler(svc ApiServiceHandler, opts ...connect.HandlerOption) 
 		ApiServiceGetTraceProcedure,
 		svc.GetTrace,
 		connect.WithSchema(apiServiceMethods.ByName("GetTrace")),
+		connect.WithHandlerOptions(opts...),
+	)
+	apiServiceQueryTracesHandler := connect.NewUnaryHandler(
+		ApiServiceQueryTracesProcedure,
+		svc.QueryTraces,
+		connect.WithSchema(apiServiceMethods.ByName("QueryTraces")),
+		connect.WithHandlerOptions(opts...),
+	)
+	apiServiceListTraceArchivesHandler := connect.NewUnaryHandler(
+		ApiServiceListTraceArchivesProcedure,
+		svc.ListTraceArchives,
+		connect.WithSchema(apiServiceMethods.ByName("ListTraceArchives")),
 		connect.WithHandlerOptions(opts...),
 	)
 	apiServiceListRoutesHandler := connect.NewUnaryHandler(
@@ -1239,6 +1284,10 @@ func NewApiServiceHandler(svc ApiServiceHandler, opts ...connect.HandlerOption) 
 			apiServiceListTracesHandler.ServeHTTP(w, r)
 		case ApiServiceGetTraceProcedure:
 			apiServiceGetTraceHandler.ServeHTTP(w, r)
+		case ApiServiceQueryTracesProcedure:
+			apiServiceQueryTracesHandler.ServeHTTP(w, r)
+		case ApiServiceListTraceArchivesProcedure:
+			apiServiceListTraceArchivesHandler.ServeHTTP(w, r)
 		case ApiServiceListRoutesProcedure:
 			apiServiceListRoutesHandler.ServeHTTP(w, r)
 		case ApiServiceUpdateRouteProcedure:
@@ -1354,6 +1403,14 @@ func (UnimplementedApiServiceHandler) ListTraces(context.Context, *connect.Reque
 
 func (UnimplementedApiServiceHandler) GetTrace(context.Context, *connect.Request[v1.GetTraceRequest]) (*connect.Response[v1.GetTraceResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gateon.v1.ApiService.GetTrace is not implemented"))
+}
+
+func (UnimplementedApiServiceHandler) QueryTraces(context.Context, *connect.Request[v1.QueryTracesRequest]) (*connect.Response[v1.QueryTracesResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gateon.v1.ApiService.QueryTraces is not implemented"))
+}
+
+func (UnimplementedApiServiceHandler) ListTraceArchives(context.Context, *connect.Request[v1.ListTraceArchivesRequest]) (*connect.Response[v1.ListTraceArchivesResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gateon.v1.ApiService.ListTraceArchives is not implemented"))
 }
 
 func (UnimplementedApiServiceHandler) ListRoutes(context.Context, *connect.Request[v1.ListRoutesRequest]) (*connect.Response[v1.ListRoutesResponse], error) {

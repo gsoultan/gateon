@@ -68,6 +68,9 @@ test_*.db
 test_*.db-shm
 test_*.db-wal
 telemetry_pebble/
+# Hourly trace archive files (GATEON_TRACE_ARCHIVE_DIR defaults under the
+# data directory, which is the working directory in a checkout).
+trace_archive/
 /graphify-out/
 /.serena/
 # The integration suite is source and must be tracked. It was excluded

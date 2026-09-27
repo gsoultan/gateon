@@ -11,9 +11,6 @@ import {
   Stack,
   ActionIcon,
   Tooltip,
-  Paper,
-  Box,
-  Divider,
   ScrollArea,
   Code,
   TextInput,
@@ -21,18 +18,14 @@ import {
   Button,
   Pagination,
   CopyButton,
-  HoverCard,
   UnstyledButton,
   Skeleton,
   Center,
-  Modal,
-  Grid,
+  Tabs,
 } from "@mantine/core";
 import {
   IconSearch,
   IconRefresh,
-  IconExternalLink,
-  IconTimeline,
   IconCircleCheck,
   IconCircleX,
   IconCopy,
@@ -40,46 +33,48 @@ import {
   IconClock,
   IconFingerprint,
   IconRoute,
-  IconArrowRight,
   IconInfoCircle,
+  IconActivity,
+  IconHistory,
+  IconArchive,
 } from "@tabler/icons-react";
-import { useState, useMemo, useTransition } from "react";
+import { lazy, Suspense, useState, useMemo, useTransition } from "react";
 
-import { useTraces, useTrace } from "../hooks/useGateon";
+import { useTraces } from "../hooks/useGateon";
 import { safeToFixed } from "../utils/format";
 import { useTableDensity } from "../hooks/useTableDensity";
 import { useUrlFilters } from "../hooks/useUrlFilters";
 import type { Trace } from "../hooks/useGateon";
 import TraceVisualizer from "../components/Diagnostics/TraceVisualizer";
 import { QueryError } from "../components/QueryError";
+import TraceDetailsModal from "../components/Traces/TraceDetailsModal";
+import { getDurationColor, getStatusColor, isSuccessStatus } from "../components/Traces/traceFormat";
+import { hourPeriod, type Period } from "../components/Traces/tracePeriods";
+
+// The History and Archive tabs load when first opened: most visits to this
+// page are for the live view.
+const TraceHistoryPanel = lazy(() => import("../components/Traces/TraceHistoryPanel"));
+const TraceArchivePanel = lazy(() => import("../components/Traces/TraceArchivePanel"));
+
+type TracesTab = "live" | "history" | "archive";
+const asTab = (v: string | undefined): TracesTab => (v === "history" || v === "archive" ? v : "live");
+
+// urlPeriod reads the History tab's period from the URL, if it holds one.
+function urlPeriod(from?: string, to?: string): Period | null {
+  if (!from || !to) return null;
+  const p = { from: new Date(from), to: new Date(to) };
+  return Number.isNaN(p.from.getTime()) || Number.isNaN(p.to.getTime()) ? null : p;
+}
 
 const PAGE_SIZE = 20;
 
-const getStatusColor = (status: string) => {
-  const code = parseInt(status);
-  if (isNaN(code)) {
-    return status === "success" ? "green" : "red";
-  }
-  if (code >= 200 && code < 300) return "green";
-  if (code >= 300 && code < 400) return "blue";
-  if (code >= 400 && code < 500) return "orange";
-  if (code >= 500) return "red";
-  return "gray";
-};
-
-const getDurationColor = (duration: number) => {
-  if (duration < 50) return "teal";
-  if (duration < 200) return "blue";
-  if (duration < 500) return "orange";
-  return "red";
-};
-
 export default function TracesPage() {
-  const { data: traces = [], isLoading, isError, error, refetch } = useTraces();
-  const density = useTableDensity();
   // URL-synced filters make a filtered trace view bookmarkable/shareable; local
   // state (seeded from the URL) keeps typing responsive while we mirror to the URL.
-  const [filters, setFilters] = useUrlFilters<{ q: string; route: string }>();
+  const [filters, setFilters] = useUrlFilters<{ q: string; route: string; tab: string; from: string; to: string }>();
+  const tab = asTab(filters.tab);
+  const { data: traces = [], isLoading, isError, error, refetch } = useTraces(100, tab === "live");
+  const density = useTableDensity();
   const [search, setSearch] = useState(filters.q ?? "");
   const [deferredSearch, setDeferredSearch] = useState(filters.q ?? "");
   const [routeFilter, setRouteFilter] = useState<string | null>(
@@ -93,11 +88,13 @@ export default function TracesPage() {
   
   const [selectedTraceId, setSelectedTraceId] = useState<string | null>(null);
   const [selectedTraceTs, setSelectedTraceTs] = useState<string | null>(null);
-  const { data: fullTrace, isLoading: isFullTraceLoading } = useTrace(
-    selectedTraceId || undefined,
-    selectedTraceTs || undefined
-  );
   const [detailsOpened, setDetailsOpened] = useState(false);
+
+  const showTab = (next: string | null) => setFilters({ tab: next === "live" ? undefined : (next ?? undefined) });
+  const viewHour = (periodStart: string) => {
+    const p = hourPeriod(periodStart);
+    if (p) setFilters({ tab: "history", from: p.from.toISOString(), to: p.to.toISOString() });
+  };
 
   const openVisualizer = (ip: string) => {
     if (!ip || ip === "-" || ip === "127.0.0.1") return;
@@ -161,7 +158,7 @@ export default function TracesPage() {
         <Stack gap={0}>
           <Group gap="sm" align="center">
             <Title order={2}>Distributed Tracing</Title>
-            {traces.length > 0 && (
+            {tab === "live" && traces.length > 0 && (
               <Badge variant="light" size="lg" radius="sm">
                 {traces.length} Total
               </Badge>
@@ -173,517 +170,271 @@ export default function TracesPage() {
           </Text>
         </Stack>
         <Group>
-          <Stack gap={0} align="flex-end">
-            <Button
-              leftSection={<IconRefresh size={16} />}
-              variant="light"
-              loading={isLoading}
-              onClick={() => refetch()}
-            >
-              Refresh
-            </Button>
-            <Text size="xs" c="dimmed" mt={4}>
-              Auto-refreshes every 5s
-            </Text>
-          </Stack>
-          <Tooltip label="Open in Jaeger">
-            <ActionIcon variant="light" color="blue" size="lg" component="a" href="#" onClick={(e) => e.preventDefault()}>
-              <IconExternalLink size={20} />
-            </ActionIcon>
-          </Tooltip>
+          {tab === "live" && (
+            <Stack gap={0} align="flex-end">
+              <Button
+                leftSection={<IconRefresh size={16} />}
+                variant="light"
+                loading={isLoading}
+                onClick={() => refetch()}
+              >
+                Refresh
+              </Button>
+              <Text size="xs" c="dimmed" mt={4}>
+                Auto-refreshes every 5s
+              </Text>
+            </Stack>
+          )}
         </Group>
       </Group>
 
-      <Card withBorder padding="md">
-        <Stack gap="md">
-          <Group justify="space-between">
-            <TextInput
-              placeholder="Search traces by ID, service, or path..."
-              leftSection={<IconSearch size={16} />}
-              value={search}
-              onChange={(e) => handleSearchChange(e.currentTarget.value)}
-              style={{ flex: 1 }}
-              rightSection={isPending ? <Text size="xs">...</Text> : null}
-            />
-            <Select
-              placeholder="Route path"
-              data={routeOptions}
-              value={routeFilter}
-              onChange={(value) => {
-                setRouteFilter(value);
-                setPage(1);
-                setFilters({ route: value ?? undefined });
-              }}
-              searchable
-              clearable
-              w={{ base: "100%", sm: 350 }}
-              renderOption={({ option }) => (
-                <Tooltip label={option.value} position="right" withArrow openDelay={400}>
-                  <Text size="xs" truncate="end" style={{ maxWidth: '100%' }}>
-                    {option.value}
-                  </Text>
-                </Tooltip>
-              )}
-            />
-            <Button
-              variant="subtle"
-              size="xs"
-              disabled={!search && !routeFilter}
-              onClick={() => {
-                handleSearchChange("");
-                setRouteFilter(null);
-                setFilters({ q: undefined, route: undefined });
-              }}
-            >
-              Clear filters
-            </Button>
-          </Group>
+      {/* keepMounted off: a tab that is not showing is not mounted, so the
+          archive is not listed and no period is queried until they are. */}
+      <Tabs value={tab} onChange={showTab} keepMounted={false}>
+        <Tabs.List>
+          <Tabs.Tab value="live" leftSection={<IconActivity size={16} />}>Live</Tabs.Tab>
+          <Tabs.Tab value="history" leftSection={<IconHistory size={16} />}>History</Tabs.Tab>
+          <Tabs.Tab value="archive" leftSection={<IconArchive size={16} />}>Archive</Tabs.Tab>
+        </Tabs.List>
 
-          <ScrollArea>
-            <Table
-              {...density}
-              highlightOnHover
-              striped
-              style={{ opacity: isPending ? 0.7 : 1, transition: 'opacity 0.2s' }}
-            >
-              <Table.Thead>
-                <Table.Tr>
-                  <Table.Th><Group gap={4}><IconFingerprint size={14} /> ID</Group></Table.Th>
-                  <Table.Th>Method</Table.Th>
-                  <Table.Th>Service</Table.Th>
-                  <Table.Th><Group gap={4}><IconRoute size={14} /> Source IP</Group></Table.Th>
-                  <Table.Th>Path</Table.Th>
-                  <Table.Th><Group gap={4}><IconClock size={14} /> Duration</Group></Table.Th>
-                  <Table.Th>Status</Table.Th>
-                  <Table.Th>Timestamp</Table.Th>
-                  <Table.Th>Actions</Table.Th>
-                </Table.Tr>
-              </Table.Thead>
-              <Table.Tbody>
-                {isError ? (
-                  <QueryError error={error} what="traces" onRetry={() => refetch()} />
-                ) : isLoading ? (
-                  Array.from({ length: 5 }).map((_, i) => (
-                    <Table.Tr key={i}>
-                      <Table.Td><Skeleton height={20} radius="xl" /></Table.Td>
-                      <Table.Td><Skeleton height={20} radius="xl" /></Table.Td>
-                      <Table.Td><Skeleton height={20} radius="xl" /></Table.Td>
-                      <Table.Td><Skeleton height={20} radius="xl" /></Table.Td>
-                      <Table.Td><Skeleton height={20} radius="xl" /></Table.Td>
-                      <Table.Td><Skeleton height={20} radius="xl" /></Table.Td>
-                      <Table.Td><Skeleton height={20} radius="xl" /></Table.Td>
-                      <Table.Td><Skeleton height={20} radius="xl" /></Table.Td>
-                      <Table.Td><Skeleton height={20} radius="xl" /></Table.Td>
-                    </Table.Tr>
-                  ))
-                ) : (
-                  paginatedTraces.map((trace) => (
-                  <Table.Tr key={trace.id}>
-                    <Table.Td>
-                      <Group gap="xs" wrap="nowrap">
-                        <Tooltip label={trace.id} withArrow>
-                          <Code color="blue.1" c="blue.8">
-                            {trace.id.substring(0, 8)}...
-                          </Code>
-                        </Tooltip>
-                        <CopyButton value={trace.id} timeout={2000}>
-                          {({ copied, copy }) => (
-                            <ActionIcon variant="subtle" color={copied ? 'teal' : 'gray'} onClick={copy} size="sm">
-                              {copied ? <IconCheck size={14} /> : <IconCopy size={14} />}
+        <Tabs.Panel value="live" pt="md">
+          <Stack gap="lg">
+            <Card withBorder padding="md">
+              <Stack gap="md">
+                <Group justify="space-between">
+                  <TextInput
+                    placeholder="Search traces by ID, service, or path..."
+                    leftSection={<IconSearch size={16} />}
+                    value={search}
+                    onChange={(e) => handleSearchChange(e.currentTarget.value)}
+                    style={{ flex: 1 }}
+                    rightSection={isPending ? <Text size="xs">...</Text> : null}
+                  />
+                  <Select
+                    placeholder="Route path"
+                    data={routeOptions}
+                    value={routeFilter}
+                    onChange={(value) => {
+                      setRouteFilter(value);
+                      setPage(1);
+                      setFilters({ route: value ?? undefined });
+                    }}
+                    searchable
+                    clearable
+                    w={{ base: "100%", sm: 350 }}
+                    renderOption={({ option }) => (
+                      <Tooltip label={option.value} position="right" withArrow openDelay={400}>
+                        <Text size="xs" truncate="end" style={{ maxWidth: '100%' }}>
+                          {option.value}
+                        </Text>
+                      </Tooltip>
+                    )}
+                  />
+                  <Button
+                    variant="subtle"
+                    size="xs"
+                    disabled={!search && !routeFilter}
+                    onClick={() => {
+                      handleSearchChange("");
+                      setRouteFilter(null);
+                      setFilters({ q: undefined, route: undefined });
+                    }}
+                  >
+                    Clear filters
+                  </Button>
+                </Group>
+
+                <ScrollArea>
+                  <Table
+                    {...density}
+                    highlightOnHover
+                    striped
+                    style={{ opacity: isPending ? 0.7 : 1, transition: 'opacity 0.2s' }}
+                  >
+                    <Table.Thead>
+                      <Table.Tr>
+                        <Table.Th><Group gap={4}><IconFingerprint size={14} /> ID</Group></Table.Th>
+                        <Table.Th>Method</Table.Th>
+                        <Table.Th>Service</Table.Th>
+                        <Table.Th><Group gap={4}><IconRoute size={14} /> Source IP</Group></Table.Th>
+                        <Table.Th>Path</Table.Th>
+                        <Table.Th><Group gap={4}><IconClock size={14} /> Duration</Group></Table.Th>
+                        <Table.Th>Status</Table.Th>
+                        <Table.Th>Timestamp</Table.Th>
+                        <Table.Th>Actions</Table.Th>
+                      </Table.Tr>
+                    </Table.Thead>
+                    <Table.Tbody>
+                      {isError ? (
+                        <QueryError error={error} what="traces" onRetry={() => refetch()} />
+                      ) : isLoading ? (
+                        Array.from({ length: 5 }).map((_, i) => (
+                          <Table.Tr key={i}>
+                            <Table.Td><Skeleton height={20} radius="xl" /></Table.Td>
+                            <Table.Td><Skeleton height={20} radius="xl" /></Table.Td>
+                            <Table.Td><Skeleton height={20} radius="xl" /></Table.Td>
+                            <Table.Td><Skeleton height={20} radius="xl" /></Table.Td>
+                            <Table.Td><Skeleton height={20} radius="xl" /></Table.Td>
+                            <Table.Td><Skeleton height={20} radius="xl" /></Table.Td>
+                            <Table.Td><Skeleton height={20} radius="xl" /></Table.Td>
+                            <Table.Td><Skeleton height={20} radius="xl" /></Table.Td>
+                            <Table.Td><Skeleton height={20} radius="xl" /></Table.Td>
+                          </Table.Tr>
+                        ))
+                      ) : (
+                        paginatedTraces.map((trace) => (
+                        <Table.Tr key={trace.id}>
+                          <Table.Td>
+                            <Group gap="xs" wrap="nowrap">
+                              <Tooltip label={trace.id} withArrow>
+                                <Code color="blue.1" c="blue.8">
+                                  {trace.id.substring(0, 8)}...
+                                </Code>
+                              </Tooltip>
+                              <CopyButton value={trace.id} timeout={2000}>
+                                {({ copied, copy }) => (
+                                  <ActionIcon variant="subtle" color={copied ? 'teal' : 'gray'} onClick={copy} size="sm">
+                                    {copied ? <IconCheck size={14} /> : <IconCopy size={14} />}
+                                  </ActionIcon>
+                                )}
+                              </CopyButton>
+                            </Group>
+                          </Table.Td>
+                          <Table.Td>
+                            <Badge variant="outline" color="blue" size="xs">
+                              {trace.method || "-"}
+                            </Badge>
+                          </Table.Td>
+                          <Table.Td>
+                            <Badge variant="dot" color="blue" size="sm">{trace.serviceName}</Badge>
+                          </Table.Td>
+                          <Table.Td>
+                            <Tooltip label={trace.sourceIp && trace.sourceIp !== "-" ? "Click to visualize IP route" : ""}>
+                              <UnstyledButton 
+                                onClick={() => openVisualizer(trace.sourceIp)}
+                                disabled={!trace.sourceIp || trace.sourceIp === "-"}
+                              >
+                                <Text 
+                                  size="sm" 
+                                  ff="monospace" 
+                                  c={trace.sourceIp && trace.sourceIp !== "-" ? "blue.6" : "inherit"}
+                                  style={{ 
+                                    textDecoration: trace.sourceIp && trace.sourceIp !== "-" ? "underline" : "none",
+                                    textUnderlineOffset: '2px',
+                                    textDecorationStyle: 'dotted'
+                                  }}
+                                >
+                                  {trace.sourceIp || "-"}
+                                </Text>
+                              </UnstyledButton>
+                            </Tooltip>
+                          </Table.Td>
+                          <Table.Td>
+                            <Tooltip label={trace.requestUri || trace.path} multiline maw={400} withArrow>
+                              <Text size="xs" c="dimmed" truncate="end" maw={200}>
+                                {trace.path}
+                              </Text>
+                            </Tooltip>
+                          </Table.Td>
+                          <Table.Td>
+                            <Badge 
+                              variant="light" 
+                              color={getDurationColor(trace.durationMs)}
+                              radius="sm"
+                            >
+                              {trace.durationMs < 1
+                                ? safeToFixed(trace.durationMs, 3)
+                                : safeToFixed(trace.durationMs, 2)}
+                              ms
+                            </Badge>
+                          </Table.Td>
+                          <Table.Td>
+                            <Badge 
+                              variant="filled" 
+                              color={getStatusColor(trace.status)}
+                              leftSection={
+                                isSuccessStatus(trace.status) ? (
+                                  <IconCircleCheck size={14} />
+                                ) : (
+                                  <IconCircleX size={14} />
+                                )
+                              }
+                            >
+                              {trace.status}
+                            </Badge>
+                          </Table.Td>
+                          <Table.Td>
+                            <Tooltip label={new Date(trace.timestamp).toLocaleString()}>
+                              <Text size="xs" c="dimmed">
+                                {new Date(trace.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                              </Text>
+                            </Tooltip>
+                          </Table.Td>
+                          <Table.Td>
+                            <ActionIcon variant="subtle" onClick={() => openDetails(trace)} title="View details">
+                              <IconInfoCircle size={16} />
                             </ActionIcon>
-                          )}
-                        </CopyButton>
-                      </Group>
-                    </Table.Td>
-                    <Table.Td>
-                      <Badge variant="outline" color="blue" size="xs">
-                        {trace.method || "-"}
-                      </Badge>
-                    </Table.Td>
-                    <Table.Td>
-                      <Badge variant="dot" color="blue" size="sm">{trace.serviceName}</Badge>
-                    </Table.Td>
-                    <Table.Td>
-                      <Tooltip label={trace.sourceIp && trace.sourceIp !== "-" ? "Click to visualize IP route" : ""}>
-                        <UnstyledButton 
-                          onClick={() => openVisualizer(trace.sourceIp)}
-                          disabled={!trace.sourceIp || trace.sourceIp === "-"}
-                        >
-                          <Text 
-                            size="sm" 
-                            ff="monospace" 
-                            c={trace.sourceIp && trace.sourceIp !== "-" ? "blue.6" : "inherit"}
-                            style={{ 
-                              textDecoration: trace.sourceIp && trace.sourceIp !== "-" ? "underline" : "none",
-                              textUnderlineOffset: '2px',
-                              textDecorationStyle: 'dotted'
-                            }}
-                          >
-                            {trace.sourceIp || "-"}
-                          </Text>
-                        </UnstyledButton>
-                      </Tooltip>
-                    </Table.Td>
-                    <Table.Td>
-                      <Tooltip label={trace.requestUri || trace.path} multiline maw={400} withArrow>
-                        <Text size="xs" c="dimmed" truncate="end" maw={200}>
-                          {trace.path}
-                        </Text>
-                      </Tooltip>
-                    </Table.Td>
-                    <Table.Td>
-                      <Badge 
-                        variant="light" 
-                        color={getDurationColor(trace.durationMs)}
-                        radius="sm"
-                      >
-                        {trace.durationMs < 1
-                          ? safeToFixed(trace.durationMs, 3)
-                          : safeToFixed(trace.durationMs, 2)}
-                        ms
-                      </Badge>
-                    </Table.Td>
-                    <Table.Td>
-                      <Badge 
-                        variant="filled" 
-                        color={getStatusColor(trace.status)}
-                        leftSection={
-                          trace.status === "success" || (parseInt(trace.status) >= 200 && parseInt(trace.status) < 400) ? (
-                            <IconCircleCheck size={14} />
-                          ) : (
-                            <IconCircleX size={14} />
-                          )
-                        }
-                      >
-                        {trace.status}
-                      </Badge>
-                    </Table.Td>
-                    <Table.Td>
-                      <Tooltip label={new Date(trace.timestamp).toLocaleString()}>
-                        <Text size="xs" c="dimmed">
-                          {new Date(trace.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-                        </Text>
-                      </Tooltip>
-                    </Table.Td>
-                    <Table.Td>
-                      <ActionIcon variant="subtle" onClick={() => openDetails(trace)} title="View details">
-                        <IconInfoCircle size={16} />
-                      </ActionIcon>
-                    </Table.Td>
-                  </Table.Tr>
-                )))}
-                {filteredTraces.length === 0 && !isLoading && (
-                  <Table.Tr>
-                    <Table.Td colSpan={9}>
-                      <Center py="xl">
-                        <Stack align="center" gap="xs">
-                          <IconSearch size={40} stroke={1.5} color="var(--mantine-color-dimmed)" />
-                          <Text fw={500} c="dimmed">No traces found</Text>
-                          <Text size="xs" c="dimmed">Try adjusting your search or filters</Text>
-                        </Stack>
-                      </Center>
-                    </Table.Td>
-                  </Table.Tr>
+                          </Table.Td>
+                        </Table.Tr>
+                      )))}
+                      {filteredTraces.length === 0 && !isLoading && (
+                        <Table.Tr>
+                          <Table.Td colSpan={9}>
+                            <Center py="xl">
+                              <Stack align="center" gap="xs">
+                                <IconSearch size={40} stroke={1.5} color="var(--mantine-color-dimmed)" />
+                                <Text fw={500} c="dimmed">No traces found</Text>
+                                <Text size="xs" c="dimmed">Try adjusting your search or filters</Text>
+                              </Stack>
+                            </Center>
+                          </Table.Td>
+                        </Table.Tr>
+                      )}
+                    </Table.Tbody>
+                  </Table>
+                </ScrollArea>
+
+                {filteredTraces.length > PAGE_SIZE && (
+                  <Group justify="space-between" align="center" pt="md" style={{ borderTop: "1px solid var(--mantine-color-default-border)" }}>
+                    <Text size="xs" c="dimmed">
+                      Showing {((page - 1) * PAGE_SIZE) + 1}–{Math.min(page * PAGE_SIZE, filteredTraces.length)} of {filteredTraces.length}
+                    </Text>
+                    <Pagination total={totalPages} value={page} onChange={setPage} size="sm" radius="md" />
+                  </Group>
                 )}
-              </Table.Tbody>
-            </Table>
-          </ScrollArea>
+              </Stack>
+            </Card>
+          </Stack>
+        </Tabs.Panel>
 
-          {filteredTraces.length > PAGE_SIZE && (
-            <Group justify="space-between" align="center" pt="md" style={{ borderTop: "1px solid var(--mantine-color-default-border)" }}>
-              <Text size="xs" c="dimmed">
-                Showing {((page - 1) * PAGE_SIZE) + 1}–{Math.min(page * PAGE_SIZE, filteredTraces.length)} of {filteredTraces.length}
-              </Text>
-              <Pagination total={totalPages} value={page} onChange={setPage} size="sm" radius="md" />
-            </Group>
-          )}
-        </Stack>
-      </Card>
+        <Tabs.Panel value="history" pt="md">
+          <Suspense fallback={<Skeleton height={320} radius="md" />}>
+            <TraceHistoryPanel
+              initialPeriod={urlPeriod(filters.from, filters.to)}
+              onPeriodChange={(p) => setFilters({ from: p.from.toISOString(), to: p.to.toISOString() })}
+            />
+          </Suspense>
+        </Tabs.Panel>
 
-      <Paper withBorder p="xl" radius="md">
-        <Stack align="center" gap="sm">
-          <IconTimeline size={48} stroke={1.5} color="var(--mantine-color-blue-6)" />
-          <Title order={3}>Live Trace Visualization</Title>
-          <Text c="dimmed" ta="center" style={{ maxWidth: 500 }}>
-            Gateon is currently exporting telemetry via OpenTelemetry Protocol (OTLP).
-            For full visualization of spans and child relationships, we recommend
-            integrating with a dedicated store like Jaeger or Honeycomb.
-          </Text>
-          <Box mt="md" w="100%">
-             <Divider label="Visualization Preview" labelPosition="center" mb="xl" />
-             <Stack gap="xs" style={{ maxWidth: 800, margin: '0 auto' }}>
-                <Paper withBorder p="sm" radius="md" style={{ backgroundColor: "light-dark(var(--mantine-color-gray-0), var(--mantine-color-dark-6))", borderLeft: '4px solid var(--mantine-color-blue-6)' }}>
-                   <Group justify="space-between">
-                      <Group gap="xs">
-                        <Badge size="sm" color="blue" variant="filled">GATEWAY</Badge>
-                        <Text size="sm" fw={500}>ingress-request</Text>
-                      </Group>
-                      <Text size="xs" fw={700} c="blue">42.4ms</Text>
-                   </Group>
-                   <Box mt="xs" style={{ height: 6, backgroundColor: "light-dark(var(--mantine-color-gray-2), var(--mantine-color-dark-4))", borderRadius: 3, overflow: 'hidden' }}>
-                      <Box style={{ width: '100%', height: '100%', backgroundColor: "var(--mantine-color-blue-6)" }} />
-                   </Box>
-                </Paper>
+        <Tabs.Panel value="archive" pt="md">
+          <Suspense fallback={<Skeleton height={320} radius="md" />}>
+            <TraceArchivePanel onViewHour={viewHour} />
+          </Suspense>
+        </Tabs.Panel>
+      </Tabs>
 
-                <Paper withBorder p="sm" radius="md" ml={40} style={{ backgroundColor: "light-dark(var(--mantine-color-gray-0), var(--mantine-color-dark-6))", borderLeft: '4px solid var(--mantine-color-violet-6)' }}>
-                   <Group justify="space-between">
-                      <Group gap="xs">
-                        <Badge size="sm" color="violet" variant="filled">AUTH-MW</Badge>
-                        <Text size="sm" fw={500}>validate-token</Text>
-                      </Group>
-                      <Text size="xs" fw={700} c="violet">8.2ms</Text>
-                   </Group>
-                   <Box mt="xs" style={{ height: 6, backgroundColor: "light-dark(var(--mantine-color-gray-2), var(--mantine-color-dark-4))", borderRadius: 3, overflow: 'hidden' }}>
-                      <Group justify="flex-start" h="100%" gap={0}>
-                        <Box style={{ width: '10%', height: '100%' }} />
-                        <Box style={{ width: '20%', height: '100%', backgroundColor: "var(--mantine-color-violet-6)" }} />
-                      </Group>
-                   </Box>
-                </Paper>
-
-                <Paper withBorder p="sm" radius="md" ml={80} style={{ backgroundColor: "light-dark(var(--mantine-color-gray-0), var(--mantine-color-dark-6))", borderLeft: '4px solid var(--mantine-color-teal-6)' }}>
-                   <Group justify="space-between">
-                      <Group gap="xs">
-                        <Badge size="sm" color="teal" variant="filled">USER-SVC</Badge>
-                        <Text size="sm" fw={500}>fetch-profile</Text>
-                      </Group>
-                      <Text size="xs" fw={700} c="teal">25.1ms</Text>
-                   </Group>
-                   <Box mt="xs" style={{ height: 6, backgroundColor: "light-dark(var(--mantine-color-gray-2), var(--mantine-color-dark-4))", borderRadius: 3, overflow: 'hidden' }}>
-                      <Group justify="flex-start" h="100%" gap={0}>
-                        <Box style={{ width: '35%', height: '100%' }} />
-                        <Box style={{ width: '60%', height: '100%', backgroundColor: "var(--mantine-color-teal-6)" }} />
-                      </Group>
-                   </Box>
-                </Paper>
-             </Stack>
-          </Box>
-        </Stack>
-      </Paper>
       <TraceVisualizer 
         opened={visualizerOpened} 
         onClose={() => setVisualizerOpened(false)} 
         targetIp={selectedIp || ""} 
       />
 
-      <Modal
+      <TraceDetailsModal
+        traceId={selectedTraceId}
+        timestamp={selectedTraceTs}
         opened={detailsOpened}
         onClose={() => setDetailsOpened(false)}
-        title={<Text fw={700}>Trace Details</Text>}
-        size="lg"
-      >
-        {isFullTraceLoading ? (
-          <Stack gap="md">
-            <Skeleton height={50} radius="md" />
-            <Grid columns={2}>
-              <Grid.Col span={1}><Skeleton height={40} radius="md" /></Grid.Col>
-              <Grid.Col span={1}><Skeleton height={40} radius="md" /></Grid.Col>
-            </Grid>
-            <Skeleton height={60} radius="md" />
-            <Skeleton height={100} radius="md" />
-            <Skeleton height={200} radius="md" />
-          </Stack>
-        ) : fullTrace ? (
-          <Stack gap="md">
-            <Paper withBorder p="sm" bg="light-dark(var(--mantine-color-gray-0), var(--mantine-color-dark-6))">
-              <Group justify="space-between">
-                <Text size="sm" fw={700} c="dimmed">TRACE ID</Text>
-                <Code color="blue" variant="light">{fullTrace.id}</Code>
-              </Group>
-            </Paper>
-
-            <Grid columns={2}>
-              <Grid.Col span={1}>
-                <Stack gap={4}>
-                  <Text size="xs" fw={700} c="dimmed">METHOD</Text>
-                  <Badge variant="filled" color="blue">{fullTrace.method || "N/A"}</Badge>
-                </Stack>
-              </Grid.Col>
-              <Grid.Col span={1}>
-                <Stack gap={4}>
-                  <Text size="xs" fw={700} c="dimmed">STATUS</Text>
-                  <Badge 
-                    variant="filled" 
-                    color={getStatusColor(fullTrace.status)}
-                  >
-                    {fullTrace.status}
-                  </Badge>
-                </Stack>
-              </Grid.Col>
-            </Grid>
-
-            <Stack gap={4}>
-              <Text size="xs" fw={700} c="dimmed">REQUEST URI</Text>
-              <Paper withBorder p="xs" bg="light-dark(var(--mantine-color-gray-0), var(--mantine-color-dark-6))">
-                <Text size="sm" style={{ wordBreak: 'break-all' }}>
-                  {fullTrace.requestUri || fullTrace.path}
-                </Text>
-              </Paper>
-            </Stack>
-
-            <Divider />
-
-            <Grid columns={2}>
-              <Grid.Col span={1}>
-                <Stack gap={4}>
-                  <Text size="xs" fw={700} c="dimmed">SOURCE IP</Text>
-                  <Text size="sm" ff="monospace">{fullTrace.sourceIp || "-"}</Text>
-                </Stack>
-              </Grid.Col>
-              <Grid.Col span={1}>
-                <Stack gap={4}>
-                  <Text size="xs" fw={700} c="dimmed">DURATION</Text>
-                  <Text size="sm">{safeToFixed(fullTrace.durationMs, 3)} ms</Text>
-                </Stack>
-              </Grid.Col>
-            </Grid>
-
-            {fullTrace.reputation !== undefined && (
-              <Stack gap={4}>
-                <Text size="xs" fw={700} c="dimmed">TRUST SCORE</Text>
-                <Badge
-                  variant="light"
-                  size="lg"
-                  color={fullTrace.reputation >= 80 ? "teal" : fullTrace.reputation >= 50 ? "yellow" : "red"}
-                >
-                  {safeToFixed(fullTrace.reputation, 0)}%
-                </Badge>
-              </Stack>
-            )}
-
-            <Divider label="TIMING BREAKDOWN" labelPosition="center" />
-
-            <Grid columns={4}>
-              <Grid.Col span={1}>
-                <Stack gap={4}>
-                  <Text size="xs" fw={700} c="dimmed">ENTRYPOINT</Text>
-                  <Text size="sm">{safeToFixed(fullTrace.entrypointDelayMs, 3)} ms</Text>
-                </Stack>
-              </Grid.Col>
-              <Grid.Col span={1}>
-                <Stack gap={4}>
-                  <Text size="xs" fw={700} c="dimmed">ROUTING</Text>
-                  <Text size="sm">{safeToFixed(fullTrace.routeDelayMs, 3)} ms</Text>
-                </Stack>
-              </Grid.Col>
-              <Grid.Col span={1}>
-                <Stack gap={4}>
-                  <Text size="xs" fw={700} c="dimmed">MIDDLEWARE</Text>
-                  <Text size="sm">{safeToFixed(fullTrace.middlewareDelayMs, 3)} ms</Text>
-                </Stack>
-              </Grid.Col>
-              <Grid.Col span={1}>
-                <Stack gap={4}>
-                  <Text size="xs" fw={700} c="dimmed">SERVICE</Text>
-                  <Text size="sm">{safeToFixed(fullTrace.serviceDelayMs, 3)} ms</Text>
-                </Stack>
-              </Grid.Col>
-            </Grid>
-
-            <Divider />
-
-            <Stack gap={4}>
-              <Text size="xs" fw={700} c="dimmed">USER AGENT</Text>
-              <Text size="sm" c="dimmed" style={{ wordBreak: 'break-all' }}>
-                {fullTrace.userAgent || "N/A"}
-              </Text>
-            </Stack>
-
-            <Grid columns={2}>
-              <Grid.Col span={1}>
-                <Stack gap={4}>
-                  <Text size="xs" fw={700} c="dimmed">TLS JA4 FINGERPRINT</Text>
-                  <Text size="xs" ff="monospace" c="dimmed">{fullTrace.ja4 || "N/A"}</Text>
-                </Stack>
-              </Grid.Col>
-              <Grid.Col span={1}>
-                <Stack gap={4}>
-                  <Text size="xs" fw={700} c="dimmed">HTTP JA4H FINGERPRINT</Text>
-                  <Text size="xs" ff="monospace" c="dimmed">{fullTrace.ja4h || "N/A"}</Text>
-                </Stack>
-              </Grid.Col>
-            </Grid>
-
-            <Stack gap={4}>
-              <Text size="xs" fw={700} c="dimmed">REFERER</Text>
-              <Text size="sm" c="dimmed" style={{ wordBreak: 'break-all' }}>
-                {fullTrace.referer || "N/A"}
-              </Text>
-            </Stack>
-
-            <Stack gap={4}>
-              <Text size="xs" fw={700} c="dimmed">TIMESTAMP</Text>
-              <Text size="sm">{new Date(fullTrace.timestamp).toLocaleString()}</Text>
-            </Stack>
-
-            {fullTrace.recommendation && (
-              <Paper withBorder p="sm" radius="md" style={{ borderLeft: '4px solid var(--mantine-color-blue-6)', backgroundColor: 'light-dark(var(--mantine-color-blue-0), rgba(34, 139, 230, 0.1))' }}>
-                <Group gap="xs" mb={4}>
-                  <IconInfoCircle size={16} color="var(--mantine-color-blue-6)" />
-                  <Text size="sm" fw={700} c="blue.7">SMART RECOMMENDATION</Text>
-                </Group>
-                <Text size="sm" c="blue.9" fw={500}>{fullTrace.recommendation}</Text>
-              </Paper>
-            )}
-
-            <Divider label="Metadata" labelPosition="center" />
-
-            {fullTrace.requestHeaders && Object.keys(fullTrace.requestHeaders).length > 0 && (
-              <Stack gap={4}>
-                <Text size="xs" fw={700} c="dimmed">REQUEST HEADERS</Text>
-                <Paper withBorder p="xs" bg="light-dark(var(--mantine-color-gray-0), var(--mantine-color-dark-6))">
-                  <Stack gap={2}>
-                    {Object.entries(fullTrace.requestHeaders || {}).map(([key, value]) => (
-                      <Group key={key} gap="xs" wrap="nowrap" align="flex-start">
-                        <Text size="xs" fw={700} style={{ minWidth: 120 }}>{key}:</Text>
-                        <Text size="xs" style={{ wordBreak: 'break-all' }}>{value}</Text>
-                      </Group>
-                    ))}
-                  </Stack>
-                </Paper>
-              </Stack>
-            )}
-
-            {fullTrace.requestBody && (
-              <Stack gap={4}>
-                <Text size="xs" fw={700} c="dimmed">REQUEST BODY</Text>
-                <ScrollArea.Autosize mah={200}>
-                  <Code block style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
-                    {fullTrace.requestBody}
-                  </Code>
-                </ScrollArea.Autosize>
-              </Stack>
-            )}
-
-            {fullTrace.responseHeaders && Object.keys(fullTrace.responseHeaders).length > 0 && (
-              <Stack gap={4}>
-                <Text size="xs" fw={700} c="dimmed">RESPONSE HEADERS</Text>
-                <Paper withBorder p="xs" bg="light-dark(var(--mantine-color-gray-0), var(--mantine-color-dark-6))">
-                  <Stack gap={2}>
-                    {Object.entries(fullTrace.responseHeaders || {}).map(([key, value]) => (
-                      <Group key={key} gap="xs" wrap="nowrap" align="flex-start">
-                        <Text size="xs" fw={700} style={{ minWidth: 120 }}>{key}:</Text>
-                        <Text size="xs" style={{ wordBreak: 'break-all' }}>{value}</Text>
-                      </Group>
-                    ))}
-                  </Stack>
-                </Paper>
-              </Stack>
-            )}
-
-            {fullTrace.responseBody && (
-              <Stack gap={4}>
-                <Text size="xs" fw={700} c="dimmed">RESPONSE BODY</Text>
-                <ScrollArea.Autosize mah={200}>
-                  <Code block style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
-                    {fullTrace.responseBody}
-                  </Code>
-                </ScrollArea.Autosize>
-              </Stack>
-            )}
-          </Stack>
-        ) : null}
-      </Modal>
+      />
     </Stack>
   );
 }

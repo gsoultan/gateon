@@ -21,13 +21,16 @@ type RouteStatsProvider func(routeID string) []proxy.TargetStats
 
 // Deps holds dependencies for REST API handlers (avoids importing server package).
 type Deps struct {
-	RouteService       route.Service
-	ServiceService     service.Service
-	EpService          entrypoint.Service
-	MwService          middleware.Service
-	TLSOptService      tls.Service
-	CanaryService      canary.Service
-	AuthManager        auth.Service
+	RouteService   route.Service
+	ServiceService service.Service
+	EpService      entrypoint.Service
+	MwService      middleware.Service
+	TLSOptService  tls.Service
+	CanaryService  canary.Service
+	AuthManager    auth.Service
+	// SetupToken is the one-time token the first-run connection test requires,
+	// as Setup does; nil keeps the test closed.
+	SetupToken         *auth.SetupToken
 	Version            string
 	StartTime          time.Time
 	RouteStatsProvider RouteStatsProvider

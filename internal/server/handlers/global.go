@@ -23,6 +23,7 @@ import (
 	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
+	"google.golang.org/protobuf/proto"
 )
 
 // decodeGlobalConfig decodes body as protobuf JSON first, then plain JSON.
@@ -43,7 +44,15 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		gc := svc.GetGlobals().Get(r.Context())
+		// A copy: the registry hands out its stored pointer, and the validation
+		// stamped below belongs to this response. Stamped on the original it was
+		// an unsynchronised write to the live config, and the next save
+		// persisted it into global.json.
+		gc, ok := proto.Clone(svc.GetGlobals().Get(r.Context())).(*gateonv1.GlobalConfig)
+		if !ok || gc == nil {
+			WriteHTTPError(w, http.StatusInternalServerError, "failed to read global config")
+			return
+		}
 
 		if gc.Tls != nil && len(gc.Tls.Certificates) > 0 {
 			tm := svc.GetTLSManager()
@@ -433,6 +442,13 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 		if !DecodeProtoRequest(w, r, &req) {
 			return
 		}
+		// The token Setup requires, before the probe dials anything: until
+		// setup completes this is the one database connection a caller who has
+		// not signed in can make the gateway open. See ADR 0021.
+		if !d.SetupToken.Matches(req.GetSetupToken()) {
+			WriteHTTPError(w, http.StatusForbidden, auth.ErrSetupTokenRequired.Error())
+			return
+		}
 		// Probe confines a SQLite database before opening it: see db.ConfineSQLite.
 		if err := db.Probe(req.GetDatabaseUrl(), req.GetDatabaseConfig(), config.DataDir()); err != nil {
 			WriteHTTPError(w, http.StatusBadRequest, err.Error())
@@ -613,11 +629,13 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 			}
 			return
 		}
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"id":             id,
-			"secret":         secret,
-			"qr_code_url":    qr,
-			"recovery_codes": recovery,
+		// A proto message written with protojson, which the login page reads as
+		// the generated type: both ends take the field names from auth.proto. They
+		// were a map literal of qr_code_url and recovery_codes, which the page
+		// never read -- an account made to enroll saw a broken QR image and was
+		// never shown its recovery codes, only the secret to type in by hand.
+		WriteProtoResponse(w, http.StatusOK, &gateonv1.Enroll2FAResponse{
+			Id: id, Secret: secret, QrCodeUrl: qr, RecoveryCodes: recovery,
 		})
 	})
 	mux.HandleFunc("POST /v1/login", func(w http.ResponseWriter, r *http.Request) {

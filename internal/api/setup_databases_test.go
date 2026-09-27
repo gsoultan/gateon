@@ -28,7 +28,21 @@ func firstRun(t *testing.T) (*ApiService, string) {
 	t.Chdir(dir)
 	holder := auth.NewHolder(nil)
 	t.Cleanup(func() { _ = holder.Close() })
-	return &ApiService{Auth: holder, Globals: config.NewGlobalRegistry(filepath.Join(dir, "global.json"))}, dir
+	return &ApiService{
+		Auth:       holder,
+		Globals:    config.NewGlobalRegistry(filepath.Join(dir, "global.json")),
+		SetupToken: newTestSetupToken(t),
+	}, dir
+}
+
+// newTestSetupToken is a setup token for a test that means to get past the gate.
+func newTestSetupToken(t *testing.T) *auth.SetupToken {
+	t.Helper()
+	tok, err := auth.NewSetupToken("")
+	if err != nil {
+		t.Fatalf("NewSetupToken: %v", err)
+	}
+	return tok
 }
 
 // TestSetupSavesTheDatabasesTheWizardChose.
@@ -48,6 +62,7 @@ func TestSetupSavesTheDatabasesTheWizardChose(t *testing.T) {
 
 	resp, err := svc.Setup(ctx, &gateonv1.SetupRequest{
 		AdminUsername: "admin", AdminPassword: "first-password", PasetoSecret: secret,
+		SetupToken:         svc.SetupToken.Value(),
 		DatabaseConfig:     &gateonv1.DatabaseConfig{Driver: "sqlite", SqlitePath: chosen},
 		LoggingDatabaseUrl: logs,
 	})
@@ -87,6 +102,7 @@ func TestSetupWritesNoDatabaseOnceConfigured(t *testing.T) {
 	ctx := context.Background()
 	if resp, err := svc.Setup(ctx, &gateonv1.SetupRequest{
 		AdminUsername: "admin", AdminPassword: "first-password", PasetoSecret: strings.Repeat("a", 32),
+		SetupToken: svc.SetupToken.Value(),
 	}); err != nil || !resp.GetSuccess() {
 		t.Fatalf("first Setup: err=%v resp=%v", err, resp)
 	}
@@ -95,8 +111,12 @@ func TestSetupWritesNoDatabaseOnceConfigured(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// A token that still matches -- Setup retired the first -- so that only the
+	// "already completed" guard can refuse: this is that guard's test.
+	svc.SetupToken = newTestSetupToken(t)
 	resp, err := svc.Setup(ctx, &gateonv1.SetupRequest{
 		AdminUsername: "attacker", AdminPassword: "attacker-password", PasetoSecret: strings.Repeat("z", 32),
+		SetupToken:         svc.SetupToken.Value(),
 		DatabaseUrl:        filepath.Join(dir, "attacker.db"),
 		LoggingDatabaseUrl: filepath.Join(dir, "attacker-audit.db"),
 	})
@@ -129,6 +149,7 @@ func TestSetupSavesNeitherDatabaseWhenOneCannotBeOpened(t *testing.T) {
 
 	resp, err := svc.Setup(ctx, &gateonv1.SetupRequest{
 		AdminUsername: "admin", AdminPassword: "first-password", PasetoSecret: strings.Repeat("a", 32),
+		SetupToken:  svc.SetupToken.Value(),
 		DatabaseUrl: filepath.Join(dir, "chosen.db"),
 		// Outside the data directory, where a database named over the network may not be.
 		LoggingDatabaseUrl: filepath.Join(t.TempDir(), "logs.db"),

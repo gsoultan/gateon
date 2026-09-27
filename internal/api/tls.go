@@ -21,11 +21,12 @@ func (s *ApiService) UpdateTLSOption(ctx context.Context, req *gateonv1.UpdateTL
 	if s.TLSOptions == nil || req == nil || req.TlsOption == nil {
 		return &gateonv1.UpdateTLSOptionResponse{Success: false}, nil
 	}
-	if err := s.TLSOptions.Update(ctx, req.TlsOption); err != nil {
+	// Through the domain service, as REST saves one: it gives a new option the
+	// id it arrives without, and invalidates. Written to the store directly,
+	// every new option was kept under "" -- each overwriting the last, and none
+	// deletable, since DeleteTLSOption refuses an empty id.
+	if err := s.tlsOptionService().SaveTLSOption(ctx, req.TlsOption); err != nil {
 		return &gateonv1.UpdateTLSOptionResponse{Success: false}, err
-	}
-	if s.Invalidator != nil {
-		s.Invalidator.InvalidateTLS()
 	}
 	s.logAudit(ctx, "update", "tls_option", fmt.Sprintf("Updated TLS option %s", req.TlsOption.Id))
 	return &gateonv1.UpdateTLSOptionResponse{Success: true}, nil
@@ -35,11 +36,8 @@ func (s *ApiService) DeleteTLSOption(ctx context.Context, req *gateonv1.DeleteTL
 	if s.TLSOptions == nil || req == nil || req.Id == "" {
 		return &gateonv1.DeleteTLSOptionResponse{Success: false}, nil
 	}
-	if err := s.TLSOptions.Delete(ctx, req.Id); err != nil {
+	if err := s.tlsOptionService().DeleteTLSOption(ctx, req.Id); err != nil {
 		return &gateonv1.DeleteTLSOptionResponse{Success: false}, err
-	}
-	if s.Invalidator != nil {
-		s.Invalidator.InvalidateTLS()
 	}
 	s.logAudit(ctx, "delete", "tls_option", fmt.Sprintf("Deleted TLS option %s", req.Id))
 	return &gateonv1.DeleteTLSOptionResponse{Success: true}, nil

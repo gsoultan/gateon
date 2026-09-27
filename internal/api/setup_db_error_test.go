@@ -70,20 +70,25 @@ func TestSetupStaysClosedWhenTheUserTableCannotBeRead(t *testing.T) {
 	globals := config.NewGlobalRegistry(filepath.Join(tmp, "global.json"))
 	ctx := context.Background()
 
-	owner := &ApiService{Auth: auth.NewHolder(mgr), Globals: globals}
+	owner := &ApiService{Auth: auth.NewHolder(mgr), Globals: globals, SetupToken: newTestSetupToken(t)}
 	first, err := owner.Setup(ctx, &gateonv1.SetupRequest{
 		AdminUsername: "admin", AdminPassword: "first-password", PasetoSecret: strings.Repeat("a", 32),
+		SetupToken: owner.SetupToken.Value(),
 	})
 	if err != nil || !first.Success {
 		t.Fatalf("first Setup: err=%v resp=%+v", err, first)
 	}
 
+	// With a token that matches, so that only the setup-required guard can
+	// refuse: this is that guard's test.
 	attacker := &ApiService{
-		Auth:    auth.NewHolder(lockedAtSetupCheck{Manager: mgr, t: t, path: dbPath}),
-		Globals: globals,
+		Auth:       auth.NewHolder(lockedAtSetupCheck{Manager: mgr, t: t, path: dbPath}),
+		Globals:    globals,
+		SetupToken: newTestSetupToken(t),
 	}
 	second, err := attacker.Setup(ctx, &gateonv1.SetupRequest{
 		AdminUsername: "admin", AdminPassword: "attacker-password", PasetoSecret: strings.Repeat("b", 32),
+		SetupToken: attacker.SetupToken.Value(),
 	})
 	if err != nil {
 		t.Fatalf("second Setup: %v", err)

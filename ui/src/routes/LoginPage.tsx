@@ -32,6 +32,7 @@ import {
 import { COOKIE_SESSION, useAuthStore } from "../store/useAuthStore";
 import { useIsMobile } from "../hooks/useMobile";
 import { getApiBaseUrl } from "../store/useApiConfigStore";
+import type { Enroll2FAResponse } from "../services/gen/gateon/v1/auth_pb";
 
 export default function LoginPage() {
   const [error, setError] = useState<string | null>(null);
@@ -40,12 +41,10 @@ export default function LoginPage() {
   const [activeFeature, setActiveFeature] = useState(0);
   const [step, setStep] = useState<"login" | "2fa" | "2fa-setup">("login");
   const [tempUser, setTempUser] = useState<any>(null);
-  const [enrollData, setEnrollData] = useState<{
-    id: string;
-    secret: string;
-    qrCodeUrl: string;
-    recoveryCodes: string[];
-  } | null>(null);
+  // The generated message, which the server writes with protojson: both ends
+  // take these names from auth.proto. Restated here by hand they drifted, and
+  // the page read qrCodeUrl and recoveryCodes that never arrived.
+  const [enrollData, setEnrollData] = useState<Omit<Enroll2FAResponse, "$typeName" | "$unknown"> | null>(null);
   const [tfaCode, setTfaCode] = useState("");
   const tfaInputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();

@@ -4,13 +4,13 @@
 // These six call RPCs that already exist on ApiService. Going through the
 // Connect client instead of hand-rolled fetch drops the duplicate wire format
 // that both of today's API bugs lived in.
+import { Code, ConnectError } from "@connectrpc/connect";
 import { api } from "../services/client";
 import { useAuthStore } from "../store/useAuthStore";
 import { getApiBaseUrl } from "../store/useApiConfigStore";
 import type {
   SetupRequest,
   SetupResponse,
-  DatabaseConfig,
   GetDiagnosticsResponse,
   GetCloudflareIPsResponse,
   TraceRouteResponse,
@@ -89,6 +89,14 @@ export async function apiFetch(path: string, options: RequestInit = {}) {
 
 /** Returns a user-friendly message for API errors (e.g. 403 insufficient permissions). */
 export function getApiErrorMessage(err: unknown): string {
+  // A Connect call fails with a code and a message of its own. Its `message`
+  // is prefixed "[permission_denied]" and the like, which is not for people.
+  if (err instanceof ConnectError) {
+    if (err.code === Code.PermissionDenied) {
+      return "Insufficient permissions. You do not have access to perform this action.";
+    }
+    return err.rawMessage || "Request failed";
+  }
   const raw = err instanceof Error ? err.message : String(err ?? "");
   try {
     const data = JSON.parse(raw);
@@ -134,10 +142,9 @@ export async function setupGateon(req: SetupRequest): Promise<SetupResponse> {
   return res;
 }
 
-export async function testDbConnection(payload: {
-  databaseUrl?: string;
-  databaseConfig?: DatabaseConfig;
-}): Promise<boolean> {
+export async function testDbConnection(
+  payload: Pick<SetupRequest, "databaseUrl" | "databaseConfig" | "setupToken">,
+): Promise<boolean> {
   const res = await apiFetch("/v1/setup/test-db", {
     method: "POST",
     headers: { "Content-Type": "application/json" },

@@ -4,6 +4,7 @@
 package telemetry
 
 import (
+	"bytes"
 	"cmp"
 	"context"
 	"database/sql"
@@ -19,6 +20,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/cockroachdb/pebble"
 	"github.com/google/uuid"
@@ -83,8 +85,44 @@ func isMitigatingAction(action string) bool {
 	}
 }
 
-// RedactHeaders masks sensitive headers like Authorization and X-Api-Key.
-// It is optimized to minimize allocations by using a pooled strings.Builder and avoiding strings.Split.
+// credentialHeaders name the headers whose values are credentials -- by
+// standard, or by a convention common enough to assume -- lower-cased. A trace
+// keeps that one was sent, which is what a debugging session needs, and not
+// what it said: the trace store is read from the dashboard, kept for days, and
+// with the trace archive on, for months.
+var credentialHeaders = [...]string{
+	"authorization",
+	"proxy-authorization",
+	"cookie",
+	"set-cookie",
+	"x-api-key",
+	"x-auth-token",
+	"x-access-token",
+	"x-refresh-token",
+	"x-amz-security-token",      // AWS STS session token
+	"x-goog-api-key",            // Google APIs
+	"api-key",                   // Azure OpenAI and Cognitive Services
+	"ocp-apim-subscription-key", // Azure API Management
+	"x-functions-key",           // Azure Functions
+	"x-vault-token",             // HashiCorp Vault
+	"private-token",             // GitLab
+	"x-csrf-token",
+	"x-xsrf-token",
+}
+
+func isCredentialHeader(name string) bool {
+	for _, h := range credentialHeaders {
+		if len(name) == len(h) && strings.EqualFold(name, h) {
+			return true
+		}
+	}
+	return false
+}
+
+// RedactHeaders replaces the value of each credential header in a header
+// block -- one "Name: value" per line, as FormatHeaders writes it -- with
+// [REDACTED]. It runs on the store's goroutine, and builds into a pooled
+// strings.Builder rather than splitting the block.
 func RedactHeaders(headers string) string {
 	if headers == "" {
 		return ""
@@ -97,37 +135,16 @@ func RedactHeaders(headers string) string {
 	start := 0
 	for {
 		end := strings.IndexByte(headers[start:], '\n')
-		var line string
-		if end == -1 {
-			line = headers[start:]
-		} else {
+		line := headers[start:]
+		if end != -1 {
 			line = headers[start : start+end]
 		}
-
-		// Fast path: check for common sensitive header prefixes case-insensitively without allocations
-		isSensitive := false
-		if len(line) >= 7 { // shortest is "cookie:"
-			if (len(line) >= 14 && strings.EqualFold(line[:14], "authorization:")) ||
-				(len(line) >= 10 && strings.EqualFold(line[:10], "x-api-key:")) ||
-				(len(line) >= 7 && strings.EqualFold(line[:7], "cookie:")) ||
-				(len(line) >= 11 && strings.EqualFold(line[:11], "set-cookie:")) ||
-				(len(line) >= 13 && strings.EqualFold(line[:13], "x-auth-token:")) ||
-				(len(line) >= 20 && strings.EqualFold(line[:20], "proxy-authorization:")) {
-				isSensitive = true
-			}
-		}
-
-		if isSensitive {
-			if colon := strings.IndexByte(line, ':'); colon != -1 {
-				sb.WriteString(line[:colon])
-				sb.WriteString(": [REDACTED]")
-			} else {
-				sb.WriteString(line)
-			}
+		if colon := strings.IndexByte(line, ':'); colon > 0 && isCredentialHeader(line[:colon]) {
+			sb.WriteString(line[:colon])
+			sb.WriteString(": [REDACTED]")
 		} else {
 			sb.WriteString(line)
 		}
-
 		if end == -1 {
 			break
 		}
@@ -512,6 +529,11 @@ type pathStatsStore struct {
 	unmitigatedCache            *lru.ARCCache
 	userMitigationCache         *lru.ARCCache
 	traceStoreEnabled           atomic.Bool
+	// tracesPrunedThrough is where the last trace prune stopped, in Unix
+	// nanoseconds: every trace older than it has been deleted. See TraceHotFloor.
+	// It is kept on disk too, in traceDir, so a restart does not forget it.
+	tracesPrunedThrough atomic.Int64
+	traceDir            string
 
 	// Real-time daily counters (seeded from DB at startup/rollover)
 	currentReqToday       atomic.Uint64
@@ -635,6 +657,8 @@ func initStore(databaseURL string, retentionDays int) error {
 	}
 	st.traceStoreEnabled.Store(td.TraceStoreEnabled)
 	st.retentionDays.Store(int32(max(retentionDays, 1)))
+	st.traceDir = pebbleDir
+	st.tracesPrunedThrough.Store(readPrunedThrough(pebbleDir))
 
 	if cache, err := lru.NewARC(cacheSizeFromEnv(envScoreCacheSize, cacheNameScore, defaultScoreCacheSize)); err == nil {
 		st.scoreCache = cache
@@ -814,11 +838,25 @@ func (s *pathStatsStore) migrateTracesToPebble() {
 }
 
 func makeTraceKey(ts time.Time, id string) []byte {
-	k := make([]byte, 8+len(id)+1)
-	binary.BigEndian.PutUint64(k[0:8], uint64(ts.UnixNano()))
-	k[8] = ':'
-	copy(k[9:], id)
-	return k
+	return AppendTraceKey(make([]byte, 0, 8+len(id)+1), ts, id)
+}
+
+// AppendTraceKey appends the store key of a trace to dst: its start time as
+// big-endian Unix nanoseconds, a colon, and its ID. Keys sort by time, so a
+// key is also a position in the timeline -- the trace archive uses one as a
+// cursor into it.
+func AppendTraceKey(dst []byte, ts time.Time, id string) []byte {
+	dst = binary.BigEndian.AppendUint64(dst, uint64(ts.UnixNano()))
+	dst = append(dst, ':')
+	return append(dst, id...)
+}
+
+// TraceKeyTime returns the start time a trace key encodes.
+func TraceKeyTime(key []byte) time.Time {
+	if len(key) < 8 {
+		return time.Time{}
+	}
+	return time.Unix(0, int64(binary.BigEndian.Uint64(key[:8]))).UTC()
 }
 
 type queryExecutor interface {
@@ -1347,11 +1385,18 @@ func (s *pathStatsStore) prunePathAndDomainStats(ctx context.Context) {
 // pruneTraces removes Pebble access-log entries older than the retention window
 // and compacts the freed key range so the deleted data is physically reclaimed.
 func (s *pathStatsStore) pruneTraces() {
-	days := s.effectiveRetention(s.accessLogRetentionDays.Load())
-	if days <= 0 {
+	cutoff := s.traceCutoff(time.Now())
+	if cutoff.IsZero() {
 		return
 	}
-	cutoffTime := time.Now().AddDate(0, 0, -days)
+	cutoffTime := guardTracePrune(cutoff)
+	// Nothing to delete, and nothing that can be: a cutoff at or before the
+	// epoch has no key below it, and UnixNano of the zero time -- which a guard
+	// holding everything back could answer -- wraps to a key above every trace,
+	// which would have deleted the lot.
+	if !cutoffTime.After(time.Unix(0, 0)) {
+		return
+	}
 	startKey := make([]byte, 8) // All zeros
 	endKey := make([]byte, 8)
 	binary.BigEndian.PutUint64(endKey, uint64(cutoffTime.UnixNano()))
@@ -1360,11 +1405,97 @@ func (s *pathStatsStore) pruneTraces() {
 		logger.Default().LogError("pebble: prune failed", "error", err)
 		return
 	}
+	s.notePruned(cutoffTime)
 	// DeleteRange only writes tombstones; compact the pruned range to actually
 	// reclaim disk space instead of waiting for an opportunistic compaction.
 	if err := s.pebble.Compact(startKey, endKey, true); err != nil {
 		logger.Default().LogError("pebble: compaction failed", "error", err)
 	}
+}
+
+// prunedThroughFile keeps where the last trace prune stopped, among the trace
+// store's own files -- Pebble passes over names it does not recognise -- so the
+// hot floor survives a restart. Without it, until the first prune after a
+// start, one trace written below the old prune point by a request that
+// outlived retention would pull the floor down and hide the archived hours
+// above it from a search.
+const prunedThroughFile = "gateon-pruned-through"
+
+func readPrunedThrough(dir string) int64 {
+	b, err := os.ReadFile(filepath.Join(dir, prunedThroughFile)) // #nosec G304 -- the trace store's own directory and a fixed name
+	if err != nil || len(b) != 8 {
+		return 0
+	}
+	return int64(binary.BigEndian.Uint64(b))
+}
+
+// notePruned records that every trace before cutoff is gone, in memory and on
+// disk. The disk copy is best effort: losing it costs only what it was kept
+// to prevent, for the hour until the next prune writes it again.
+func (s *pathStatsStore) notePruned(cutoff time.Time) {
+	n := cutoff.UnixNano()
+	if n <= s.tracesPrunedThrough.Load() {
+		return
+	}
+	s.tracesPrunedThrough.Store(n)
+	if s.traceDir == "" {
+		return
+	}
+	tmp := filepath.Join(s.traceDir, prunedThroughFile+".tmp")
+	if err := os.WriteFile(tmp, binary.BigEndian.AppendUint64(nil, uint64(n)), 0o600); err == nil {
+		_ = os.Rename(tmp, filepath.Join(s.traceDir, prunedThroughFile))
+	}
+}
+
+// traceCutoff is the time before which traces are past their retention. Zero
+// means they are kept for good.
+func (s *pathStatsStore) traceCutoff(now time.Time) time.Time {
+	days := s.effectiveRetention(s.accessLogRetentionDays.Load())
+	if days <= 0 {
+		return time.Time{}
+	}
+	return now.AddDate(0, 0, -days)
+}
+
+// TracePruneGuard is consulted before traces are deleted for age. It is handed
+// the retention cutoff and answers how far the deletion may go; an earlier
+// answer holds traces back. It runs on the pruning goroutine, so it must answer
+// from what it already knows rather than doing the work that would let it.
+type TracePruneGuard func(cutoff time.Time) time.Time
+
+var tracePruneGuard atomic.Pointer[TracePruneGuard]
+
+// SetTracePruneGuard installs the guard, replacing any before it; nil removes it.
+func SetTracePruneGuard(g TracePruneGuard) {
+	if g == nil {
+		tracePruneGuard.Store(nil)
+		return
+	}
+	tracePruneGuard.Store(&g)
+}
+
+// guardTracePrune lets the installed guard hold traces back. It can only move
+// the cutoff earlier: retention decides the most that may be deleted, and an
+// answer past it is ignored rather than obeyed.
+func guardTracePrune(cutoff time.Time) time.Time {
+	g := tracePruneGuard.Load()
+	if g == nil {
+		return cutoff
+	}
+	if held := (*g)(cutoff); held.Before(cutoff) {
+		return held
+	}
+	return cutoff
+}
+
+// TracePruneCutoff returns the time before which the next prune will delete
+// traces, before any guard has its say. Zero means nothing is pruned.
+func TracePruneCutoff(now time.Time) time.Time {
+	s := getStore()
+	if s == nil {
+		return time.Time{}
+	}
+	return s.traceCutoff(now)
 }
 
 // pruneSecurityThreats removes recorded threats older than the retention window.
@@ -1508,6 +1639,8 @@ func recordTraceToStore(tr *TraceRecord) {
 }
 
 func (s *pathStatsStore) processTrace(tr *TraceRecord) {
+	tr.ID = storableTraceID(tr.ID)
+
 	// Format headers lazily in the background
 	if tr.rawReqHeader != nil {
 		tr.RequestHeaders = FormatHeaders(tr.rawReqHeader)
@@ -2392,6 +2525,277 @@ func GetTraces(ctx context.Context, limit int) []*TraceRecord {
 	return GetTracesFiltered(ctx, limit, false)
 }
 
+// maxTraceIDBytes bounds the ID a trace is stored under.
+const maxTraceIDBytes = 128
+
+// storableTraceID bounds and cleans a trace's ID before it is stored. The ID is
+// the request's X-Request-ID as sent -- the client's to choose, up to the
+// header limit -- and it becomes part of the store key and, through it, of
+// every cursor and archive line. A megabyte of it, or bytes that are not
+// UTF-8, which JSON would record differently from the key, serves nobody.
+// It runs on the store's goroutine, not the request's.
+func storableTraceID(id string) string {
+	if len(id) > maxTraceIDBytes {
+		id = id[:maxTraceIDBytes]
+	}
+	if !utf8.ValidString(id) {
+		id = strings.ToValidUTF8(id, "\uFFFD")
+	}
+	return id
+}
+
+// ErrTraceStoreClosed is returned by trace reads when the store is not open.
+var ErrTraceStoreClosed = errors.New("telemetry: the trace store is not open")
+
+// TraceScan selects stored traces by the time their requests started.
+type TraceScan struct {
+	// From and To bound the scan to [From, To). A zero bound is open.
+	From, To time.Time
+	// Desc scans newest first.
+	Desc bool
+	// After resumes a scan strictly past this key, in the scan's direction.
+	After []byte
+}
+
+// ScanTraces calls visit with the key and stored JSON of each trace in the
+// scan, until visit returns false or ctx ends. Both slices belong to the store
+// and are valid only for the duration of the call.
+func ScanTraces(ctx context.Context, sc TraceScan, visit func(key, value []byte) bool) error {
+	s := getStore()
+	if s == nil || s.pebble == nil {
+		return ErrTraceStoreClosed
+	}
+	return scanTraces(ctx, s.pebble.NewIter, sc, visit)
+}
+
+// iterOpener opens an iterator on the live store or on a snapshot of it.
+type iterOpener func(*pebble.IterOptions) (*pebble.Iterator, error)
+
+func scanTraces(ctx context.Context, open iterOpener, sc TraceScan, visit func(key, value []byte) bool) error {
+	opts := sc.iterOptions()
+	if opts.LowerBound != nil && opts.UpperBound != nil && bytes.Compare(opts.LowerBound, opts.UpperBound) >= 0 {
+		return nil
+	}
+	iter, err := open(opts)
+	if err != nil {
+		return err
+	}
+	defer iter.Close()
+	first, step := iter.First, iter.Next
+	if sc.Desc {
+		first, step = iter.Last, iter.Prev
+	}
+	n := 0
+	for ok := first(); ok; ok = step() {
+		if n++; n%256 == 0 && ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if !visit(iter.Key(), iter.Value()) {
+			break
+		}
+	}
+	return iter.Error()
+}
+
+// iterOptions turns the scan into Pebble bounds. The time bounds are 8-byte
+// key prefixes: every key of a trace that started at or after From sorts at or
+// above From's prefix, and every key of one that started before To sorts below
+// To's.
+func (sc TraceScan) iterOptions() *pebble.IterOptions {
+	opts := &pebble.IterOptions{}
+	if !sc.From.IsZero() {
+		opts.LowerBound = timeKeyPrefix(sc.From)
+	}
+	if !sc.To.IsZero() {
+		opts.UpperBound = timeKeyPrefix(sc.To)
+	}
+	if len(sc.After) == 0 {
+		return opts
+	}
+	if sc.Desc {
+		if opts.UpperBound == nil || bytes.Compare(sc.After, opts.UpperBound) < 0 {
+			opts.UpperBound = sc.After
+		}
+		return opts
+	}
+	// The smallest key that sorts after After is After with a zero byte on it.
+	next := append(bytes.Clone(sc.After), 0)
+	if opts.LowerBound == nil || bytes.Compare(next, opts.LowerBound) > 0 {
+		opts.LowerBound = next
+	}
+	return opts
+}
+
+// timeKeyPrefix is the key prefix of a trace that started at t, clamped to the
+// epoch: UnixNano of an earlier time is negative and would wrap to the top of
+// the keyspace.
+func timeKeyPrefix(t time.Time) []byte {
+	return binary.BigEndian.AppendUint64(nil, uint64(max(t.UnixNano(), 0)))
+}
+
+// OldestTraceTime returns when the oldest stored trace's request started.
+func OldestTraceTime(ctx context.Context) (time.Time, bool) {
+	s := getStore()
+	if s == nil || s.pebble == nil {
+		return time.Time{}, false
+	}
+	oldest, found, _ := firstTraceTime(ctx, s.pebble.NewIter)
+	return oldest, found
+}
+
+func firstTraceTime(ctx context.Context, open iterOpener) (time.Time, bool, error) {
+	var oldest time.Time
+	found := false
+	err := scanTraces(ctx, open, TraceScan{}, func(key, _ []byte) bool {
+		oldest, found = TraceKeyTime(key), true
+		return false
+	})
+	return oldest, found, err
+}
+
+// hotFloor is the later of where pruning stopped and the oldest stored trace;
+// with nothing stored, it is now.
+func hotFloor(prunedThrough int64, oldest time.Time, found bool) time.Time {
+	if !found {
+		return time.Now().UTC()
+	}
+	if floor := time.Unix(0, prunedThrough).UTC(); !oldest.After(floor) {
+		return floor
+	}
+	return oldest
+}
+
+// TraceView is the trace store as it stood at one moment. A read that spans
+// the store and the trace archive takes one: a prune that lands halfway
+// through the read cannot then delete an hour after the read has decided the
+// store is where that hour is.
+type TraceView struct {
+	snap  *pebble.Snapshot
+	floor time.Time
+}
+
+// OpenTraceView captures the store as it is now. Close releases it.
+func OpenTraceView(ctx context.Context) (*TraceView, error) {
+	s := getStore()
+	if s == nil || s.pebble == nil {
+		return nil, ErrTraceStoreClosed
+	}
+	v := &TraceView{snap: s.pebble.NewSnapshot()}
+	// Read after the snapshot, not before. A prune in between then puts the
+	// floor above traces the snapshot still holds, which only sends a reader
+	// to the archive for them, where the prune guard has made sure they are.
+	// In the other order it would send the reader to the snapshot for traces
+	// already gone from it.
+	pruned := s.tracesPrunedThrough.Load()
+	oldest, found, err := firstTraceTime(ctx, v.snap.NewIter)
+	if err != nil {
+		v.Close()
+		return nil, err
+	}
+	v.floor = hotFloor(pruned, oldest, found)
+	return v, nil
+}
+
+// Floor is TraceHotFloor as of the view's moment.
+func (v *TraceView) Floor() time.Time { return v.floor }
+
+// Scan is ScanTraces over the view.
+func (v *TraceView) Scan(ctx context.Context, sc TraceScan, visit func(key, value []byte) bool) error {
+	return scanTraces(ctx, v.snap.NewIter, sc, visit)
+}
+
+// Close releases the view.
+func (v *TraceView) Close() { _ = v.snap.Close() }
+
+// TraceIter walks a view's traces in a scan's order, one at a time. A reader
+// merging the store with other sources in key order pulls from it rather than
+// being pushed to, as ScanTraces does.
+type TraceIter struct {
+	it      *pebble.Iterator
+	desc    bool
+	started bool
+}
+
+// Iter opens an iterator over the view for the scan. Close it.
+func (v *TraceView) Iter(sc TraceScan) (*TraceIter, error) {
+	opts := sc.iterOptions()
+	if opts.LowerBound != nil && opts.UpperBound != nil && bytes.Compare(opts.LowerBound, opts.UpperBound) >= 0 {
+		return &TraceIter{}, nil // an empty range
+	}
+	it, err := v.snap.NewIter(opts)
+	if err != nil {
+		return nil, err
+	}
+	return &TraceIter{it: it, desc: sc.Desc}, nil
+}
+
+// Next moves to the next trace in the scan's order and reports whether there
+// is one.
+func (t *TraceIter) Next() bool {
+	switch {
+	case t.it == nil:
+		return false
+	case !t.started && t.desc:
+		t.started = true
+		return t.it.Last()
+	case !t.started:
+		t.started = true
+		return t.it.First()
+	case t.desc:
+		return t.it.Prev()
+	default:
+		return t.it.Next()
+	}
+}
+
+// Key is the current trace's store key, valid until the next call to Next.
+func (t *TraceIter) Key() []byte { return t.it.Key() }
+
+// Value is the current trace's stored JSON, valid until the next call to Next.
+func (t *TraceIter) Value() []byte { return t.it.Value() }
+
+// Err is the error, if any, that ended the iteration.
+func (t *TraceIter) Err() error {
+	if t.it == nil {
+		return nil
+	}
+	return t.it.Error()
+}
+
+// Close releases the iterator.
+func (t *TraceIter) Close() error {
+	if t.it == nil {
+		return nil
+	}
+	return t.it.Close()
+}
+
+// TraceHotFloor returns the time from which the store holds every trace it
+// has recorded: before it, traces have been pruned (or were never here); from
+// it on, none has been deleted. A reader wanting a period older than the floor
+// has to look somewhere else -- the trace archive -- and one wanting a newer
+// period will find it all here.
+//
+// It is the later of where pruning stopped and the oldest stored trace, not
+// either alone. A trace whose request outlived the retention window is written
+// with a key below the last prune, which would make the oldest trace a floor
+// the store cannot honour; and a store that has been emptied or replaced holds
+// nothing from before its oldest trace, whatever it pruned.
+func TraceHotFloor(ctx context.Context) time.Time {
+	s := getStore()
+	if s == nil || s.pebble == nil {
+		return time.Now().UTC()
+	}
+	oldest, found, _ := firstTraceTime(ctx, s.pebble.NewIter)
+	return hotFloor(s.tracesPrunedThrough.Load(), oldest, found)
+}
+
+// TraceStoreActive reports whether new traces are being recorded.
+func TraceStoreActive() bool {
+	s := getStore()
+	return s != nil && s.traceStoreEnabled.Load()
+}
+
 // GetTracesFiltered returns the last N traces with an optional summary mode.
 // In summary mode, large fields (bodies, headers) are omitted from unmarshaling.
 func GetTracesFiltered(ctx context.Context, limit int, summary bool) []*TraceRecord {
@@ -2416,7 +2820,7 @@ func GetTracesFiltered(ctx context.Context, limit int, summary bool) []*TraceRec
 		tr := GetTraceRecord()
 		if summary {
 			// Use a specialized summary unmarshaler to avoid CPU overhead on large bodies
-			if err := unmarshalTraceSummary(iter.Value(), tr); err == nil {
+			if err := UnmarshalTraceSummary(iter.Value(), tr); err == nil {
 				if _, ok := seen[tr.ID]; ok {
 					tr.Reset()
 					tracePool.Put(tr)
@@ -2446,8 +2850,8 @@ func GetTracesFiltered(ctx context.Context, limit int, summary bool) []*TraceRec
 	return res
 }
 
-// unmarshalTraceSummary unmarshals basic fields but omits heavy payloads.
-func unmarshalTraceSummary(data []byte, tr *TraceRecord) error {
+// UnmarshalTraceSummary unmarshals basic fields but omits heavy payloads.
+func UnmarshalTraceSummary(data []byte, tr *TraceRecord) error {
 	// We use a temporary struct with only the fields we need to avoid unmarshaling
 	// large body/header strings into the final TraceRecord.
 	type summary struct {
@@ -2856,7 +3260,15 @@ func GetAssociatedFingerprints(ctx context.Context, ip string) []string {
 }
 
 // FlushThreats blocks until all enqueued security threats are processed and persisted to DB.
-func FlushThreats() {
+func FlushThreats() { flushQueues() }
+
+// FlushTraces blocks until every trace recorded before it is in the trace
+// store. It is the same barrier as FlushThreats -- one flush drains every
+// intake -- under the name a caller waiting for traces looks for; without it,
+// tests slept and hoped the timed flush had run.
+func FlushTraces() { flushQueues() }
+
+func flushQueues() {
 	s := getStore()
 	if s == nil {
 		return

@@ -11,6 +11,68 @@ here after the fact.
 
 ## Unreleased
 
+### First-run setup requires a setup token — **scripted setup must send it**
+
+Setup runs before any account exists, and it required nothing: whoever reached
+a fresh gateway first could make themselves its administrator, or use the
+wizard's connection test to open a database connection to any address. Setup
+and the connection test now require a one-time token. At startup a gateway that
+needs setup prints the token in its log and writes it to `setup-token` in its
+data directory; the wizard asks for it on its first page, and the file is
+deleted once setup completes. See ADR 0021.
+
+**Who is affected:** anything that sets a gateway up without the dashboard --
+`POST /v1/setup`, or the `Setup` RPC over Connect or gRPC. Send the token as
+`setup_token` (`setupToken` in JSON): read it from `setup-token`, or set
+`GATEON_SETUP_TOKEN` (16 characters or more) on the gateway and send that. A
+request without it is refused with a message saying where to find it. Gateways
+that are already set up are unaffected.
+
+### The setup wizard accepts a SQLite file in a data directory reached through a symlink
+
+The wizard only takes a SQLite database inside the data directory, and it
+compared the two paths as written. A relative path is resolved against the
+working directory, which the operating system reports with its symlinks
+resolved, so a data directory reached through one -- `/var/lib/gateon` linked
+to a data disk, or anything under macOS's `/var` -- refused every relative
+path, the wizard's default `gateon.db` included. Paths are now compared where
+they actually are. A path that leaves the data directory through a symlink
+inside it, which the written path hid, is now refused.
+
+**Who is affected:** an install whose data directory is a symlink or sits below
+one, which can now use the wizard's SQLite defaults.
+
+### The setup wizard's connection test no longer says why an address that is not Postgres failed
+
+Until setup completes, anyone who can reach the management port can use the
+wizard's "Test connection", and Setup itself, to make the gateway connect to an
+address of their choosing. Both answered with the driver's error, which told a
+refused port from one that answered and hung up, and both from one that never
+answered: a port scanner for the gateway's network, open until the first
+administrator existed. They now pass on only what a Postgres server said (a
+wrong password, a missing database, a host it refuses), answer everything else
+with one message after the same five seconds, and log the detail. The attempt
+is bounded at five seconds whatever the url asks for; it used to wait as long as
+the far end did.
+
+**Who is affected:** an operator whose connection test fails for any reason
+other than Postgres refusing it. The reason is in the gateway's log, under
+"database connection test failed", rather than in the wizard.
+
+### Required 2FA enrollment shows its QR code and recovery codes — **accounts that enrolled that way never saw theirs**
+
+When an administrator required 2FA, the login page enrolled the account through
+`POST /v1/auth/2fa/enroll`, which answered `qr_code_url` and `recovery_codes`
+while the page reads `qrCodeUrl` and `recoveryCodes`. The QR image was blank
+and the recovery codes were never displayed, so enrollment went through on the
+secret typed in by hand. The endpoint now answers in the page's spelling.
+
+**Who is affected:** every account that enrolled through a required-2FA login
+from v2.4.2 on. Its recovery codes exist and nobody has seen them. Each such
+user can get a new set by setting 2FA up again from their own row in Users
+("Manage your two-factor authentication"). Anything outside the dashboard that
+reads the two old keys from this endpoint must switch to the new ones.
+
 ### eBPF filters IPv6 — **an IPv4-only kernel allowlist now closes the management port to IPv6**
 
 Both eBPF programs passed every IPv6 packet: no shun, no rate limit, no SYN
