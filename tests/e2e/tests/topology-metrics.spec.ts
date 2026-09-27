@@ -99,8 +99,11 @@ test.describe('Metrics', () => {
     await page.goto('/metrics-dashboard');
     await expect(page.getByRole('heading', { name: 'Metrics Dashboard' })).toBeVisible();
 
+    // Inside the Golden Signals card: the per-route table further down has an
+    // "Error Rate" column of its own.
+    const golden = page.locator('.mantine-Card-root').filter({ has: page.getByText('Golden Signals', { exact: true }) });
     const tile = (label: string) =>
-      page.locator('.mantine-Paper-root').filter({ has: page.getByText(label, { exact: true }) }).last();
+      golden.locator('.mantine-Paper-root').filter({ has: page.getByText(label, { exact: true }) });
     await expect(tile('Total Requests')).toContainText('987');
     await expect(tile('Error Rate')).toContainText('1.22%');
     await expect(tile('Error Rate')).toContainText('12 errors of 987 requests');
