@@ -31,7 +31,11 @@ you need a user's sessions gone, disable the account or rotate the password.
 **Where the token lives.** In the browser it exists only in the HttpOnly,
 `SameSite=Lax` `gateon_session` cookie (`Secure` when served over TLS). It is
 never written to `localStorage` or `sessionStorage`, and no script on the page
-can read it. API and CLI clients send `Authorization: Bearer <token>`; query
+can read it. Sign-in (`POST /v1/login`, and the second step at
+`POST /v1/auth/2fa/verify`) answers a browser -- any request carrying the
+`Sec-Fetch-Mode` header, which browsers always send and page script can neither
+set nor remove -- with the cookie alone; the token appears in the response body
+only for API and CLI clients, which send `Authorization: Bearer <token>`. Query
 parameters are accepted only for WebSocket and SSE, which cannot set headers.
 
 **Multi-instance deployments.** Binding state is cached per process, and a

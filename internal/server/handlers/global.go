@@ -37,6 +37,18 @@ func decodeGlobalConfig(body []byte, conf *gateonv1.GlobalConfig) error {
 	return nil
 }
 
+// sentByBrowser reports whether r was sent by a browser.
+//
+// Sec-Fetch-Mode is a forbidden request header: every current browser sets it
+// on every request it sends -- a navigation, fetch(), XMLHttpRequest -- and page
+// script can neither set nor remove it. So its presence means a browser sent
+// the request and its absence means a program that is not one did, whatever the
+// script behind a browser request would like the server to believe. A browser
+// too old to send it is treated as an API client, which is what it was before.
+func sentByBrowser(r *http.Request) bool {
+	return r.Header.Get("Sec-Fetch-Mode") != ""
+}
+
 // wrongCodeStatus is the status for a second factor that did not verify.
 //
 // During sign-in there is no session yet, and 401 says so. A caller enrolling
@@ -633,6 +645,11 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 			// Set HttpOnly secure cookie for session (24h)
 			middleware.SetSessionCookie(w, r, resp.Token, int(auth.TokenLifetime.Seconds()))
 		}
+		// The second step of a browser's sign-in gets the session only as the
+		// cookie, as /v1/login does; see sentByBrowser.
+		if isLoginStep && sentByBrowser(r) {
+			resp.Token = ""
+		}
 		if !isLoginStep {
 			// The caller is enrolling their own account and already holds a
 			// session, in a cookie script cannot read. The service mints a token
@@ -713,6 +730,15 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 		if !resp.TwoFactorRequired && !resp.TwoFactorSetupRequired {
 			// Set HttpOnly secure cookie for session (24h) to reduce XSS exposure
 			middleware.SetSessionCookie(w, r, resp.Token, int(auth.TokenLifetime.Seconds()))
+		}
+		// A browser gets the session only as that cookie. A token in the body
+		// is a string any script in the page can read -- including script that
+		// wrapped fetch before the sign-in form was submitted -- and carry off
+		// as a bearer credential that outlives the tab; the cookie it cannot
+		// read. API clients, which have no cookie jar to speak of, still read
+		// the token from the body.
+		if sentByBrowser(r) {
+			resp.Token = ""
 		}
 
 		data, _ := ProtojsonOptions().Marshal(resp)

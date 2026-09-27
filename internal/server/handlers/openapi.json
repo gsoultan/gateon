@@ -70,7 +70,7 @@
       "post": { "summary": "Upload GeoIP database (.mmdb) (operator, admin)", "tags": ["middlewares"], "responses": { "200": { "description": "OK" }, "403": { "description": "Insufficient permissions" } } }
     },
     "/v1/login": {
-      "post": { "summary": "Login (returns PASETO token)", "tags": ["auth"], "responses": { "200": { "description": "OK" }, "401": { "description": "Invalid credentials" } } }
+      "post": { "summary": "Login (sets the gateon_session cookie; the PASETO token is also in the body for clients that send no Sec-Fetch-Mode header)", "tags": ["auth"], "responses": { "200": { "description": "OK" }, "401": { "description": "Invalid credentials" } } }
     },
     "/v1/logout": {
       "post": { "summary": "Logout", "tags": ["auth"], "responses": { "200": { "description": "OK" } } }
