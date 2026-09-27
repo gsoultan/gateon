@@ -306,14 +306,57 @@ func pipeHalfClose(client, backend net.Conn) {
 }
 
 // copyThenCloseWrite copies src to dst -- by splice(2) when both are TCP
-// sockets on Linux, through a buffer otherwise -- and then half-closes dst.
+// sockets on Linux, through a pooled buffer otherwise -- and then half-closes
+// dst.
 func copyThenCloseWrite(dst, src net.Conn) {
 	if _, err := SpliceCopy(dst, src); err != nil {
-		_, _ = io.Copy(dst, src)
+		copyPooled(dst, src)
 	}
 	if c, ok := dst.(interface{ CloseWrite() error }); ok {
 		_ = c.CloseWrite()
 	}
+}
+
+// copyBufSize is io.Copy's own buffer size, so pooling changes allocation,
+// not how many bytes move per read.
+const copyBufSize = 32 << 10
+
+// copyBufs holds the buffers of sessions splice cannot move -- every session
+// of a TLS-terminating entrypoint. io.Copy allocated one per direction per
+// session, 64 KiB of garbage for each short session; a session now borrows
+// two and returns them when it ends. sync.Pool bounds what it keeps idle by
+// releasing it to the collector. It has no New: an empty pool answers nil, and
+// copyPooled makes the buffer itself.
+var copyBufs sync.Pool
+
+// copyBuf is one direction's copy state: the buffer, and the wrappers that
+// make io.CopyBuffer use it. io.CopyBuffer ignores the buffer when dst has
+// ReadFrom or src has WriteTo, and a *net.TCPConn has both -- each bringing
+// its own 32 KiB allocation when the other end is not a socket it can splice
+// to. The wrappers hide both, and live here so that passing them as
+// interfaces does not allocate them per copy.
+type copyBuf struct {
+	buf []byte
+	w   writerOnly
+	r   readerOnly
+}
+
+func newCopyBuf() *copyBuf { return &copyBuf{buf: make([]byte, copyBufSize)} }
+
+// writerOnly and readerOnly hide every method but Write and Read.
+type writerOnly struct{ io.Writer }
+type readerOnly struct{ io.Reader }
+
+// copyPooled copies src to dst through a buffer from copyBufs.
+func copyPooled(dst io.Writer, src io.Reader) {
+	cb, _ := copyBufs.Get().(*copyBuf) // nil when the pool is empty
+	if cb == nil {
+		cb = newCopyBuf()
+	}
+	cb.w.Writer, cb.r.Reader = dst, src
+	_, _ = io.CopyBuffer(&cb.w, &cb.r, cb.buf)
+	cb.w.Writer, cb.r.Reader = nil, nil // an idle buffer must not keep a connection alive
+	copyBufs.Put(cb)
 }
 
 // writeProxyHeader sends HAProxy PROXY protocol v1 header so the backend sees the original client IP.

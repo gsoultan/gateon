@@ -14,11 +14,14 @@ import (
 // splice(2) through the standard library.
 const spliceSupported = true
 
-// SpliceCopy attempts to zero-copy data from src to dst using splice(2).
-// On Linux, this is achieved by leveraging Go's built-in support in (*net.TCPConn).ReadFrom.
+// SpliceCopy copies src to dst with splice(2), through (*net.TCPConn).ReadFrom.
+// It refuses (ENOSYS) unless both ends are *net.TCPConn: ReadFrom from any
+// other source copies anyway, through a 32 KiB buffer it allocates for the
+// call, which is the copy the caller's pooled fallback exists to replace.
 func SpliceCopy(dst, src net.Conn) (int64, error) {
 	dstTCP, ok1 := dst.(*net.TCPConn)
-	if !ok1 {
+	_, ok2 := src.(*net.TCPConn)
+	if !ok1 || !ok2 {
 		return 0, syscall.ENOSYS
 	}
 	return dstTCP.ReadFrom(src)

@@ -14,6 +14,7 @@ package entrypoint
 // scripts/bench-datapath.sh.
 
 import (
+	"crypto/tls"
 	"io"
 	"net"
 	"syscall"
@@ -36,6 +37,36 @@ func reportBenchCPU(b *testing.B, start time.Duration) {
 }
 
 func echoConn(c net.Conn) { _, _ = io.Copy(c, c) }
+
+// BenchmarkTLSEntrypointSession is one short session through a TCP entrypoint
+// that terminates TLS: a full handshake, a 64-byte echo, close. These sessions
+// cannot splice; the proxy copies the decrypted bytes through buffers.
+func BenchmarkTLSEntrypointSession(b *testing.B) {
+	backend, stopBackend := serveBackend(b, echoConn)
+	defer stopBackend()
+	serverTLS, clientTLS := selfSignedTLS(b)
+	addr, stop := l4Entrypoint(b, backend, serverTLS)
+	defer stop()
+	msg, buf := make([]byte, 64), make([]byte, 64)
+	dialer := &net.Dialer{Timeout: 5 * time.Second}
+
+	b.ReportAllocs()
+	start := benchCPU(b)
+	for b.Loop() {
+		c, err := tls.DialWithDialer(dialer, "tcp", addr, clientTLS)
+		if err != nil {
+			b.Fatalf("dial: %v", err)
+		}
+		if _, err := c.Write(msg); err != nil {
+			b.Fatalf("write: %v", err)
+		}
+		if _, err := io.ReadFull(c, buf); err != nil {
+			b.Fatalf("echo: %v", err)
+		}
+		_ = c.Close()
+	}
+	reportBenchCPU(b, start)
+}
 
 // BenchmarkTCPEntrypointSession is one short L4 session per operation: connect,
 // a 64-byte message the client speaks first, its echo, close. It is the

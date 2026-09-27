@@ -6,7 +6,14 @@ package entrypoint
 import (
 	"bufio"
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"io"
+	"math/big"
 	"net"
 	"path/filepath"
 	"sync"
@@ -79,6 +86,13 @@ func l4Resolver(tb testing.TB, epID, backend string) L4Resolver {
 // cmd/gateon wires one, whose one route leads to backend.
 func plaintextTCPEntrypoint(tb testing.TB, backend string) (addr string, stop func()) {
 	tb.Helper()
+	return l4Entrypoint(tb, backend, nil)
+}
+
+// l4Entrypoint starts a TCP entrypoint whose one route leads to backend,
+// terminating TLS with serverTLS when it is not nil.
+func l4Entrypoint(tb testing.TB, backend string, serverTLS *tls.Config) (addr string, stop func()) {
+	tb.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		tb.Fatalf("reserve port: %v", err)
@@ -92,8 +106,12 @@ func plaintextTCPEntrypoint(tb testing.TB, backend string) (addr string, stop fu
 		Type:      gateonv1.EntryPoint_TCP,
 		Protocols: []gateonv1.EntryPoint_Protocol{gateonv1.EntryPoint_TCP_PROTO},
 	}
+	if serverTLS != nil {
+		ep.Tls = &gateonv1.TlsConfig{Enabled: true}
+	}
 	reg := &ShutdownRegistry{}
 	deps := &Deps{
+		TLSConfig:        serverTLS,
 		TLSManager:       gtls.NewManager(gtls.Config{}),
 		Limiter:          traffic.NoopRateLimiter{},
 		ShutdownRegistry: reg,
@@ -110,6 +128,38 @@ func plaintextTCPEntrypoint(tb testing.TB, backend string) (addr string, stop fu
 			wg.Wait()
 		})
 	}
+}
+
+// selfSignedTLS returns a server config with a fresh self-signed ECDSA
+// certificate for 127.0.0.1, and a client config that trusts it.
+func selfSignedTLS(tb testing.TB) (server, client *tls.Config) {
+	tb.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		tb.Fatalf("key: %v", err)
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject:      pkix.Name{CommonName: "127.0.0.1"},
+		IPAddresses:  []net.IP{net.ParseIP("127.0.0.1")},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(time.Hour),
+		KeyUsage:     x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
+		tb.Fatalf("certificate: %v", err)
+	}
+	leaf, err := x509.ParseCertificate(der)
+	if err != nil {
+		tb.Fatalf("parse certificate: %v", err)
+	}
+	roots := x509.NewCertPool()
+	roots.AddCert(leaf)
+	cert := tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key, Leaf: leaf}
+	return &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12},
+		&tls.Config{RootCAs: roots, ServerName: "127.0.0.1", MinVersion: tls.VersionTLS12}
 }
 
 // TestAPlaintextL4SessionEndsWhenTheBackendHangsUp: a backend that answers and
@@ -148,6 +198,41 @@ func TestAPlaintextL4SessionEndsWhenTheBackendHangsUp(t *testing.T) {
 	}
 	if want := "answer to whois example\n"; string(got) != want {
 		t.Errorf("client read %q, want %q -- the inspected first bytes must reach the backend first", got, want)
+	}
+}
+
+// TestATLSL4SessionRoundTripsAndEnds: through an entrypoint that terminates
+// TLS the proxy copies decrypted bytes through buffers rather than splicing;
+// they must still arrive intact, and a backend's hang-up must still reach the
+// client as the end of the stream.
+func TestATLSL4SessionRoundTripsAndEnds(t *testing.T) {
+	backend, stopBackend := serveBackend(t, func(c net.Conn) {
+		line, err := bufio.NewReader(c).ReadString('\n')
+		if err != nil {
+			return
+		}
+		_, _ = io.WriteString(c, "answer to "+line) // then hang up
+	})
+	defer stopBackend()
+	serverTLS, clientTLS := selfSignedTLS(t)
+	addr, stop := l4Entrypoint(t, backend, serverTLS)
+	defer stop()
+
+	c, err := tls.DialWithDialer(&net.Dialer{Timeout: 5 * time.Second}, "tcp", addr, clientTLS)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer c.Close()
+	if _, err := io.WriteString(c, "over tls\n"); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	_ = c.SetReadDeadline(time.Now().Add(5 * time.Second))
+	got, err := io.ReadAll(c)
+	if err != nil {
+		t.Fatalf("read %q, then: %v -- the backend hung up and the client was not told", got, err)
+	}
+	if want := "answer to over tls\n"; string(got) != want {
+		t.Errorf("client read %q, want %q", got, want)
 	}
 }
 
