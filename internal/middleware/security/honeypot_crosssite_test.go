@@ -327,13 +327,14 @@ func TestTheHoneypotSaysWhatItDid(t *testing.T) {
 		lapseBan(telemetry.ClientIPOf(tc.req))
 	}
 
-	// Last, because it leaves the ban list full: at capacity nothing new is
-	// banned, and the record must not claim otherwise.
+	// Last, because it leaves the ban list full: at capacity a ban close to
+	// lapsing makes room (evictSoonestExpiringBan), so the next scanner is still
+	// banned, and the record says so.
 	until := time.Now().Add(time.Hour)
 	for i := range maxHoneypotBlocklist {
 		blockHoneypotIP(ipv4For(i), until)
 	}
-	if got, want := hit(visitorRequest("203.0.113.63", "/.env")), "source not banned"; !strings.Contains(got, want) {
+	if got, want := hit(visitorRequest("203.0.113.63", "/.env")), "banned 203.0.113.63 for 15m0s"; !strings.Contains(got, want) {
 		t.Errorf("with the ban list full, the threat says %q, want it to say %q", got, want)
 	}
 }

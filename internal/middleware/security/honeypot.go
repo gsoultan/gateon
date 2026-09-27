@@ -193,9 +193,9 @@ func honeypotBanFor(clientIP string, now time.Time) time.Duration {
 // maxHoneypotBlocklist caps the blocklist. Entries are keyed by client IP and
 // otherwise only removed when that same address returns after its ban expires,
 // so a scan from many sources would retain every one of them forever. At the
-// cap we sweep expired entries first and, if that frees nothing, refuse to grow
-// — a ban that cannot be recorded is far cheaper than an unbounded map fed by
-// attacker-chosen keys.
+// cap we sweep expired entries first and, if that frees nothing, evict one ban
+// close to lapsing (evictSoonestExpiringBan) -- the list stays bounded against
+// attacker-chosen keys, and a full list still bans the next scanner.
 const maxHoneypotBlocklist = 10_000
 
 // defaultHoneypotPaths lists the trap paths used when deception is active but
@@ -278,11 +278,40 @@ func blockHoneypotIP(clientIP string, until time.Time) (key string, banned bool)
 			}
 		}
 		if len(honeypotBlocklist) >= maxHoneypotBlocklist {
-			return key, false
+			evictSoonestExpiringBan()
 		}
 	}
 	honeypotBlocklist[key] = until
 	return key, true
+}
+
+// banEvictionSample is how many bans a full list compares before evicting one.
+const banEvictionSample = 8
+
+// evictSoonestExpiringBan makes room in a full ban list by dropping, of a few
+// bans picked at random, the one closest to lapsing on its own. Caller holds
+// blocklistMu.
+//
+// A full list used to refuse the next ban, so once it was full no scanner
+// anywhere was banned: one customer's /48 -- 65,536 of the /64s bans are keyed
+// on -- could switch the honeypot off for everyone. Evicting keeps banning
+// working at the cap. Sampling, as Redis approximates LRU, keeps it O(1) under
+// the lock the request path's ban check also takes; scanning all ten thousand
+// entries on every new ban during a flood would stall that check instead. Map
+// iteration starts at a random entry, so the sample is random.
+func evictSoonestExpiringBan() {
+	var victim string
+	var soonest time.Time
+	n := 0
+	for k, exp := range honeypotBlocklist {
+		if n == 0 || exp.Before(soonest) {
+			victim, soonest = k, exp
+		}
+		if n++; n == banEvictionSample {
+			break
+		}
+	}
+	delete(honeypotBlocklist, victim)
 }
 
 // Fetch Metadata request headers (https://www.w3.org/TR/fetch-metadata/),
