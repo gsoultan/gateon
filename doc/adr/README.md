@@ -32,6 +32,7 @@ ADRs follow a lightweight [MADR](https://adr.github.io/madr/)-style format:
 | [0019](./0019-the-service-runs-as-its-own-account.md) | The packaged service runs as its own account, not root | Accepted |
 | [0020](./0020-the-kernel-filters-ipv6-too.md) | The kernel filters IPv6 too | Accepted |
 | [0021](./0021-first-run-setup-requires-a-token.md) | First-run setup requires a one-time token | Accepted |
+| [0022](./0022-traces-are-archived-an-hour-at-a-time.md) | Traces are archived an hour at a time, in files named for the hour | Accepted |
 
 ## Conventions
 

@@ -245,9 +245,16 @@ const clamavRoute = createRoute({
 const tracesRoute = createRoute({
   getParentRoute: () => authenticatedRoute,
   path: "/traces",
-  validateSearch: (search: Record<string, unknown>): { q?: string; route?: string } => ({
+  validateSearch: (
+    search: Record<string, unknown>,
+  ): { q?: string; route?: string; tab?: string; from?: string; to?: string } => ({
     q: asSearchString(search.q),
     route: asSearchString(search.route),
+    // The History tab's period, so a period of traces can be bookmarked and
+    // shared; TracesPage checks both are times before using them.
+    tab: asSearchString(search.tab),
+    from: asSearchString(search.from),
+    to: asSearchString(search.to),
   }),
   component: () => <TracesPage />,
 });

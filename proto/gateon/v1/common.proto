@@ -115,6 +115,12 @@ message LogConfig {
   int32 access_log_retention_days = 5;
   int32 security_threat_retention_days = 6;
   int32 audit_log_retention_days = 7;
+  // Trace archive: each closed hour of traces is copied to a compressed file
+  // so traces outlive access_log_retention_days. Off unless enabled. A zero
+  // retention or size takes the resource profile's default.
+  bool trace_archive_enabled = 8;
+  int32 trace_archive_retention_days = 9;
+  int32 trace_archive_max_size_mb = 10;
 }
 
 message TlsClientConfig {

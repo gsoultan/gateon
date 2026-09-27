@@ -13,7 +13,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file gateon/v1/trace.proto.
  */
 export const file_gateon_v1_trace: GenFile = /*@__PURE__*/
-  fileDesc("ChVnYXRlb24vdjEvdHJhY2UucHJvdG8SCWdhdGVvbi52MSK5BQoFVHJhY2USCgoCaWQYASABKAkSFgoOb3BlcmF0aW9uX25hbWUYAiABKAkSFAoMc2VydmljZV9uYW1lGAMgASgJEhMKC2R1cmF0aW9uX21zGAQgASgBEhEKCXRpbWVzdGFtcBgFIAEoCRIOCgZzdGF0dXMYBiABKAkSDAoEcGF0aBgHIAEoCRIRCglzb3VyY2VfaXAYCCABKAkSEgoKdXNlcl9hZ2VudBgJIAEoCRIOCgZtZXRob2QYCiABKAkSDwoHcmVmZXJlchgLIAEoCRITCgtyZXF1ZXN0X3VyaRgMIAEoCRI9Cg9yZXF1ZXN0X2hlYWRlcnMYDSADKAsyJC5nYXRlb24udjEuVHJhY2UuUmVxdWVzdEhlYWRlcnNFbnRyeRIUCgxyZXF1ZXN0X2JvZHkYDiABKAkSPwoQcmVzcG9uc2VfaGVhZGVycxgPIAMoCzIlLmdhdGVvbi52MS5UcmFjZS5SZXNwb25zZUhlYWRlcnNFbnRyeRIVCg1yZXNwb25zZV9ib2R5GBAgASgJEgsKA2phNBgSIAEoCRIMCgRqYTRoGBkgASgJEhYKDnJlY29tbWVuZGF0aW9uGBMgASgJEhIKCnJlcHV0YXRpb24YFCABKAESGwoTZW50cnlwb2ludF9kZWxheV9tcxgVIAEoARIWCg5yb3V0ZV9kZWxheV9tcxgWIAEoARIbChNtaWRkbGV3YXJlX2RlbGF5X21zGBcgASgBEhgKEHNlcnZpY2VfZGVsYXlfbXMYGCABKAEaNQoTUmVxdWVzdEhlYWRlcnNFbnRyeRILCgNrZXkYASABKAkSDQoFdmFsdWUYAiABKAk6AjgBGjYKFFJlc3BvbnNlSGVhZGVyc0VudHJ5EgsKA2tleRgBIAEoCRINCgV2YWx1ZRgCIAEoCToCOAFKBAgREBIiMwoRTGlzdFRyYWNlc1JlcXVlc3QSDQoFbGltaXQYASABKAUSDwoHc3VtbWFyeRgCIAEoCCI2ChJMaXN0VHJhY2VzUmVzcG9uc2USIAoGdHJhY2VzGAEgAygLMhAuZ2F0ZW9uLnYxLlRyYWNlIjAKD0dldFRyYWNlUmVxdWVzdBIKCgJpZBgBIAEoCRIRCgl0aW1lc3RhbXAYAiABKAkiMwoQR2V0VHJhY2VSZXNwb25zZRIfCgV0cmFjZRgBIAEoCzIQLmdhdGVvbi52MS5UcmFjZUKVAQoNY29tLmdhdGVvbi52MUIKVHJhY2VQcm90b1ABWjNnaXRodWIuY29tL2dzb3VsdGFuL2dhdGVvbi9wcm90by9nYXRlb24vdjE7Z2F0ZW9udjGiAgNHWFiqAglHYXRlb24uVjHKAglHYXRlb25cVjHiAhVHYXRlb25cVjFcR1BCTWV0YWRhdGHqAgpHYXRlb246OlYxYgZwcm90bzM");
+  fileDesc("ChVnYXRlb24vdjEvdHJhY2UucHJvdG8SCWdhdGVvbi52MSK5BQoFVHJhY2USCgoCaWQYASABKAkSFgoOb3BlcmF0aW9uX25hbWUYAiABKAkSFAoMc2VydmljZV9uYW1lGAMgASgJEhMKC2R1cmF0aW9uX21zGAQgASgBEhEKCXRpbWVzdGFtcBgFIAEoCRIOCgZzdGF0dXMYBiABKAkSDAoEcGF0aBgHIAEoCRIRCglzb3VyY2VfaXAYCCABKAkSEgoKdXNlcl9hZ2VudBgJIAEoCRIOCgZtZXRob2QYCiABKAkSDwoHcmVmZXJlchgLIAEoCRITCgtyZXF1ZXN0X3VyaRgMIAEoCRI9Cg9yZXF1ZXN0X2hlYWRlcnMYDSADKAsyJC5nYXRlb24udjEuVHJhY2UuUmVxdWVzdEhlYWRlcnNFbnRyeRIUCgxyZXF1ZXN0X2JvZHkYDiABKAkSPwoQcmVzcG9uc2VfaGVhZGVycxgPIAMoCzIlLmdhdGVvbi52MS5UcmFjZS5SZXNwb25zZUhlYWRlcnNFbnRyeRIVCg1yZXNwb25zZV9ib2R5GBAgASgJEgsKA2phNBgSIAEoCRIMCgRqYTRoGBkgASgJEhYKDnJlY29tbWVuZGF0aW9uGBMgASgJEhIKCnJlcHV0YXRpb24YFCABKAESGwoTZW50cnlwb2ludF9kZWxheV9tcxgVIAEoARIWCg5yb3V0ZV9kZWxheV9tcxgWIAEoARIbChNtaWRkbGV3YXJlX2RlbGF5X21zGBcgASgBEhgKEHNlcnZpY2VfZGVsYXlfbXMYGCABKAEaNQoTUmVxdWVzdEhlYWRlcnNFbnRyeRILCgNrZXkYASABKAkSDQoFdmFsdWUYAiABKAk6AjgBGjYKFFJlc3BvbnNlSGVhZGVyc0VudHJ5EgsKA2tleRgBIAEoCRINCgV2YWx1ZRgCIAEoCToCOAFKBAgREBIiMwoRTGlzdFRyYWNlc1JlcXVlc3QSDQoFbGltaXQYASABKAUSDwoHc3VtbWFyeRgCIAEoCCI2ChJMaXN0VHJhY2VzUmVzcG9uc2USIAoGdHJhY2VzGAEgAygLMhAuZ2F0ZW9uLnYxLlRyYWNlIjAKD0dldFRyYWNlUmVxdWVzdBIKCgJpZBgBIAEoCRIRCgl0aW1lc3RhbXAYAiABKAkiMwoQR2V0VHJhY2VSZXNwb25zZRIfCgV0cmFjZRgBIAEoCzIQLmdhdGVvbi52MS5UcmFjZSKRAQoSUXVlcnlUcmFjZXNSZXF1ZXN0EgwKBGZyb20YASABKAkSCgoCdG8YAiABKAkSDQoFbGltaXQYAyABKAUSDgoGY3Vyc29yGAQgASgJEhQKDG9sZGVzdF9maXJzdBgFIAEoCBIOCgZzdGF0dXMYBiABKAkSDgoGbWV0aG9kGAcgASgJEgwKBHRleHQYCCABKAkicQoTUXVlcnlUcmFjZXNSZXNwb25zZRIgCgZ0cmFjZXMYASADKAsyEC5nYXRlb24udjEuVHJhY2USEwoLbmV4dF9jdXJzb3IYAiABKAkSDwoHcGFydGlhbBgDIAEoCBISCgpzY2FubmVkX3RvGAQgASgJIosBChNUcmFjZUFyY2hpdmVTZWdtZW50EgwKBG5hbWUYASABKAkSFAoMcGVyaW9kX3N0YXJ0GAIgASgJEhIKCnBlcmlvZF9lbmQYAyABKAkSEgoKc2l6ZV9ieXRlcxgEIAEoAxITCgt0cmFjZV9jb3VudBgFIAEoAxITCgthcmNoaXZlZF9hdBgGIAEoCSKVAgoSVHJhY2VBcmNoaXZlU3RhdHVzEg8KB2VuYWJsZWQYASABKAgSGgoSdHJhY2Vfc3RvcmVfYWN0aXZlGAIgASgIEhYKDnJldGVudGlvbl9kYXlzGAMgASgFEhYKDm1heF9zaXplX2J5dGVzGAQgASgDEhUKDXNlZ21lbnRfY291bnQYBSABKAMSGAoQdG90YWxfc2l6ZV9ieXRlcxgGIAEoAxIVCg1vbGRlc3RfcGVyaW9kGAcgASgJEhUKDW5ld2VzdF9wZXJpb2QYCCABKAkSGAoQbGFzdF9hcmNoaXZlZF9hdBgJIAEoCRISCgpsYXN0X2Vycm9yGAogASgJEhUKDWxhc3RfZXJyb3JfYXQYCyABKAkiWwoYTGlzdFRyYWNlQXJjaGl2ZXNSZXF1ZXN0EgwKBGZyb20YASABKAkSCgoCdG8YAiABKAkSEQoJcGFnZV9zaXplGAMgASgFEhIKCnBhZ2VfdG9rZW4YBCABKAkilQEKGUxpc3RUcmFjZUFyY2hpdmVzUmVzcG9uc2USMAoIc2VnbWVudHMYASADKAsyHi5nYXRlb24udjEuVHJhY2VBcmNoaXZlU2VnbWVudBIXCg9uZXh0X3BhZ2VfdG9rZW4YAiABKAkSLQoGc3RhdHVzGAMgASgLMh0uZ2F0ZW9uLnYxLlRyYWNlQXJjaGl2ZVN0YXR1c0KVAQoNY29tLmdhdGVvbi52MUIKVHJhY2VQcm90b1ABWjNnaXRodWIuY29tL2dzb3VsdGFuL2dhdGVvbi9wcm90by9nYXRlb24vdjE7Z2F0ZW9udjGiAgNHWFiqAglHYXRlb24uVjHKAglHYXRlb25cVjHiAhVHYXRlb25cVjFcR1BCTWV0YWRhdGHqAgpHYXRlb246OlYxYgZwcm90bzM");
 
 /**
  * @generated from message gateon.v1.Trace
@@ -228,4 +228,307 @@ export type GetTraceResponse = Message<"gateon.v1.GetTraceResponse"> & {
  */
 export const GetTraceResponseSchema: GenMessage<GetTraceResponse> = /*@__PURE__*/
   messageDesc(file_gateon_v1_trace, 4);
+
+/**
+ * QueryTracesRequest asks for the traces whose requests started in a period.
+ * Recent periods are read from the live trace store and older ones from the
+ * trace archive; the caller sees one timeline.
+ *
+ * @generated from message gateon.v1.QueryTracesRequest
+ */
+export type QueryTracesRequest = Message<"gateon.v1.QueryTracesRequest"> & {
+  /**
+   * RFC 3339, inclusive
+   *
+   * @generated from field: string from = 1;
+   */
+  from: string;
+
+  /**
+   * RFC 3339, exclusive
+   *
+   * @generated from field: string to = 2;
+   */
+  to: string;
+
+  /**
+   * default 100, at most 500
+   *
+   * @generated from field: int32 limit = 3;
+   */
+  limit: number;
+
+  /**
+   * next_cursor from the previous page
+   *
+   * @generated from field: string cursor = 4;
+   */
+  cursor: string;
+
+  /**
+   * default is newest first
+   *
+   * @generated from field: bool oldest_first = 5;
+   */
+  oldestFirst: boolean;
+
+  /**
+   * "", "2xx", "3xx", "4xx", "5xx" or "errors" (4xx and 5xx)
+   *
+   * @generated from field: string status = 6;
+   */
+  status: string;
+
+  /**
+   * exact, any case
+   *
+   * @generated from field: string method = 7;
+   */
+  method: string;
+
+  /**
+   * any case, within the path, ID, source IP or service
+   *
+   * @generated from field: string text = 8;
+   */
+  text: string;
+};
+
+/**
+ * Describes the message gateon.v1.QueryTracesRequest.
+ * Use `create(QueryTracesRequestSchema)` to create a new message.
+ */
+export const QueryTracesRequestSchema: GenMessage<QueryTracesRequest> = /*@__PURE__*/
+  messageDesc(file_gateon_v1_trace, 5);
+
+/**
+ * @generated from message gateon.v1.QueryTracesResponse
+ */
+export type QueryTracesResponse = Message<"gateon.v1.QueryTracesResponse"> & {
+  /**
+   * summaries: no headers or bodies
+   *
+   * @generated from field: repeated gateon.v1.Trace traces = 1;
+   */
+  traces: Trace[];
+
+  /**
+   * Continues the query where this page stopped; empty once the period has
+   * been read to the end.
+   *
+   * @generated from field: string next_cursor = 2;
+   */
+  nextCursor: string;
+
+  /**
+   * The page stopped because it had read as much as one call may, not because
+   * it filled. There may be more matches further on, or none.
+   *
+   * @generated from field: bool partial = 3;
+   */
+  partial: boolean;
+
+  /**
+   * RFC 3339: how far through the period this page read
+   *
+   * @generated from field: string scanned_to = 4;
+   */
+  scannedTo: string;
+};
+
+/**
+ * Describes the message gateon.v1.QueryTracesResponse.
+ * Use `create(QueryTracesResponseSchema)` to create a new message.
+ */
+export const QueryTracesResponseSchema: GenMessage<QueryTracesResponse> = /*@__PURE__*/
+  messageDesc(file_gateon_v1_trace, 6);
+
+/**
+ * TraceArchiveSegment is one archived hour: a file named for the UTC hour it
+ * holds, e.g. traces-2026-09-26T14Z.ndjson.zst for 14:00-15:00 UTC.
+ *
+ * @generated from message gateon.v1.TraceArchiveSegment
+ */
+export type TraceArchiveSegment = Message<"gateon.v1.TraceArchiveSegment"> & {
+  /**
+   * @generated from field: string name = 1;
+   */
+  name: string;
+
+  /**
+   * RFC 3339, UTC
+   *
+   * @generated from field: string period_start = 2;
+   */
+  periodStart: string;
+
+  /**
+   * RFC 3339, UTC
+   *
+   * @generated from field: string period_end = 3;
+   */
+  periodEnd: string;
+
+  /**
+   * @generated from field: int64 size_bytes = 4;
+   */
+  sizeBytes: bigint;
+
+  /**
+   * @generated from field: int64 trace_count = 5;
+   */
+  traceCount: bigint;
+
+  /**
+   * @generated from field: string archived_at = 6;
+   */
+  archivedAt: string;
+};
+
+/**
+ * Describes the message gateon.v1.TraceArchiveSegment.
+ * Use `create(TraceArchiveSegmentSchema)` to create a new message.
+ */
+export const TraceArchiveSegmentSchema: GenMessage<TraceArchiveSegment> = /*@__PURE__*/
+  messageDesc(file_gateon_v1_trace, 7);
+
+/**
+ * @generated from message gateon.v1.TraceArchiveStatus
+ */
+export type TraceArchiveStatus = Message<"gateon.v1.TraceArchiveStatus"> & {
+  /**
+   * @generated from field: bool enabled = 1;
+   */
+  enabled: boolean;
+
+  /**
+   * @generated from field: bool trace_store_active = 2;
+   */
+  traceStoreActive: boolean;
+
+  /**
+   * @generated from field: int32 retention_days = 3;
+   */
+  retentionDays: number;
+
+  /**
+   * @generated from field: int64 max_size_bytes = 4;
+   */
+  maxSizeBytes: bigint;
+
+  /**
+   * @generated from field: int64 segment_count = 5;
+   */
+  segmentCount: bigint;
+
+  /**
+   * @generated from field: int64 total_size_bytes = 6;
+   */
+  totalSizeBytes: bigint;
+
+  /**
+   * start of the oldest archived hour; empty if none
+   *
+   * @generated from field: string oldest_period = 7;
+   */
+  oldestPeriod: string;
+
+  /**
+   * @generated from field: string newest_period = 8;
+   */
+  newestPeriod: string;
+
+  /**
+   * @generated from field: string last_archived_at = 9;
+   */
+  lastArchivedAt: string;
+
+  /**
+   * what went wrong, for a person; details are in the log
+   *
+   * @generated from field: string last_error = 10;
+   */
+  lastError: string;
+
+  /**
+   * @generated from field: string last_error_at = 11;
+   */
+  lastErrorAt: string;
+};
+
+/**
+ * Describes the message gateon.v1.TraceArchiveStatus.
+ * Use `create(TraceArchiveStatusSchema)` to create a new message.
+ */
+export const TraceArchiveStatusSchema: GenMessage<TraceArchiveStatus> = /*@__PURE__*/
+  messageDesc(file_gateon_v1_trace, 8);
+
+/**
+ * @generated from message gateon.v1.ListTraceArchivesRequest
+ */
+export type ListTraceArchivesRequest = Message<"gateon.v1.ListTraceArchivesRequest"> & {
+  /**
+   * RFC 3339; empty is open
+   *
+   * @generated from field: string from = 1;
+   */
+  from: string;
+
+  /**
+   * RFC 3339; empty is open
+   *
+   * @generated from field: string to = 2;
+   */
+  to: string;
+
+  /**
+   * default 48, at most 200
+   *
+   * @generated from field: int32 page_size = 3;
+   */
+  pageSize: number;
+
+  /**
+   * next_page_token from the previous page
+   *
+   * @generated from field: string page_token = 4;
+   */
+  pageToken: string;
+};
+
+/**
+ * Describes the message gateon.v1.ListTraceArchivesRequest.
+ * Use `create(ListTraceArchivesRequestSchema)` to create a new message.
+ */
+export const ListTraceArchivesRequestSchema: GenMessage<ListTraceArchivesRequest> = /*@__PURE__*/
+  messageDesc(file_gateon_v1_trace, 9);
+
+/**
+ * @generated from message gateon.v1.ListTraceArchivesResponse
+ */
+export type ListTraceArchivesResponse = Message<"gateon.v1.ListTraceArchivesResponse"> & {
+  /**
+   * newest first
+   *
+   * @generated from field: repeated gateon.v1.TraceArchiveSegment segments = 1;
+   */
+  segments: TraceArchiveSegment[];
+
+  /**
+   * @generated from field: string next_page_token = 2;
+   */
+  nextPageToken: string;
+
+  /**
+   * @generated from field: gateon.v1.TraceArchiveStatus status = 3;
+   */
+  status?: TraceArchiveStatus | undefined;
+};
+
+/**
+ * Describes the message gateon.v1.ListTraceArchivesResponse.
+ * Use `create(ListTraceArchivesResponseSchema)` to create a new message.
+ */
+export const ListTraceArchivesResponseSchema: GenMessage<ListTraceArchivesResponse> = /*@__PURE__*/
+  messageDesc(file_gateon_v1_trace, 10);
 

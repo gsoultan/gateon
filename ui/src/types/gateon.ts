@@ -281,6 +281,10 @@ export type LogConfig = {
   accessLogRetentionDays?: number;
   securityThreatRetentionDays?: number;
   auditLogRetentionDays?: number;
+  // Trace archive. Zero or absent takes the resource profile's default.
+  traceArchiveEnabled?: boolean;
+  traceArchiveRetentionDays?: number;
+  traceArchiveMaxSizeMb?: number;
 };
 
 export type TransportConfig = {

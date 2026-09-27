@@ -3,6 +3,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../services/client";
+import { retryUnlessAnswered } from "./useTraceHistory";
 
 export interface Trace {
   id: string;
@@ -48,18 +49,26 @@ export async function fetchTrace(id: string, timestamp: string): Promise<Trace |
   return res.trace ?? null;
 }
 
-export function useTraces(limit: number = 100) {
+// active is false while the traces are not on screen -- another tab of the
+// page is -- so the five-second poll stops rather than running for nothing.
+export function useTraces(limit: number = 100, active: boolean = true) {
   return useQuery({
     queryKey: ["traces", limit],
     queryFn: () => fetchTraces(limit),
-    refetchInterval: 5000,
+    refetchInterval: active ? 5000 : false,
+    enabled: active,
   });
 }
 
+// useTrace loads one trace. Not with the dashboard's keepPreviousData: opening
+// a second trace would show the first one's source, headers and bodies under
+// the second one's name until it loaded.
 export function useTrace(id?: string, timestamp?: string) {
   return useQuery({
     queryKey: ["trace", id, timestamp],
     queryFn: () => (id && timestamp ? fetchTrace(id, timestamp) : null),
     enabled: !!id && !!timestamp,
+    placeholderData: undefined,
+    retry: retryUnlessAnswered,
   });
 }

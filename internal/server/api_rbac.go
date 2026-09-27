@@ -156,6 +156,8 @@ var apiPermissions = map[string]apiPermission{
 	gateonv1connect.ApiServiceGetAuditArchiveProcedure:     readOn(auth.ResourceDiagnostics),
 	gateonv1connect.ApiServiceListTracesProcedure:          readOn(auth.ResourceDiagnostics),
 	gateonv1connect.ApiServiceGetTraceProcedure:            readOn(auth.ResourceDiagnostics),
+	gateonv1connect.ApiServiceQueryTracesProcedure:         readOn(auth.ResourceDiagnostics),
+	gateonv1connect.ApiServiceListTraceArchivesProcedure:   readOn(auth.ResourceDiagnostics),
 
 	// TraceRoute and ValidateCORS reach outward but are mapped read, matching
 	// POST /v1/diagnostics/traceroute and /v1/diagnostics/cors-validator.

@@ -23,6 +23,8 @@ service ApiService {
   rpc GetStatus(GetStatusRequest) returns (GetStatusResponse);
   rpc ListTraces(ListTracesRequest) returns (ListTracesResponse);
   rpc GetTrace(GetTraceRequest) returns (GetTraceResponse);
+  rpc QueryTraces(QueryTracesRequest) returns (QueryTracesResponse);
+  rpc ListTraceArchives(ListTraceArchivesRequest) returns (ListTraceArchivesResponse);
   rpc ListRoutes(ListRoutesRequest) returns (ListRoutesResponse);
   rpc UpdateRoute(UpdateRouteRequest) returns (UpdateRouteResponse);
   rpc DeleteRoute(DeleteRouteRequest) returns (DeleteRouteResponse);

@@ -67,6 +67,14 @@ type TierDefaults struct {
 	PebbleMemTableBytes int64
 	PebbleMaxOpenFiles  int
 
+	// Trace archive (internal/telemetry/tracearchive): how long archived hours
+	// of traces are kept, and the most disk they may take, whichever binds
+	// first. The archive itself is off on every tier until it is enabled --
+	// turning it on writes to disk every existing install has budgeted for
+	// something else -- so these only size it once someone has.
+	TraceArchiveRetentionDays int
+	TraceArchiveMaxBytes      int64
+
 	// WAF default tier when WafConfig.Tier is empty.
 	WAFTier Tier
 
@@ -112,69 +120,75 @@ func DefaultsFor(tier Tier) TierDefaults {
 	switch tier {
 	case TierMinimal:
 		return TierDefaults{
-			Tier:                     TierMinimal,
-			CorrelationEnabled:       false,
-			CorrelationMaxSources:    500,
-			CorrelationMaxPerSource:  32,
-			TraceStoreEnabled:        false,
-			TraceSampleRate:          0,
-			CMSWidth:                 512,
-			CMSDepth:                 3,
-			EbpfPollSeconds:          10,
-			RetentionDays:            1,
-			PebbleCacheBytes:         4 << 20, // 4 MiB
-			PebbleMemTableBytes:      1 << 20, // 1 MiB
-			PebbleMaxOpenFiles:       50,
-			DBMaxOpenConns:           5,
-			DBMaxIdleConns:           5,
-			TelemetryIntervalSeconds: 30,
-			FlushIntervalSeconds:     10,
-			WAFTier:                  TierMinimal,
-			RLLimiterStates:          2000,
+			Tier:                      TierMinimal,
+			CorrelationEnabled:        false,
+			CorrelationMaxSources:     500,
+			CorrelationMaxPerSource:   32,
+			TraceStoreEnabled:         false,
+			TraceSampleRate:           0,
+			CMSWidth:                  512,
+			CMSDepth:                  3,
+			EbpfPollSeconds:           10,
+			RetentionDays:             1,
+			PebbleCacheBytes:          4 << 20, // 4 MiB
+			PebbleMemTableBytes:       1 << 20, // 1 MiB
+			PebbleMaxOpenFiles:        50,
+			TraceArchiveRetentionDays: 7,
+			TraceArchiveMaxBytes:      256 << 20, // 256 MiB
+			DBMaxOpenConns:            5,
+			DBMaxIdleConns:            5,
+			TelemetryIntervalSeconds:  30,
+			FlushIntervalSeconds:      10,
+			WAFTier:                   TierMinimal,
+			RLLimiterStates:           2000,
 		}
 	case TierEnterprise:
 		return TierDefaults{
-			Tier:                     TierEnterprise,
-			CorrelationEnabled:       true,
-			CorrelationMaxSources:    10000,
-			CorrelationMaxPerSource:  256,
-			TraceStoreEnabled:        true,
-			TraceSampleRate:          1,
-			CMSWidth:                 4096,
-			CMSDepth:                 4,
-			EbpfPollSeconds:          2,
-			RetentionDays:            30,
-			PebbleCacheBytes:         32 << 20, // 32 MiB
-			PebbleMemTableBytes:      8 << 20,  // 8 MiB
-			PebbleMaxOpenFiles:       500,
-			DBMaxOpenConns:           100,
-			DBMaxIdleConns:           50,
-			TelemetryIntervalSeconds: 2,
-			FlushIntervalSeconds:     1,
-			WAFTier:                  TierEnterprise,
-			RLLimiterStates:          100000,
+			Tier:                      TierEnterprise,
+			CorrelationEnabled:        true,
+			CorrelationMaxSources:     10000,
+			CorrelationMaxPerSource:   256,
+			TraceStoreEnabled:         true,
+			TraceSampleRate:           1,
+			CMSWidth:                  4096,
+			CMSDepth:                  4,
+			EbpfPollSeconds:           2,
+			RetentionDays:             30,
+			PebbleCacheBytes:          32 << 20, // 32 MiB
+			PebbleMemTableBytes:       8 << 20,  // 8 MiB
+			PebbleMaxOpenFiles:        500,
+			TraceArchiveRetentionDays: 365,
+			TraceArchiveMaxBytes:      20 << 30, // 20 GiB
+			DBMaxOpenConns:            100,
+			DBMaxIdleConns:            50,
+			TelemetryIntervalSeconds:  2,
+			FlushIntervalSeconds:      1,
+			WAFTier:                   TierEnterprise,
+			RLLimiterStates:           100000,
 		}
 	default: // TierStandard
 		return TierDefaults{
-			Tier:                     TierStandard,
-			CorrelationEnabled:       true,
-			CorrelationMaxSources:    2000,
-			CorrelationMaxPerSource:  64,
-			TraceStoreEnabled:        true,
-			TraceSampleRate:          1,
-			CMSWidth:                 2048,
-			CMSDepth:                 4,
-			EbpfPollSeconds:          2,
-			RetentionDays:            7,
-			PebbleCacheBytes:         8 << 20, // 8 MiB
-			PebbleMemTableBytes:      4 << 20, // 4 MiB
-			PebbleMaxOpenFiles:       200,
-			DBMaxOpenConns:           25,
-			DBMaxIdleConns:           25,
-			TelemetryIntervalSeconds: 5,
-			FlushIntervalSeconds:     2,
-			WAFTier:                  TierStandard,
-			RLLimiterStates:          20000,
+			Tier:                      TierStandard,
+			CorrelationEnabled:        true,
+			CorrelationMaxSources:     2000,
+			CorrelationMaxPerSource:   64,
+			TraceStoreEnabled:         true,
+			TraceSampleRate:           1,
+			CMSWidth:                  2048,
+			CMSDepth:                  4,
+			EbpfPollSeconds:           2,
+			RetentionDays:             7,
+			PebbleCacheBytes:          8 << 20, // 8 MiB
+			PebbleMemTableBytes:       4 << 20, // 4 MiB
+			PebbleMaxOpenFiles:        200,
+			TraceArchiveRetentionDays: 90,
+			TraceArchiveMaxBytes:      2 << 30, // 2 GiB
+			DBMaxOpenConns:            25,
+			DBMaxIdleConns:            25,
+			TelemetryIntervalSeconds:  5,
+			FlushIntervalSeconds:      2,
+			WAFTier:                   TierStandard,
+			RLLimiterStates:           20000,
 		}
 	}
 }

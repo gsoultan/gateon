@@ -73,6 +73,7 @@ import { generateRandomString } from "../utils/random";
 import { Link } from "@tanstack/react-router";
 import { apiFetch, getApiErrorMessage } from "../hooks/useGateon";
 import { ACME_CHALLENGE_NOTE, ACME_CHALLENGE_TYPES } from "../components/settings/acmeChallenges";
+import { TraceArchiveSettingsCard } from "../components/Traces/TraceArchiveSettingsCard";
 
 function inferDriver(
   databaseUrl?: string,
@@ -2332,6 +2333,12 @@ export default function SettingsPage() {
       />
 
       <AuditSettingsCard
+        config={config}
+        onChange={setConfig}
+        disabled={formDisabled}
+      />
+
+      <TraceArchiveSettingsCard
         config={config}
         onChange={setConfig}
         disabled={formDisabled}

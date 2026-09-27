@@ -53,3 +53,66 @@ message GetTraceRequest {
 message GetTraceResponse {
   Trace trace = 1;
 }
+
+// QueryTracesRequest asks for the traces whose requests started in a period.
+// Recent periods are read from the live trace store and older ones from the
+// trace archive; the caller sees one timeline.
+message QueryTracesRequest {
+  string from = 1;       // RFC 3339, inclusive
+  string to = 2;         // RFC 3339, exclusive
+  int32 limit = 3;       // default 100, at most 500
+  string cursor = 4;     // next_cursor from the previous page
+  bool oldest_first = 5; // default is newest first
+  string status = 6;     // "", "2xx", "3xx", "4xx", "5xx" or "errors" (4xx and 5xx)
+  string method = 7;     // exact, any case
+  string text = 8;       // any case, within the path, ID, source IP or service
+}
+
+message QueryTracesResponse {
+  repeated Trace traces = 1; // summaries: no headers or bodies
+  // Continues the query where this page stopped; empty once the period has
+  // been read to the end.
+  string next_cursor = 2;
+  // The page stopped because it had read as much as one call may, not because
+  // it filled. There may be more matches further on, or none.
+  bool partial = 3;
+  string scanned_to = 4; // RFC 3339: how far through the period this page read
+}
+
+// TraceArchiveSegment is one archived hour: a file named for the UTC hour it
+// holds, e.g. traces-2026-09-26T14Z.ndjson.zst for 14:00-15:00 UTC.
+message TraceArchiveSegment {
+  string name = 1;
+  string period_start = 2; // RFC 3339, UTC
+  string period_end = 3;   // RFC 3339, UTC
+  int64 size_bytes = 4;
+  int64 trace_count = 5;
+  string archived_at = 6;
+}
+
+message TraceArchiveStatus {
+  bool enabled = 1;
+  bool trace_store_active = 2;
+  int32 retention_days = 3;
+  int64 max_size_bytes = 4;
+  int64 segment_count = 5;
+  int64 total_size_bytes = 6;
+  string oldest_period = 7; // start of the oldest archived hour; empty if none
+  string newest_period = 8;
+  string last_archived_at = 9;
+  string last_error = 10; // what went wrong, for a person; details are in the log
+  string last_error_at = 11;
+}
+
+message ListTraceArchivesRequest {
+  string from = 1;       // RFC 3339; empty is open
+  string to = 2;         // RFC 3339; empty is open
+  int32 page_size = 3;   // default 48, at most 200
+  string page_token = 4; // next_page_token from the previous page
+}
+
+message ListTraceArchivesResponse {
+  repeated TraceArchiveSegment segments = 1; // newest first
+  string next_page_token = 2;
+  TraceArchiveStatus status = 3;
+}

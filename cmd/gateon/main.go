@@ -37,6 +37,7 @@ import (
 	"github.com/gsoultan/gateon/internal/security/waf"
 	"github.com/gsoultan/gateon/internal/server"
 	"github.com/gsoultan/gateon/internal/telemetry"
+	"github.com/gsoultan/gateon/internal/telemetry/tracearchive"
 	"github.com/gsoultan/gateon/internal/tui"
 	"github.com/gsoultan/gateon/internal/ui"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
@@ -413,6 +414,12 @@ func initTelemetry(globalReg *config.GlobalRegistry, ctx context.Context) {
 	if err := telemetry.InitPathStatsStore(databaseURL, retention); err != nil {
 		logger.L.LogError("failed to init path stats store", "error", err, "database_url", databaseURL)
 	}
+
+	// Copies each closed hour of traces to the trace archive when archiving is
+	// enabled, and holds the store's pruning back until the archive has them.
+	// It runs whether or not archiving is on, because it also applies the
+	// archive's retention and picks up the setting when it changes.
+	go tracearchive.Default().Run(ctx)
 
 	// Start background metrics snapshotting
 	go telemetry.StartSnapshotLoop(ctx)

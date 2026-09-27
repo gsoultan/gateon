@@ -1,6 +1,7 @@
 # Build artifacts and local state — regenerated inside the image.
 dist/
 telemetry_pebble/
+trace_archive/
 *.db
 *.db-shm
 *.db-wal

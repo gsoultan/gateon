@@ -5,10 +5,13 @@ package api
 
 import (
 	"context"
+	"errors"
 
 	"connectrpc.com/connect"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 	"github.com/gsoultan/gateon/proto/gateon/v1/gateonv1connect"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // ConnectHandler wraps ApiService to provide ConnectRPC compatibility.
@@ -178,7 +181,37 @@ func (h *ConnectHandler) ListTraces(ctx context.Context, req *connect.Request[ga
 func (h *ConnectHandler) GetTrace(ctx context.Context, req *connect.Request[gateonv1.GetTraceRequest]) (*connect.Response[gateonv1.GetTraceResponse], error) {
 	res, err := h.s.GetTrace(ctx, req.Msg)
 	if err != nil {
-		return nil, err
+		return nil, connectCode(err)
 	}
 	return connect.NewResponse(res), nil
+}
+
+func (h *ConnectHandler) QueryTraces(ctx context.Context, req *connect.Request[gateonv1.QueryTracesRequest]) (*connect.Response[gateonv1.QueryTracesResponse], error) {
+	res, err := h.s.QueryTraces(ctx, req.Msg)
+	if err != nil {
+		return nil, connectCode(err)
+	}
+	return connect.NewResponse(res), nil
+}
+
+func (h *ConnectHandler) ListTraceArchives(ctx context.Context, req *connect.Request[gateonv1.ListTraceArchivesRequest]) (*connect.Response[gateonv1.ListTraceArchivesResponse], error) {
+	res, err := h.s.ListTraceArchives(ctx, req.Msg)
+	if err != nil {
+		return nil, connectCode(err)
+	}
+	return connect.NewResponse(res), nil
+}
+
+// connectCode carries a gRPC status across Connect. ApiService answers in
+// grpc-go statuses, which connect-go does not recognise: it sends any error it
+// did not make itself as Unknown, over HTTP 500, with the whole
+// "rpc error: code = NotFound desc = trace not found" as the message. A trace
+// that has gone would then read as a failure to retry, and a refused query as
+// a string of internals. The two code spaces share their numbering.
+func connectCode(err error) error {
+	st, ok := status.FromError(err)
+	if !ok || st.Code() == codes.OK || st.Code() == codes.Unknown {
+		return err
+	}
+	return connect.NewError(connect.Code(st.Code()), errors.New(st.Message()))
 }
