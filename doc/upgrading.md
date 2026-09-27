@@ -27,6 +27,62 @@ but upgrade. Until you can, stop such an entrypoint being reachable from anywher
 you do not trust. A gRPC route on such an entrypoint is now proxied to its
 backend; before, the gateway's own server answered it.
 
+### Signing out ends every session of the account — **a sign-out now signs out every device**
+
+Signing out cleared the browser's cookie and nothing else. The session token
+the cookie held is a bearer token, and it went on working until it expired --
+up to eight hours -- for anyone holding a copy of it. Signing out now advances a
+per-account session epoch that every session is bound to, so every session of
+the account ends: the one that signed out, any copy of its cookie, and the
+account's sessions in every other browser and API client. Signing in again
+works as before. The dashboard's sign-out controls (the profile menu, the
+Profile page and the command palette) now say that sign-out ends every session
+of the account.
+
+Migration 65 adds `users.session_epoch` (`INTEGER NOT NULL DEFAULT 0`) on SQLite
+and Postgres. Every existing account starts at 0, which the session binding
+leaves out, so the upgrade ends no session and tokens issued before it keep
+working.
+
+In a cluster, the node that handles the sign-out refuses the account's old
+sessions at once; the other nodes follow within the session-binding cache TTL
+(30 seconds, `GATEON_SESSION_BINDING_TTL`), or within a round trip where the
+Redis invalidation channel is configured. During a rolling upgrade, nodes still
+on the previous release do not read the epoch: until they are upgraded they keep
+accepting a signed-out session, and they refuse the sessions an upgraded node
+issues to an account after that account has signed out.
+
+**Who is affected:** anyone signed in to one account from more than one place --
+signing out in one browser now signs the others out too -- and automation that
+shares an account with a person: its token ends when that person signs out. Give
+scripts and API clients an account of their own. A failed sign-out (the gateway
+could not record it) now answers 500 and says the account's other sessions
+could not be ended; the browser's cookie is cleared either way, and the
+dashboard opens the sign-in page with a warning that the other sessions may
+still be signed in and how to end them. A sign-out that never reached the
+gateway leaves the dashboard where it was and says so, so it can be tried
+again.
+
+### Add User refuses a username that is taken — **it used to take that account over**
+
+`PUT /v1/users` (the dashboard's Add User and Edit User) and the `UpdateUser`
+RPC wrote accounts with `INSERT ... ON CONFLICT(username) DO UPDATE`, so adding
+a user under a username that already existed replaced that account's password
+and role and reported success: an administrator who typed a colleague's name
+into Add User took their account over. A request with no id, or with an id no
+account has, is now a create, and a username another account has is refused --
+`409 Conflict` over REST, `ALREADY_EXISTS` over gRPC -- with nothing written;
+the dashboard says "That username is already taken by another account. Choose
+a different username." and keeps the form open. A request carrying an existing
+account's id edits that account, and renaming it onto a taken username is
+refused the same way. Renaming a user now works; it used to fail with a
+database error.
+
+**Who is affected:** scripts that call `PUT /v1/users` without an id to reset an
+existing account's password or role. Send the account's `id` (from
+`GET /v1/users`) to edit it; without one the request is a create, and a taken
+username is refused.
+
 ### Editing a user no longer enables a disabled account — **check your disabled accounts**
 
 The Users page's Edit form saved only the account's name and role, and the
@@ -41,6 +97,95 @@ shows no Disabled badge, or one you required 2FA of that shows no "2FA pending",
 was changed by an edit. Disable it or require 2FA again. Scripts that call
 `PUT /v1/users` are unaffected: the gateway still sets both flags from what
 the request sends, as it always has.
+
+### A browser signing in over gRPC gets no token in the reply
+
+`POST /v1/login` has answered a browser -- a request carrying `Sec-Fetch-Mode`,
+which every browser sends and page script cannot remove -- with the session
+cookie alone. The `Login` RPC answered every caller with the session token in
+its reply, and a browser can make that call: script on the dashboard's origin
+sending `application/grpc` over HTTP/2 to an HTTPS management listener. `Login`
+over gRPC now withholds the token from a call carrying `Sec-Fetch-Mode`; the
+sign-in otherwise succeeds and the reply still names the user. Native gRPC
+clients never send that header and still receive the token. gRPC-Web cannot
+call `Login` at all -- the management server refuses `application/grpc-web`
+with 415 before any RPC runs -- so there was nothing to withhold there.
+
+**Who is affected:** only code running in a browser that signs in over gRPC; it
+gets no token and must sign in through `POST /v1/login`, which sets the session
+cookie. The dashboard, API clients and gRPC libraries are unaffected.
+
+### A fingerprint block covers one browser build on one network — **existing fingerprint blocks are released on upgrade**
+
+A fingerprint block (the "User Mitigations" list, refused with `Forbidden:
+Compromised Fingerprint`) was kept for the whole JA4+ fingerprint, which names
+a browser build rather than a client: three WAF blocks from one attacker's
+stock Chrome refused every user of that Chrome build, on every network, for an
+hour. Rate-limit rejections, bot and geo policy blocks and reputation blocks
+counted towards it as if they were attacks, the count never lapsed, and the
+attacker shed the block by dropping a `Referer` header, which changes the
+fingerprint and not the browser.
+
+A block is now kept for the fingerprint's class -- its TLS fingerprint, or its
+header shape without the method, cookie and referer -- on the client's /24
+(IPv4) or /64 (IPv6), the identity reputation already uses (ADR 0026). It
+refuses that build on that network only, and a header toggle does not shed it.
+The automatic block needs three pieces of attack evidence -- WAF blocks on a
+payload, traps, malware uploads, brute-force or exploit-scan detections -- from
+one build on one network within ten minutes; rate limits and policy blocks no
+longer count. The one-hour expiry, `GATEON_JA4_MITIGATE_AFTER` and
+`GATEON_JA4_MITIGATION_TTL` are unchanged.
+
+- The user mitigation list shows each block as `<fingerprint class>|<network>`,
+  e.g. `t13d1516h2_8daaf6152771_b0da82dd1658|203.0.113`, and only blocks still
+  in force. Allow on a row lifts that one network's block.
+- Remove Mitigation with a fingerprint -- from a threat's detail view, or
+  `POST /v1/diagnostics/remove-mitigation` with the fingerprint as `source` --
+  lifts that browser build's block on every network it is blocked on, and holds
+  it for 24 hours, as before.
+- Add Mitigation (and `POST /v1/diagnostics/mitigate`) takes a fingerprint only
+  with a network: `<fingerprint>|<address>` blocks it on that address's /24 or
+  /64. A bare fingerprint is refused with that instruction. The dashboard now
+  shows a refused block as "Not blocked" with the reason, where it used to show
+  a green "Success".
+- "Apply automatic fix" on a finding whose source is a fingerprint (impossible
+  travel) is refused rather than blocking the build everywhere; on a finding
+  with a threat, it blocks the threat's address and the threat's build on the
+  threat's network.
+
+**Who is affected:** anyone with fingerprint blocks in force at upgrade time.
+They were stored without a network, so they cannot be moved to the new form;
+they stop being enforced and listed immediately and are deleted a day later.
+Every one would have expired within the hour anyway, and a client still
+attacking is blocked again after three more attacks. Scripts that block a bare
+fingerprint through the API must add `|<address>`.
+
+### A tab left open after its session expired is no longer reported as brute force
+
+The per-IP threat detector counted every 401 and 403 an address received as a
+failed login, so a dashboard tab polling after its session expired -- every
+poll a GET answered 401 -- was recorded as a `brute_force_attempt` within a few
+minutes, and its score cost the client reputation. Brute force is now judged
+on credential attempts only: POSTs (a login form, a token request), and any
+request whose `Authorization` header carries a password (HTTP Basic or Digest),
+which keeps Basic-auth guessing over GET visible. A client re-presenting an
+expired bearer token or session cookie is not an attempt. Traces record whether
+a request carried a password scheme (`passwordAuth`; nothing of the credential
+is stored).
+
+**Who is affected:** installs where browsers or API clients poll with expired
+sessions: fewer `brute_force_attempt` findings. Credential guessing through a
+GET query string is not counted.
+
+### Kernel throttles on the mitigation list count down to when they lift
+
+A kernel rate limit on the IP mitigation list gave its expiry only inside the
+description. It now carries it as a field (`expires_at` on the listed
+`Anomaly`, RFC 3339 UTC), and the list shows "lifts in 4m" under the row's
+status, which stays current while the page is open.
+
+**Who is affected:** nobody needs to act. API clients reading the mitigation
+list can use `expiresAt` instead of parsing the description.
 
 ### First-run setup requires a setup token — **scripted setup must send it**
 
