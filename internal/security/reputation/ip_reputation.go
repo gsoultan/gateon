@@ -262,7 +262,12 @@ func (s *IPReputationStore) IsBad(ipStr string) (bool, float64) {
 		return false, 0
 	}
 
-	return s.trie.search(addr)
+	// A v4-mapped address is the IPv4 host it maps: the spelling a proxy on a
+	// dual-stack socket writes for an IPv4 client. Searched as written it went
+	// to the IPv6 trie, where no IPv4 entry lives, and every listed IPv4
+	// address walked past the feed. The trie holds every entry, host routes
+	// included, so the unmapped search finds what the map lookup above missed.
+	return s.trie.search(addr.Unmap())
 }
 
 // SetIPScore manually sets the reputation score for an IP (primarily for testing or internal overrides).
@@ -545,11 +550,22 @@ func parseFeedLine(line string) (netip.Prefix, bool) {
 	}
 	if strings.Contains(line, "/") {
 		prefix, err := netip.ParsePrefix(line)
-		return prefix, err == nil
+		return unmapPrefix(prefix), err == nil
 	}
 	addr, err := netip.ParseAddr(line)
 	if err != nil {
 		return netip.Prefix{}, false
 	}
-	return netip.PrefixFrom(addr, addr.BitLen()), true
+	return unmapPrefix(netip.PrefixFrom(addr, addr.BitLen())), true
+}
+
+// unmapPrefix files a v4-mapped entry under the IPv4 network it maps, where an
+// IPv4 client's lookup goes. A prefix shorter than the mapped space (/96)
+// covers more than IPv4 and is kept as written.
+func unmapPrefix(p netip.Prefix) netip.Prefix {
+	const mappedBits = 96
+	if !p.IsValid() || !p.Addr().Is4In6() || p.Bits() < mappedBits {
+		return p
+	}
+	return netip.PrefixFrom(p.Addr().Unmap(), p.Bits()-mappedBits)
 }
