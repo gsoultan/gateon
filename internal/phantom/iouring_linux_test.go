@@ -71,24 +71,29 @@ func listenOptimized(t *testing.T, core *linuxCore) net.Listener {
 	return opt
 }
 
-// waitForParkedAccept returns once a goroutine is parked inside the io_uring
-// Accept: its operation has been queued and it is waiting for the completion.
-// A stack dump is the only place that state is visible from outside, and it is
-// a barrier rather than a guess at how long queueing takes.
-func waitForParkedAccept(t *testing.T) {
+// waitForParked returns once a goroutine is parked in a select inside the named
+// function: its io_uring op has been queued and it is waiting for the
+// completion. A stack dump is the only place that state is visible from
+// outside, and it is a barrier rather than a guess at how long queueing takes.
+func waitForParked(t *testing.T, fn string) {
 	t.Helper()
 	buf := make([]byte, 1<<20)
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
 		n := runtime.Stack(buf, true)
 		for _, g := range strings.Split(string(buf[:n]), "\n\n") {
-			if strings.Contains(g, "[select") && strings.Contains(g, "(*iouringListener).Accept") {
+			if strings.Contains(g, "[select") && strings.Contains(g, fn) {
 				return
 			}
 		}
 		runtime.Gosched()
 	}
-	t.Fatal("no goroutine ever parked in the io_uring Accept")
+	t.Fatalf("no goroutine ever parked in %s", fn)
+}
+
+func waitForParkedAccept(t *testing.T) {
+	t.Helper()
+	waitForParked(t, "(*iouringListener).Accept")
 }
 
 // sockaddrSized has the size class of unix.RawSockaddrAny, the buffer an
@@ -315,6 +320,139 @@ func TestUringWriteAfterCloseDoesNotReachAReusedDescriptor(t *testing.T) {
 			"different, already-closed connection whose fd it reused", buf[:m])
 	}
 	t.Logf("victim read ended with %v (no leaked bytes)", rerr)
+}
+
+// cancelWithoutClosing cancels a core's context the way Close's first step
+// does, but leaves the ring mapped so the kernel keeps and later completes the
+// ops that were in flight. That is the window Close opens: cancel() wakes every
+// parked Accept/Read/Write before <-reactorDone and ring.Close() run.
+func cancelWithoutClosing(t *testing.T, core *linuxCore) {
+	t.Helper()
+	if core.cancel == nil {
+		t.Fatal("core has no cancel; not an io_uring core")
+	}
+	core.cancel()
+}
+
+// dedicatedCore builds a core the test owns, skipping when io_uring is
+// unavailable. Its ring is intentionally never closed: go-uring does not
+// reclaim a closed ring anyway, and these tests must leave it mapped so the
+// kernel completes the abandoned op.
+func dedicatedCore(t *testing.T) *linuxCore {
+	t.Helper()
+	c := newUringCore(t)
+	if c == nil {
+		t.Skip("io_uring is unavailable here; this test proves nothing about the ring")
+	}
+	return c
+}
+
+// TestUringAcceptBufferSurvivesAContextCancel is the ctx.Done half of the
+// keep-alive: cancelling the core (Close's first step) wakes a parked Accept and
+// it returns, but the accept is still pending in the kernel. defer KeepAlive(op)
+// ends at that return, so the op -- which owns the buffer the kernel writes the
+// peer's address into -- became collectable while the kernel still had it. A GC
+// and then a connecting client wrote a sockaddr into freed, reused memory.
+func TestUringAcceptBufferSurvivesAContextCancel(t *testing.T) {
+	core := dedicatedCore(t)
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	opt := core.OptimizeListener(ln)
+
+	returned := make(chan struct{})
+	go func() {
+		c, _ := opt.Accept()
+		if c != nil {
+			_ = c.Close()
+		}
+		close(returned)
+	}()
+	waitForParkedAccept(t)
+	time.Sleep(50 * time.Millisecond) // let the publisher submit the SQE to the kernel
+
+	cancelWithoutClosing(t, core)
+	select {
+	case <-returned:
+	case <-time.After(3 * time.Second):
+		t.Fatal("Accept did not return after the core context was cancelled")
+	}
+
+	runtime.GC()
+	spray := sprayFreedSlots()
+	client, err := net.Dial("tcp", opt.Addr().String()) // completes the pending accept
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	time.Sleep(200 * time.Millisecond)
+
+	if hit := overwritten(spray); hit != nil {
+		t.Fatalf("after Accept returned on context cancel, the kernel wrote the peer's "+
+			"address (% x) into memory freed from the abandoned accept and reused", hit)
+	}
+	runtime.KeepAlive(spray)
+}
+
+// TestUringReadBufferStaysReachableAfterContextCancel is the same hole on Read,
+// tested at its root: the buffer the kernel will fill must not become
+// collectable while the read is still pending. The read buffer belongs to the
+// op; when the caller keeps no other reference to it -- a short-lived read
+// buffer -- the op is all that holds it. Cancelling the core woke the parked
+// Read and returned, defer KeepAlive(op) then ended, and the buffer became
+// eligible for collection while the kernel still had the read queued. A
+// finalizer on the buffer fires exactly when that happens.
+func TestUringReadBufferStaysReachableAfterContextCancel(t *testing.T) {
+	core := dedicatedCore(t)
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	opt := core.OptimizeListener(ln)
+	server, client := acceptOne(t, opt)
+	defer server.Close()
+	defer client.Close()
+
+	freed := make(chan struct{})
+	started := make(chan struct{})
+	go func() {
+		buf := new(sockaddrSized) // only the pending op will reference it after Read returns
+		runtime.SetFinalizer(buf, func(*sockaddrSized) { close(freed) })
+		close(started)
+		_, _ = server.Read(buf[:])
+		// buf leaves scope here; the goroutine exits.
+	}()
+	<-started
+	waitForParked(t, "(*iouringConn).awaitOp")
+	time.Sleep(50 * time.Millisecond) // let the read SQE reach the kernel
+
+	cancelWithoutClosing(t, core)
+	time.Sleep(100 * time.Millisecond) // let the woken Read return and its goroutine exit
+
+	// Force collection; if the buffer is unreachable its finalizer runs.
+	stop := make(chan struct{})
+	defer close(stop)
+	go func() {
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				runtime.GC()
+				time.Sleep(10 * time.Millisecond)
+			}
+		}
+	}()
+	select {
+	case <-freed:
+		t.Fatal("the read buffer was collected while its io_uring read was still pending " +
+			"in the kernel: on the next byte the kernel copies received data into freed memory")
+	case <-time.After(2 * time.Second):
+		// stayed reachable until the (never-arriving) completion, as it must
+	}
 }
 
 // TestStatusNamesIOURingWhileItsRingIsUp is the other half of

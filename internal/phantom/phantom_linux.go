@@ -293,12 +293,13 @@ func (l *iouringListener) Accept() (net.Conn, error) {
 	op := uring.Accept(uintptr(fd), 0)
 	// The SQE refers to op's address buffer by a bare integer the collector
 	// cannot see, and the kernel writes the peer's sockaddr into it when a
-	// connection arrives. Without this the operation was garbage the moment it
-	// was queued: a collection while the accept was pending freed the buffer,
-	// and the next client's address landed in whatever reused it.
-	defer runtime.KeepAlive(op)
+	// connection arrives. The completion callback holds op, and the reactor
+	// holds the callback until the CQE, so op outlives the kernel's use of it
+	// even when Accept returns early on ctx.Done -- a deferred KeepAlive would
+	// end at that return, while the accept is still pending in the kernel.
 	_, err = l.rea.Queue(op, func(event uring.CQEvent) {
 		resCh <- event
+		runtime.KeepAlive(op)
 	})
 	if err != nil {
 		return l.TCPListener.Accept()
@@ -383,9 +384,15 @@ func (c *iouringConn) Close() error {
 // the collector cannot see, and the kernel touches that buffer between the
 // queue and the completion.
 func (c *iouringConn) awaitOp(op uring.Operation) (event uring.CQEvent, ok bool, err error) {
-	defer runtime.KeepAlive(op)
 	resCh := make(chan uring.CQEvent, 1)
-	if _, qerr := c.rea.Queue(op, func(e uring.CQEvent) { resCh <- e }); qerr != nil {
+	// The completion callback holds op, and the reactor holds the callback until
+	// the CQE arrives, so op's buffer stays reachable until the kernel is done
+	// with it -- including when awaitOp returns early on ctx.Done with the op
+	// still pending. A deferred KeepAlive would end at that early return.
+	if _, qerr := c.rea.Queue(op, func(e uring.CQEvent) {
+		resCh <- e
+		runtime.KeepAlive(op)
+	}); qerr != nil {
 		return uring.CQEvent{}, false, nil
 	}
 	select {
