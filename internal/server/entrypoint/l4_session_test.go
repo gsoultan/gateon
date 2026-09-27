@@ -103,9 +103,12 @@ func plaintextTCPEntrypoint(tb testing.TB, backend string) (addr string, stop fu
 	}
 	wg := &syncutil.WaitGroup{}
 	startTCPServer(addr, ep, deps, wg, reg) // binds before it returns
-	return addr, func() {
-		reg.ShutdownAll(context.Background())
-		wg.Wait()
+	var once sync.Once
+	return addr, func() { // callable more than once: a test may stop early and defer it too
+		once.Do(func() {
+			reg.ShutdownAll(context.Background())
+			wg.Wait()
+		})
 	}
 }
 
