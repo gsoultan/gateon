@@ -63,8 +63,10 @@ func TestChangePasswordStillAllowsSelfAndAdmin(t *testing.T) {
 
 	self := mwauth.InjectContext(context.Background(),
 		&auth.Claims{ID: victimID, Role: auth.RoleViewer})
+	// The owner proves the change with the current password; without it the
+	// change is refused (users_password_test.go).
 	if _, err := svc.ChangePassword(self, &gateonv1.ChangePasswordRequest{
-		Id: victimID, Password: "chosen-by-the-owner",
+		Id: victimID, Password: "chosen-by-the-owner", CurrentPassword: "victim-original-password",
 	}); err != nil {
 		t.Fatalf("a user changing their own password was refused: %v", err)
 	}

@@ -25,7 +25,10 @@ import {
 } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import { useForm } from "@mantine/form";
+import { notifications } from "@mantine/notifications";
+import { useNavigate } from "@tanstack/react-router";
 import {
+  IconCheck,
   IconUserPlus,
   IconTrash,
   IconEdit,
@@ -43,6 +46,8 @@ import type { User } from "../types/gateon";
 import { useAuthStore } from "../store/useAuthStore";
 import { TwoFactorModal } from "../components/TwoFactorModal";
 import { QueryError } from "../components/QueryError";
+import { ChangePasswordForm } from "../components/ChangePasswordForm";
+import { queryClient } from "../queryClient";
 
 export default function UsersPage() {
   const [search, setSearch] = useState("");
@@ -62,6 +67,8 @@ export default function UsersPage() {
   const [targetUser, setTargetUser] = useState<User | null>(null);
   const currentUser = useAuthStore((state) => state.user);
   const token = useAuthStore((state) => state.token);
+  const logout = useAuthStore((state) => state.logout);
+  const navigate = useNavigate();
 
   const form = useForm({
     initialValues: {
@@ -88,8 +95,25 @@ export default function UsersPage() {
 
   const handleChangePassword = (user: User) => {
     setTargetUser(user);
-    passwordForm.reset();
     pwOpen();
+  };
+
+  // Your own password change ends every session the account has, this one
+  // included, so go to the sign-in page rather than let the next request fail.
+  const handlePasswordChanged = (user: User) => {
+    const own = currentUser?.id === user.id;
+    notifications.show({
+      title: "Password changed",
+      message: own ? "Sign in again with your new password." : `The password for ${user.username} was changed.`,
+      color: "green",
+      icon: <IconCheck size={16} />,
+    });
+    pwClose();
+    if (own) {
+      queryClient.clear();
+      logout();
+      void navigate({ to: "/login" });
+    }
   };
 
   const isAdmin = currentUser?.role === "admin";
@@ -191,39 +215,6 @@ export default function UsersPage() {
       }
     } catch (err) {
       console.error("Failed to delete user", err);
-    }
-  };
-
-  const passwordForm = useForm({
-    initialValues: {
-      password: "",
-      confirmPassword: "",
-    },
-    validate: {
-      password: (value) => (value.length < 6 ? "Password must be at least 6 characters" : null),
-      confirmPassword: (value, values) => (value !== values.password ? "Passwords do not match" : null),
-    },
-  });
-
-  const handlePasswordSubmit = async (values: typeof passwordForm.values) => {
-    if (!targetUser) return;
-    try {
-      const res = await apiFetch("/v1/users/password", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          id: targetUser.id,
-          password: values.password,
-        }),
-      });
-
-      if (res.ok) {
-        pwClose();
-      }
-    } catch (err) {
-      console.error("Failed to change password", err);
     }
   };
 
@@ -584,25 +575,13 @@ export default function UsersPage() {
         }
         radius="md"
       >
-        <form onSubmit={passwordForm.onSubmit(handlePasswordSubmit)}>
-          <Stack gap="md">
-            <PasswordInput
-              label="New Password"
-              placeholder="Enter new password"
-              required
-              {...passwordForm.getInputProps("password")}
-            />
-            <PasswordInput
-              label="Confirm New Password"
-              placeholder="Confirm new password"
-              required
-              {...passwordForm.getInputProps("confirmPassword")}
-            />
-            <Button type="submit" mt="md" fullWidth color="blue">
-              Change Password
-            </Button>
-          </Stack>
-        </form>
+        {targetUser && (
+          <ChangePasswordForm
+            userId={targetUser.id}
+            own={currentUser?.id === targetUser.id}
+            onChanged={() => handlePasswordChanged(targetUser)}
+          />
+        )}
       </Modal>
 
       {targetUser && (

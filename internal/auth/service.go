@@ -17,6 +17,9 @@ type Service interface {
 	UpsertUser(u *gateonv1.User) error
 	DeleteUser(id string) error
 	ChangePassword(id, password string) error
+	// ChangeOwnPassword is ChangePassword for the account's own user, who must
+	// present the current password; a wrong one counts towards login's lockout.
+	ChangeOwnPassword(id, current, password string) error
 	UpdateSymmetricKey(key string)
 	SetUserDisabled(id string, disabled bool) error
 	SetTwoFactorPending(id string, pending bool) error

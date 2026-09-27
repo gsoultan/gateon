@@ -368,6 +368,20 @@ func (m *Manager) ChangePassword(id, password string) error {
 	return nil
 }
 
+// ChangeOwnPassword changes account id's password for a caller who presents
+// the current one, checked by confirmPassword under login's rules and lockout.
+//
+// ChangePassword alone needs nothing but an id, which was all a signed-in user
+// changing their own password had to supply -- so the session was enough, and in
+// the dashboard the session is a cookie that script in the page can ride. A
+// password chosen by that script would outlive the session it was set from.
+func (m *Manager) ChangeOwnPassword(id, current, password string) error {
+	if err := m.confirmPassword(id, current); err != nil {
+		return err
+	}
+	return m.ChangePassword(id, password)
+}
+
 func (m *Manager) DeleteUser(id string) error {
 	q := m.dialect.Rebind(QueryDeleteUser)
 	_, err := m.db.Exec(q, id)

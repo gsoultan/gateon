@@ -168,6 +168,14 @@ func (h *Holder) ChangePassword(id, password string) error {
 	return s.ChangePassword(id, password)
 }
 
+func (h *Holder) ChangeOwnPassword(id, current, password string) error {
+	s := h.Get()
+	if s == nil {
+		return ErrUnavailable
+	}
+	return s.ChangeOwnPassword(id, current, password)
+}
+
 func (h *Holder) UpdateSymmetricKey(key string) {
 	if s := h.Get(); s != nil {
 		s.UpdateSymmetricKey(key)

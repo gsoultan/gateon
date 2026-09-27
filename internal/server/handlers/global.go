@@ -23,6 +23,8 @@ import (
 	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -82,6 +84,26 @@ func writeSetup2FARefusal(w http.ResponseWriter, r *http.Request, err error) {
 	default:
 		logger.L.LogError("2FA setup failed", "error", err)
 		WriteHTTPError(w, http.StatusInternalServerError, "2FA setup could not be started")
+	}
+}
+
+// writeServiceRefusal answers an error ApiService returned with the HTTP status
+// its gRPC code stands for. The service's message is passed on only for the
+// codes it writes messages for callers under -- a refusal, not a failure; an
+// unexpected failure's text can be a database error, and is logged instead. A
+// refused password is 403 and never 401, for the reason wrongCodeStatus gives.
+func writeServiceRefusal(w http.ResponseWriter, err error) {
+	st, _ := status.FromError(err)
+	switch st.Code() {
+	case codes.InvalidArgument:
+		WriteHTTPError(w, http.StatusBadRequest, st.Message())
+	case codes.PermissionDenied:
+		WriteHTTPError(w, http.StatusForbidden, st.Message())
+	case codes.ResourceExhausted:
+		WriteHTTPError(w, http.StatusTooManyRequests, st.Message())
+	default:
+		logger.L.LogError("management request failed", "error", err)
+		WriteHTTPError(w, http.StatusInternalServerError, "the request could not be completed")
 	}
 }
 
@@ -775,7 +797,7 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 		}
 		resp, err := svc.UpdateUser(r.Context(), &gateonv1.UpdateUserRequest{User: &req})
 		if err != nil {
-			WriteHTTPError(w, http.StatusInternalServerError, err.Error())
+			writeServiceRefusal(w, err)
 			return
 		}
 
@@ -818,7 +840,7 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 
 		resp, err := svc.ChangePassword(r.Context(), &req)
 		if err != nil {
-			WriteHTTPError(w, http.StatusInternalServerError, err.Error())
+			writeServiceRefusal(w, err)
 			return
 		}
 		data, _ := ProtojsonOptions().Marshal(resp)
