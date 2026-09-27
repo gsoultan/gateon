@@ -24,6 +24,20 @@ type DiagnosticData struct {
 	SequenceStats    map[[3]uint64]*SequenceStats // [3]PathHash -> Aggregated signals
 	PathPopularity   map[string]int               // Case-insensitive path popularity
 	PathIPs          map[string]map[string]struct{}
+
+	// Now is the moment the pass judges recency against; zero means time.Now().
+	Now time.Time
+	// TraceSampleRate is the trace store's 1-in-N sampling of successful
+	// requests (failures are always kept); 0 and 1 both mean every request.
+	TraceSampleRate uint32
+}
+
+// now is the pass's clock.
+func (d *DiagnosticData) now() time.Time {
+	if d.Now.IsZero() {
+		return time.Now()
+	}
+	return d.Now
 }
 
 type SequenceStats struct {

@@ -19,6 +19,7 @@ import (
 
 	"github.com/gsoultan/gateon/internal/ai"
 	"github.com/gsoultan/gateon/internal/logger"
+	"github.com/gsoultan/gateon/internal/middleware"
 	"github.com/gsoultan/gateon/internal/middleware/security"
 	"github.com/gsoultan/gateon/internal/security/mitigation"
 	"github.com/gsoultan/gateon/internal/security/waf"
@@ -391,7 +392,7 @@ func (s *ApiService) detectAnomalies(ctx context.Context, routes []*gateonv1.Rou
 		globalCfg = s.Globals.Get(ctx)
 	}
 
-	traces := telemetry.GetTracesFiltered(ctx, 1000, true)
+	traces := analysisTraces(ctx)
 	threats := telemetry.GetSecurityThreatsLite(ctx, 1000, 0, nil)
 	engine := NewAnomalyAnalysisEngine(globalCfg, s.IPReputation)
 	engine.SetLowPower(s.mlLowPowerActive(time.Now()))
@@ -401,6 +402,7 @@ func (s *ApiService) detectAnomalies(ctx context.Context, routes []*gateonv1.Rou
 		Routes:          routes,
 		Middlewares:     middlewares,
 		ManagementHosts: mgmtHosts,
+		TraceSampleRate: middleware.TraceSampleRate(),
 	})
 
 	// Process neural sentinel anomalies through the RL feedback loop in eBPF.
@@ -413,6 +415,16 @@ func (s *ApiService) detectAnomalies(ctx context.Context, routes []*gateonv1.Rou
 	}
 
 	return anomalies
+}
+
+// analysisTraceLimit is how many of the most recent traces one analysis pass
+// reads.
+const analysisTraceLimit = 1000
+
+// analysisTraces is what one analysis pass reads from the trace store: the most
+// recent traces, as summaries, newest first (Analyze puts them in order).
+func analysisTraces(ctx context.Context) []*telemetry.TraceRecord {
+	return telemetry.GetTracesFiltered(ctx, analysisTraceLimit, true)
 }
 
 func (s *ApiService) getManagementHosts(ctx context.Context) []string {

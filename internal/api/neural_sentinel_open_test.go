@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/e-XpertSolutions/go-iforest/v2/iforest"
-	"github.com/gsoultan/gateon/internal/telemetry"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
@@ -91,13 +90,6 @@ func visitorsAndScanner(scanner string) *DiagnosticData {
 			base.Add(time.Duration(r)*100*time.Millisecond)))
 	}
 	return data
-}
-
-func trace(ip, path, status string, ms float64, at time.Time) *telemetry.TraceRecord {
-	return &telemetry.TraceRecord{
-		SourceIP: ip, Path: path, Method: "GET", Status: status, DurationMs: ms,
-		Timestamp: at, UserAgent: "Mozilla/5.0",
-	}
 }
 
 // neuralFeatures is the detector's feature matrix, rows in the order the

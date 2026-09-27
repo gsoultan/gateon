@@ -8,6 +8,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"hash/maphash"
+	"net/http"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -119,26 +121,51 @@ func getRuleDescription(id string) string {
 	return fmt.Sprintf("Rule %s", id)
 }
 
+// Analyze aggregates the pass's traces and threats per address and runs every
+// detector over the result.
 func (e *AnomalyAnalysisEngine) Analyze(ctx context.Context, data *DiagnosticData) []*gateonv1.Anomaly {
-	// Pre-filter loopback traffic to prevent management/test traffic from skewing anomalies.
-	// This improves performance and eliminates false positives during management operations.
-	filteredTraces := make([]*telemetry.RequestTrace, 0, len(data.Traces))
-	for _, tr := range data.Traces {
+	data.Traces = tracesForAnalysis(data.Traces)
+	data.SecurityThreats = threatsForAnalysis(data.SecurityThreats)
+	e.aggregate(data)
+	return capAnomalies(e.runDetectors(ctx, data))
+}
+
+// tracesForAnalysis drops loopback traffic -- management and test calls would
+// otherwise skew every statistic -- and puts the rest oldest first.
+//
+// Oldest first, because the trace store hands back its newest trace first, and
+// every order-dependent signal below was computed backwards: the gap between a
+// client's requests came out negative for every pair and was thrown away, so no
+// client ever had an interval measured, and the three-path sequences read each
+// visit in reverse.
+func tracesForAnalysis(in []*telemetry.TraceRecord) []*telemetry.TraceRecord {
+	out := make([]*telemetry.TraceRecord, 0, len(in))
+	for _, tr := range in {
 		if tr != nil && !httputil.IsLoopback(tr.SourceIP) {
-			filteredTraces = append(filteredTraces, tr)
+			out = append(out, tr)
 		}
 	}
-	data.Traces = filteredTraces
+	slices.SortStableFunc(out, func(a, b *telemetry.TraceRecord) int {
+		return a.Timestamp.Compare(b.Timestamp)
+	})
+	return out
+}
 
-	filteredThreats := make([]*telemetry.SecurityThreat, 0, len(data.SecurityThreats))
-	for _, th := range data.SecurityThreats {
+// threatsForAnalysis drops loopback threats, as tracesForAnalysis drops
+// loopback traces.
+func threatsForAnalysis(in []*telemetry.SecurityThreat) []*telemetry.SecurityThreat {
+	out := make([]*telemetry.SecurityThreat, 0, len(in))
+	for _, th := range in {
 		if th != nil && !httputil.IsLoopback(th.SourceIP) {
-			filteredThreats = append(filteredThreats, th)
+			out = append(out, th)
 		}
 	}
-	data.SecurityThreats = filteredThreats
+	return out
+}
 
-	// Pre-process traces for performance - single pass
+// aggregate builds the per-address, per-fingerprint and per-sequence views the
+// detectors read, in one pass over the traces and one over the threats.
+func (e *AnomalyAnalysisEngine) aggregate(data *DiagnosticData) {
 	data.IPStats = make(map[string]*IPStats)
 	data.FingerprintStats = make(map[string]*FingerprintStats)
 	data.PathMap = make(map[uint64]string)
@@ -146,215 +173,20 @@ func (e *AnomalyAnalysisEngine) Analyze(ctx context.Context, data *DiagnosticDat
 	data.PathPopularity = make(map[string]int)
 	data.PathIPs = make(map[string]map[string]struct{})
 
-	routeMap := make(map[string]*gateonv1.Route)
-	for _, r := range data.Routes {
-		routeMap[r.Id] = r
-	}
-
-	// For burst detection and hashing
-	type ipTime struct {
-		ip   string
-		slot int64
-	}
-	burstTracker := make(map[ipTime]int)
-	hasher := hashPool.Get().(*maphash.Hash)
-	defer hashPool.Put(hasher)
-
+	agg := newTraceAggregator(e, data)
+	defer agg.release()
 	for _, tr := range data.Traces {
-		if tr == nil || tr.SourceIP == "" {
-			continue
-		}
-
-		// 1. Path Hashing & Mapping
-		hasher.Reset()
-		_, _ = hasher.WriteString(tr.Path)
-		h := hasher.Sum64()
-		if _, ok := data.PathMap[h]; !ok {
-			data.PathMap[h] = tr.Path
-		}
-
-		stats, ok := data.IPStats[tr.SourceIP]
-		if !ok {
-			stats = &IPStats{
-				UniquePaths: make(map[string]struct{}),
-				UserAgents:  make(map[string]struct{}),
-				Methods:     make(map[string]int),
-				Referers:    make(map[string]int),
-				JA4s:        make(map[string]int),
-				PathErrors:  make(map[string]int),
-				CountryCode: tr.CountryCode,
-			}
-			data.IPStats[tr.SourceIP] = stats
-		}
-		stats.TotalRequests++
-		stats.TotalDuration += tr.DurationMs
-		if tr.Timestamp.After(stats.LastSeen) {
-			stats.LastSeen = tr.Timestamp
-			stats.LastTrace = tr
-		}
-		stats.UniquePaths[tr.Path] = struct{}{}
-		lp := strings.ToLower(tr.Path)
-		data.PathPopularity[lp]++
-		if _, ok := data.PathIPs[lp]; !ok {
-			data.PathIPs[lp] = make(map[string]struct{})
-		}
-		data.PathIPs[lp][tr.SourceIP] = struct{}{}
-
-		if tr.UserAgent != "" {
-			stats.UserAgents[tr.UserAgent] = struct{}{}
-		}
-		if tr.Method != "" {
-			stats.Methods[tr.Method]++
-		}
-		if tr.Referer != "" {
-			stats.Referers[tr.Referer]++
-		}
-		if tr.JA4 != "" {
-			stats.JA4s[tr.JA4]++
-		}
-
-		// 2. Behavioral Signals: IAT (Inter-Arrival Time)
-		if !stats.LastRequestAt.IsZero() {
-			iat := tr.Timestamp.Sub(stats.LastRequestAt).Seconds() * 1000 // ms
-			if iat > 0 {
-				stats.IATSum += iat
-				stats.IATSumSq += iat * iat
-				stats.IATCount++
-			}
-		}
-		stats.LastRequestAt = tr.Timestamp
-
-		// 3. Coordination Signals: Sequence Aggregation
-		// Skip consecutive duplicate paths (polling)
-		if h != stats.LastPathHash {
-			if stats.PrevPathHash != 0 && stats.LastPathHash != 0 {
-				sig := [3]uint64{stats.PrevPathHash, stats.LastPathHash, h}
-				sStats, ok := data.SequenceStats[sig]
-				if !ok {
-					sStats = &SequenceStats{
-						IPs:        make(map[string]struct{}),
-						UserAgents: make(map[string]int),
-						JA4s:       make(map[string]int),
-						Countries:  make(map[string]struct{}),
-					}
-					data.SequenceStats[sig] = sStats
-				}
-				if _, seen := sStats.IPs[tr.SourceIP]; !seen {
-					sStats.IPs[tr.SourceIP] = struct{}{}
-					if tr.UserAgent != "" {
-						sStats.UserAgents[tr.UserAgent]++
-						sStats.UACount++
-					}
-					if tr.JA4 != "" {
-						sStats.JA4s[tr.JA4]++
-						sStats.JA4Count++
-					}
-					if tr.CountryCode != "" {
-						sStats.Countries[tr.CountryCode] = struct{}{}
-					}
-				}
-			}
-			stats.PrevPathHash = stats.LastPathHash
-			stats.LastPathHash = h
-		}
-
-		// Burst detection: 10-second slots
-		slot := tr.Timestamp.Unix() / 10
-		it := ipTime{tr.SourceIP, slot}
-		burstTracker[it]++
-		if burstTracker[it] > stats.BurstCount {
-			stats.BurstCount = burstTracker[it]
-		}
-
-		// Fingerprint aggregation
-		if tr.Fingerprint != "" {
-			fStats, ok := data.FingerprintStats[tr.Fingerprint]
-			if !ok {
-				fStats = &FingerprintStats{
-					Fingerprint: tr.Fingerprint,
-					IPs:         make(map[string]struct{}),
-					UniquePaths: make(map[string]struct{}),
-					Countries:   make(map[string]time.Time),
-				}
-				data.FingerprintStats[tr.Fingerprint] = fStats
-			}
-			fStats.TotalRequests++
-			fStats.IPs[tr.SourceIP] = struct{}{}
-			fStats.UniquePaths[tr.Path] = struct{}{}
-			if tr.CountryCode != "" {
-				if last, ok := fStats.Countries[tr.CountryCode]; !ok || tr.Timestamp.After(last) {
-					fStats.Countries[tr.CountryCode] = tr.Timestamp
-				}
-			}
-			if tr.Timestamp.After(fStats.LastSeen) {
-				fStats.LastSeen = tr.Timestamp
-				fStats.LastTrace = tr
-			}
-			if strings.HasPrefix(tr.Status, "4") {
-				fStats.Error4xx++
-			} else if strings.HasPrefix(tr.Status, "5") {
-				fStats.Error5xx++
-			}
-		}
-		if strings.Contains(tr.Status, "401") {
-			stats.Error401++
-			stats.PathErrors[tr.Path]++
-		} else if strings.Contains(tr.Status, "403") {
-			stats.Error403++
-			stats.PathErrors[tr.Path]++
-		} else if strings.Contains(tr.Status, "404") {
-			stats.Error404++
-		} else if strings.HasPrefix(tr.Status, "4") {
-			stats.Error4xx++
-		} else if strings.HasPrefix(tr.Status, "5") {
-			stats.Error5xx++
-		}
-
-		// Header Consistency Check
-		e.checkHeaderConsistency(tr, routeMap[tr.ServiceName], stats)
+		agg.add(tr)
 	}
 
+	evidenceSince := data.now().Add(-attackEvidenceWindow)
 	for _, th := range data.SecurityThreats {
-		if th == nil || th.SourceIP == "" {
-			continue
-		}
-
-		stats, ok := data.IPStats[th.SourceIP]
-		if !ok {
-			stats = &IPStats{
-				UniquePaths: make(map[string]struct{}),
-				UserAgents:  make(map[string]struct{}),
-				Methods:     make(map[string]int),
-				Referers:    make(map[string]int),
-				JA4s:        make(map[string]int),
-				PathErrors:  make(map[string]int),
-				CountryCode: th.CountryCode,
-			}
-			data.IPStats[th.SourceIP] = stats
-		}
-		if th.Mitigated {
-			stats.WAFHits++
-		} else {
-			stats.WAFWarnings++
-		}
-		if th.TriggeredRules != "" {
-			if stats.WAFRules == nil {
-				stats.WAFRules = make(map[string]int)
-			}
-			var ruleIDs []int
-			if err := json.Unmarshal([]byte(th.TriggeredRules), &ruleIDs); err == nil {
-				for _, id := range ruleIDs {
-					stats.WAFRules[getRuleDescription(fmt.Sprintf("%d", id))]++
-				}
-			} else {
-				stats.WAFRules[getRuleDescription(th.TriggeredRules)]++
-			}
-		}
-		if th.Time.After(stats.LastSeen) {
-			stats.LastSeen = th.Time
-		}
+		aggregateThreat(data, th, evidenceSince)
 	}
+}
 
+// runDetectors runs every detector concurrently over the aggregated data.
+func (e *AnomalyAnalysisEngine) runDetectors(ctx context.Context, data *DiagnosticData) []*gateonv1.Anomaly {
 	var allAnomalies []*gateonv1.Anomaly
 	var mu sync.Mutex
 	g, gctx := errgroup.WithContext(ctx)
@@ -373,7 +205,345 @@ func (e *AnomalyAnalysisEngine) Analyze(ctx context.Context, data *DiagnosticDat
 	}
 
 	_ = g.Wait()
-	return capAnomalies(allAnomalies)
+	return allAnomalies
+}
+
+// newIPStats is an empty per-address record.
+func newIPStats(countryCode string) *IPStats {
+	return &IPStats{
+		UniquePaths: make(map[string]struct{}),
+		UserAgents:  make(map[string]struct{}),
+		Methods:     make(map[string]int),
+		Referers:    make(map[string]int),
+		JA4s:        make(map[string]int),
+		PathErrors:  make(map[string]int),
+		CountryCode: countryCode,
+	}
+}
+
+// ipSlot is one address in one 10-second slot, for burst detection.
+type ipSlot struct {
+	ip   string
+	slot int64
+}
+
+// traceAggregator folds traces, oldest first, into DiagnosticData.
+type traceAggregator struct {
+	engine *AnomalyAnalysisEngine
+	data   *DiagnosticData
+	routes map[string]*gateonv1.Route
+	hasher *maphash.Hash
+	bursts map[ipSlot]int
+}
+
+func newTraceAggregator(e *AnomalyAnalysisEngine, data *DiagnosticData) *traceAggregator {
+	routes := make(map[string]*gateonv1.Route, len(data.Routes))
+	for _, r := range data.Routes {
+		routes[r.Id] = r
+	}
+	hasher, _ := hashPool.Get().(*maphash.Hash)
+	if hasher == nil {
+		hasher = new(maphash.Hash)
+	}
+	return &traceAggregator{engine: e, data: data, routes: routes, hasher: hasher, bursts: make(map[ipSlot]int)}
+}
+
+// release returns the pooled hasher.
+func (a *traceAggregator) release() {
+	hashPool.Put(a.hasher)
+}
+
+// add folds one trace in.
+func (a *traceAggregator) add(tr *telemetry.TraceRecord) {
+	if tr == nil || tr.SourceIP == "" {
+		return
+	}
+	h := a.pathHash(tr.Path)
+	stats := a.ipStats(tr)
+	a.countRequest(stats, tr)
+	countInterval(stats, tr)
+	a.countSequence(stats, tr, h)
+	a.countBurst(stats, tr)
+	a.countFingerprint(tr)
+	countStatus(stats, tr)
+	a.engine.checkHeaderConsistency(tr, a.routes[tr.ServiceName], stats)
+}
+
+// pathHash hashes a path and remembers the path it came from.
+func (a *traceAggregator) pathHash(path string) uint64 {
+	a.hasher.Reset()
+	_, _ = a.hasher.WriteString(path)
+	h := a.hasher.Sum64()
+	if _, ok := a.data.PathMap[h]; !ok {
+		a.data.PathMap[h] = path
+	}
+	return h
+}
+
+// ipStats is the trace's address record, created on first sight.
+func (a *traceAggregator) ipStats(tr *telemetry.TraceRecord) *IPStats {
+	stats, ok := a.data.IPStats[tr.SourceIP]
+	if !ok {
+		stats = newIPStats(tr.CountryCode)
+		a.data.IPStats[tr.SourceIP] = stats
+	}
+	return stats
+}
+
+// countRequest records the request's size-independent facts: volume, timing,
+// path and client identifiers.
+func (a *traceAggregator) countRequest(stats *IPStats, tr *telemetry.TraceRecord) {
+	stats.TotalRequests++
+	stats.TotalDuration += tr.DurationMs
+	if tr.Timestamp.After(stats.LastSeen) {
+		stats.LastSeen = tr.Timestamp
+		stats.LastTrace = tr
+	}
+	stats.UniquePaths[tr.Path] = struct{}{}
+	lp := strings.ToLower(tr.Path)
+	a.data.PathPopularity[lp]++
+	if _, ok := a.data.PathIPs[lp]; !ok {
+		a.data.PathIPs[lp] = make(map[string]struct{})
+	}
+	a.data.PathIPs[lp][tr.SourceIP] = struct{}{}
+
+	if tr.UserAgent != "" {
+		stats.UserAgents[tr.UserAgent] = struct{}{}
+	}
+	if tr.Method != "" {
+		stats.Methods[tr.Method]++
+	}
+	if tr.Referer != "" {
+		stats.Referers[tr.Referer]++
+	}
+	if tr.JA4 != "" {
+		stats.JA4s[tr.JA4]++
+	}
+}
+
+// countInterval records the gap since the address's previous request.
+//
+// A zero gap counts: two requests in the same instant are what a browser
+// fetching a page's assets in parallel looks like, and leaving them out made
+// that burst read as a steady, machine-like rhythm.
+func countInterval(stats *IPStats, tr *telemetry.TraceRecord) {
+	if !stats.LastRequestAt.IsZero() {
+		if iat := tr.Timestamp.Sub(stats.LastRequestAt).Seconds() * 1000; iat >= 0 { // ms
+			stats.IATSum += iat
+			stats.IATSumSq += iat * iat
+			stats.IATCount++
+		}
+	}
+	stats.LastRequestAt = tr.Timestamp
+}
+
+// countSequence aggregates the three-path sequences coordinated-scan detection
+// compares across addresses. Consecutive repeats of one path (polling) are
+// skipped.
+func (a *traceAggregator) countSequence(stats *IPStats, tr *telemetry.TraceRecord, h uint64) {
+	if h == stats.LastPathHash {
+		return
+	}
+	if stats.PrevPathHash != 0 && stats.LastPathHash != 0 {
+		a.sequence([3]uint64{stats.PrevPathHash, stats.LastPathHash, h}).add(tr)
+	}
+	stats.PrevPathHash = stats.LastPathHash
+	stats.LastPathHash = h
+}
+
+// sequence is the record for one three-path sequence, created on first sight.
+func (a *traceAggregator) sequence(sig [3]uint64) *SequenceStats {
+	sStats, ok := a.data.SequenceStats[sig]
+	if !ok {
+		sStats = &SequenceStats{
+			IPs:        make(map[string]struct{}),
+			UserAgents: make(map[string]int),
+			JA4s:       make(map[string]int),
+			Countries:  make(map[string]struct{}),
+		}
+		a.data.SequenceStats[sig] = sStats
+	}
+	return sStats
+}
+
+// add counts the trace's client under the sequence, once per address.
+func (s *SequenceStats) add(tr *telemetry.TraceRecord) {
+	if _, seen := s.IPs[tr.SourceIP]; seen {
+		return
+	}
+	s.IPs[tr.SourceIP] = struct{}{}
+	if tr.UserAgent != "" {
+		s.UserAgents[tr.UserAgent]++
+		s.UACount++
+	}
+	if tr.JA4 != "" {
+		s.JA4s[tr.JA4]++
+		s.JA4Count++
+	}
+	if tr.CountryCode != "" {
+		s.Countries[tr.CountryCode] = struct{}{}
+	}
+}
+
+// countBurst tracks the address's busiest 10-second slot.
+func (a *traceAggregator) countBurst(stats *IPStats, tr *telemetry.TraceRecord) {
+	it := ipSlot{tr.SourceIP, tr.Timestamp.Unix() / 10}
+	a.bursts[it]++
+	if a.bursts[it] > stats.BurstCount {
+		stats.BurstCount = a.bursts[it]
+	}
+}
+
+// countFingerprint aggregates the trace under its behavioural fingerprint.
+func (a *traceAggregator) countFingerprint(tr *telemetry.TraceRecord) {
+	if tr.Fingerprint == "" {
+		return
+	}
+	fStats, ok := a.data.FingerprintStats[tr.Fingerprint]
+	if !ok {
+		fStats = &FingerprintStats{
+			Fingerprint: tr.Fingerprint,
+			IPs:         make(map[string]struct{}),
+			UniquePaths: make(map[string]struct{}),
+			Countries:   make(map[string]time.Time),
+		}
+		a.data.FingerprintStats[tr.Fingerprint] = fStats
+	}
+	fStats.TotalRequests++
+	fStats.IPs[tr.SourceIP] = struct{}{}
+	fStats.UniquePaths[tr.Path] = struct{}{}
+	if tr.CountryCode != "" {
+		if last, ok := fStats.Countries[tr.CountryCode]; !ok || tr.Timestamp.After(last) {
+			fStats.Countries[tr.CountryCode] = tr.Timestamp
+		}
+	}
+	if tr.Timestamp.After(fStats.LastSeen) {
+		fStats.LastSeen = tr.Timestamp
+		fStats.LastTrace = tr
+	}
+	if strings.HasPrefix(tr.Status, "4") {
+		fStats.Error4xx++
+	} else if strings.HasPrefix(tr.Status, "5") {
+		fStats.Error5xx++
+	}
+}
+
+// countStatus files the response under the counters the detectors read.
+func countStatus(stats *IPStats, tr *telemetry.TraceRecord) {
+	post := tr.Method == http.MethodPost
+	if post {
+		stats.Posts++
+	}
+	switch {
+	case strings.Contains(tr.Status, "401"), strings.Contains(tr.Status, "403"):
+		if strings.Contains(tr.Status, "401") {
+			stats.Error401++
+		} else {
+			stats.Error403++
+		}
+		stats.PathErrors[tr.Path]++
+		if post {
+			stats.PostAuthFailures++
+		}
+	case strings.Contains(tr.Status, "404"):
+		stats.Error404++
+	case strings.HasPrefix(tr.Status, "4"):
+		stats.Error4xx++
+	case strings.HasPrefix(tr.Status, "5"):
+		stats.Error5xx++
+	default:
+		return
+	}
+	if stats.FailedPaths == nil {
+		stats.FailedPaths = make(map[string]int)
+	}
+	stats.FailedPaths[tr.Path]++
+}
+
+// aggregateThreat folds one recorded threat into its address's record.
+func aggregateThreat(data *DiagnosticData, th *telemetry.SecurityThreat, evidenceSince time.Time) {
+	if th == nil || th.SourceIP == "" {
+		return
+	}
+	stats, ok := data.IPStats[th.SourceIP]
+	if !ok {
+		stats = newIPStats(th.CountryCode)
+		data.IPStats[th.SourceIP] = stats
+	}
+	if th.Mitigated {
+		stats.WAFHits++
+	} else {
+		stats.WAFWarnings++
+	}
+	if th.TriggeredRules != "" {
+		countTriggeredRules(stats, th.TriggeredRules)
+	}
+	if th.Time.After(stats.LastSeen) {
+		stats.LastSeen = th.Time
+	}
+	if !th.Time.Before(evidenceSince) {
+		stats.AttackEvidence += attackEvidenceWeight(th)
+	}
+}
+
+// countTriggeredRules tallies the WAF rules a threat names.
+func countTriggeredRules(stats *IPStats, triggered string) {
+	if stats.WAFRules == nil {
+		stats.WAFRules = make(map[string]int)
+	}
+	var ruleIDs []int
+	if err := json.Unmarshal([]byte(triggered), &ruleIDs); err == nil {
+		for _, id := range ruleIDs {
+			stats.WAFRules[getRuleDescription(fmt.Sprintf("%d", id))]++
+		}
+		return
+	}
+	stats.WAFRules[getRuleDescription(triggered)]++
+}
+
+// attackEvidenceWindow is how long a recorded threat counts as evidence against
+// its address. Half an hour: long enough to cover the analysis window of a
+// quiet site, short enough that an address handed to someone else stops
+// carrying a stranger's record the same afternoon.
+const attackEvidenceWindow = 30 * time.Minute
+
+// Threat kinds that are attack evidence. See attackEvidenceWeight.
+const (
+	threatHoneypotTriggered = "honeypot_triggered"
+	threatFastPathSignature = "fast_path_signature"
+	threatWAFPrefix         = "waf_"
+	categoryMalware         = "malware"
+	categoryBruteForce      = "brute_force"
+	categoryExploitScanning = "exploit_scanning"
+
+	// decisiveAttackWeight is a decision no ordinary client provokes by
+	// accident, worth as much as three WAF blocks.
+	decisiveAttackWeight = 3.0
+)
+
+// attackEvidenceWeight is what a recorded threat says about its source address:
+// 1 for a request the WAF blocked on an attack payload, decisiveAttackWeight for
+// a trap sprung, a malware upload, or a brute-force or exploit-scan detection,
+// and 0 for everything else.
+//
+// Everything else deliberately includes: rate-limit rejections, which a busy
+// office egress earns without attacking anyone; geo and bot-management blocks,
+// which are policy about who a client is rather than evidence of what it did;
+// the mitigation and reputation blocks that follow an earlier decision, which
+// would feed a block back in as its own evidence; the WAF's detection-only
+// matches, which the operator has not trusted enough to block on; and every
+// threat this engine records itself, which would make one false positive the
+// evidence for the next.
+func attackEvidenceWeight(th *telemetry.SecurityThreat) float64 {
+	switch {
+	case th.Type == threatHoneypotTriggered, th.Category == categoryMalware,
+		th.Category == categoryBruteForce, th.Category == categoryExploitScanning:
+		return decisiveAttackWeight
+	case th.Type == threatFastPathSignature, strings.HasPrefix(th.Type, threatWAFPrefix) && th.Mitigated:
+		return 1
+	default:
+		return 0
+	}
 }
 
 // maxAnomaliesPerPass bounds what a single detection pass returns.

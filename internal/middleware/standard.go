@@ -257,6 +257,14 @@ func traceSampleRate() uint32 {
 	return config.CurrentTierDefaults().TraceSampleRate
 }
 
+// TraceSampleRate is the rate the metrics middleware records traces at: 1-in-N
+// successful requests, every failure. The anomaly analysis reads it to weigh
+// the traces it is handed, since a sample that keeps every failure and one
+// success in twenty overstates every failure rate about twentyfold.
+func TraceSampleRate() uint32 {
+	return traceSampleRate()
+}
+
 // Metrics returns a middleware that records comprehensive Prometheus metrics
 // including request counts, latency histograms, status code breakdown,
 // body size tracking, TTFB, and in-flight request gauges.

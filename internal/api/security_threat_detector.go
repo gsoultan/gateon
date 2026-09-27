@@ -107,7 +107,7 @@ func (d *SecurityThreatDetector) Detect(ctx context.Context, data *DiagnosticDat
 			score += d.analyzeErrors(stats, &reasons, &primaryType)
 			score += d.analyzePatterns(stats, pathIPs, totalIPs, &reasons, &primaryType)
 			score += d.analyzeHeaders(stats, &reasons)
-			score += d.analyzeBehavior(stats, &reasons)
+			score += d.analyzeBehavior(stats, data.TraceSampleRate, &reasons)
 			score += d.analyzeDirectoryBusting(stats, &reasons)
 
 			// Reputation-based Smart Discount: Reduces false positives for trusted clients.
@@ -649,7 +649,7 @@ func (d *SecurityThreatDetector) analyzeHeaders(stats *IPStats, reasons *[]strin
 	return score
 }
 
-func (d *SecurityThreatDetector) analyzeBehavior(stats *IPStats, reasons *[]string) int {
+func (d *SecurityThreatDetector) analyzeBehavior(stats *IPStats, sampleRate uint32, reasons *[]string) int {
 	score := 0
 	if stats.TotalRequests > 20 && len(stats.Methods) == 1 {
 		if _, hasPost := stats.Methods["POST"]; hasPost {
@@ -657,29 +657,48 @@ func (d *SecurityThreatDetector) analyzeBehavior(stats *IPStats, reasons *[]stri
 			*reasons = append(*reasons, "Unusual POST-only traffic pattern")
 		}
 	}
+	return score + automatedTimingScore(stats, sampleRate, reasons)
+}
 
-	// IAT (Inter-Arrival Time) Regularity Analysis
-	// Bots often have very low variance in their request timing.
-	if stats.IATCount >= 10 {
-		mean := stats.IATSum / float64(stats.IATCount)
-		variance := (stats.IATSumSq / float64(stats.IATCount)) - (mean * mean)
-		stdDev := math.Sqrt(math.Max(0, variance))
+// The request-timing check. A coefficient of variation (standard deviation of
+// the gaps over their mean) below regularTimingMaxCV is a machine's rhythm;
+// below regularTimingMinMeanMs the gaps are a burst, not a rhythm.
+const (
+	regularTimingMinIntervals = 10
+	regularTimingMinMeanMs    = 100.0
+	regularTimingMaxCV        = 0.15
+	regularTimingScore        = 25
+)
 
-		// If standard deviation is extremely low relative to the mean, it's likely a bot.
-		// Coefficient of Variation (CV) = StdDev / Mean
-		if mean > 100 { // Only check for non-bursty traffic
-			cv := stdDev / mean
-			if cv < 0.05 { // Extremely regular timing (<5% variation)
-				score += 60
-				*reasons = append(*reasons, fmt.Sprintf("Highly regular request intervals (CV: %.3f)", cv))
-			} else if cv < 0.15 {
-				score += 25
-				*reasons = append(*reasons, "Suspiciously regular request timing")
-			}
-		}
+// automatedTimingScore adds weight for a steady machine rhythm, but only to an
+// address whose traffic harmEvidence already found harmful.
+//
+// A steady rhythm is evidence of automation, not of malice. A dashboard polling
+// every five seconds, a health checker, a CI job and an uptime monitor all keep
+// one. The check used to add 60 points for it alone -- twice the default threat
+// threshold -- so once the gaps could be measured at all, every one of them was
+// filed as a threat on every pass. On harmful traffic the rhythm still counts:
+// it is what separates a credential-stuffing script from a person mistyping a
+// password.
+func automatedTimingScore(stats *IPStats, sampleRate uint32, reasons *[]string) int {
+	if stats.IATCount < regularTimingMinIntervals {
+		return 0
 	}
-
-	return score
+	mean := stats.IATSum / float64(stats.IATCount)
+	if mean <= regularTimingMinMeanMs {
+		return 0
+	}
+	variance := stats.IATSumSq/float64(stats.IATCount) - mean*mean
+	cv := math.Sqrt(math.Max(0, variance)) / mean
+	if cv >= regularTimingMaxCV {
+		return 0
+	}
+	harm, harmful := stats.harmEvidence(sampleRate)
+	if !harmful {
+		return 0
+	}
+	*reasons = append(*reasons, fmt.Sprintf("Highly regular request intervals (CV: %.3f) on harmful traffic: %s", cv, harm))
+	return regularTimingScore
 }
 
 func (d *SecurityThreatDetector) analyzeDirectoryBusting(stats *IPStats, reasons *[]string) int {

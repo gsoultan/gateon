@@ -264,12 +264,15 @@ func TestSecurityThreatDetector_CoordinatedAttack(t *testing.T) {
 
 		var traces []*telemetry.TraceRecord
 		ip := "1.2.3.4"
-		// Exactly every 5 seconds
+		// Exactly every 5 seconds, each a failed login: a machine's rhythm on
+		// harmful traffic. The same rhythm on successful GETs is a poller and is
+		// not reported (TestPollersAreNotThreats).
 		for i := 0; i < 15; i++ {
 			traces = append(traces, &telemetry.TraceRecord{
 				SourceIP:  ip,
-				Path:      "/api/data",
-				Method:    "GET",
+				Path:      "/login",
+				Method:    "POST",
+				Status:    "401",
 				Timestamp: now.Add(time.Duration(i*5) * time.Second),
 			})
 		}
