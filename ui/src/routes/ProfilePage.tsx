@@ -30,7 +30,7 @@ import {
   IconUser,
   IconUserCircle,
 } from "@tabler/icons-react";
-import { apiFetch } from "../hooks/useGateon";
+import { useSignOut } from "../hooks/useSignOut";
 import { useAuthStore } from "../store/useAuthStore";
 import { queryClient } from "../queryClient";
 import { TwoFactorModal } from "../components/TwoFactorModal";
@@ -58,6 +58,7 @@ export default function ProfilePage() {
 
   const [tfaOpened, { open: tfaOpen, close: tfaClose }] = useDisclosure(false);
   const [signingOut, setSigningOut] = useState(false);
+  const signOut = useSignOut();
 
   // Changing the password ends every session the account has, this one
   // included (the session is bound to the password), so say so and go to the
@@ -88,17 +89,8 @@ export default function ProfilePage() {
 
   const handleSignOut = async () => {
     setSigningOut(true);
-    try {
-      // Ends every session of the account and clears the HttpOnly cookie.
-      await apiFetch("/v1/logout", { method: "POST" });
-    } catch {
-      // Clear local session regardless of network errors.
-    } finally {
-      // Drop any cached, potentially sensitive data from this session.
-      queryClient.clear();
-      logout();
-      void navigate({ to: "/login" });
-    }
+    // Still signed in: stop the spinner so the button can be pressed again.
+    if (!(await signOut())) setSigningOut(false);
   };
 
   const username = user?.username ?? "Account";

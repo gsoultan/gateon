@@ -33,8 +33,7 @@ import {
 } from "@tabler/icons-react";
 import { useAuthStore } from "../../store/useAuthStore";
 import { usePreferencesStore } from "../../store/usePreferencesStore";
-import { apiFetch } from "../../hooks/useGateon";
-import { queryClient } from "../../queryClient";
+import { useSignOut } from "../../hooks/useSignOut";
 import { SIGN_OUT_SCOPE } from "../signOut";
 import type { Command } from "./types";
 
@@ -77,7 +76,7 @@ export function useCommands(close: () => void): Command[] {
   const navigate = useNavigate();
   const { setColorScheme } = useMantineColorScheme();
   const role = useAuthStore((s) => s.user?.role);
-  const logout = useAuthStore((s) => s.logout);
+  const signOut = useSignOut();
   const toggleSidebar = usePreferencesStore((s) => s.toggleSidebar);
 
   return useMemo<Command[]>(() => {
@@ -161,21 +160,11 @@ export function useCommands(close: () => void): Command[] {
         keywords: ["logout", "exit"],
         perform: () => {
           close();
-          void (async () => {
-            try {
-              await apiFetch("/v1/logout", { method: "POST" });
-            } catch {
-              // Ignore network errors; clear local session regardless.
-            } finally {
-              queryClient.clear();
-              logout();
-              void navigate({ to: "/login" });
-            }
-          })();
+          void signOut();
         },
       },
     ];
 
     return [...navCommands, ...actionCommands];
-  }, [navigate, setColorScheme, role, logout, toggleSidebar, close]);
+  }, [navigate, setColorScheme, role, signOut, toggleSidebar, close]);
 }
