@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -62,8 +63,7 @@ func (d *NeuralAnomalyDetector) Detect(ctx context.Context, data *DiagnosticData
 		numTrees = 25
 		sampleSize = 64
 	}
-	forest := iforest.NewForest(numTrees, sampleSize, 0.05)
-	forest.Train(features)
+	forest := trainForest(features, numTrees, sampleSize)
 
 	// 3. Score each point
 	var anomalies []*gateonv1.Anomaly
@@ -102,6 +102,20 @@ func (d *NeuralAnomalyDetector) Detect(ctx context.Context, data *DiagnosticData
 	}
 
 	return anomalies
+}
+
+// forestMu serializes forest training. go-iforest's Train writes the
+// package-global iforest.MaxDepth that every tree it builds then reads, so two
+// passes training at once -- the analysis loop and a Diagnostics request, or
+// two requests -- raced on it.
+var forestMu sync.Mutex
+
+func trainForest(features [][]float64, numTrees, sampleSize int) *iforest.Forest {
+	forestMu.Lock()
+	defer forestMu.Unlock()
+	forest := iforest.NewForest(numTrees, sampleSize, 0.05)
+	forest.Train(features)
+	return forest
 }
 
 func (d *NeuralAnomalyDetector) extractFeatures(stats *IPStats) []float64 {

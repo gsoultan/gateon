@@ -77,12 +77,7 @@ func (s *ApiService) GetDiagnostics(ctx context.Context, _ *gateonv1.GetDiagnost
 	})
 
 	g.Go(func() error {
-		if cached := s.anomaliesCache.Load(); cached != nil {
-			anomalies = *cached
-		} else {
-			// Fallback if cache is empty
-			anomalies = s.detectAnomalies(gctx, routes)
-		}
+		anomalies = s.publishedAnomalies(gctx, routes)
 		return nil
 	})
 
@@ -176,6 +171,33 @@ func (s *ApiService) GetDiagnostics(ctx context.Context, _ *gateonv1.GetDiagnost
 		Dependencies:     deps,
 		TotalMitigations: int32(totalUserMit + totalIPMit),
 	}, nil
+}
+
+// publishedAnomalies returns the caller's own copy of the latest detection pass.
+//
+// A copy, because GetDiagnostics appends recent threats to what it gets and
+// sorts it, and every dashboard's watch stream calls it every five seconds:
+// handed the published slice itself, two dashboards were two goroutines
+// permuting one array while the other iterated it.
+//
+// Until the analysis loop publishes its first pass, one pass is run for all
+// the callers waiting on it and published, rather than one per request -- each
+// watch stream used to run a whole pass inline on every tick. It runs detached
+// from the request that started it, since the others share its result.
+func (s *ApiService) publishedAnomalies(ctx context.Context, routes []*gateonv1.Route) []*gateonv1.Anomaly {
+	if cached := s.anomaliesCache.Load(); cached != nil {
+		return slices.Clone(*cached)
+	}
+	v, _, _ := s.coldAnomalies.Do("anomalies", func() (any, error) {
+		if cached := s.anomaliesCache.Load(); cached != nil {
+			return *cached, nil
+		}
+		pass := s.detectAnomalies(context.WithoutCancel(ctx), routes)
+		s.anomaliesCache.CompareAndSwap(nil, &pass)
+		return pass, nil
+	})
+	pass, _ := v.([]*gateonv1.Anomaly)
+	return slices.Clone(pass)
 }
 
 func (s *ApiService) buildEntryPointDiagnostics(

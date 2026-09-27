@@ -9,6 +9,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"golang.org/x/sync/singleflight"
+
 	"github.com/gsoultan/gateon/internal/audit"
 	"github.com/gsoultan/gateon/internal/auth"
 	"github.com/gsoultan/gateon/internal/config"
@@ -71,6 +73,9 @@ type ApiService struct {
 	cfLatencyCache   atomic.Pointer[time.Duration]
 	anomaliesCache   atomic.Pointer[[]*gateonv1.Anomaly]
 	mlLowPowerUntil  atomic.Int64 // UnixNano when low power lapses; 0 is off
+	// coldAnomalies runs one detection pass for every Diagnostics caller that
+	// arrives before the analysis loop has published its first.
+	coldAnomalies singleflight.Group
 }
 
 // mlLowPowerHold is how long one report of CPU pressure keeps the ML engine in
