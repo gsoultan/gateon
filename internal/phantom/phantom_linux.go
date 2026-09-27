@@ -365,24 +365,41 @@ type iouringConn struct {
 	ctx  context.Context
 }
 
-func (c *iouringConn) Read(b []byte) (n int, err error) {
+// awaitOp queues op on the reactor and waits for its completion.
+//
+// ok is false when the ring would not accept the op, so the caller can fall
+// back to the standard descriptor. The op is kept reachable until its
+// completion is observed: the SQE refers to the op's buffer by a bare integer
+// the collector cannot see, and the kernel touches that buffer between the
+// queue and the completion.
+func (c *iouringConn) awaitOp(op uring.Operation) (event uring.CQEvent, ok bool, err error) {
+	defer runtime.KeepAlive(op)
 	resCh := make(chan uring.CQEvent, 1)
-	op := uring.Read(uintptr(c.fd), b, 0)
-	defer runtime.KeepAlive(op) // the kernel writes into op's buffer; see Accept
-	_, err = c.rea.Queue(op, func(event uring.CQEvent) {
-		resCh <- event
-	})
-	if err != nil {
-		return c.Conn.Read(b)
+	if _, qerr := c.rea.Queue(op, func(e uring.CQEvent) { resCh <- e }); qerr != nil {
+		return uring.CQEvent{}, false, nil
 	}
-
-	var event uring.CQEvent
 	select {
 	case event = <-resCh:
+		return event, true, nil
 	case <-c.ctx.Done():
-		return 0, c.ctx.Err()
+		return uring.CQEvent{}, true, c.ctx.Err()
 	}
+}
 
+func (c *iouringConn) Read(b []byte) (int, error) {
+	if len(b) == 0 {
+		// uring.Read takes &b[0], which panics on an empty slice; and the op
+		// would already be queued when it did, leaving the reactor a nil
+		// callback. io.Reader lets an empty read return (0, nil).
+		return 0, nil
+	}
+	event, ok, err := c.awaitOp(uring.Read(uintptr(c.fd), b, 0))
+	if !ok {
+		return c.Conn.Read(b)
+	}
+	if err != nil {
+		return 0, err
+	}
 	if err := event.Error(); err != nil {
 		return 0, err
 	}
@@ -392,26 +409,30 @@ func (c *iouringConn) Read(b []byte) (n int, err error) {
 	return int(event.Res), nil
 }
 
-func (c *iouringConn) Write(b []byte) (n int, err error) {
-	resCh := make(chan uring.CQEvent, 1)
-	op := uring.Write(uintptr(c.fd), b, 0)
-	defer runtime.KeepAlive(op) // the kernel reads op's buffer; see Accept
-	_, err = c.rea.Queue(op, func(event uring.CQEvent) {
-		resCh <- event
-	})
-	if err != nil {
-		return c.Conn.Write(b)
+func (c *iouringConn) Write(b []byte) (int, error) {
+	if len(b) == 0 {
+		return 0, nil
 	}
-
-	var event uring.CQEvent
-	select {
-	case event = <-resCh:
-	case <-c.ctx.Done():
-		return 0, c.ctx.Err()
+	// One write op transfers only as much as the send buffer accepts. io.Writer
+	// requires err != nil whenever n < len(b), so a partial transfer is looped,
+	// not returned as success -- otherwise the tail of a large response is lost.
+	total := 0
+	for total < len(b) {
+		event, ok, err := c.awaitOp(uring.Write(uintptr(c.fd), b[total:], 0))
+		if !ok {
+			n, werr := c.Conn.Write(b[total:])
+			return total + n, werr
+		}
+		if err != nil {
+			return total, err
+		}
+		if err := event.Error(); err != nil {
+			return total, err
+		}
+		if event.Res == 0 {
+			return total, io.ErrShortWrite
+		}
+		total += int(event.Res)
 	}
-
-	if err := event.Error(); err != nil {
-		return 0, err
-	}
-	return int(event.Res), nil
+	return total, nil
 }

@@ -6,6 +6,7 @@
 package phantom
 
 import (
+	"io"
 	"net"
 	"runtime"
 	"strings"
@@ -160,6 +161,101 @@ func TestUringAcceptKeepsTheAddressBufferUntilTheKernelWritesIt(t *testing.T) {
 				"the collector had freed from a pending accept and reallocated", round, hit)
 		}
 		runtime.KeepAlive(spray)
+	}
+}
+
+// acceptOne accepts a single connection from opt and returns it.
+func acceptOne(t *testing.T, opt net.Listener) (server, client net.Conn) {
+	t.Helper()
+	type res struct {
+		c   net.Conn
+		err error
+	}
+	ch := make(chan res, 1)
+	go func() {
+		c, err := opt.Accept()
+		ch <- res{c, err}
+	}()
+	client, err := net.Dial("tcp", opt.Addr().String())
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	r := <-ch
+	if r.err != nil {
+		t.Fatalf("accept: %v", r.err)
+	}
+	return r.c, client
+}
+
+// TestUringWriteDeliversEveryByteOrReportsAnError pins the io.Writer contract
+// on the optimized connection.
+//
+// One io_uring write op transfers as much as the socket send buffer takes and
+// reports that count. Write returned it with a nil error, so a Write of more
+// than the send buffer -- a large HTTP response body, exactly what this path is
+// meant to speed up -- returned n < len(b) and err == nil. io.Copy and
+// net/http's response writer take that as success and move on, and the tail of
+// every large write was dropped.
+func TestUringWriteDeliversEveryByteOrReportsAnError(t *testing.T) {
+	opt := listenOptimized(t, uringCore(t))
+	server, client := acceptOne(t, opt)
+	defer server.Close()
+	defer client.Close()
+
+	received := make(chan int, 1)
+	go func() {
+		n, _ := io.Copy(io.Discard, client) // drains fully, so a correct Write completes
+		received <- int(n)
+	}()
+
+	payload := make([]byte, 32<<20) // larger than any default socket send buffer
+	for i := range payload {
+		payload[i] = byte(i)
+	}
+	n, err := server.Write(payload)
+	if n < len(payload) && err == nil {
+		t.Fatalf("Write returned (%d, nil) for a %d-byte buffer: a short write with no "+
+			"error tells io.Copy and net/http the whole buffer was sent, so the "+
+			"remaining %d bytes are silently dropped", n, len(payload), len(payload)-n)
+	}
+	if err != nil {
+		t.Fatalf("Write to a fully-draining peer failed: %v", err)
+	}
+	_ = server.Close()
+	if got := <-received; got != len(payload) {
+		t.Fatalf("the peer received %d of %d bytes", got, len(payload))
+	}
+}
+
+// TestUringZeroLengthIODoesNotCrash covers an empty buffer, which http/2 frame
+// writing and bufio can both hand a conn.
+//
+// The read and write ops take &buf[0] unconditionally, which panics on a
+// zero-length slice; worse, the op had already been queued when the panic
+// unwound, leaving the reactor a nil callback to invoke on the completion,
+// which took the whole process down rather than one connection.
+func TestUringZeroLengthIODoesNotCrash(t *testing.T) {
+	opt := listenOptimized(t, uringCore(t))
+	server, client := acceptOne(t, opt)
+	defer server.Close()
+	defer client.Close()
+
+	if n, err := server.Write([]byte{}); n != 0 || err != nil {
+		t.Fatalf("Write(empty) = (%d, %v), want (0, nil)", n, err)
+	}
+	if n, err := server.Read([]byte{}); n != 0 || err != nil {
+		t.Fatalf("Read(empty) = (%d, %v), want (0, nil)", n, err)
+	}
+
+	// The reactor must still be alive: a real exchange has to go through.
+	go func() { _, _ = client.Write([]byte("ping")) }()
+	buf := make([]byte, 4)
+	if _, err := io.ReadFull(server, buf); err != nil {
+		t.Fatalf("a real read after the empty ops failed, so the reactor did not "+
+			"survive them: %v", err)
+	}
+	if string(buf) != "ping" {
+		t.Fatalf("read %q after empty ops, want \"ping\"", buf)
 	}
 }
 
