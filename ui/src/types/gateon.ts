@@ -148,6 +148,7 @@ export enum HealthCheckType {
 export type RouteTLSConfig = {
   certificateIds: string[];
   optionId?: string;
+  acmeEnabled?: boolean;
 };
 
 export type TLSOption = {
