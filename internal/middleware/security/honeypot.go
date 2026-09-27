@@ -372,14 +372,13 @@ func serveHoneypotGlobal(globalStore config.GlobalConfigStore, next http.Handler
 		return
 	}
 
-	paths, deceptionEnabled := honeypotPaths(globalStore, r)
+	paths, injectLinks := honeypotPaths(globalStore, r)
 	if trap, hit := honeypotTrapFor(r.URL.Path, paths); hit {
 		honeypotHit(w, r, trap)
 		return
 	}
 
-	// If deception is enabled, wrap ResponseWriter to inject breadcrumbs
-	if deceptionEnabled {
+	if injectLinks {
 		next.ServeHTTP(&breadcrumbWriter{ResponseWriter: w, request: r}, r)
 		return
 	}
@@ -436,18 +435,23 @@ func noHoneypotBans() bool {
 }
 
 // honeypotPaths resolves the configured trap paths, falling back to the
-// built-in set so an enabled honeypot with no paths still traps something.
-func honeypotPaths(globalStore config.GlobalConfigStore, r *http.Request) (paths []string, deceptionEnabled bool) {
-	gc := globalStore.Get(r.Context())
-	if gc != nil && gc.SecurityAdvanced != nil && gc.SecurityAdvanced.Deception != nil &&
-		gc.SecurityAdvanced.Deception.Enabled {
-		paths = gc.SecurityAdvanced.Deception.HoneypotPaths
-		deceptionEnabled = true
+// built-in set so an enabled honeypot with no paths still traps something, and
+// reports whether pages get the hidden trap link.
+//
+// The link follows the dashboard's "Inject Invisible Links" switch, not the
+// deception switch above it. It used to follow the latter, so an operator who
+// turned links off still had one injected into every HTML page -- the switch
+// they could see was not the one in force. The route-level deception the
+// router builds from the same settings already honoured it for its own links.
+func honeypotPaths(globalStore config.GlobalConfigStore, r *http.Request) (paths []string, injectLinks bool) {
+	if d := globalStore.Get(r.Context()).GetSecurityAdvanced().GetDeception(); d.GetEnabled() {
+		paths = d.GetHoneypotPaths()
+		injectLinks = d.GetInjectInvisibleLinks()
 	}
 	if len(paths) == 0 {
 		paths = defaultHoneypotPaths()
 	}
-	return paths, deceptionEnabled
+	return paths, injectLinks
 }
 
 // honeypotTrapFor reports which trap a path hit, if any. A trap matches
@@ -533,9 +537,12 @@ func (w *breadcrumbWriter) Write(b []byte) (int, error) {
 		return w.ResponseWriter.Write(b)
 	}
 
-	// Generate a unique trap path
+	// Generate a unique trap path. rel="nofollow" for the reason deception's
+	// markup carries it: a search crawler reads markup, not styles, and follows a
+	// hidden link as readily as a bot does -- and here it would be banned for it.
+	// Well-behaved crawlers honour nofollow; the bots the trap is for do not.
 	trapID := newTrapID()
-	trapLink := fmt.Sprintf("\n<!-- Gateon Breadcrumb -->\n<a href=\"/_gateon_trap_%d\" style=\"display:none\" aria-hidden=\"true\" tabIndex=\"-1\"></a>\n", trapID)
+	trapLink := fmt.Sprintf("\n<!-- Gateon Breadcrumb -->\n<a href=\"/_gateon_trap_%d\" rel=\"nofollow\" style=\"display:none\" aria-hidden=\"true\" tabIndex=\"-1\"></a>\n", trapID)
 	return writeAround(w.ResponseWriter, b, idx, trapLink)
 }
 

@@ -129,8 +129,8 @@ export const SecurityAdvancedSettingsCard: React.FC<SecurityAdvancedSettingsCard
                 <TagsInput
                   id="deception-honeypot-paths"
                   label="Honeypot Paths"
-                  description="Accessing these paths triggers an immediate block. Recommended: /.env, /wp-admin, /config.php"
-                  placeholder="/.env, /wp-admin, /_backup"
+                  description="A request for one of these paths is refused and its client banned: 15 minutes at first, rising to a day on repeat hits. Leave empty for the built-in list (/.env, /.git, /.aws, /.ssh, /config.php, /backup.sql). Never list a path real users visit, such as /wp-admin: the first administrator to sign in would be banned."
+                  placeholder="/.env, /.git, /backup.sql"
                   value={security.deception?.honeypotPaths || []}
                   onChange={(val) => updateSection("deception", { honeypotPaths: val })}
                   disabled={disabled}
@@ -138,7 +138,7 @@ export const SecurityAdvancedSettingsCard: React.FC<SecurityAdvancedSettingsCard
                 <Group justify="space-between" mt="xs">
                   <Stack gap={0}>
                     <Text size="sm" fw={500}>Inject Invisible Links</Text>
-                    <Text size="xs" c="dimmed">Inject hidden links into HTML responses to trap automated crawlers.</Text>
+                    <Text size="xs" c="dimmed">Inject hidden trap links into HTML pages, to catch clients that follow links no person can see. Search engines are asked not to follow them (rel=nofollow).</Text>
                   </Stack>
                   <Switch
                     checked={security.deception?.injectInvisibleLinks}
