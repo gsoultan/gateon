@@ -336,6 +336,9 @@ func registerTelemetryProviders(s *Server) {
 	telemetry.SetEbpfManager(s.EbpfManager)
 	telemetry.SetTargetHealthProvider(s.proxyCache())
 	telemetry.SetVersion(s.Version)
+	telemetry.SetDetectorStatusProvider(func() (bool, bool) {
+		return api.DetectorStatus(config.GetGlobalConfig().GetAnomalyDetection())
+	})
 	if s.Phantom != nil {
 		telemetry.SetTitanProvider(s.Phantom)
 	}

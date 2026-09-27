@@ -136,6 +136,30 @@ func SetVersion(v string) {
 	globalVersion.Store(v)
 }
 
+// DetectorStatusProvider reports whether the analysis loop runs the Neural
+// Sentinel and Graph Intelligence under the current configuration.
+type DetectorStatusProvider func() (neuralSentinel, graphIntelligence bool)
+
+var globalDetectorStatus atomic.Pointer[DetectorStatusProvider]
+
+// SetDetectorStatusProvider registers where the snapshot reads the detectors'
+// status. The API package owns the answer, since it owns the conditions the
+// detectors check before they run.
+func SetDetectorStatusProvider(p DetectorStatusProvider) {
+	globalDetectorStatus.Store(&p)
+}
+
+// detectorStatus is the registered provider's answer, or off before one is
+// registered. Both flags used to be true unconditionally -- on every install,
+// including the default one, where anomaly detection is off and neither
+// detector runs.
+func detectorStatus() (neuralSentinel, graphIntelligence bool) {
+	if p := globalDetectorStatus.Load(); p != nil && *p != nil {
+		return (*p)()
+	}
+	return false, false
+}
+
 func GetLastSnapshot() *MetricsSnapshot {
 	return lastSnapshot.Load()
 }
@@ -1141,8 +1165,7 @@ func buildSystemMetrics(idx map[string]*dto.MetricFamily) SystemMetrics {
 	}
 
 	sm.PredictiveAiEnabled = ai.GlobalPredictor() != nil
-	sm.NeuralSentinelEnabled = true // Isolation Forest is always active if initialized
-	sm.GraphIntelligenceEnabled = true
+	sm.NeuralSentinelEnabled, sm.GraphIntelligenceEnabled = detectorStatus()
 	sm.PqcEnabled = true // ML-KEM/ML-DSA always available in binary
 
 	sm.ResourceGovernorEnabled = false

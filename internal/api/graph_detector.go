@@ -45,10 +45,25 @@ const (
 	graphMaxBroadcastsPerPass = 64
 )
 
+// graphIntelligenceRuns reports whether the detector runs under cfg: whenever
+// anomaly detection is on. It reads the attack evidence threats carry, so it
+// does not need behavioural fingerprinting.
+func graphIntelligenceRuns(cfg *gateonv1.AnomalyDetectionConfig) bool {
+	return cfg.GetEnabled()
+}
+
+// DetectorStatus reports whether the analysis loop runs the Neural Sentinel and
+// Graph Intelligence under cfg -- the conditions each checks before it runs --
+// for the status the dashboard shows.
+func DetectorStatus(cfg *gateonv1.AnomalyDetectionConfig) (neuralSentinel, graphIntelligence bool) {
+	_, neuralSentinel = neuralThreshold(cfg)
+	return neuralSentinel, graphIntelligenceRuns(cfg)
+}
+
 // Detect files this pass's attack links, gossips the qualifying ones, and
 // reports the clusters.
 func (d *HybridGraphAnomalyDetector) Detect(ctx context.Context, data *DiagnosticData) []*gateonv1.Anomaly {
-	if d.Config == nil || !d.Config.GetEnabled() {
+	if !graphIntelligenceRuns(d.Config) {
 		return nil
 	}
 	now := data.now()
