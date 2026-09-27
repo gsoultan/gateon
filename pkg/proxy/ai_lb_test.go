@@ -5,11 +5,13 @@ package proxy
 
 import (
 	"context"
+	"slices"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/gsoultan/gateon/internal/ai"
+	"github.com/gsoultan/gateon/internal/telemetry"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
@@ -159,5 +161,30 @@ func TestAIPredictiveForgetsRemovedTargets(t *testing.T) {
 	}
 	if _, ok := lb.strategy.Estimate(kept, now); !ok {
 		t.Error("a target still configured was forgotten")
+	}
+}
+
+// TestEveryPolicyReportsAHealthTransition: the dashboard's circuit-breaker
+// feed learns that a target went down or came back from the balancer's
+// SetAlive. Round robin, least-connections and weighted round robin reported
+// it; ai_predictive did not, so its services' outages never appeared there.
+func TestEveryPolicyReportsAHealthTransition(t *testing.T) {
+	installProductionPredictor(t)
+	for _, policy := range []string{"round_robin", "least_conn", "weighted_round_robin", "ai_predictive"} {
+		t.Run(policy, func(t *testing.T) {
+			target := "http://health-" + policy
+			lb := NewDefaultLoadBalancerFactory().Create(policy, []*gateonv1.Target{{Url: target, Weight: 1}})
+			lb.SetAlive(target, false)
+			lb.SetAlive(target, true)
+			var got []telemetry.CircuitState
+			for _, ev := range telemetry.GetCircuitBreakerEvents() {
+				if ev.Target == target {
+					got = append(got, ev.State)
+				}
+			}
+			if want := []telemetry.CircuitState{telemetry.CircuitOpen, telemetry.CircuitClosed}; !slices.Equal(got, want) {
+				t.Errorf("%s: health transitions recorded for %s = %v, want %v", policy, target, got, want)
+			}
+		})
 	}
 }

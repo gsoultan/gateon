@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/gsoultan/gateon/internal/ai"
+	"github.com/gsoultan/gateon/internal/telemetry"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
@@ -141,7 +142,9 @@ func (lb *AIPredictiveLB) GetStats() []TargetStats {
 	return stats
 }
 
-// SetAlive marks a target as alive or dead based on health checks.
+// SetAlive marks a target as alive or dead based on health checks, and
+// reports the transition to the circuit-breaker feed as the other policies do;
+// ai_predictive services' outages never appeared there.
 func (lb *AIPredictiveLB) SetAlive(url string, alive bool) {
 	ptr := lb.targetsPtr.Load()
 	if ptr == nil {
@@ -149,6 +152,13 @@ func (lb *AIPredictiveLB) SetAlive(url string, alive bool) {
 	}
 	for _, t := range *ptr {
 		if t.url == url {
+			if t.alive.Load() != alive {
+				state := telemetry.CircuitClosed
+				if !alive {
+					state = telemetry.CircuitOpen
+				}
+				telemetry.RecordCircuitBreakerEvent(url, state, "health check")
+			}
 			t.alive.Store(alive)
 			return
 		}
