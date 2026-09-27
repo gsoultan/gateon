@@ -33,6 +33,7 @@ ADRs follow a lightweight [MADR](https://adr.github.io/madr/)-style format:
 | [0020](./0020-the-kernel-filters-ipv6-too.md) | The kernel filters IPv6 too | Accepted |
 | [0021](./0021-first-run-setup-requires-a-token.md) | First-run setup requires a one-time token | Accepted |
 | [0022](./0022-traces-are-archived-an-hour-at-a-time.md) | Traces are archived an hour at a time, in files named for the hour | Accepted |
+| [0023](./0023-the-trace-archive-has-a-directory-per-node.md) | The trace archive has a directory per node, and every node reads them all | Accepted |
 
 ## Conventions
 

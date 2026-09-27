@@ -5,17 +5,17 @@ package tracearchive
 
 import (
 	"bytes"
+	"cmp"
+	"container/heap"
 	"context"
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"io/fs"
 	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
 
-	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/telemetry"
 )
 
@@ -55,6 +55,11 @@ var ErrInvalidQuery = errors.New("invalid query")
 // it will at once.
 var ErrBusy = errors.New("the trace archive is busy")
 
+// ErrTooLarge is returned when a search would hold more of the archive at once
+// than maxSearchHeld allows: more nodes with hours in its period, or larger
+// frames, than a real archive has.
+var ErrTooLarge = errors.New("the trace archive holds more for this period than one search may read at once")
+
 // querySlots bounds the queries reading at once to one. A query runs on one
 // core; on the two-core hosts Gateon is sized for, two would be both of them,
 // and decoding JSON is CPU the proxy on the same host would rather have.
@@ -70,8 +75,9 @@ type Query struct {
 	// OldestFirst reads the period forwards. The default is newest first.
 	OldestFirst bool
 	Filter      Filter
-	// budget overrides scanBudget, for tests.
-	budget int
+	// budget overrides scanBudget, and holdLimit maxSearchHeld, for tests.
+	budget    int
+	holdLimit int64
 }
 
 // Filter narrows a query. An empty field matches everything.
@@ -87,8 +93,9 @@ type Filter struct {
 
 // Result is one page of a query.
 type Result struct {
-	// Traces are summaries, without headers or bodies.
-	Traces []*telemetry.TraceRecord
+	// Traces are summaries, without headers or bodies, each with the node
+	// that recorded it.
+	Traces []Found
 	// NextCursor continues the query where this page stopped; empty once the
 	// period has been read to the end.
 	NextCursor string
@@ -99,10 +106,20 @@ type Result struct {
 	ScannedTo time.Time
 }
 
-// Search returns one page of a query. The part of the period the live store
-// still holds is read from the store; the part before that from the archive.
+// Found is a trace a query found, and the node that recorded it.
+type Found struct {
+	*telemetry.TraceRecord
+	Node string
+}
+
+// Search returns one page of a query, merged from every place that holds
+// traces for the period: this node's live store above its hot floor, this
+// node's archive below it, and every other node's archive for the whole period
+// -- this node cannot see their stores, and on shared storage it can read their
+// archives (ADR-0023). The sources are merged by trace key, which is also what
+// the cursor holds, so pages neither repeat nor skip across them.
 //
-// The store is read through a snapshot taken before the split is decided, so a
+// The store is read through a snapshot taken before the floor is decided, so a
 // prune that lands while the archive is being read cannot delete an hour after
 // the query has decided the store is where that hour is.
 func Search(ctx context.Context, q Query) (Result, error) {
@@ -124,18 +141,19 @@ func Search(ctx context.Context, q Query) (Result, error) {
 	case !errors.Is(err, telemetry.ErrTraceStoreClosed):
 		return Result{}, err
 	}
-	run := &searchRun{view: view, after: after, c: &collector{
-		limit: q.Limit, budget: cmpOr(q.budget, scanBudget), filter: q.Filter.compile(),
-	}}
-	for _, p := range q.phases(floor, CurrentSettings().Dir) {
-		if err := run.phase(ctx, p); err != nil {
-			return Result{}, err
-		}
-		if run.c.done {
-			break
-		}
+	srcs, err := q.sources(sourcePlan{
+		view: view, floor: floor, after: after, settings: CurrentSettings(),
+		hold: &holdings{limit: cmp.Or(q.holdLimit, maxSearchHeld)},
+	})
+	defer closeSources(srcs)
+	if err != nil {
+		return Result{}, err
 	}
-	return run.c.result(), nil
+	c := &collector{limit: q.Limit, budget: cmpOr(q.budget, scanBudget), filter: q.Filter.compile()}
+	if err := merge(ctx, srcs, !q.OldestFirst, c); err != nil {
+		return Result{}, err
+	}
+	return c.result(), nil
 }
 
 func takeSlot(ctx context.Context) (func(), error) {
@@ -149,13 +167,6 @@ func takeSlot(ctx context.Context) (func(), error) {
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
-}
-
-// searchRun is one Search call's state across its phases.
-type searchRun struct {
-	view  *telemetry.TraceView // nil when the store is not open
-	after []byte
-	c     *collector
 }
 
 func cmpOr(v, fallback int) int {
@@ -201,25 +212,75 @@ func decodeCursor(cursor string) ([]byte, error) {
 	return key, nil
 }
 
-// phase is the part of a query's period read from one place.
-type phase struct {
+// span is a period read in one direction.
+type span struct {
 	from, to time.Time
 	desc     bool
-	// archive is the archive's root, or empty to read the live store.
-	archive string
 }
 
-// phases splits the period at the store's floor: the live store for what it
-// holds, the archive for what came before. Newest first reads the store first.
-func (q Query) phases(floor time.Time, archive string) []phase {
+// sourcePlan is what Search knows when it lays out its sources.
+type sourcePlan struct {
+	view     *telemetry.TraceView // nil when the store is not open
+	floor    time.Time
+	after    []byte
+	settings Settings
+	hold     *holdings
+}
+
+// sources lays out where the query's period is read from. What a source
+// cannot hold -- an empty range, a node with no archived hour in it -- is left
+// out.
+func (q Query) sources(p sourcePlan) ([]source, error) {
 	desc := !q.OldestFirst
-	store := phase{from: laterOf(q.From, floor), to: q.To, desc: desc}
-	archived := phase{from: q.From, to: earlierOf(q.To, floor), desc: desc, archive: archive}
-	ps := []phase{store, archived}
-	if !desc {
-		ps = []phase{archived, store}
+	var out []source
+	if p.view != nil {
+		if from := laterOf(q.From, p.floor); from.Before(q.To) {
+			it, err := p.view.Iter(telemetry.TraceScan{From: from, To: q.To, Desc: desc, After: p.after})
+			if err != nil {
+				return out, err
+			}
+			out = append(out, &storeSource{it: it, node: p.settings.Node})
+		}
 	}
-	return slices.DeleteFunc(ps, func(p phase) bool { return !p.from.Before(p.to) })
+	nodes, err := listNodes(p.settings.Dir)
+	if err != nil {
+		return out, err
+	}
+	for _, node := range nodes {
+		to := q.To
+		if node == p.settings.Node {
+			to = earlierOf(q.To, p.floor) // the store has the rest
+		}
+		src, err := newArchiveSource(p.settings.Dir, node, span{from: q.From, to: to, desc: desc}, p.after, p.hold)
+		if err != nil {
+			return out, err
+		}
+		if src != nil {
+			out = append(out, src)
+		}
+	}
+	return out, nil
+}
+
+// newArchiveSource is nil when the node has nothing archived in the span, past
+// the cursor.
+func newArchiveSource(root, node string, sp span, after []byte, hold *holdings) (*archiveSource, error) {
+	if !sp.from.Before(sp.to) {
+		return nil, nil
+	}
+	w := newKeyWindow(sp, after)
+	if bytes.Compare(w.lo, w.hi) >= 0 {
+		return nil, nil
+	}
+	nw := w.nanos()
+	segs, err := listSegments(root, node, time.Unix(0, nw.lo), time.Unix(0, nw.hi))
+	if err != nil || len(segs) == 0 {
+		return nil, err
+	}
+	if sp.desc {
+		slices.Reverse(segs)
+	}
+	return &archiveSource{root: root, node: node, segs: segs, w: w, hold: hold}, nil
 }
 
 func laterOf(a, b time.Time) time.Time {
@@ -236,96 +297,133 @@ func earlierOf(a, b time.Time) time.Time {
 	return b
 }
 
-func (r *searchRun) phase(ctx context.Context, p phase) error {
-	if p.archive != "" {
-		return p.runArchive(ctx, r.after, r.c)
-	}
-	if r.view == nil {
-		return nil // no store, so nothing recent to find
-	}
-	var rec telemetry.TraceRecord
-	return r.view.Scan(ctx, telemetry.TraceScan{From: p.from, To: p.to, Desc: p.desc, After: r.after},
-		func(key, value []byte) bool {
-			rec = telemetry.TraceRecord{}
-			return r.c.offer(key, &rec, trace{readable: telemetry.UnmarshalTraceSummary(value, &rec) == nil, size: len(value)})
-		})
+// source yields traces in one span's order, each once.
+type source interface {
+	// advance moves to the next trace and reports whether there is one.
+	advance(ctx context.Context) (bool, error)
+	// current is the trace advance moved to, valid until the next advance.
+	current() ([]byte, *telemetry.TraceRecord, trace)
+	nodeName() string
+	close()
 }
 
-// runArchive reads the archived hours the window reaches. The window, not the
-// period, picks the files: once the cursor has moved past an hour, a later page
-// does not open it again only to find nothing in it.
-func (p phase) runArchive(ctx context.Context, after []byte, c *collector) error {
-	w := newKeyWindow(p, after)
-	if bytes.Compare(w.lo, w.hi) >= 0 {
-		return nil
+// storeSource reads this node's live store through a view.
+type storeSource struct {
+	it   *telemetry.TraceIter
+	node string
+	rec  telemetry.TraceRecord
+	t    trace
+}
+
+func (s *storeSource) advance(context.Context) (bool, error) {
+	if !s.it.Next() {
+		return false, s.it.Err()
 	}
-	nw := w.nanos()
-	segs, err := listSegments(p.archive, time.Unix(0, nw.lo), time.Unix(0, nw.hi))
-	if err != nil {
-		return err
+	s.rec = telemetry.TraceRecord{}
+	v := s.it.Value()
+	s.t = trace{readable: telemetry.UnmarshalTraceSummary(v, &s.rec) == nil, size: len(v)}
+	return true, nil
+}
+
+func (s *storeSource) current() ([]byte, *telemetry.TraceRecord, trace) {
+	return s.it.Key(), &s.rec, s.t
+}
+
+func (s *storeSource) nodeName() string { return s.node }
+
+func (s *storeSource) close() { _ = s.it.Close() }
+
+func closeSources(srcs []source) {
+	for _, s := range srcs {
+		s.close()
 	}
-	if p.desc {
-		slices.Reverse(segs)
-	}
-	for _, info := range segs {
-		if err := scanArchived(ctx, info.seg.path(p.archive), w, c); err != nil || c.done {
+}
+
+// merge offers the sources' traces to the collector in one key order until
+// it has what it needs. Each source is in that order already, so a heap of
+// their current traces is all the ordering there is to do.
+func merge(ctx context.Context, srcs []source, desc bool, c *collector) error {
+	h := &sourceHeap{desc: desc}
+	for _, s := range srcs {
+		ok, err := s.advance(ctx)
+		if err != nil {
 			return err
+		}
+		if ok {
+			h.items = append(h.items, s)
+		}
+	}
+	heap.Init(h)
+	for n := 1; h.Len() > 0; n++ {
+		if n%256 == 0 && ctx.Err() != nil {
+			return ctx.Err()
+		}
+		top := h.items[0]
+		key, rec, t := top.current()
+		if !c.offer(key, rec, t, top.nodeName()) {
+			return nil
+		}
+		ok, err := top.advance(ctx)
+		if err != nil {
+			return err
+		}
+		if ok {
+			heap.Fix(h, 0)
+		} else {
+			heap.Pop(h)
 		}
 	}
 	return nil
 }
 
-// scanArchived offers the traces of one archived hour that fall in the window.
-// An hour that has gone -- retention runs while queries do -- or cannot be read
-// is passed over: one bad file should not blank a year of history.
-func scanArchived(ctx context.Context, path string, w keyWindow, c *collector) error {
-	f, err := openSegment(path)
-	if err != nil {
-		if !errors.Is(err, fs.ErrNotExist) {
-			logger.Default().LogWarn("trace archive: skipping an unreadable segment", "path", path, "error", err)
-		}
-		return nil
-	}
-	defer f.Close()
-	var rec telemetry.TraceRecord
-	key := make([]byte, 0, 64)
-	_, err = f.scan(ctx, w.nanos(), func(line []byte) bool {
-		rec = telemetry.TraceRecord{}
-		if telemetry.UnmarshalTraceSummary(line, &rec) != nil {
-			return true
-		}
-		key = telemetry.AppendTraceKey(key[:0], rec.Timestamp, rec.ID)
-		switch w.place(key) {
-		case beforeWindow:
-			return true
-		case pastWindow:
-			return false
-		}
-		return c.offer(key, &rec, trace{readable: true, size: len(line)})
-	})
-	if err != nil && ctx.Err() == nil {
-		logger.Default().LogWarn("trace archive: stopped reading a damaged segment", "path", path, "error", err)
-		return nil
-	}
-	return err
+// sourceHeap keeps the source whose current trace comes next at the top:
+// the smallest key reading forwards, the largest reading backwards.
+type sourceHeap struct {
+	items []source
+	desc  bool
 }
 
-// keyWindow is where a phase reads, in store keys: [lo, hi), with the cursor
+func (h *sourceHeap) Len() int { return len(h.items) }
+
+func (h *sourceHeap) Less(i, j int) bool {
+	a, _, _ := h.items[i].current()
+	b, _, _ := h.items[j].current()
+	if h.desc {
+		return bytes.Compare(a, b) > 0
+	}
+	return bytes.Compare(a, b) < 0
+}
+
+func (h *sourceHeap) Swap(i, j int) { h.items[i], h.items[j] = h.items[j], h.items[i] }
+
+func (h *sourceHeap) Push(x any) {
+	if s, ok := x.(source); ok {
+		h.items = append(h.items, s)
+	}
+}
+
+func (h *sourceHeap) Pop() any {
+	last := h.items[len(h.items)-1]
+	h.items = h.items[:len(h.items)-1]
+	return last
+}
+
+// keyWindow is where a source reads, in store keys: [lo, hi), with the cursor
 // already folded in, and the direction the scan meets keys in.
 type keyWindow struct {
 	lo, hi []byte
 	desc   bool
 }
 
-// newKeyWindow narrows the phase's period to what lies strictly past the
-// cursor in the phase's direction.
-func newKeyWindow(p phase, after []byte) keyWindow {
-	w := keyWindow{lo: timePrefix(p.from), hi: timePrefix(p.to), desc: p.desc}
+// newKeyWindow narrows a span to what lies strictly past the cursor in the
+// span's direction.
+func newKeyWindow(sp span, after []byte) keyWindow {
+	w := keyWindow{lo: timePrefix(sp.from), hi: timePrefix(sp.to), desc: sp.desc}
 	switch {
 	case after == nil:
-	case p.desc && bytes.Compare(after, w.hi) < 0:
+	case sp.desc && bytes.Compare(after, w.hi) < 0:
 		w.hi = after
-	case !p.desc && bytes.Compare(after, w.lo) >= 0:
+	case !sp.desc && bytes.Compare(after, w.lo) >= 0:
 		// The smallest key that sorts after the cursor.
 		w.lo = append(bytes.Clone(after), 0)
 	}
@@ -374,7 +472,7 @@ func (w keyWindow) nanos() nanoWindow {
 type collector struct {
 	limit, budget int
 	filter        *compiledFilter
-	out           []*telemetry.TraceRecord
+	out           []Found
 	scanned       int
 	scannedBytes  int
 	last          []byte
@@ -390,13 +488,13 @@ type trace struct {
 
 // offer examines one trace and reports whether the scan should go on. A trace
 // that could not be read still counts toward the budget and moves the cursor.
-func (c *collector) offer(key []byte, rec *telemetry.TraceRecord, t trace) bool {
+func (c *collector) offer(key []byte, rec *telemetry.TraceRecord, t trace, node string) bool {
 	c.scanned++
 	c.scannedBytes += t.size
 	c.last = append(c.last[:0], key...)
 	if t.readable && c.filter.matches(rec) {
 		kept := *rec
-		c.out = append(c.out, &kept)
+		c.out = append(c.out, Found{TraceRecord: &kept, Node: node})
 	}
 	switch {
 	case len(c.out) >= c.limit:

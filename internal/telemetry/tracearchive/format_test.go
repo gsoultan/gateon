@@ -24,7 +24,7 @@ import (
 // returns the segment's path and its NDJSON as it should decompress.
 func bigLines(t *testing.T, root string, seg Segment, n, size int) (string, []byte) {
 	t.Helper()
-	w, err := newSegmentWriter(root, seg)
+	w, err := newSegmentWriter(root, testNode, seg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,7 +42,7 @@ func bigLines(t *testing.T, root string, seg Segment, n, size int) (string, []by
 	if _, published, err := w.commit(); err != nil || !published {
 		t.Fatalf("commit: published=%v err=%v", published, err)
 	}
-	return seg.path(root), want.Bytes()
+	return seg.path(root, testNode), want.Bytes()
 }
 
 // A segment has to be several frames for the index to mean anything, and every
@@ -138,14 +138,14 @@ func TestFrameRange_PicksOnlyTheFramesAWindowNeeds(t *testing.T) {
 func TestCommit_WithNoTracesPublishesNothing(t *testing.T) {
 	root := t.TempDir()
 	seg := hour(t, "2026-09-26T17")
-	w, err := newSegmentWriter(root, seg)
+	w, err := newSegmentWriter(root, testNode, seg)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, published, err := w.commit(); err != nil || published {
 		t.Fatalf("commit = published %v, err %v; want nothing published", published, err)
 	}
-	left, _ := os.ReadDir(filepath.Join(root, seg.dir()))
+	left, _ := os.ReadDir(filepath.Join(root, seg.dir(testNode)))
 	if len(left) != 0 {
 		t.Fatalf("left %d file(s) behind: %v", len(left), left)
 	}

@@ -4,7 +4,8 @@ Date: 2026-09-26
 
 ## Status
 
-Accepted.
+Accepted. The layout gained a directory and a name part per node in
+[ADR 0023](0023-the-trace-archive-has-a-directory-per-node.md), before release.
 
 ## Context
 

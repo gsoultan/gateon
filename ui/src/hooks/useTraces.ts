@@ -30,6 +30,8 @@ export interface Trace {
   routeDelayMs?: number;
   middlewareDelayMs?: number;
   serviceDelayMs?: number;
+  /** The gateway that recorded it, in period-query results. */
+  node?: string;
 }
 
 // Both through the generated client: the REST routes only wrapped these RPCs,

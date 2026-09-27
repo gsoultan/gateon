@@ -75,10 +75,11 @@ export function TraceArchiveSettingsCard({ config, onChange, disabled }: TraceAr
 
         <Text size="xs" c="dimmed">
           A few minutes after each hour ends, its traces are written to{" "}
-          <Code>trace_archive/2026/09/26/traces-2026-09-26T14Z.ndjson.zst</Code> under the gateway's data directory —
-          one file per UTC hour, named for the hour it holds. When either limit is reached the oldest hours go first.
-          Changes apply within a minute, without a restart; <Code>GATEON_TRACE_ARCHIVE_*</Code> environment variables,
-          where set, take precedence.
+          <Code>trace_archive/gw-1/2026/09/26/traces-2026-09-26T14Z.gw-1.ndjson.zst</Code> under the gateway's data
+          directory — one file per UTC hour, named for the hour it holds and for this gateway, which is{" "}
+          <Code>GATEON_NODE_NAME</Code> or else the host name. Gateways sharing the directory each keep their own
+          files and search each other's. When either limit is reached the oldest hours go first. Changes apply within a minute, without a restart;{" "}
+          <Code>GATEON_TRACE_ARCHIVE_*</Code> environment variables, where set, take precedence.
         </Text>
       </Stack>
     </Card>

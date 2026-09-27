@@ -34,6 +34,30 @@ func counter(t *testing.T, c prometheus.Counter) float64 {
 	return m.GetCounter().GetValue()
 }
 
+// Nodes sharing a root each export their own hours. Another node's newer hour
+// is not this node's progress: taken for it, this node would never export an
+// hour of its own older than the other's newest. What Status reports, though,
+// is the whole archive.
+func TestArchiver_AnotherNodesHoursAreNotItsProgress(t *testing.T) {
+	openStore(t)
+	root := enableArchive(t)
+	now := time.Now().UTC()
+	mine, theirs := SegmentAt(now.Add(-3*time.Hour)), SegmentAt(now.Add(-2*time.Hour))
+	writeNodeFile(t, root, "gw-other", theirs, testTrace{id: "other", at: theirs.Start().Add(time.Minute)})
+	store(t, testTrace{id: "mine", at: mine.Start().Add(time.Minute)})
+
+	a := &Archiver{}
+	a.tick(context.Background(), now)
+	if !exists(mine.path(root, testNode)) {
+		t.Fatal("this node's hour was not archived: another node's newer hour was taken for this node's progress")
+	}
+	st := a.Status()
+	if st.Segments != 2 || !slices.Equal(st.Nodes, []string{"gw-other", testNode}) ||
+		!st.Oldest.Equal(mine.Start()) || !st.Newest.Equal(theirs.Start()) {
+		t.Fatalf("status = %+v, want both nodes' hours", st)
+	}
+}
+
 // Closed hours are archived, each in its own file; the hour still open is not.
 func TestArchiver_WritesEachClosedHourOnce(t *testing.T) {
 	openStore(t)
@@ -50,13 +74,13 @@ func TestArchiver_WritesEachClosedHourOnce(t *testing.T) {
 	a := &Archiver{}
 	a.tick(context.Background(), now)
 
-	if got := ids(t, h1.path(root)); !slices.Equal(got, []string{"a", "b"}) {
-		t.Fatalf("%s holds %v, want [a b]", h1.Name(), got)
+	if got := ids(t, h1.path(root, testNode)); !slices.Equal(got, []string{"a", "b"}) {
+		t.Fatalf("%s holds %v, want [a b]", h1.FileName(testNode), got)
 	}
-	if got := ids(t, h2.path(root)); !slices.Equal(got, []string{"c"}) {
-		t.Fatalf("%s holds %v, want [c]", h2.Name(), got)
+	if got := ids(t, h2.path(root, testNode)); !slices.Equal(got, []string{"c"}) {
+		t.Fatalf("%s holds %v, want [c]", h2.FileName(testNode), got)
 	}
-	if exists(open.path(root)) {
+	if exists(open.path(root, testNode)) {
 		t.Fatal("the hour still open was archived")
 	}
 
@@ -91,7 +115,7 @@ func TestArchiver_MergesALateTraceBeforeTheStoreMayDeleteItsHour(t *testing.T) {
 	)
 	a := &Archiver{}
 	a.tick(context.Background(), now)
-	if got := ids(t, h.path(root)); !slices.Equal(got, []string{"early", "later"}) {
+	if got := ids(t, h.path(root, testNode)); !slices.Equal(got, []string{"early", "later"}) {
 		t.Fatalf("first archive of the hour holds %v", got)
 	}
 	if limit := a.guard(cutoff); limit.After(cutoff) {
@@ -101,7 +125,7 @@ func TestArchiver_MergesALateTraceBeforeTheStoreMayDeleteItsHour(t *testing.T) {
 	store(t, testTrace{id: "late", at: h.Start().Add(20 * time.Minute)})
 	a.tick(context.Background(), now.Add(2*time.Hour))
 
-	if got := ids(t, h.path(root)); !slices.Equal(got, []string{"early", "late", "later"}) {
+	if got := ids(t, h.path(root, testNode)); !slices.Equal(got, []string{"early", "late", "later"}) {
 		t.Fatalf("after the check the hour holds %v, want the late trace merged in key order", got)
 	}
 	if v := time.Unix(0, a.verifiedThrough.Load()); !v.After(h.Start()) {
@@ -129,7 +153,7 @@ func TestReconcile_KeepsWhatOnlyTheOldFileHeld(t *testing.T) {
 	if _, err := a.reconcile(context.Background(), CurrentSettings(), h); err != nil {
 		t.Fatal(err)
 	}
-	if got := ids(t, h.path(root)); !slices.Equal(got, []string{"gone-1", "both", "new", "gone-2"}) {
+	if got := ids(t, h.path(root, testNode)); !slices.Equal(got, []string{"gone-1", "both", "new", "gone-2"}) {
 		t.Fatalf("merged hour holds %v", got)
 	}
 	// Now in step with the store: a second reconcile leaves it alone.
@@ -185,7 +209,7 @@ func TestArchiver_WhenOffWritesNothing(t *testing.T) {
 
 	(&Archiver{}).tick(context.Background(), now)
 
-	if exists(h.path(root)) {
+	if exists(h.path(root, testNode)) {
 		t.Fatal("an hour was archived with archiving off")
 	}
 }
@@ -198,8 +222,8 @@ func TestArchiver_ReportsAFailureUntilItClears(t *testing.T) {
 	now := time.Now().UTC()
 	h := SegmentAt(now.Add(-3 * time.Hour))
 	store(t, testTrace{id: "a", at: h.Start().Add(time.Minute)})
-	// A file where the year's directory must go.
-	block := filepath.Join(root, h.Start().Format("2006"))
+	// A file where the node's directory must go.
+	block := filepath.Join(root, testNode)
 	if err := os.WriteFile(block, []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -215,8 +239,8 @@ func TestArchiver_ReportsAFailureUntilItClears(t *testing.T) {
 		t.Fatal(err)
 	}
 	a.tick(context.Background(), now.Add(time.Minute))
-	if st := a.Status(); st.LastError != "" || !exists(h.path(root)) {
-		t.Fatalf("after the fix: LastError = %q, archived = %v", st.LastError, exists(h.path(root)))
+	if st := a.Status(); st.LastError != "" || !exists(h.path(root, testNode)) {
+		t.Fatalf("after the fix: LastError = %q, archived = %v", st.LastError, exists(h.path(root, testNode)))
 	}
 }
 
@@ -279,16 +303,16 @@ func TestReconcile_LeavesAFileItCannotReadAlone(t *testing.T) {
 		testTrace{id: "b", at: h.Start().Add(2 * time.Minute)},
 	)
 	store(t, testTrace{id: "d", at: h.Start().Add(30 * time.Minute)})
-	if err := os.Chmod(h.path(root), 0); err != nil {
+	if err := os.Chmod(h.path(root, testNode), 0); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = os.Chmod(h.path(root), 0o600) })
+	t.Cleanup(func() { _ = os.Chmod(h.path(root, testNode), 0o600) })
 
 	if _, err := (&Archiver{}).reconcile(context.Background(), CurrentSettings(), h); err == nil {
 		t.Fatal("reconcile reported success on a file it could not read")
 	}
-	_ = os.Chmod(h.path(root), 0o600)
-	if got := ids(t, h.path(root)); !slices.Equal(got, []string{"a", "b"}) {
+	_ = os.Chmod(h.path(root, testNode), 0o600)
+	if got := ids(t, h.path(root, testNode)); !slices.Equal(got, []string{"a", "b"}) {
 		t.Fatalf("the unreadable file was rewritten: it holds %v", got)
 	}
 }
@@ -307,7 +331,7 @@ func TestArchiver_BackfillsWhenRetentionIsRaised(t *testing.T) {
 	)
 	a := &Archiver{}
 	a.tick(context.Background(), now)
-	if exists(old.path(root)) {
+	if exists(old.path(root, testNode)) {
 		t.Fatal("an hour outside a one-day retention was archived")
 	}
 
@@ -316,8 +340,8 @@ func TestArchiver_BackfillsWhenRetentionIsRaised(t *testing.T) {
 	for i := range 3 {
 		a.tick(context.Background(), later.Add(time.Duration(i)*time.Minute))
 	}
-	if !exists(old.path(root)) {
-		t.Fatalf("%s is inside the new retention and still in the store, but was not archived", old.Name())
+	if !exists(old.path(root, testNode)) {
+		t.Fatalf("%s is inside the new retention and still in the store, but was not archived", old.FileName(testNode))
 	}
 }
 
@@ -341,7 +365,7 @@ func TestReconcile_DoesNotDuplicateAnIDThatIsNotUTF8(t *testing.T) {
 	if _, err := a.reconcile(context.Background(), CurrentSettings(), h); err != nil {
 		t.Fatal(err)
 	}
-	if got := ids(t, h.path(root)); len(got) != 4 {
+	if got := ids(t, h.path(root, testNode)); len(got) != 4 {
 		t.Fatalf("after three merges the hour holds %q, want four traces", got)
 	}
 }

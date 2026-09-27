@@ -4,9 +4,11 @@
 package tracearchive
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"os"
 	"slices"
 	"strings"
@@ -14,6 +16,7 @@ import (
 	"time"
 
 	"github.com/gsoultan/gateon/internal/telemetry"
+	"github.com/klauspost/compress/zstd"
 )
 
 // timeline puts two archived hours before the live store's oldest trace and
@@ -147,7 +150,7 @@ func TestSearch_StopsAtTheBudgetAndResumes(t *testing.T) {
 func TestSearch_PassesOverADamagedHour(t *testing.T) {
 	base, _ := timeline(t)
 	damaged := SegmentAt(base.Add(-3 * time.Hour))
-	if err := os.WriteFile(damaged.path(CurrentSettings().Dir), []byte("not a segment"), 0o600); err != nil {
+	if err := os.WriteFile(damaged.path(CurrentSettings().Dir, testNode), []byte("not a segment"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	q := Query{From: base.Add(-3 * time.Hour), To: base.Add(time.Hour), Limit: 100, OldestFirst: true}
@@ -267,4 +270,160 @@ func TestFilter_MatchesIgnoringASCIICase(t *testing.T) {
 	if accented.matches(&telemetry.TraceRecord{Path: "/é"}) {
 		t.Error("a non-ASCII letter was folded; the filter documents ASCII case only")
 	}
+}
+
+// Behind a load balancer the trace an operator wants is in whichever node
+// served it. With the archive root shared, every node's archive is searched
+// with this node's store and archive as one timeline -- including another
+// node's hours newer than this node's floor, which this node's store cannot
+// have -- and each trace says which node recorded it.
+func TestSearch_MergesEveryNodesArchiveIntoOneTimeline(t *testing.T) {
+	openStore(t)
+	root := enableArchive(t)
+	base := time.Now().UTC().Add(-48 * time.Hour).Truncate(time.Hour)
+	older := SegmentAt(base.Add(-2 * time.Hour))
+	writeFile(t, root, older, testTrace{id: "local-archived", at: older.Start().Add(10 * time.Minute)})
+	store(t,
+		testTrace{id: "local-live-1", at: base.Add(5 * time.Minute)},
+		testTrace{id: "local-live-2", at: base.Add(50 * time.Minute)},
+	)
+	writeNodeFile(t, root, "gw-other", older, testTrace{id: "other-early", at: older.Start().Add(20 * time.Minute)})
+	writeNodeFile(t, root, "gw-other", SegmentAt(base), testTrace{id: "other-late", at: base.Add(30 * time.Minute)})
+
+	oldestFirst := []string{
+		"local-archived@gw-test", "other-early@gw-other", "local-live-1@gw-test", "other-late@gw-other", "local-live-2@gw-test",
+	}
+	newestFirst := slices.Clone(oldestFirst)
+	slices.Reverse(newestFirst)
+	for _, limit := range []int{1, 2, 3, 100} {
+		q := Query{From: older.Start(), To: base.Add(time.Hour), Limit: limit}
+		if got := pagesWithNodes(t, q); !slices.Equal(got, newestFirst) {
+			t.Fatalf("newest first, %d a page: %v\nwant %v", limit, got, newestFirst)
+		}
+		q.OldestFirst = true
+		if got := pagesWithNodes(t, q); !slices.Equal(got, oldestFirst) {
+			t.Fatalf("oldest first, %d a page: %v\nwant %v", limit, got, oldestFirst)
+		}
+	}
+}
+
+// pagesWithNodes is pages, naming each trace's node.
+func pagesWithNodes(t *testing.T, q Query) []string {
+	t.Helper()
+	var got []string
+	for range 1000 {
+		res, err := Search(context.Background(), q)
+		if err != nil {
+			t.Fatalf("Search: %v", err)
+		}
+		for _, tr := range res.Traces {
+			got = append(got, tr.ID+"@"+tr.Node)
+		}
+		if res.NextCursor == "" {
+			return got
+		}
+		q.Cursor = res.NextCursor
+	}
+	t.Fatal("the query never reached the end of its period")
+	return nil
+}
+
+// A frame is counted before it is decoded, by the size its header states. One
+// that states none is not one this package wrote, and is not decoded.
+func TestFrameClaims_TrustsOnlyAStatedSize(t *testing.T) {
+	payload := []byte(strings.Repeat(`{"id":"a-trace","path":"/orders"}`+"\n", 30_000)) // past one zstd block
+	enc, err := zstd.NewWriter(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n, err := frameClaims(enc.EncodeAll(payload, nil)); err != nil || n != int64(len(payload)) {
+		t.Fatalf("frameClaims of a whole frame = %d, %v; want %d", n, err, len(payload))
+	}
+	var streamed bytes.Buffer
+	enc.Reset(&streamed) // a stream does not know its size when it starts
+	if _, err := enc.Write(payload); err != nil {
+		t.Fatal(err)
+	}
+	if err := enc.Close(); err != nil {
+		t.Fatal(err)
+	}
+	for name, frame := range map[string][]byte{"no stated size": streamed.Bytes(), "not zstd": []byte("not a frame")} {
+		if n, err := frameClaims(frame); !errors.Is(err, ErrCorrupt) {
+			t.Errorf("%s: frameClaims = %d, %v; want ErrCorrupt", name, n, err)
+		}
+	}
+}
+
+// holding is what a search's source holds reading a file of one frame: its
+// index, and its frame compressed and decoded.
+func holding(t *testing.T, path string) int64 {
+	t.Helper()
+	f, err := openSegment(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if len(f.frames) != 1 {
+		t.Fatalf("%s has %d frames, want 1", path, len(f.frames))
+	}
+	src := make([]byte, f.frames[0].length)
+	if _, err := f.f.ReadAt(src, f.frames[0].offset); err != nil {
+		t.Fatal(err)
+	}
+	n, err := frameClaims(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return indexEntrySize + int64(len(src)) + n
+}
+
+// traceRun is n traces from start, a minute apart.
+func traceRun(prefix string, start time.Time, n int) []testTrace {
+	out := make([]testTrace, n)
+	for i := range out {
+		out[i] = testTrace{id: fmt.Sprintf("%s-%02d", prefix, i), at: start.Add(time.Duration(i) * time.Minute)}
+	}
+	return out
+}
+
+// A search holds a file's index and a frame for each node at once, and no more
+// than its limit in all. Past the limit it is refused rather than cut short: a
+// page that quietly left out one node's traces would read as the whole answer.
+func TestSearch_HoldsNoMoreThanItsLimit(t *testing.T) {
+	t.Run("one frame for each node at once", func(t *testing.T) {
+		openStore(t)
+		root := enableArchive(t)
+		seg := hour(t, "2026-09-20T10")
+		var need int64
+		for i, node := range []string{"gw-a", "gw-b", "gw-c"} {
+			writeNodeFile(t, root, node, seg, testTrace{id: node, at: seg.Start().Add(time.Duration(i+1) * time.Minute)})
+			need += holding(t, seg.path(root, node))
+		}
+		q := Query{From: seg.Start(), To: seg.End(), holdLimit: need}
+		if res, err := Search(context.Background(), q); err != nil || len(res.Traces) != 3 {
+			t.Fatalf("with room for all three: %d traces, %v", len(res.Traces), err)
+		}
+		q.holdLimit = need - 1
+		if res, err := Search(context.Background(), q); !errors.Is(err, ErrTooLarge) {
+			t.Fatalf("a byte short: %d traces, %v; want ErrTooLarge", len(res.Traces), err)
+		}
+	})
+	// gw-a's hour ends before gw-b moves on to its larger second hour; what
+	// gw-a held must be free by then.
+	t.Run("a source that is done gives back what it held", func(t *testing.T) {
+		openStore(t)
+		root := enableArchive(t)
+		h10, h11 := hour(t, "2026-09-20T10"), hour(t, "2026-09-20T11")
+		writeNodeFile(t, root, "gw-a", h10, traceRun("a", h10.Start(), 50)...)
+		writeNodeFile(t, root, "gw-b", h10, testTrace{id: "b-last", at: h10.Start().Add(55 * time.Minute)})
+		writeNodeFile(t, root, "gw-b", h11, traceRun("b", h11.Start(), 30)...)
+		a10, b10, b11 := holding(t, h10.path(root, "gw-a")), holding(t, h10.path(root, "gw-b")), holding(t, h11.path(root, "gw-b"))
+		if b11 <= b10 || b11 > a10+b10 {
+			t.Fatalf("fixture: want gw-b's second hour larger than its first and within both first hours: %d, %d, %d", a10, b10, b11)
+		}
+		q := Query{From: h10.Start(), To: h11.End(), OldestFirst: true, Limit: 500, holdLimit: a10 + b10}
+		if res, err := Search(context.Background(), q); err != nil || len(res.Traces) != 81 {
+			t.Fatalf("%d traces, %v; want all 81 within the two first hours' room", len(res.Traces), err)
+		}
+	})
 }

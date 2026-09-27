@@ -32,14 +32,14 @@ import {
 } from "../../hooks/useTraceArchives";
 import { formatBytes } from "../../utils/format";
 import { QueryError } from "../QueryError";
+import { archivePath, severalNodes } from "./traceNodes";
 
 const when = (iso: string) => (iso ? new Date(iso).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }) : "—");
 const clock = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 const day = (iso: string) => new Date(iso).toLocaleDateString([], { weekday: "short", year: "numeric", month: "short", day: "numeric" });
 
-// The directory an hour's file lives in under the archive root, which is named
-// in UTC like the file: 2026/09/26.
-const utcDir = (iso: string) => iso.slice(0, 10).replace(/-/g, "/");
+// The most gateway names the status card lists before counting the rest.
+const LISTED_NODES = 6;
 
 interface TraceArchivePanelProps {
   /** Opens the History tab on one archived hour. */
@@ -88,7 +88,11 @@ export default function TraceArchivePanel({ onViewHour }: TraceArchivePanelProps
               </Stack>
             </Center>
           ) : (
-            <SegmentTable segments={segments} onViewHour={onViewHour} />
+            <SegmentTable
+              segments={segments}
+              showNode={severalNodes(segments) || (status?.nodes.length ?? 0) > 1}
+              onViewHour={onViewHour}
+            />
           )}
           {archives.hasNextPage && (
             <Group justify="center">
@@ -164,23 +168,55 @@ function ArchiveStatusCard({ status, newest }: { status: TraceArchiveStatus | nu
           <Text size="xs" c="dimmed">When either limit is reached, the oldest hours go first.</Text>
         </Stack>
 
-        <NamingNote example={newest} />
+        <NodesNote status={status} />
+        <NamingNote example={newest} node={status.node} />
       </Stack>
     </Card>
   );
 }
 
+// NodesNote names this gateway in the archive and, when the archive's storage
+// is shared, the others writing to it: every gateway's hours are listed here
+// and searched in History.
+function NodesNote({ status }: { status: TraceArchiveStatus }) {
+  const others = status.nodes.filter((n) => n !== status.node);
+  if (!status.node) return null;
+  return (
+    <Text size="xs" c="dimmed">
+      This gateway archives as <Code>{status.node}</Code>.
+      {others.length > 0 && (
+        <>
+          {" "}
+          Shared with {others.length === 1 ? "one other gateway" : `${others.length} other gateways`}:{" "}
+          {others.slice(0, LISTED_NODES).map((n, i) => (
+            <Fragment key={n}>
+              {i > 0 && ", "}
+              <Code>{n}</Code>
+            </Fragment>
+          ))}
+          {others.length > LISTED_NODES && ` and ${others.length - LISTED_NODES} more`}.{" "}
+          {others.length === 1 ? "Its" : "Their"} hours are listed and searched with this one's.
+        </>
+      )}
+    </Text>
+  );
+}
+
 // NamingNote explains the file names with a real one where there is one.
-function NamingNote({ example }: { example?: TraceArchiveSegment }) {
-  const start = example?.periodStart ?? "2026-09-26T14:00:00Z";
-  const name = example?.name ?? "traces-2026-09-26T14Z.ndjson.zst";
+function NamingNote({ example, node }: { example?: TraceArchiveSegment; node: string }) {
+  const sample = example ?? {
+    node: node || "gw-1",
+    periodStart: "2026-09-26T14:00:00Z",
+    name: `traces-2026-09-26T14Z.${node || "gw-1"}.ndjson.zst`,
+  };
+  const start = sample.periodStart;
   const hour = Number(start.slice(11, 13));
   const span = `${String(hour).padStart(2, "0")}:00–${String((hour + 1) % 24).padStart(2, "0")}:00 UTC`;
   return (
     <Text size="xs" c="dimmed">
-      One file per hour, named for the UTC hour it holds, in a directory per UTC day:{" "}
-      <Code>{`${utcDir(start)}/${name}`}</Code> holds the traces whose requests started {span} on{" "}
-      {start.slice(0, 10)}. Read one with <Code>zstd -dc FILE | jq .</Code>
+      One file per hour and gateway, named for the UTC hour it holds and the gateway that recorded it, in a directory
+      per gateway and UTC day: <Code>{archivePath(sample)}</Code> holds the traces whose requests started {span} on{" "}
+      {start.slice(0, 10)} at {sample.node}. Read one with <Code>zstd -dc FILE | jq .</Code>
     </Text>
   );
 }
@@ -194,13 +230,20 @@ function Stat({ label, value }: { label: string; value: string }) {
   );
 }
 
-function SegmentTable({ segments, onViewHour }: { segments: TraceArchiveSegment[]; onViewHour: (s: string) => void }) {
+interface SegmentTableProps {
+  segments: TraceArchiveSegment[];
+  showNode: boolean;
+  onViewHour: (s: string) => void;
+}
+
+function SegmentTable({ segments, showNode, onViewHour }: SegmentTableProps) {
   return (
     <ScrollArea>
       <Table highlightOnHover verticalSpacing="xs">
         <Table.Thead>
           <Table.Tr>
             <Table.Th>Hour</Table.Th>
+            {showNode && <Table.Th>Node</Table.Th>}
             <Table.Th>File</Table.Th>
             <Table.Th ta="right">Traces</Table.Th>
             <Table.Th ta="right">Size</Table.Th>
@@ -213,12 +256,12 @@ function SegmentTable({ segments, onViewHour }: { segments: TraceArchiveSegment[
             <Fragment key={s.name}>
               {(i === 0 || day(segments[i - 1].periodStart) !== day(s.periodStart)) && (
                 <Table.Tr>
-                  <Table.Td colSpan={6} bg="var(--mantine-color-default-hover)">
+                  <Table.Td colSpan={showNode ? 7 : 6} bg="var(--mantine-color-default-hover)">
                     <Text size="xs" fw={700}>{day(s.periodStart)}</Text>
                   </Table.Td>
                 </Table.Tr>
               )}
-              <SegmentRow segment={s} onViewHour={onViewHour} />
+              <SegmentRow segment={s} showNode={showNode} onViewHour={onViewHour} />
             </Fragment>
           ))}
         </Table.Tbody>
@@ -227,7 +270,7 @@ function SegmentTable({ segments, onViewHour }: { segments: TraceArchiveSegment[
   );
 }
 
-function SegmentRow({ segment: s, onViewHour }: { segment: TraceArchiveSegment; onViewHour: (s: string) => void }) {
+function SegmentRow({ segment: s, showNode, onViewHour }: { segment: TraceArchiveSegment } & Omit<SegmentTableProps, "segments">) {
   return (
     <Table.Tr>
       <Table.Td>
@@ -235,6 +278,11 @@ function SegmentRow({ segment: s, onViewHour }: { segment: TraceArchiveSegment; 
           {clock(s.periodStart)} – {clock(s.periodEnd)}
         </Text>
       </Table.Td>
+      {showNode && (
+        <Table.Td>
+          <Text size="xs" ff="monospace" style={{ whiteSpace: "nowrap" }}>{s.node}</Text>
+        </Table.Td>
+      )}
       <Table.Td>
         <Text size="xs" ff="monospace" c="dimmed">{s.name}</Text>
       </Table.Td>
@@ -249,7 +297,7 @@ function SegmentRow({ segment: s, onViewHour }: { segment: TraceArchiveSegment; 
       </Table.Td>
       <Table.Td>
         <Group gap={4} justify="flex-end" wrap="nowrap">
-          <Tooltip label="Search this hour's traces">
+          <Tooltip label={showNode ? "Search this hour's traces, from every gateway" : "Search this hour's traces"}>
             <Button size="compact-xs" variant="light" leftSection={<IconSearch size={12} />} onClick={() => onViewHour(s.periodStart)}>
               View
             </Button>

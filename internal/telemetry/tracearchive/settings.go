@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/gsoultan/gateon/internal/config"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
@@ -23,6 +24,9 @@ const (
 	EnvDir           = "GATEON_TRACE_ARCHIVE_DIR"
 	EnvRetentionDays = "GATEON_TRACE_ARCHIVE_RETENTION_DAYS"
 	EnvMaxMB         = "GATEON_TRACE_ARCHIVE_MAX_MB"
+	// EnvNodeName names this gateway in the archive; the host name otherwise.
+	// Two gateways on one host that share an archive root must each set it.
+	EnvNodeName = "GATEON_NODE_NAME"
 )
 
 // Settings is the archive's effective configuration.
@@ -36,6 +40,9 @@ type Settings struct {
 	MaxBytes int64
 	// Dir is the archive's root directory.
 	Dir string
+	// Node is this gateway's name in the archive: its directory under Dir, and
+	// part of every file it writes. See ADR-0023.
+	Node string
 }
 
 // CurrentSettings resolves the settings as they stand now. It is cheap enough
@@ -47,6 +54,7 @@ func CurrentSettings() Settings {
 		RetentionDays: td.TraceArchiveRetentionDays,
 		MaxBytes:      td.TraceArchiveMaxBytes,
 		Dir:           filepath.Join(config.DataDir(), "trace_archive"),
+		Node:          NodeName(hostName()),
 	}
 	s.applyConfig(config.GetGlobalConfig().GetLog())
 	s.applyEnv()
@@ -79,7 +87,20 @@ func (s *Settings) applyEnv() {
 	if dir := strings.TrimSpace(os.Getenv(EnvDir)); dir != "" {
 		s.Dir = dir
 	}
+	if node := strings.TrimSpace(os.Getenv(EnvNodeName)); node != "" {
+		s.Node = NodeName(node)
+	}
 }
+
+// hostName is read once: a node whose name changed while it ran would start
+// writing a second directory halfway through an hour.
+var hostName = sync.OnceValue(func() string {
+	h, err := os.Hostname()
+	if err != nil {
+		return ""
+	}
+	return h
+})
 
 func positiveEnv(name string) (int64, bool) {
 	n, err := strconv.ParseInt(strings.TrimSpace(os.Getenv(name)), 10, 64)

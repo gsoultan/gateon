@@ -20,15 +20,16 @@ mock.module("../services/client", () => ({
         segments: [
           {
             $typeName: "gateon.v1.TraceArchiveSegment",
-            name: "traces-2026-09-26T14Z.ndjson.zst",
+            name: "traces-2026-09-26T14Z.gw-2.ndjson.zst",
             periodStart: "2026-09-26T14:00:00Z",
             periodEnd: "2026-09-26T15:00:00Z",
             sizeBytes: 3_145_728n,
             traceCount: 40_213n,
             archivedAt: "2026-09-26T15:02:00Z",
+            node: "gw-2",
           },
         ],
-        nextPageToken: "traces-2026-09-26T14Z.ndjson.zst",
+        nextPageToken: "traces-2026-09-26T14Z.gw-2.ndjson.zst",
         status: {
           $typeName: "gateon.v1.TraceArchiveStatus",
           enabled: true,
@@ -42,6 +43,8 @@ mock.module("../services/client", () => ({
           lastArchivedAt: "2026-09-26T15:02:00Z",
           lastError: "",
           lastErrorAt: "",
+          node: "gw-1",
+          nodes: ["gw-1", "gw-2"],
         },
       };
     },
@@ -60,14 +63,21 @@ describe("trace archives", () => {
     expect(JSON.stringify(page)).not.toContain("$typeName");
   });
 
+  test("say which gateway wrote each hour, and which gateways share the archive", async () => {
+    const page = await fetchTraceArchivePage("");
+    expect(page.segments[0].node).toBe("gw-2");
+    expect(page.status?.node).toBe("gw-1");
+    expect(page.status?.nodes).toEqual(["gw-1", "gw-2"]);
+  });
+
   test("page through with the token the page before gave", async () => {
     calls.length = 0;
-    await fetchTraceArchivePage("traces-2026-09-26T14Z.ndjson.zst");
-    expect(calls).toEqual([{ pageSize: 48, pageToken: "traces-2026-09-26T14Z.ndjson.zst" }]);
+    await fetchTraceArchivePage("traces-2026-09-26T14Z.gw-2.ndjson.zst");
+    expect(calls).toEqual([{ pageSize: 48, pageToken: "traces-2026-09-26T14Z.gw-2.ndjson.zst" }]);
   });
 
   test("download from the archive route, compressed or as plain NDJSON", () => {
-    const name = "traces-2026-09-26T14Z.ndjson.zst";
+    const name = "traces-2026-09-26T14Z.gw-2.ndjson.zst";
     expect(new URL(traceArchiveDownloadUrl(name, false)).pathname).toBe(`/v1/traces/archives/${name}`);
     const plain = new URL(traceArchiveDownloadUrl(name, true));
     expect(plain.pathname).toBe(`/v1/traces/archives/${name}`);

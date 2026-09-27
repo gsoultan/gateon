@@ -179,8 +179,8 @@ func (a *Archiver) archiveHour(ctx context.Context, s Settings, seg Segment, now
 // and never one the archive's retention would delete as soon as it was written.
 func (a *Archiver) resume(ctx context.Context, s Settings, now time.Time) (Segment, bool, error) {
 	if a.next.start.IsZero() {
-		if st := a.snapshot().stats; st.segments > 0 {
-			a.next = st.newest.Next()
+		if own := a.snapshot().stats.own; own.segments > 0 {
+			a.next = own.newest.Next()
 		}
 	}
 	from := a.next
@@ -226,18 +226,18 @@ func (a *Archiver) verifyAhead(ctx context.Context, s Settings, now time.Time) {
 
 // firstToVerify returns the first stored hour not yet verified. Hours the
 // archive's retention would not keep are passed over. So are hours older than
-// the oldest one archived, once the archive is near its size budget: the
-// budget let them go, and writing them again only for it to delete them again
-// would be work in a loop. Below the budget they are written -- retention may
-// have been raised, and the store still has them.
+// this node's oldest archived one, once the archive is near its size budget:
+// the budget let them go, and writing them again only for it to delete them
+// again would be work in a loop. Below the budget they are written --
+// retention may have been raised, and the store still has them.
 func (a *Archiver) firstToVerify(ctx context.Context, s Settings, now time.Time) (Segment, bool, error) {
 	from := SegmentAt(time.Unix(0, a.verifiedThrough.Load()))
 	if floor := retentionFloor(s, now); from.start.Before(floor.start) {
 		from = floor
 	}
 	st := a.snapshot().stats
-	if st.segments > 0 && st.oldest.start.After(from.start) && !roomToBackfill(s, st) {
-		from = st.oldest
+	if st.own.segments > 0 && st.own.oldest.start.After(from.start) && !roomToBackfill(s, st) {
+		from = st.own.oldest
 	}
 	return nextStored(ctx, from)
 }

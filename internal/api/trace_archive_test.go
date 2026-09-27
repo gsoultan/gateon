@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http/httptest"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -43,6 +44,7 @@ func TestTraceArchive_AnArchivedTraceIsFoundAndOpens(t *testing.T) {
 	t.Setenv("GATEON_PROFILE", "standard")
 	t.Setenv(tracearchive.EnvDir, t.TempDir())
 	t.Setenv(tracearchive.EnvEnabled, "true")
+	t.Setenv(tracearchive.EnvNodeName, "gw-api")
 	openTraceStore(t)
 
 	at := time.Now().UTC().Add(-3 * time.Hour).Truncate(time.Second)
@@ -66,6 +68,18 @@ func TestTraceArchive_AnArchivedTraceIsFoundAndOpens(t *testing.T) {
 	}
 	if len(q.Traces) != 1 || q.Traces[0].Id != "archived-1" || q.NextCursor != "" {
 		t.Fatalf("QueryTraces = %+v, want the one archived trace and no further page", q)
+	}
+	if q.Traces[0].Node != "gw-api" {
+		t.Fatalf("the trace's node = %q, want the gateway that recorded it", q.Traces[0].Node)
+	}
+	list, err := s.ListTraceArchives(context.Background(), &gateonv1.ListTraceArchivesRequest{})
+	if err != nil {
+		t.Fatalf("ListTraceArchives: %v", err)
+	}
+	seg := tracearchive.SegmentAt(at)
+	if segs := list.GetSegments(); len(segs) != 1 || segs[0].Node != "gw-api" || segs[0].Name != seg.FileName("gw-api") ||
+		list.GetStatus().GetNode() != "gw-api" {
+		t.Fatalf("ListTraceArchives = %+v, want gw-api's one hour, named for it", list)
 	}
 
 	got, err := s.GetTrace(context.Background(), &gateonv1.GetTraceRequest{Id: "archived-1", Timestamp: q.Traces[0].Timestamp})
@@ -115,6 +129,11 @@ func TestListTraceArchives_ReportsTheArchive(t *testing.T) {
 	}
 	if _, err := (&ApiService{}).ListTraceArchives(context.Background(), &gateonv1.ListTraceArchivesRequest{PageToken: "../x"}); status.Code(err) != codes.InvalidArgument {
 		t.Fatalf("a forged page token: %v, want InvalidArgument", err)
+	}
+	// The counts are the running archiver's; what is reported of them is this.
+	st := traceArchiveStatus(tracearchive.Status{Settings: tracearchive.Settings{Node: "gw-a"}, Nodes: []string{"gw-a", "gw-b"}})
+	if st.GetNode() != "gw-a" || !slices.Equal(st.GetNodes(), []string{"gw-a", "gw-b"}) {
+		t.Fatalf("status = %+v, want this node and both", st)
 	}
 }
 
@@ -183,5 +202,14 @@ func TestConnectCode_PassesThroughWhatItDoesNotConvert(t *testing.T) {
 	own := status.Error(codes.Unauthenticated, "no")
 	if got := connectCode(own); got != own { //nolint:errorlint // identity is the property under test
 		t.Fatalf("Unauthenticated was converted to %v; only a real session expiry may say that", got)
+	}
+}
+
+// A search the archive refuses for what it would hold is ResourceExhausted, in
+// words fit to show; the node it stopped at stays in the log.
+func TestTraceArchiveError_ASearchTooLargeIsResourceExhausted(t *testing.T) {
+	err := traceArchiveError("query", fmt.Errorf("%w: node gw-7", tracearchive.ErrTooLarge))
+	if st, _ := status.FromError(err); st.Code() != codes.ResourceExhausted || strings.Contains(st.Message(), "gw-7") {
+		t.Fatalf("traceArchiveError = %v, want ResourceExhausted without the detail", err)
 	}
 }

@@ -4,10 +4,12 @@
 package tracearchive
 
 import (
+	"cmp"
 	"errors"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 )
@@ -15,6 +17,7 @@ import (
 // segmentFileInfo is a segment found on disk.
 type segmentFileInfo struct {
 	seg  Segment
+	node string
 	size int64
 	mod  time.Time
 }
@@ -24,7 +27,7 @@ type segmentFileInfo struct {
 // orders of magnitude; one this old was abandoned by a crash.
 const staleTempAge = time.Hour
 
-// periodLevels are the directories below the archive root -- year, month,
+// periodLevels are the directories below a node's directory -- year, month,
 // day -- with the layout of each one's name and the length of its period.
 var periodLevels = [...]struct {
 	layout string
@@ -35,22 +38,80 @@ var periodLevels = [...]struct {
 	{"02", func(t time.Time) time.Time { return t.AddDate(0, 0, 1) }},
 }
 
-// segmentWalk lists the segments under root that overlap [from, to), oldest
-// first. A zero bound is open. Directories whose period lies outside the
-// range are not opened, so a query for one day reads one day's directory.
-// Anything in the tree that is not a segment in its own day's directory is
-// ignored, except abandoned temporary files, which are collected for removal.
+// listNodes returns the node directories under the archive root, sorted. A
+// root that does not exist yet has none.
+func listNodes(root string) ([]string, error) {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var nodes []string
+	for _, e := range entries {
+		if e.IsDir() && ValidNode(e.Name()) {
+			nodes = append(nodes, e.Name())
+		}
+	}
+	return nodes, nil
+}
+
+// listSegments returns one node's segments that overlap [from, to), oldest
+// first. A zero bound is open.
+func listSegments(root, node string, from, to time.Time) ([]segmentFileInfo, error) {
+	w := segmentWalk{root: root, node: node, from: from, to: to}
+	err := w.walk(node, 0, time.Time{})
+	return w.segments, err
+}
+
+// listAllSegments returns every node's segments that overlap [from, to),
+// oldest first, and for one hour in node order.
+func listAllSegments(root string, from, to time.Time) ([]segmentFileInfo, error) {
+	w, err := walkAll(root, from, to)
+	if err != nil {
+		return nil, err
+	}
+	return w.segments, nil
+}
+
+// walkAll walks every node's directory, and orders what it found by hour and
+// then node.
+func walkAll(root string, from, to time.Time) (*segmentWalk, error) {
+	nodes, err := listNodes(root)
+	if err != nil {
+		return nil, err
+	}
+	all := &segmentWalk{root: root, from: from, to: to}
+	for _, node := range nodes {
+		w := segmentWalk{root: root, node: node, from: from, to: to}
+		if err := w.walk(node, 0, time.Time{}); err != nil {
+			return nil, err
+		}
+		all.segments = append(all.segments, w.segments...)
+		all.temps = append(all.temps, w.temps...)
+	}
+	slices.SortStableFunc(all.segments, func(a, b segmentFileInfo) int {
+		if c := a.seg.start.Compare(b.seg.start); c != 0 {
+			return c
+		}
+		return cmp.Compare(a.node, b.node)
+	})
+	return all, nil
+}
+
+// segmentWalk lists the segments under one node's directory that overlap
+// [from, to), oldest first. A zero bound is open. Directories whose period lies
+// outside the range are not opened, so a query for one day reads one day's
+// directory. Anything in the tree that is not the node's segment in its own
+// day's directory is ignored, except abandoned temporary files, which are
+// collected for removal.
 type segmentWalk struct {
 	root     string
+	node     string
 	from, to time.Time
 	segments []segmentFileInfo
 	temps    []string
-}
-
-func listSegments(root string, from, to time.Time) ([]segmentFileInfo, error) {
-	w := segmentWalk{root: root, from: from, to: to}
-	err := w.walk("", 0, time.Time{})
-	return w.segments, err
 }
 
 func (w *segmentWalk) walk(rel string, depth int, parent time.Time) error {
@@ -108,31 +169,52 @@ func (w *segmentWalk) collect(rel string, entries []fs.DirEntry) {
 			w.temps = append(w.temps, filepath.Join(rel, e.Name()))
 			continue
 		}
-		seg, err := ParseSegmentName(e.Name())
-		if err != nil || !e.Type().IsRegular() || seg.dir() != rel || !w.overlaps(seg.Start(), seg.End()) {
+		seg, node, err := ParseFileName(e.Name())
+		if err != nil || node != w.node || !e.Type().IsRegular() || seg.dir(node) != rel ||
+			!w.overlaps(seg.Start(), seg.End()) {
 			continue
 		}
 		info, err := e.Info()
 		if err != nil {
 			continue
 		}
-		w.segments = append(w.segments, segmentFileInfo{seg: seg, size: info.Size(), mod: info.ModTime()})
+		w.segments = append(w.segments, segmentFileInfo{seg: seg, node: node, size: info.Size(), mod: info.ModTime()})
 	}
 }
 
-// catalogStats summarises what the archive holds.
+// catalogStats summarises what the archive holds: all of it, and this node's
+// part, which is what the archiver's own decisions are about.
 type catalogStats struct {
 	segments int
 	bytes    int64
 	oldest   Segment
 	newest   Segment
+	nodes    []string // every node with an archived hour
+	own      ownStats
 }
 
-func statsOf(segs []segmentFileInfo) catalogStats {
+type ownStats struct {
+	segments       int
+	oldest, newest Segment
+}
+
+// statsOf summarises segments sorted oldest first, counting node's as its own.
+func statsOf(segs []segmentFileInfo, node string) catalogStats {
 	st := catalogStats{segments: len(segs)}
 	for _, s := range segs {
 		st.bytes += s.size
+		if !slices.Contains(st.nodes, s.node) {
+			st.nodes = append(st.nodes, s.node)
+		}
+		if s.node == node {
+			if st.own.segments == 0 {
+				st.own.oldest = s.seg
+			}
+			st.own.segments++
+			st.own.newest = s.seg
+		}
 	}
+	slices.Sort(st.nodes)
 	if len(segs) > 0 {
 		st.oldest, st.newest = segs[0].seg, segs[len(segs)-1].seg
 	}
@@ -143,12 +225,17 @@ func statsOf(segs []segmentFileInfo) catalogStats {
 // oldest ones until the archive fits its size budget, then whatever an
 // interrupted write left behind. It returns what remains.
 //
+// It covers every node's directory, not only this node's: a node that is
+// renamed or replaced leaves its directory behind, and someone has to age it
+// out. Nodes sharing a root apply the same settings, so their deletions agree;
+// a file another node removed first is not an error.
+//
 // An hour that will not delete stops the size eviction for this pass rather
 // than being made up for with newer ones: one unremovable file would otherwise
 // take the whole archive with it, newest last.
 func enforceRetention(s Settings, now time.Time) (catalogStats, error) {
-	w := segmentWalk{root: s.Dir}
-	if err := w.walk("", 0, time.Time{}); err != nil {
+	w, err := walkAll(s.Dir, time.Time{}, time.Time{})
+	if err != nil {
 		return catalogStats{}, err
 	}
 	cutoff := now.AddDate(0, 0, -max(s.RetentionDays, 1))
@@ -166,7 +253,7 @@ func enforceRetention(s Settings, now time.Time) (catalogStats, error) {
 			keep = append(keep, info)
 			continue
 		}
-		if err := removeSegment(s.Dir, info.seg); err != nil {
+		if err := removeSegment(s.Dir, info.node, info.seg); err != nil {
 			firstErr = cmpErr(firstErr, err)
 			keep = append(keep, info)
 			stuck = true
@@ -175,7 +262,7 @@ func enforceRetention(s Settings, now time.Time) (catalogStats, error) {
 		total -= info.size
 	}
 	w.removeStaleTemps(now)
-	return statsOf(keep), firstErr
+	return statsOf(keep, s.Node), firstErr
 }
 
 func cmpErr(first, err error) error {
@@ -185,13 +272,13 @@ func cmpErr(first, err error) error {
 	return err
 }
 
-// removeSegment deletes a segment and then its day, month and year
-// directories, each only if that left it empty.
-func removeSegment(root string, seg Segment) error {
-	if err := os.Remove(seg.path(root)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+// removeSegment deletes a node's segment and then its day, month and year
+// directories and the node's own, each only if that left it empty.
+func removeSegment(root, node string, seg Segment) error {
+	if err := os.Remove(seg.path(root, node)); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return err
 	}
-	for dir := seg.dir(); dir != "." && dir != ""; dir = filepath.Dir(dir) {
+	for dir := seg.dir(node); dir != "." && dir != ""; dir = filepath.Dir(dir) {
 		if os.Remove(filepath.Join(root, dir)) != nil {
 			break // not empty, which is the usual answer
 		}

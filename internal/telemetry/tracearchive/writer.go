@@ -50,21 +50,21 @@ type segmentWriter struct {
 	meta   segmentMeta
 }
 
-func newSegmentWriter(root string, seg Segment) (*segmentWriter, error) {
+func newSegmentWriter(root, node string, seg Segment) (*segmentWriter, error) {
 	enc, err := encoder()
 	if err != nil {
 		return nil, err
 	}
-	final := seg.path(root)
+	final := seg.path(root, node)
 	if err := os.MkdirAll(filepath.Dir(final), dirPerm); err != nil {
 		return nil, err
 	}
-	f, err := os.CreateTemp(filepath.Dir(final), "."+seg.Name()+tempMarker+"*")
+	f, err := os.CreateTemp(filepath.Dir(final), "."+seg.FileName(node)+tempMarker+"*")
 	if err != nil {
 		return nil, err
 	}
 	w := &segmentWriter{final: final, tmp: f.Name(), f: f, enc: enc, at: headerSize}
-	w.meta = segmentMeta{Format: formatName, Version: formatVersion, Start: seg.Start(), End: seg.End()}
+	w.meta = segmentMeta{Format: formatName, Version: formatVersion, Node: node, Start: seg.Start(), End: seg.End()}
 	// A placeholder the size of the real header, so the data frames land where
 	// the index will say they are.
 	if _, err := f.Write(bytes.Repeat([]byte{0}, headerSize)); err != nil {

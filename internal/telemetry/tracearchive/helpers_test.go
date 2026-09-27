@@ -31,7 +31,11 @@ func openStore(t *testing.T) {
 	t.Cleanup(func() { _ = telemetry.ClosePathStatsStore(context.Background()) })
 }
 
-// enableArchive turns archiving on, into a directory of this test's own.
+// testNode is the node the tests' archive is written as.
+const testNode = "gw-test"
+
+// enableArchive turns archiving on, as testNode, into a directory of this
+// test's own.
 func enableArchive(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -39,6 +43,7 @@ func enableArchive(t *testing.T) string {
 	t.Setenv(EnvEnabled, "true")
 	t.Setenv(EnvRetentionDays, "")
 	t.Setenv(EnvMaxMB, "")
+	t.Setenv(EnvNodeName, testNode)
 	return dir
 }
 
@@ -93,11 +98,17 @@ func line(t *testing.T, tr testTrace) []byte {
 	return b
 }
 
-// writeFile writes a segment holding the given traces, as the archive would,
-// without going through the store.
+// writeFile writes testNode's segment holding the given traces, as the
+// archive would, without going through the store.
 func writeFile(t *testing.T, root string, seg Segment, traces ...testTrace) {
 	t.Helper()
-	w, err := newSegmentWriter(root, seg)
+	writeNodeFile(t, root, testNode, seg, traces...)
+}
+
+// writeNodeFile is writeFile for another node's segment.
+func writeNodeFile(t *testing.T, root, node string, seg Segment, traces ...testTrace) {
+	t.Helper()
+	w, err := newSegmentWriter(root, node, seg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,11 +151,11 @@ func ids(t *testing.T, path string) []string {
 
 func hour(t *testing.T, stamp string) Segment {
 	t.Helper()
-	seg, err := ParseSegmentName(segmentPrefix + stamp + "Z" + segmentSuffix)
+	at, err := time.Parse(stampLayout, stamp+"Z")
 	if err != nil {
 		t.Fatalf("hour %q: %v", stamp, err)
 	}
-	return seg
+	return SegmentAt(at)
 }
 
 func exists(path string) bool {

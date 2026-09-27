@@ -62,7 +62,7 @@ func TestList_PagesNewestFirst(t *testing.T) {
 		}
 		for _, s := range page {
 			if s.Traces != 1 || s.Size <= 0 || s.Archived.IsZero() {
-				t.Fatalf("%s: %+v, want its header's count and time", s.Segment.Name(), s)
+				t.Fatalf("%s: %+v, want its header's count and time", s.Name(), s)
 			}
 			got = append(got, s.Segment.Start().Format("2006-01-02T15"))
 		}
@@ -89,16 +89,16 @@ func TestOpenDownload_ServesOnlyArchiveFiles(t *testing.T) {
 		testTrace{id: "b", at: seg.Start().Add(2 * time.Minute)},
 	)
 
-	for _, name := range []string{"../../../etc/passwd", "2026/09/20/" + seg.Name(), ""} {
+	for _, name := range []string{"../../../etc/passwd", "2026/09/20/" + seg.FileName(testNode), ""} {
 		if _, err := OpenDownload(name); !errors.Is(err, ErrNotASegment) {
 			t.Errorf("OpenDownload(%q) = %v, want ErrNotASegment", name, err)
 		}
 	}
-	if _, err := OpenDownload(hour(t, "2026-09-20T11").Name()); !errors.Is(err, fs.ErrNotExist) {
+	if _, err := OpenDownload(hour(t, "2026-09-20T11").FileName(testNode)); !errors.Is(err, fs.ErrNotExist) {
 		t.Errorf("an hour with no file: %v, want fs.ErrNotExist", err)
 	}
 
-	d, err := OpenDownload(seg.Name())
+	d, err := OpenDownload(seg.FileName(testNode))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +116,7 @@ func TestOpenDownload_ServesOnlyArchiveFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	onDisk, _ := os.ReadFile(seg.path(root))
+	onDisk, _ := os.ReadFile(seg.path(root, testNode))
 	if !bytes.Equal(stored, onDisk) {
 		t.Fatal("the compressed download is not the file as stored")
 	}
@@ -192,22 +192,22 @@ func TestOpenDownload_AtMostFourAtOnce(t *testing.T) {
 
 	var open []*Download
 	for range maxDownloads {
-		d, err := OpenDownload(seg.Name())
+		d, err := OpenDownload(seg.FileName(testNode))
 		if err != nil {
 			t.Fatal(err)
 		}
 		open = append(open, d)
 	}
-	if _, err := OpenDownload(seg.Name()); !errors.Is(err, ErrBusy) {
+	if _, err := OpenDownload(seg.FileName(testNode)); !errors.Is(err, ErrBusy) {
 		t.Fatalf("download %d: %v, want ErrBusy", maxDownloads+1, err)
 	}
 	_ = open[0].Close()
 	_ = open[0].Close() // a second Close must not give back a slot it does not hold
-	d, err := OpenDownload(seg.Name())
+	d, err := OpenDownload(seg.FileName(testNode))
 	if err != nil {
 		t.Fatalf("after one closed: %v", err)
 	}
-	if _, err := OpenDownload(seg.Name()); !errors.Is(err, ErrBusy) {
+	if _, err := OpenDownload(seg.FileName(testNode)); !errors.Is(err, ErrBusy) {
 		t.Fatalf("a double Close freed two slots: %v", err)
 	}
 	for _, o := range append(open[1:], d) {
@@ -216,14 +216,92 @@ func TestOpenDownload_AtMostFourAtOnce(t *testing.T) {
 	if _, err := OpenDownload("../nope"); !errors.Is(err, ErrNotASegment) {
 		t.Fatal("the name check must come before a slot is taken")
 	}
-	if _, err := OpenDownload(hour(t, "2026-09-20T11").Name()); !errors.Is(err, fs.ErrNotExist) {
+	if _, err := OpenDownload(hour(t, "2026-09-20T11").FileName(testNode)); !errors.Is(err, fs.ErrNotExist) {
 		t.Fatal("a missing hour must not keep the slot it took")
 	}
 	for range maxDownloads {
-		d, err := OpenDownload(seg.Name())
+		d, err := OpenDownload(seg.FileName(testNode))
 		if err != nil {
 			t.Fatalf("a failed open leaked a slot: %v", err)
 		}
 		defer d.Close()
+	}
+}
+
+// A trace found in another node's archive opens: the detail view asks by start
+// time and ID, and does not know which node recorded it.
+func TestLookup_FindsATraceInAnotherNodesArchive(t *testing.T) {
+	root := enableArchive(t)
+	seg := hour(t, "2026-09-20T10")
+	at := seg.Start().Add(17 * time.Minute)
+	writeFile(t, root, seg, testTrace{id: "mine", at: at})
+	writeNodeFile(t, root, "gw-other", seg, testTrace{id: "theirs", at: at})
+
+	for _, id := range []string{"mine", "theirs"} {
+		if rec, err := Lookup(context.Background(), at, id); rec == nil || err != nil || rec.ID != id {
+			t.Fatalf("Lookup(%q) = %+v, %v", id, rec, err)
+		}
+	}
+}
+
+// Every node's hours are listed, newest hour first and within an hour by node,
+// and a page token continues past a node inside an hour as well as past an
+// hour.
+func TestList_PagesAcrossNodes(t *testing.T) {
+	root := enableArchive(t)
+	older, newer := hour(t, "2026-09-20T10"), hour(t, "2026-09-20T11")
+	writeFile(t, root, older, testTrace{id: "a", at: older.Start().Add(time.Minute)})
+	writeNodeFile(t, root, "gw-other", older, testTrace{id: "b", at: older.Start().Add(time.Minute)})
+	writeNodeFile(t, root, "gw-other", newer, testTrace{id: "c", at: newer.Start().Add(time.Minute)})
+
+	var got []string
+	token := ""
+	for range 10 {
+		page, next, err := List(time.Time{}, time.Time{}, 1, token)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, s := range page {
+			got = append(got, s.Name())
+		}
+		if token = next; token == "" {
+			break
+		}
+	}
+	want := []string{
+		"traces-2026-09-20T11Z.gw-other.ndjson.zst",
+		"traces-2026-09-20T10Z.gw-test.ndjson.zst",
+		"traces-2026-09-20T10Z.gw-other.ndjson.zst",
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("listed %v, want %v", got, want)
+	}
+	d, err := OpenDownload(want[0])
+	if err != nil {
+		t.Fatalf("another node's hour does not download: %v", err)
+	}
+	if d.Node != "gw-other" {
+		t.Fatalf("download node = %q", d.Node)
+	}
+	_ = d.Close()
+}
+
+// One node's damaged file for an hour does not hide the traces other nodes
+// archived for it; the damage is reported only if no node has the trace.
+func TestLookup_ADamagedFileDoesNotHideAnotherNodes(t *testing.T) {
+	root := enableArchive(t)
+	seg := hour(t, "2026-09-20T10")
+	at := seg.Start().Add(17 * time.Minute)
+	writeFile(t, root, seg, testTrace{id: "mine", at: at})
+	writeNodeFile(t, root, "gw-other", seg, testTrace{id: "theirs", at: at})
+	if err := os.WriteFile(seg.path(root, testNode), []byte("not a segment"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if rec, err := Lookup(context.Background(), at, "theirs"); rec == nil || err != nil {
+		t.Fatalf("Lookup = %+v, %v; want gw-other's trace", rec, err)
+	}
+	if rec, err := Lookup(context.Background(), at, "mine"); rec != nil || err == nil {
+		t.Fatalf("Lookup = %+v, %v; want the damage reported", rec, err)
 	}
 }

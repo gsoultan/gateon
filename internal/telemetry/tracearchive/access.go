@@ -30,10 +30,43 @@ const (
 var downloadSlots = make(chan struct{}, maxDownloads)
 
 // Lookup returns the archived trace with this start time and ID, in full, or
-// nil if the archive does not hold it. The start time names the hour and,
-// through the index, the frame; only that frame is decoded.
+// nil if no node's archive holds it. The start time names the hour and,
+// through each file's index, the frame; only that frame of each node's file
+// for the hour is decoded. This node's file is tried first. A file that cannot
+// be read does not stop the others being tried; its error is returned only if
+// none of them has the trace.
 func Lookup(ctx context.Context, ts time.Time, id string) (*telemetry.TraceRecord, error) {
-	f, err := openSegment(SegmentAt(ts).path(CurrentSettings().Dir))
+	s := CurrentSettings()
+	nodes, err := listNodes(s.Dir)
+	if err != nil {
+		return nil, err
+	}
+	slices.SortStableFunc(nodes, func(a, b string) int {
+		return boolRank(a != s.Node) - boolRank(b != s.Node)
+	})
+	var firstErr error
+	for _, node := range nodes {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		rec, err := lookupIn(ctx, SegmentAt(ts).path(s.Dir, node), ts, id)
+		if rec != nil {
+			return rec, nil
+		}
+		firstErr = cmpErr(firstErr, err)
+	}
+	return nil, firstErr
+}
+
+func boolRank(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+func lookupIn(ctx context.Context, path string, ts time.Time, id string) (*telemetry.TraceRecord, error) {
+	f, err := openSegment(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
 	}
@@ -63,43 +96,56 @@ func Lookup(ctx context.Context, ts time.Time, id string) (*telemetry.TraceRecor
 	return found, err
 }
 
-// SegmentSummary is one archived hour, as a listing shows it.
+// SegmentSummary is one node's archived hour, as a listing shows it.
 type SegmentSummary struct {
 	Segment  Segment
+	Node     string
 	Size     int64
 	Traces   int64
 	Archived time.Time
 }
 
-// List returns the archived hours that overlap [from, to), newest first, a
-// page at a time. A zero bound is open. pageToken is the next token the page
-// before returned; the token is the name of that page's last hour.
+// Name is the hour's file name, which is also how it is downloaded.
+func (s SegmentSummary) Name() string { return s.Segment.FileName(s.Node) }
+
+// List returns every node's archived hours that overlap [from, to), newest
+// first and, within an hour, by node, a page at a time. A zero bound is open.
+// pageToken is the next token the page before returned: the file name of that
+// page's last hour.
 func List(from, to time.Time, limit int, pageToken string) ([]SegmentSummary, string, error) {
+	var tokenSeg Segment
+	var tokenNode string
 	if pageToken != "" {
-		seg, err := ParseSegmentName(pageToken)
+		seg, node, err := ParseFileName(pageToken)
 		if err != nil {
 			return nil, "", fmt.Errorf("%w: the page token is not one this server issued", ErrInvalidQuery)
 		}
-		if to.IsZero() || seg.start.Before(to) {
-			to = seg.start
+		tokenSeg, tokenNode = seg, node
+		if to.IsZero() || seg.End().Before(to) {
+			to = seg.End()
 		}
 	}
 	root := CurrentSettings().Dir
-	segs, err := listSegments(root, from, to)
+	segs, err := listAllSegments(root, from, to)
 	if err != nil {
 		return nil, "", err
+	}
+	if pageToken != "" {
+		segs = slices.DeleteFunc(segs, func(i segmentFileInfo) bool {
+			return !listedBefore(i, tokenSeg, tokenNode)
+		})
 	}
 	slices.Reverse(segs)
 	limit = min(cmpOr(limit, defaultListLimit), maxListLimit)
 	next := ""
 	if len(segs) > limit {
 		segs = segs[:limit]
-		next = segs[limit-1].seg.Name()
+		next = segs[limit-1].seg.FileName(segs[limit-1].node)
 	}
 	out := make([]SegmentSummary, 0, len(segs))
 	for _, info := range segs {
-		sum := SegmentSummary{Segment: info.seg, Size: info.size, Archived: info.mod}
-		if m, err := readMeta(info.seg.path(root)); err == nil {
+		sum := SegmentSummary{Segment: info.seg, Node: info.node, Size: info.size, Archived: info.mod}
+		if m, err := readMeta(info.seg.path(root, info.node)); err == nil {
 			sum.Traces, sum.Archived = m.Count, m.Created
 		}
 		out = append(out, sum)
@@ -107,21 +153,31 @@ func List(from, to time.Time, limit int, pageToken string) ([]SegmentSummary, st
 	return out, next, nil
 }
 
+// listedBefore reports whether a segment comes after the token's in a listing,
+// which runs newest hour first and, within an hour, by node from the last.
+func listedBefore(i segmentFileInfo, seg Segment, node string) bool {
+	if c := i.seg.start.Compare(seg.start); c != 0 {
+		return c < 0
+	}
+	return i.node < node
+}
+
 // Download is an archived hour opened for sending to a client. It holds one
 // of maxDownloads slots until it is closed.
 type Download struct {
 	Name    string
+	Node    string
 	ModTime time.Time
 	file    *segmentFile
 	release sync.Once
 }
 
-// OpenDownload opens the archived hour a file name names. The name is the only
-// input, and only the exact form Segment.Name produces is accepted, so it
-// cannot reach outside the archive. With maxDownloads already open it returns
-// ErrBusy at once rather than queueing.
+// OpenDownload opens the archived hour a file name names, whichever node's it
+// is. The name is the only input, and only the exact form Segment.FileName
+// produces is accepted, so it cannot reach outside the archive. With
+// maxDownloads already open it returns ErrBusy at once rather than queueing.
 func OpenDownload(name string) (*Download, error) {
-	seg, err := ParseSegmentName(name)
+	seg, node, err := ParseFileName(name)
 	if err != nil {
 		return nil, err
 	}
@@ -130,7 +186,7 @@ func OpenDownload(name string) (*Download, error) {
 	default:
 		return nil, ErrBusy
 	}
-	d, err := openDownload(seg)
+	d, err := openDownload(seg, node)
 	if err != nil {
 		<-downloadSlots
 		return nil, err
@@ -138,8 +194,8 @@ func OpenDownload(name string) (*Download, error) {
 	return d, nil
 }
 
-func openDownload(seg Segment) (*Download, error) {
-	f, err := openSegment(seg.path(CurrentSettings().Dir))
+func openDownload(seg Segment, node string) (*Download, error) {
+	f, err := openSegment(seg.path(CurrentSettings().Dir, node))
 	if err != nil {
 		return nil, err
 	}
@@ -148,7 +204,7 @@ func openDownload(seg Segment) (*Download, error) {
 		_ = f.Close()
 		return nil, err
 	}
-	return &Download{Name: seg.Name(), ModTime: info.ModTime(), file: f}, nil
+	return &Download{Name: seg.FileName(node), Node: node, ModTime: info.ModTime(), file: f}, nil
 }
 
 // Content is the file as stored -- zstd, readable with `zstd -dc` -- for
@@ -165,7 +221,7 @@ func (d *Download) WriteNDJSON(ctx context.Context, w io.Writer) (int64, error) 
 		if err := ctx.Err(); err != nil {
 			return written, err
 		}
-		raw, err := d.file.decodeFrame(i)
+		raw, err := d.file.decodeFrame(i, nil)
 		if err != nil {
 			return written, err
 		}
@@ -189,8 +245,12 @@ func (d *Download) Close() error {
 type Status struct {
 	Settings         Settings
 	TraceStoreActive bool
-	Segments         int
-	TotalBytes       int64
+	// Segments and TotalBytes are the whole archive's, every node's.
+	Segments   int
+	TotalBytes int64
+	// Nodes are the nodes with an archived hour under the root; Settings.Node
+	// is this one.
+	Nodes []string
 	// Oldest and Newest are the starts of the oldest and newest archived
 	// hours; zero when there are none.
 	Oldest, Newest time.Time
@@ -207,6 +267,7 @@ func (a *Archiver) Status() Status {
 		TraceStoreActive: telemetry.TraceStoreActive(),
 		Segments:         st.stats.segments,
 		TotalBytes:       st.stats.bytes,
+		Nodes:            st.stats.nodes,
 		LastWritten:      st.lastWritten,
 		LastError:        st.lastErr,
 		LastErrorAt:      st.lastErrAt,

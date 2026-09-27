@@ -58,6 +58,7 @@ var ErrCorrupt = errors.New("tracearchive: segment file is corrupt")
 type segmentMeta struct {
 	Format  string    `json:"format"`
 	Version int       `json:"version"`
+	Node    string    `json:"node"`
 	Start   time.Time `json:"start"`
 	End     time.Time `json:"end"`
 	// Count is how many traces the file holds.

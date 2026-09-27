@@ -2707,6 +2707,69 @@ func (v *TraceView) Scan(ctx context.Context, sc TraceScan, visit func(key, valu
 // Close releases the view.
 func (v *TraceView) Close() { _ = v.snap.Close() }
 
+// TraceIter walks a view's traces in a scan's order, one at a time. A reader
+// merging the store with other sources in key order pulls from it rather than
+// being pushed to, as ScanTraces does.
+type TraceIter struct {
+	it      *pebble.Iterator
+	desc    bool
+	started bool
+}
+
+// Iter opens an iterator over the view for the scan. Close it.
+func (v *TraceView) Iter(sc TraceScan) (*TraceIter, error) {
+	opts := sc.iterOptions()
+	if opts.LowerBound != nil && opts.UpperBound != nil && bytes.Compare(opts.LowerBound, opts.UpperBound) >= 0 {
+		return &TraceIter{}, nil // an empty range
+	}
+	it, err := v.snap.NewIter(opts)
+	if err != nil {
+		return nil, err
+	}
+	return &TraceIter{it: it, desc: sc.Desc}, nil
+}
+
+// Next moves to the next trace in the scan's order and reports whether there
+// is one.
+func (t *TraceIter) Next() bool {
+	switch {
+	case t.it == nil:
+		return false
+	case !t.started && t.desc:
+		t.started = true
+		return t.it.Last()
+	case !t.started:
+		t.started = true
+		return t.it.First()
+	case t.desc:
+		return t.it.Prev()
+	default:
+		return t.it.Next()
+	}
+}
+
+// Key is the current trace's store key, valid until the next call to Next.
+func (t *TraceIter) Key() []byte { return t.it.Key() }
+
+// Value is the current trace's stored JSON, valid until the next call to Next.
+func (t *TraceIter) Value() []byte { return t.it.Value() }
+
+// Err is the error, if any, that ended the iteration.
+func (t *TraceIter) Err() error {
+	if t.it == nil {
+		return nil
+	}
+	return t.it.Error()
+}
+
+// Close releases the iterator.
+func (t *TraceIter) Close() error {
+	if t.it == nil {
+		return nil
+	}
+	return t.it.Close()
+}
+
 // TraceHotFloor returns the time from which the store holds every trace it
 // has recorded: before it, traces have been pruned (or were never here); from
 // it on, none has been deleted. A reader wanting a period older than the floor

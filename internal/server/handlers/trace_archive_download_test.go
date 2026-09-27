@@ -32,6 +32,7 @@ func archivedHour(t *testing.T, paths ...string) tracearchive.Segment {
 	t.Setenv("GATEON_TRACE_DIR", filepath.Join(dir, "pebble"))
 	t.Setenv(tracearchive.EnvDir, filepath.Join(dir, "archive"))
 	t.Setenv(tracearchive.EnvEnabled, "true")
+	t.Setenv(tracearchive.EnvNodeName, archiveNode)
 	_ = telemetry.ClosePathStatsStore(context.Background())
 	if err := telemetry.InitPathStatsStore(filepath.Join(dir, "telemetry.db"), 7); err != nil {
 		t.Fatalf("InitPathStatsStore: %v", err)
@@ -55,6 +56,17 @@ func archivedHour(t *testing.T, paths ...string) tracearchive.Segment {
 	return tracearchive.SegmentAt(at)
 }
 
+// archiveNode is the name the tests' gateway archives under.
+const archiveNode = "gw-test"
+
+// archiveName is the name an hour this gateway archived downloads by.
+func archiveName(seg tracearchive.Segment) string { return seg.FileName(archiveNode) }
+
+// archivePath is where that hour's file is on disk.
+func archivePath(seg tracearchive.Segment) string {
+	return filepath.Join(os.Getenv(tracearchive.EnvDir), archiveNode, seg.Start().Format("2006/01/02"), archiveName(seg))
+}
+
 func download(t *testing.T, path string, claims *auth.Claims) *httptest.ResponseRecorder {
 	t.Helper()
 	mux := http.NewServeMux()
@@ -74,12 +86,11 @@ func TestTraceArchiveDownload_SendsAnAttachmentNeverAPage(t *testing.T) {
 	seg := archivedHour(t)
 	viewer := &auth.Claims{ID: "v", Username: "viewer", Role: auth.RoleViewer}
 
-	raw := download(t, "/v1/traces/archives/"+seg.Name(), viewer)
+	raw := download(t, "/v1/traces/archives/"+archiveName(seg), viewer)
 	if raw.Code != http.StatusOK {
 		t.Fatalf("compressed download: %d %s", raw.Code, raw.Body.String())
 	}
-	onDisk, err := os.ReadFile(filepath.Join(os.Getenv(tracearchive.EnvDir),
-		seg.Start().Format("2006/01/02"), seg.Name()))
+	onDisk, err := os.ReadFile(archivePath(seg))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +99,7 @@ func TestTraceArchiveDownload_SendsAnAttachmentNeverAPage(t *testing.T) {
 	}
 	for name, want := range map[string]string{
 		"Content-Type":           "application/zstd",
-		"Content-Disposition":    `attachment; filename=` + seg.Name(),
+		"Content-Disposition":    `attachment; filename=` + archiveName(seg),
 		"X-Content-Type-Options": "nosniff",
 		"Cache-Control":          "private, no-store",
 	} {
@@ -97,11 +108,11 @@ func TestTraceArchiveDownload_SendsAnAttachmentNeverAPage(t *testing.T) {
 		}
 	}
 
-	plain := download(t, "/v1/traces/archives/"+seg.Name()+"?format=ndjson", viewer)
+	plain := download(t, "/v1/traces/archives/"+archiveName(seg)+"?format=ndjson", viewer)
 	if plain.Code != http.StatusOK || !strings.Contains(plain.Body.String(), `"id":"t-1"`) {
 		t.Fatalf("NDJSON download: %d %q", plain.Code, plain.Body.String())
 	}
-	if got := plain.Header().Get("Content-Disposition"); got != "attachment; filename="+strings.TrimSuffix(seg.Name(), ".zst") {
+	if got := plain.Header().Get("Content-Disposition"); got != "attachment; filename="+strings.TrimSuffix(archiveName(seg), ".zst") {
 		t.Errorf("NDJSON Content-Disposition = %q", got)
 	}
 	if plain.Header().Get("X-Content-Type-Options") != "nosniff" || plain.Header().Get("Content-Type") != "application/x-ndjson" ||
@@ -118,10 +129,11 @@ func TestTraceArchiveDownload_RefusesWhatItShould(t *testing.T) {
 		claims *auth.Claims
 		want   int
 	}{
-		"a role without diagnostics": {"/v1/traces/archives/" + seg.Name(), &auth.Claims{ID: "g", Role: "guest"}, http.StatusForbidden},
+		"a role without diagnostics": {"/v1/traces/archives/" + archiveName(seg), &auth.Claims{ID: "g", Role: "guest"}, http.StatusForbidden},
 		"not a segment name":         {"/v1/traces/archives/passwd", admin, http.StatusBadRequest},
 		"an encoded traversal":       {"/v1/traces/archives/..%2F..%2Fgateon.db", admin, http.StatusBadRequest},
-		"an hour not archived":       {"/v1/traces/archives/" + seg.Next().Name(), admin, http.StatusNotFound},
+		"a node that is a path":      {"/v1/traces/archives/traces-2026-09-26T14Z...%2F..%2Fetc.ndjson.zst", admin, http.StatusBadRequest},
+		"an hour not archived":       {"/v1/traces/archives/" + archiveName(seg.Next()), admin, http.StatusNotFound},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if rr := download(t, tc.path, tc.claims); rr.Code != tc.want {
@@ -135,7 +147,7 @@ func TestTraceArchiveDownload_BusyIsAnAnswerToRetry(t *testing.T) {
 	seg := archivedHour(t)
 	var held []*tracearchive.Download
 	for {
-		d, err := tracearchive.OpenDownload(seg.Name())
+		d, err := tracearchive.OpenDownload(archiveName(seg))
 		if err != nil {
 			break
 		}
@@ -146,7 +158,7 @@ func TestTraceArchiveDownload_BusyIsAnAnswerToRetry(t *testing.T) {
 			_ = d.Close()
 		}
 	}()
-	rr := download(t, "/v1/traces/archives/"+seg.Name(), nil)
+	rr := download(t, "/v1/traces/archives/"+archiveName(seg), nil)
 	if rr.Code != http.StatusServiceUnavailable || rr.Header().Get("Retry-After") == "" {
 		t.Fatalf("with every slot taken: %d, Retry-After %q; want 503 with a Retry-After", rr.Code, rr.Header().Get("Retry-After"))
 	}
@@ -156,7 +168,7 @@ func TestTraceArchiveDownload_BusyIsAnAnswerToRetry(t *testing.T) {
 // index, whose offset the header gives.
 func damageFrame(t *testing.T, seg tracearchive.Segment) {
 	t.Helper()
-	path := filepath.Join(os.Getenv(tracearchive.EnvDir), seg.Start().Format("2006/01/02"), seg.Name())
+	path := archivePath(seg)
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
@@ -180,7 +192,7 @@ func TestTraceArchiveDownload_ADamagedFileIsNeverSentAsWhole(t *testing.T) {
 	t.Run("before anything is sent", func(t *testing.T) {
 		seg := archivedHour(t)
 		damageFrame(t, seg)
-		if rr := download(t, "/v1/traces/archives/"+seg.Name()+"?format=ndjson", nil); rr.Code != http.StatusInternalServerError {
+		if rr := download(t, "/v1/traces/archives/"+archiveName(seg)+"?format=ndjson", nil); rr.Code != http.StatusInternalServerError {
 			t.Fatalf("status %d, want 500", rr.Code)
 		}
 	})
@@ -192,7 +204,7 @@ func TestTraceArchiveDownload_ADamagedFileIsNeverSentAsWhole(t *testing.T) {
 				t.Fatalf("recovered %v, want http.ErrAbortHandler", r)
 			}
 		}()
-		rr := download(t, "/v1/traces/archives/"+seg.Name()+"?format=ndjson", nil)
+		rr := download(t, "/v1/traces/archives/"+archiveName(seg)+"?format=ndjson", nil)
 		t.Fatalf("the download ended normally with %d bytes sent; it must be aborted", rr.Body.Len())
 	})
 }

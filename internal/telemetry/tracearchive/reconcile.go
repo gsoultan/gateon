@@ -22,7 +22,7 @@ import (
 // otherwise a new one is written from the store and the old file together and
 // replaces it. It reports whether it wrote a file.
 func (a *Archiver) reconcile(ctx context.Context, s Settings, seg Segment) (bool, error) {
-	old, err := openSegment(seg.path(s.Dir))
+	old, err := openSegment(seg.path(s.Dir, s.Node))
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
 		old = nil
@@ -30,7 +30,7 @@ func (a *Archiver) reconcile(ctx context.Context, s Settings, seg Segment) (bool
 		// The store's copy is the best there is; what the file held that the
 		// store does not, nothing can read.
 		logger.Default().LogWarn("trace archive: replacing a damaged segment",
-			"segment", seg.Name(), "error", err)
+			"segment", seg.FileName(s.Node), "error", err)
 		old = nil
 	case err != nil:
 		// Not damage -- a permission, a descriptor limit, a failing disk. The
@@ -48,7 +48,7 @@ func (a *Archiver) reconcile(ctx context.Context, s Settings, seg Segment) (bool
 			return false, nil
 		}
 	}
-	return writeSegment(ctx, s.Dir, seg, old)
+	return writeSegment(ctx, s, seg, old)
 }
 
 func countStored(ctx context.Context, seg Segment) (int64, error) {
@@ -58,10 +58,11 @@ func countStored(ctx context.Context, seg Segment) (int64, error) {
 	return n, err
 }
 
-// writeSegment writes seg from the store's traces merged with old's, in key
-// order; a trace in both is taken from the store. old may be nil.
-func writeSegment(ctx context.Context, root string, seg Segment, old *segmentFile) (bool, error) {
-	w, err := newSegmentWriter(root, seg)
+// writeSegment writes this node's file for seg from the store's traces merged
+// with old's, in key order; a trace in both is taken from the store. old may be
+// nil.
+func writeSegment(ctx context.Context, s Settings, seg Segment, old *segmentFile) (bool, error) {
+	w, err := newSegmentWriter(s.Dir, s.Node, seg)
 	if err != nil {
 		return false, err
 	}

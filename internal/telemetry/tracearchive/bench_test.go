@@ -76,7 +76,7 @@ func BenchmarkWriteSegment(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for range b.N {
-		w, err := newSegmentWriter(root, seg)
+		w, err := newSegmentWriter(root, testNode, seg)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -89,7 +89,7 @@ func BenchmarkWriteSegment(b *testing.B) {
 		if _, _, err := w.commit(); err != nil {
 			b.Fatal(err)
 		}
-		info, err := os.Stat(seg.path(root))
+		info, err := os.Stat(seg.path(root, testNode))
 		if err != nil {
 			b.Fatal(err)
 		}

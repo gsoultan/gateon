@@ -10,7 +10,7 @@ environment variables you can tune to control memory and disk usage.
 |-------|---------|-------|----------|
 | Telemetry SQL | SQLite (default), Postgres | Aggregated path/domain stats, security threats, audit rows | `gateon.db` (SQLite) or the configured DSN |
 | Telemetry traces | Pebble (embedded LSM) | Per-request access-log / trace records | `telemetry_pebble/` next to the SQLite DB |
-| Trace archive (opt-in) | zstd-compressed NDJSON files | One file per UTC hour of traces, kept after the live store lets them go | `trace_archive/` in the data directory |
+| Trace archive (opt-in) | zstd-compressed NDJSON files | One file per UTC hour of traces and node, kept after the live store lets them go | `trace_archive/` in the data directory |
 | Cache / rate-limit | Redis (optional) | Response cache, distributed rate-limit counters | External Redis |
 
 > SQLite is used out of the box so a single binary is fully self-contained.
@@ -101,24 +101,28 @@ existing install has budgeted for something else. Turn it on in
 
 ```
 <data dir>/trace_archive/
-└── 2026/
-    └── 09/
-        └── 26/
-            ├── traces-2026-09-26T00Z.ndjson.zst
-            ├── …
-            └── traces-2026-09-26T14Z.ndjson.zst   ← requests that started 14:00–15:00 UTC, 26 Sep 2026
+└── gw-1/                                            ← the node: GATEON_NODE_NAME, or the host name
+    └── 2026/
+        └── 09/
+            └── 26/
+                ├── traces-2026-09-26T00Z.gw-1.ndjson.zst
+                ├── …
+                └── traces-2026-09-26T14Z.gw-1.ndjson.zst   ← requests that started 14:00–15:00 UTC, 26 Sep 2026, at gw-1
 ```
 
-- **One file per hour, named for the hour it holds:**
-  `traces-YYYY-MM-DDTHHZ.ndjson.zst`. The `Z` is literal and every name is UTC,
-  so an hour never has two names around a daylight-saving change, and a name
-  means the same hour on every node, whatever its time zone.
-- **A directory per UTC day** (`YYYY/MM/DD`), so a day or a month can be copied,
-  measured or removed with ordinary tools:
-  `du -sh trace_archive/2026/09`, `rsync -a trace_archive/2026/09/26 backup:`.
+- **One file per hour and node, named for the hour it holds and the node that
+  recorded it:** `traces-YYYY-MM-DDTHHZ.<node>.ndjson.zst`. The `Z` is literal
+  and every name is UTC, so an hour never has two names around a daylight-saving
+  change, and a name means the same hour on every node, whatever its time zone.
+  The node is in the name as well as the directory so that a file copied out of
+  the tree — a download is one — still says where it came from.
+- **A directory per node, then per UTC day** (`<node>/YYYY/MM/DD`), so a day or a
+  month can be copied, measured or removed with ordinary tools:
+  `du -sh trace_archive/gw-1/2026/09`, `rsync -a trace_archive/gw-1/2026/09/26 backup:`.
 - **Names sort in time order, and globs select periods:**
   `traces-2026-09-26T*` is a day, `traces-2026-09-*` a month,
-  `traces-2026-09-26T1[4-7]Z*` is 14:00–17:59.
+  `traces-2026-09-26T1[4-7]Z*` is 14:00–17:59; `trace_archive/*/2026/09/26/` is
+  that day from every node.
 - A trace belongs to the hour its request **started** — the order the live store
   keeps them in. An hour with no traces has no file.
 
@@ -128,7 +132,7 @@ A file is NDJSON — one trace per line, the JSON the trace API returns —
 compressed with zstd:
 
 ```sh
-zstd -dc traces-2026-09-26T14Z.ndjson.zst | jq 'select(.status | startswith("5")) | .path'
+zstd -dc traces-2026-09-26T14Z.gw-1.ndjson.zst | jq 'select(.status | startswith("5")) | .path'
 ```
 
 It also carries a header (the hour, how many traces, the first and last) and a
@@ -176,14 +180,36 @@ route — are archived as captured.
 | Keep hours for | `GATEON_TRACE_ARCHIVE_RETENTION_DAYS` | 7 days | 90 days | 365 days |
 | Size limit | `GATEON_TRACE_ARCHIVE_MAX_MB` | 256 MB | 2 GB | 20 GB |
 | Directory | `GATEON_TRACE_ARCHIVE_DIR` | `<data dir>/trace_archive` | same | same |
+| Node name | `GATEON_NODE_NAME` | the host name | same | same |
 
 An environment variable beats the global config (`log.trace_archive_*`), which
 beats the profile. Settings changes apply within a minute, without a restart.
 
-**One directory per node.** Each gateway archives its own traces. To gather
-several nodes' archives in one place, give each its own directory — for example
-`GATEON_TRACE_ARCHIVE_DIR=/mnt/archive/$HOSTNAME` — because two nodes writing one
-directory would each replace the other's hours.
+### Several gateways
+
+Each gateway archives under its own name — `GATEON_NODE_NAME`, or the host name —
+lower-cased and reduced to letters, digits, `.`, `_` and `-`. Put the archive
+directory on storage every gateway mounts (NFS, EFS, a shared volume) and every
+gateway's dashboard lists and searches every gateway's hours: Traces → History
+merges them into one timeline, with a Node column saying which gateway recorded
+each trace, and the Archive tab lists every gateway's files.
+
+- A gateway writes only its own directory, so none replaces another's hours. Two
+  gateways on one host that share the directory must each be given
+  `GATEON_NODE_NAME`: by host name they would share a directory.
+- An hour is archived a couple of minutes after it ends. Until then its traces
+  are only in the live store of the gateway that recorded them, and only that
+  gateway's dashboard shows them.
+- Every gateway applies the archive's retention and size limit to the whole
+  directory, not only its own part: a gateway that is renamed or replaced leaves
+  its hours behind, and they still have to age out. Give every gateway that
+  shares the directory the same archive settings — the strictest one decides
+  what is kept.
+- Without shared storage nothing changes but the extra directory level: each
+  gateway lists and searches its own hours.
+
+See [ADR 0023](adr/0023-the-trace-archive-has-a-directory-per-node.md) for why
+the gateways share files rather than query each other.
 
 ### Disk and CPU
 

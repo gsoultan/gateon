@@ -5,10 +5,12 @@ import { useInfiniteQuery } from "@tanstack/react-query";
 import { api } from "../services/client";
 import { getApiUrl } from "./api";
 
-// The trace archive: one compressed file per UTC hour of traces, named for the
-// hour it holds (traces-2026-09-26T14Z.ndjson.zst). Sizes and counts are
-// int64s, which arrive as bigint; they are numbers here because the page does
-// arithmetic on them.
+// The trace archive: one compressed file per UTC hour of traces and gateway,
+// named for the hour it holds and the node that wrote it
+// (traces-2026-09-26T14Z.gw-1.ndjson.zst). Gateways sharing the archive's
+// storage each write their own and list everyone's (ADR-0023). Sizes and
+// counts are int64s, which arrive as bigint; they are numbers here because the
+// page does arithmetic on them.
 
 export interface TraceArchiveSegment {
   name: string;
@@ -17,6 +19,7 @@ export interface TraceArchiveSegment {
   sizeBytes: number;
   traceCount: number;
   archivedAt: string;
+  node: string;
 }
 
 export interface TraceArchiveStatus {
@@ -31,6 +34,10 @@ export interface TraceArchiveStatus {
   lastArchivedAt: string;
   lastError: string;
   lastErrorAt: string;
+  /** This gateway's name in the archive. */
+  node: string;
+  /** Every node with an archived hour, this one among them once it has one. */
+  nodes: string[];
 }
 
 export interface TraceArchivePage {
@@ -53,6 +60,7 @@ export async function fetchTraceArchivePage(pageToken: string): Promise<TraceArc
       sizeBytes: Number(s.sizeBytes),
       traceCount: Number(s.traceCount),
       archivedAt: s.archivedAt,
+      node: s.node,
     })),
     nextPageToken: res.nextPageToken,
     status: st
@@ -68,6 +76,8 @@ export async function fetchTraceArchivePage(pageToken: string): Promise<TraceArc
           lastArchivedAt: st.lastArchivedAt,
           lastError: st.lastError,
           lastErrorAt: st.lastErrorAt,
+          node: st.node,
+          nodes: [...st.nodes],
         }
       : null,
   };

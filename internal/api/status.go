@@ -124,7 +124,9 @@ func (s *ApiService) QueryTraces(ctx context.Context, req *gateonv1.QueryTracesR
 		ScannedTo:  formatTime(res.ScannedTo),
 	}
 	for _, t := range res.Traces {
-		out.Traces = append(out.Traces, traceToProto(t, false))
+		pt := traceToProto(t.TraceRecord, false)
+		pt.Node = t.Node
+		out.Traces = append(out.Traces, pt)
 	}
 	return out, nil
 }
@@ -170,7 +172,8 @@ func (s *ApiService) ListTraceArchives(_ context.Context, req *gateonv1.ListTrac
 	}
 	for _, sg := range segs {
 		out.Segments = append(out.Segments, &gateonv1.TraceArchiveSegment{
-			Name:        sg.Segment.Name(),
+			Name:        sg.Name(),
+			Node:        sg.Node,
 			PeriodStart: formatTime(sg.Segment.Start()),
 			PeriodEnd:   formatTime(sg.Segment.End()),
 			SizeBytes:   sg.Size,
@@ -201,6 +204,8 @@ func traceArchiveStatus(st tracearchive.Status) *gateonv1.TraceArchiveStatus {
 		LastArchivedAt:   formatTime(st.LastWritten),
 		LastError:        st.LastError,
 		LastErrorAt:      formatTime(st.LastErrorAt),
+		Node:             st.Settings.Node,
+		Nodes:            st.Nodes,
 	}
 }
 
@@ -214,6 +219,9 @@ func traceArchiveError(op string, err error) error {
 		return status.Error(codes.InvalidArgument, err.Error())
 	case errors.Is(err, tracearchive.ErrBusy):
 		return status.Error(codes.ResourceExhausted, "another trace search is running; try again in a moment")
+	case errors.Is(err, tracearchive.ErrTooLarge):
+		logger.L.LogWarn("trace archive: search refused", "op", op, "error", err)
+		return status.Error(codes.ResourceExhausted, "the trace archive holds more for this period than one search may read at once; try a shorter period")
 	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
 		return status.FromContextError(err).Err()
 	}

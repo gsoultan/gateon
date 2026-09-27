@@ -44,6 +44,7 @@ import {
   type Period,
   type PeriodPreset,
 } from "./tracePeriods";
+import { severalNodes } from "./traceNodes";
 
 // "any" stands for no filter: an option needs a value of its own to be
 // selected, and the gateway takes an empty string for "no filter".
@@ -284,9 +285,11 @@ interface HistoryTableProps {
 }
 
 function HistoryTable({ rows, density, loading, error, onRetry, onOpen }: HistoryTableProps) {
+  const showNode = useMemo(() => severalNodes(rows), [rows]);
   if (error) {
     return <QueryError error={error} what="the traces for this period" onRetry={onRetry} />;
   }
+  const columns = showNode ? 9 : 8;
   return (
     <ScrollArea>
       <Table {...density} highlightOnHover striped>
@@ -299,6 +302,7 @@ function HistoryTable({ rows, density, loading, error, onRetry, onOpen }: Histor
             <Table.Th>Duration</Table.Th>
             <Table.Th>Source IP</Table.Th>
             <Table.Th>Service</Table.Th>
+            {showNode && <Table.Th>Node</Table.Th>}
             <Table.Th>
               <VisuallyHidden>Details</VisuallyHidden>
             </Table.Th>
@@ -308,15 +312,17 @@ function HistoryTable({ rows, density, loading, error, onRetry, onOpen }: Histor
           {loading
             ? Array.from({ length: 5 }).map((_, i) => (
                 <Table.Tr key={i}>
-                  <Table.Td colSpan={8}>
+                  <Table.Td colSpan={columns}>
                     <Skeleton height={20} radius="xl" />
                   </Table.Td>
                 </Table.Tr>
               ))
-            : rows.map((t) => <HistoryRow key={`${t.timestamp}:${t.id}`} trace={t} onOpen={onOpen} />)}
+            : rows.map((t) => (
+                <HistoryRow key={`${t.node ?? ""}:${t.timestamp}:${t.id}`} trace={t} showNode={showNode} onOpen={onOpen} />
+              ))}
           {!loading && rows.length === 0 && (
             <Table.Tr>
-              <Table.Td colSpan={8}>
+              <Table.Td colSpan={columns}>
                 <Center py="xl">
                   <Stack align="center" gap={4}>
                     <Text fw={500} c="dimmed">No traces in this period</Text>
@@ -335,7 +341,13 @@ function HistoryTable({ rows, density, loading, error, onRetry, onOpen }: Histor
   );
 }
 
-function HistoryRow({ trace, onOpen }: { trace: Trace; onOpen: (t: Trace) => void }) {
+interface HistoryRowProps {
+  trace: Trace;
+  showNode: boolean;
+  onOpen: (t: Trace) => void;
+}
+
+function HistoryRow({ trace, showNode, onOpen }: HistoryRowProps) {
   return (
     <Table.Tr>
       <Table.Td>
@@ -363,6 +375,11 @@ function HistoryRow({ trace, onOpen }: { trace: Trace; onOpen: (t: Trace) => voi
       <Table.Td>
         <Text size="xs" truncate="end" maw={160}>{trace.serviceName || "-"}</Text>
       </Table.Td>
+      {showNode && (
+        <Table.Td>
+          <Text size="xs" ff="monospace" style={{ whiteSpace: "nowrap" }}>{trace.node || "-"}</Text>
+        </Table.Td>
+      )}
       <Table.Td>
         <ActionIcon variant="subtle" onClick={() => onOpen(trace)} aria-label={`Details of trace ${trace.id}`}>
           <IconInfoCircle size={16} />
