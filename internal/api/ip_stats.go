@@ -5,6 +5,7 @@ package api
 
 import (
 	"fmt"
+	"net/http"
 	"time"
 
 	"github.com/gsoultan/gateon/internal/telemetry"
@@ -27,7 +28,6 @@ type IPStats struct {
 	Referers      map[string]int
 	BurstCount    int            // Requests in the peak 10-second window
 	JA4s          map[string]int // Track JA4 fingerprints per IP
-	PathErrors    map[string]int // Track 401/403 errors per path
 	WAFHits       int            // Count of requests blocked by WAF rules
 	WAFWarnings   int            // Count of requests flagged but not blocked by WAF rules
 	WAFRules      map[string]int // Track specific WAF rules triggered
@@ -40,6 +40,11 @@ type IPStats struct {
 	PostAuthFailures int            // POSTs answered 401 or 403
 	AttackEvidence   float64        // request-path attack decisions in the evidence window; see attackEvidenceWeight
 
+	// Brute-force evidence: credential attempts (credentialAttempt) answered
+	// 401 or 403, in all and per path. The per-path map is nil until the first.
+	CredentialFailures     int
+	CredentialFailurePaths map[string]int
+
 	// Advanced Behavioral Signals
 	IATSum        float64   // Sum of durations between requests (ms)
 	IATSumSq      float64   // Sum of squares of durations (ms^2)
@@ -47,6 +52,26 @@ type IPStats struct {
 	LastRequestAt time.Time // Time of previous request for IAT calculation
 	LastPathHash  uint64    // Previous path hash
 	PrevPathHash  uint64    // Path hash before LastPathHash
+}
+
+// credentialAttempt reports whether a traced request could have been someone
+// trying a credential: a POST, which is how a login form and a token request
+// submit one, or any request whose Authorization header carried a password,
+// which is how HTTP Basic and Digest do.
+//
+// A refused GET is otherwise not an attempt. A tab whose session expired keeps
+// polling, and every poll is a GET answered 401 that presents the one session
+// it had; so does an application re-presenting a bearer token the server issued
+// and has since expired. Headers are not in the summary traces the analysis
+// reads, so the recording path decides the password case once, from the
+// scheme alone, and stores the answer (telemetry.TraceRecord.PasswordAuth).
+//
+// What this does not see: credentials guessed through a GET query string, and a
+// token-guessing client presenting a different bearer token each time. Neither
+// is how credential guessing is done against a login form or Basic auth, and
+// counting every refused GET to catch them is what reported the expired tab.
+func credentialAttempt(tr *telemetry.TraceRecord) bool {
+	return tr.Method == http.MethodPost || tr.PasswordAuth
 }
 
 // Failures is how many of the address's traced requests failed (4xx or 5xx).

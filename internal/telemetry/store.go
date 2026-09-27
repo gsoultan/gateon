@@ -429,6 +429,16 @@ type TraceRecord struct {
 	// "", which every reader treats as "not recorded".
 	Host string `json:"host,omitempty"`
 
+	// PasswordAuth records that the request presented a password in its
+	// Authorization header -- the Basic scheme, or Digest, whose response is
+	// derived from one (see presentsPassword). The analysis reads summary
+	// traces, which carry no headers, and this is how it tells HTTP Basic
+	// guessing, a GET answered 401, from a stale session's poll, which is the
+	// same GET answered 401. Only the scheme is read; nothing of the
+	// credential is kept. omitempty: absent is false, which is also how a trace
+	// written before the field existed reads.
+	PasswordAuth bool `json:"passwordAuth,omitempty"`
+
 	// Internal fields for lazy formatting in background worker
 	rawReqHeader  map[string][]string
 	rawRespHeader map[string][]string
@@ -2896,11 +2906,13 @@ func UnmarshalTraceSummary(data []byte, tr *TraceRecord) error {
 		RouteDelay      float64   `json:"routeDelayMs"`
 		MiddlewareDelay float64   `json:"middlewareDelayMs"`
 		ServiceDelay    float64   `json:"serviceDelayMs"`
+		PasswordAuth    bool      `json:"passwordAuth"`
 	}
 	var s summary
 	if err := json.Unmarshal(data, &s); err != nil {
 		return err
 	}
+	tr.PasswordAuth = s.PasswordAuth
 	tr.ID = s.ID
 	tr.OperationName = s.OperationName
 	tr.ServiceName = s.ServiceName

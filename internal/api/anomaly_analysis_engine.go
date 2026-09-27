@@ -216,7 +216,6 @@ func newIPStats(countryCode string) *IPStats {
 		Methods:     make(map[string]int),
 		Referers:    make(map[string]int),
 		JA4s:        make(map[string]int),
-		PathErrors:  make(map[string]int),
 		CountryCode: countryCode,
 	}
 }
@@ -439,7 +438,9 @@ func countStatus(stats *IPStats, tr *telemetry.TraceRecord) {
 		} else {
 			stats.Error403++
 		}
-		stats.PathErrors[tr.Path]++
+		if credentialAttempt(tr) {
+			countCredentialFailure(stats, tr.Path)
+		}
 		if post {
 			stats.PostAuthFailures++
 		}
@@ -456,6 +457,15 @@ func countStatus(stats *IPStats, tr *telemetry.TraceRecord) {
 		stats.FailedPaths = make(map[string]int)
 	}
 	stats.FailedPaths[tr.Path]++
+}
+
+// countCredentialFailure records a refused credential attempt on path.
+func countCredentialFailure(stats *IPStats, path string) {
+	stats.CredentialFailures++
+	if stats.CredentialFailurePaths == nil {
+		stats.CredentialFailurePaths = make(map[string]int)
+	}
+	stats.CredentialFailurePaths[path]++
 }
 
 // aggregateThreat folds one recorded threat into its address's record.

@@ -140,17 +140,18 @@ func TestAnomalyAnalysisEngine_RealWorld(t *testing.T) {
 	now := time.Now()
 
 	traces := []*telemetry.TraceRecord{
-		// Brute force from IP 1.2.3.4 (11 failures)
-		{SourceIP: "1.2.3.4", Status: "401 Unauthorized", Timestamp: now, Path: "/login", DurationMs: 100},
-		{SourceIP: "1.2.3.4", Status: "401 Unauthorized", Timestamp: now, Path: "/login", DurationMs: 100},
-		{SourceIP: "1.2.3.4", Status: "401 Unauthorized", Timestamp: now, Path: "/login", DurationMs: 100},
-		{SourceIP: "1.2.3.4", Status: "401 Unauthorized", Timestamp: now, Path: "/login", DurationMs: 100},
-		{SourceIP: "1.2.3.4", Status: "401 Unauthorized", Timestamp: now, Path: "/login", DurationMs: 100},
-		{SourceIP: "1.2.3.4", Status: "401 Unauthorized", Timestamp: now, Path: "/login", DurationMs: 100},
-		{SourceIP: "1.2.3.4", Status: "401 Unauthorized", Timestamp: now, Path: "/login", DurationMs: 100},
-		{SourceIP: "1.2.3.4", Status: "401 Unauthorized", Timestamp: now, Path: "/login", DurationMs: 100},
-		{SourceIP: "1.2.3.4", Status: "401 Unauthorized", Timestamp: now, Path: "/login", DurationMs: 100},
-		{SourceIP: "1.2.3.4", Status: "401 Unauthorized", Timestamp: now, Path: "/login", DurationMs: 100},
+		// Brute force from IP 1.2.3.4 (11 failures): a login form is POSTed, and
+		// only a credential attempt counts towards brute force (credentialAttempt).
+		{SourceIP: "1.2.3.4", Method: "POST", Status: "401 Unauthorized", Timestamp: now, Path: "/login", DurationMs: 100},
+		{SourceIP: "1.2.3.4", Method: "POST", Status: "401 Unauthorized", Timestamp: now, Path: "/login", DurationMs: 100},
+		{SourceIP: "1.2.3.4", Method: "POST", Status: "401 Unauthorized", Timestamp: now, Path: "/login", DurationMs: 100},
+		{SourceIP: "1.2.3.4", Method: "POST", Status: "401 Unauthorized", Timestamp: now, Path: "/login", DurationMs: 100},
+		{SourceIP: "1.2.3.4", Method: "POST", Status: "401 Unauthorized", Timestamp: now, Path: "/login", DurationMs: 100},
+		{SourceIP: "1.2.3.4", Method: "POST", Status: "401 Unauthorized", Timestamp: now, Path: "/login", DurationMs: 100},
+		{SourceIP: "1.2.3.4", Method: "POST", Status: "401 Unauthorized", Timestamp: now, Path: "/login", DurationMs: 100},
+		{SourceIP: "1.2.3.4", Method: "POST", Status: "401 Unauthorized", Timestamp: now, Path: "/login", DurationMs: 100},
+		{SourceIP: "1.2.3.4", Method: "POST", Status: "401 Unauthorized", Timestamp: now, Path: "/login", DurationMs: 100},
+		{SourceIP: "1.2.3.4", Method: "POST", Status: "401 Unauthorized", Timestamp: now, Path: "/login", DurationMs: 100},
 		{SourceIP: "1.2.3.4", Status: "403 Forbidden", Timestamp: now, Path: "/admin", DurationMs: 100},
 
 		// Scanner from IP 5.6.7.8 (21 404s)

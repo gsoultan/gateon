@@ -506,6 +506,9 @@ func (d *SecurityThreatDetector) analyzeWAF(stats *IPStats, reasons *[]string, p
 	return score
 }
 
+// loginPaths are the paths a refused credential attempt on counts for more.
+var loginPaths = []string{"/login", "/auth", "/signin", "/api/v1/auth", "/api/auth"}
+
 func (d *SecurityThreatDetector) analyzeErrors(stats *IPStats, reasons *[]string, primaryType *string) int {
 	score := 0
 	errorRate := 0.0
@@ -520,23 +523,22 @@ func (d *SecurityThreatDetector) analyzeErrors(stats *IPStats, reasons *[]string
 		score += 15
 	}
 
-	// Advanced Auth Failure Detection
-	loginPaths := []string{"/login", "/auth", "/signin", "/api/v1/auth", "/api/auth"}
+	// Brute force is judged on credential attempts alone (credentialAttempt),
+	// not on every 401 and 403: an expired session's tab polls with GETs that
+	// are all refused, and it was reported as a brute-force attacker.
 	loginFailures := 0
 	for _, p := range loginPaths {
-		if count, ok := stats.PathErrors[p]; ok {
-			loginFailures += count
-		}
+		loginFailures += stats.CredentialFailurePaths[p]
 	}
 
 	if loginFailures > 5 {
 		score += 60
 		*reasons = append(*reasons, fmt.Sprintf("Targeted brute force on auth endpoints (%d failures)", loginFailures))
-		*primaryType = "brute_force_attempt"
-	} else if stats.Error401+stats.Error403 > 10 {
+		*primaryType = findingBruteForce
+	} else if stats.CredentialFailures > 10 {
 		score += 50
-		*reasons = append(*reasons, fmt.Sprintf("Multiple authentication failures (%d)", stats.Error401+stats.Error403))
-		*primaryType = "brute_force_attempt"
+		*reasons = append(*reasons, fmt.Sprintf("Multiple refused credential attempts (%d)", stats.CredentialFailures))
+		*primaryType = findingBruteForce
 	}
 
 	if stats.Error404 > 3 {
