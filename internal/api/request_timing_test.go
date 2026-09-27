@@ -144,6 +144,48 @@ func TestASampledOfficeEgressIsNotAScan(t *testing.T) {
 	}
 }
 
+// TestAnalysisReadsTraceSummariesOnly settles the review's other open timing
+// finding, "the header checks never see a header": checkHeaderConsistency (a
+// client calling itself Mozilla without Accept-Language) and the Neural
+// Sentinel's entropy feature read TraceRecord.RequestHeaders, and the
+// summaries the analysis reads carry none. The open test asked for the header
+// check to count; the decision was to remove it and the entropy feature instead.
+//
+// Reading full records was measured on 1000 traces: 1.3 MiB a pass for ordinary
+// traffic, 126 MiB with a debugger session's 64 KiB bodies, 79 MiB with headers
+// padded to 32 KiB -- and a client may send 1 MiB of headers (MaxHeaderBytes),
+// a gigabyte a pass on a 2 GB host. Bounding the read by record size is cheap,
+// but it is a bound the client sets: padding past it switches the check off.
+// And the check misfired on the traffic it would have seen -- crawlers that
+// call themselves Mozilla and send no Accept-Language, Connect and gRPC-Web
+// browsers on gRPC routes -- while the entropy of one request's headers
+// separates nothing. This keeps the pass on summaries, where that cost cannot
+// come back unnoticed.
+func TestAnalysisReadsTraceSummariesOnly(t *testing.T) {
+	openTraceStore(t)
+	body := strings.Repeat("b", 64<<10)
+	padded := map[string][]string{"User-Agent": {"Mozilla/5.0"}, "X-Pad": {strings.Repeat("a", 32<<10)}}
+	start := time.Now().Add(-2 * time.Minute)
+	for i := range 3 {
+		telemetry.RecordTraceDetailed(fmt.Sprintf("debug-%d", i), "GET /", "rt-web", "svc-web", 12,
+			start.Add(time.Duration(i)*time.Second), "200", "/", "10.44.0.9", "", "", "Mozilla/5.0",
+			http.MethodGet, "", "/", "", "", padded, body, map[string][]string{"Content-Type": {"text/html"}}, body,
+			"", 100, 0, 0, 0, 0)
+	}
+	telemetry.FlushTraces()
+
+	traces := analysisTraces(t.Context())
+	if len(traces) != 3 {
+		t.Fatalf("read %d of the 3 recorded traces", len(traces))
+	}
+	for _, tr := range traces {
+		if n := len(tr.RequestHeaders) + len(tr.RequestBody) + len(tr.ResponseHeaders) + len(tr.ResponseBody); n > 0 {
+			t.Errorf("the analysis pass decoded %d bytes of headers and bodies from trace %s; nothing it runs reads them",
+				n, tr.ID)
+		}
+	}
+}
+
 // behavioralEngine is the engine with per-address behavioural analysis on, as
 // an operator who enables it runs it.
 func behavioralEngine() *AnomalyAnalysisEngine {

@@ -641,11 +641,6 @@ func (d *SecurityThreatDetector) analyzeHeaders(stats *IPStats, reasons *[]strin
 		*reasons = append(*reasons, fmt.Sprintf("Multiple TLS fingerprints (JA4+: %d) from single IP", len(stats.JA4s)))
 	}
 
-	if stats.HeaderAnomaly > 5 {
-		score += 30
-		*reasons = append(*reasons, "Inconsistent HTTP headers for declared User-Agent (potential spoofing)")
-	}
-
 	return score
 }
 

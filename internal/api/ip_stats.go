@@ -31,7 +31,6 @@ type IPStats struct {
 	WAFHits       int            // Count of requests blocked by WAF rules
 	WAFWarnings   int            // Count of requests flagged but not blocked by WAF rules
 	WAFRules      map[string]int // Track specific WAF rules triggered
-	HeaderAnomaly int            // Count of requests with suspicious header combinations
 	LastTrace     *telemetry.TraceRecord
 
 	// Harm evidence: what an address must show before a detector whose finding

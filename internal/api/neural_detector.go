@@ -145,13 +145,6 @@ func (d *NeuralAnomalyDetector) extractFeatures(stats *IPStats) []float64 {
 	// Feature 5: WAF Hit Rate
 	wafHitRate := float64(stats.WAFHits) / total
 
-	// Feature 6: Entropy of last request (Complexity of headers/body)
-	entropy := 0.0
-	if stats.LastTrace != nil {
-		content := stats.LastTrace.RequestHeaders + stats.LastTrace.RequestBody
-		entropy = d.calculateShannonEntropy(content)
-	}
-
 	return []float64{
 		avgDuration,
 		avgIAT,
@@ -159,22 +152,6 @@ func (d *NeuralAnomalyDetector) extractFeatures(stats *IPStats) []float64 {
 		errorRate,
 		uniquePathRatio,
 		wafHitRate,
-		entropy,
 	}
 }
 
-func (d *NeuralAnomalyDetector) calculateShannonEntropy(data string) float64 {
-	if len(data) == 0 {
-		return 0
-	}
-	counts := make(map[byte]int)
-	for i := 0; i < len(data); i++ {
-		counts[data[i]]++
-	}
-	var entropy float64
-	for _, count := range counts {
-		p := float64(count) / float64(len(data))
-		entropy -= p * math.Log2(p)
-	}
-	return entropy
-}

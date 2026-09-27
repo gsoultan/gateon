@@ -173,7 +173,7 @@ func (e *AnomalyAnalysisEngine) aggregate(data *DiagnosticData) {
 	data.PathPopularity = make(map[string]int)
 	data.PathIPs = make(map[string]map[string]struct{})
 
-	agg := newTraceAggregator(e, data)
+	agg := newTraceAggregator(data)
 	defer agg.release()
 	for _, tr := range data.Traces {
 		agg.add(tr)
@@ -228,24 +228,23 @@ type ipSlot struct {
 }
 
 // traceAggregator folds traces, oldest first, into DiagnosticData.
+//
+// It reads no header. The traces it is handed are summaries (analysisTraces),
+// and the one check that wanted headers -- a client calling itself Mozilla
+// without Accept-Language -- was removed rather than paid for: see
+// TestAnalysisReadsTraceSummariesOnly.
 type traceAggregator struct {
-	engine *AnomalyAnalysisEngine
 	data   *DiagnosticData
-	routes map[string]*gateonv1.Route
 	hasher *maphash.Hash
 	bursts map[ipSlot]int
 }
 
-func newTraceAggregator(e *AnomalyAnalysisEngine, data *DiagnosticData) *traceAggregator {
-	routes := make(map[string]*gateonv1.Route, len(data.Routes))
-	for _, r := range data.Routes {
-		routes[r.Id] = r
-	}
+func newTraceAggregator(data *DiagnosticData) *traceAggregator {
 	hasher, _ := hashPool.Get().(*maphash.Hash)
 	if hasher == nil {
 		hasher = new(maphash.Hash)
 	}
-	return &traceAggregator{engine: e, data: data, routes: routes, hasher: hasher, bursts: make(map[ipSlot]int)}
+	return &traceAggregator{data: data, hasher: hasher, bursts: make(map[ipSlot]int)}
 }
 
 // release returns the pooled hasher.
@@ -266,7 +265,6 @@ func (a *traceAggregator) add(tr *telemetry.TraceRecord) {
 	a.countBurst(stats, tr)
 	a.countFingerprint(tr)
 	countStatus(stats, tr)
-	a.engine.checkHeaderConsistency(tr, a.routes[tr.ServiceName], stats)
 }
 
 // pathHash hashes a path and remembers the path it came from.
@@ -604,42 +602,3 @@ func capAnomalies(anomalies []*gateonv1.Anomaly) []*gateonv1.Anomaly {
 	return anomalies[:maxAnomaliesPerPass]
 }
 
-func (e *AnomalyAnalysisEngine) checkHeaderConsistency(tr *telemetry.TraceRecord, route *gateonv1.Route, stats *IPStats) {
-	if tr.RequestHeaders == "" {
-		return
-	}
-
-	uaLower := strings.ToLower(tr.UserAgent)
-	isMozilla := strings.Contains(uaLower, "mozilla")
-
-	routeType := "http"
-	if route != nil {
-		routeType = strings.ToLower(route.Type)
-	}
-
-	headers := tr.RequestHeaders
-	if routeType == "grpc" {
-		if !strings.Contains(headers, "application/grpc") {
-			if isMozilla {
-				stats.HeaderAnomaly++
-				return
-			}
-			if tr.Method != "OPTIONS" && tr.Method != "GET" {
-				stats.HeaderAnomaly++
-			}
-		}
-
-		if isMozilla && !strings.Contains(headers, "X-Grpc-Web") && !strings.Contains(headers, "grpc-timeout") {
-			stats.HeaderAnomaly++
-		}
-	} else {
-		if isMozilla {
-			if !strings.Contains(headers, "Accept-Language:") || !strings.Contains(headers, "Accept-Encoding:") {
-				stats.HeaderAnomaly++
-			}
-			if !strings.Contains(headers, "Accept:") {
-				stats.HeaderAnomaly++
-			}
-		}
-	}
-}
