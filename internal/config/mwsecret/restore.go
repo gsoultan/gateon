@@ -120,9 +120,8 @@ func restoreAPIKey(middlewareID string, stored map[string]string, e apiKeyEntry,
 	apiKey, found := storedAPIKey(middlewareID, stored, fp)
 	switch {
 	case !found:
-		return fmt.Errorf("API key %s (tenant %q): no stored API key has this fingerprint -- it was removed, "+
-			"or this was read before the gateway restarted without GATEON_ENCRYPTION_KEY; enter the key again",
-			fp, e.label)
+		return fmt.Errorf("API key %s (tenant %q): no stored API key has this fingerprint -- it was removed "+
+			"or replaced since this was read; enter the key again", fp, e.label)
 	case hasKey(out, apiKeyPrefix+apiKey):
 		return fmt.Errorf("API key %s (tenant %q): the same stored API key is kept twice", fp, e.label)
 	}

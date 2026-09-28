@@ -5,7 +5,6 @@ package mwsecret
 
 import (
 	"crypto/hmac"
-	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"os"
@@ -22,29 +21,45 @@ import (
 // object has no order to keep) and neither is the tenant label, which the
 // operator is free to change and several keys may share.
 //
-// The fingerprint is keyed. An unkeyed hash of an API key would let anyone who
-// can read middlewares test guesses offline, and a key typed by hand
-// ("partner-2024") falls to that at once. The key is derived from
-// GATEON_ENCRYPTION_KEY when it is set, so fingerprints survive a restart and
-// agree across gateways that share it; without it the key is random per
-// process, and a form opened or an export taken before a restart can no longer
-// keep an API key -- it is refused, naming the element, and has to be entered
-// again.
+// The fingerprint must be stable across a restart, or it is useless: a marker
+// an operator read or exported names a stored key by its fingerprint, and a
+// save sends it back to keep that key. A per-process random key made every
+// fingerprint change on restart, so any marker read before one no longer
+// matched any stored key and every API key was refused by tenant -- a form or
+// export could not be saved at all (ADR 0037).
+//
+// When GATEON_ENCRYPTION_KEY is set the key is derived from it, unchanged: the
+// fingerprint survives a restart and agrees across gateways that share it, and
+// a leaked masked config cannot be offline-tested against weak, hand-typed keys
+// ("partner-2024") without the encryption key. When it is unset the key is a
+// fixed public constant, so the derivation is deterministic and the fingerprint
+// is stable. What is lost without the encryption key is unlinkability across
+// gateways (the same API key now fingerprints the same on two of them) and
+// offline-guessing resistance for weak keys. Neither matters here: the
+// fingerprint identifies a stored key within one gateway and is never compared
+// across them, and a deployment with no GATEON_ENCRYPTION_KEY also stores its
+// config -- and so its API-key values -- unencrypted, so the fingerprint is not
+// the weakest link. An operator who wants either property back sets the key,
+// which restores both.
 var fingerprintKey = newFingerprintKey()
 
 // minSeedLen is the shortest GATEON_ENCRYPTION_KEY used as a seed, the same
 // floor the config encryption applies to it.
 const minSeedLen = 16
 
+// fingerprintFallbackSeed keys the fingerprint when GATEON_ENCRYPTION_KEY is
+// unset or too short. It is a public constant, so the derivation is
+// deterministic: identical across a restart and across gateways.
+const fingerprintFallbackSeed = "gateon/mwsecret/api-key-fingerprint/unkeyed-fallback/v1"
+
 func newFingerprintKey() []byte {
-	if seed := os.Getenv("GATEON_ENCRYPTION_KEY"); len(seed) >= minSeedLen {
-		mac := hmac.New(sha256.New, []byte(seed))
-		mac.Write([]byte("gateon/mwsecret/api-key-fingerprint/v1"))
-		return mac.Sum(nil)
+	seed := os.Getenv("GATEON_ENCRYPTION_KEY")
+	if len(seed) < minSeedLen {
+		seed = fingerprintFallbackSeed
 	}
-	key := make([]byte, sha256.Size)
-	_, _ = rand.Read(key) // crypto/rand.Read does not fail; it crashes the process instead
-	return key
+	mac := hmac.New(sha256.New, []byte(seed))
+	mac.Write([]byte("gateon/mwsecret/api-key-fingerprint/v1"))
+	return mac.Sum(nil)
 }
 
 // fingerprint identifies one API key of one middleware without disclosing it.
