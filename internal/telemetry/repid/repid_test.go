@@ -3,7 +3,10 @@
 
 package repid
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // This package decides what a reputation score is about, and the whole reason it
 // exists is that the previous answer — the JA4+ fingerprint alone — named a
@@ -315,5 +318,51 @@ func BenchmarkFor(b *testing.B) {
 				_ = For(tc.fp, tc.ip)
 			}
 		})
+	}
+}
+
+// TestScopedTellsANetworkScopedIdentityFromABareOne pins the check a fingerprint
+// block's store makes before it writes or enforces a key (ADR 0026). A bare
+// fingerprint names a browser build on every network, which is the block this
+// package exists to stop; an address alone is not a fingerprint block at all.
+func TestScopedTellsANetworkScopedIdentityFromABareOne(t *testing.T) {
+	const browser = "t13d1516h2_8daaf6152771_b0da82dd1658"
+	for _, ip := range []string{"203.0.113.10", "2001:db8::1", ""} {
+		if id := For(browser, ip); !Scoped(id) {
+			t.Errorf("For(browser, %q) = %q reads as unscoped; the store would refuse "+
+				"the block it was asked to keep", ip, id)
+		}
+	}
+	for _, bare := range []string{browser, Class(browser), For("", "203.0.113.10"), "2001:db8::1", ""} {
+		if Scoped(bare) {
+			t.Errorf("Scoped(%q) = true; a key without a network would be enforced on "+
+				"every network", bare)
+		}
+	}
+}
+
+// TestScopesOfFindsEveryNetworkOfAClassAndNoOtherClass pins how a release by
+// fingerprint finds every network the build is blocked on: by the prefix
+// ScopesOf gives. The separator is part of that prefix because one class's text
+// can begin another's; matched on the class alone, releasing one build would
+// lift the other's blocks too.
+func TestScopesOfFindsEveryNetworkOfAClassAndNoOtherClass(t *testing.T) {
+	const browser = "t13d1516h2_8daaf6152771_b0da82dd1658"
+	prefix := ScopesOf(Class(browser))
+	for _, ip := range []string{"203.0.113.10", "198.51.100.20", "2001:db8::1"} {
+		if id := For(browser, ip); !strings.HasPrefix(id, prefix) {
+			t.Errorf("For(browser, %q) = %q does not start with %q; a release by "+
+				"fingerprint would miss this network", ip, id, prefix)
+		}
+	}
+
+	const longer = browser + "ab"
+	if c := Class(longer); c == Class(browser) || !strings.HasPrefix(c, Class(browser)) {
+		t.Fatalf("precondition: Class(%q) = %q should extend Class(browser) = %q",
+			longer, c, Class(browser))
+	}
+	if id := For(longer, "203.0.113.10"); strings.HasPrefix(id, prefix) {
+		t.Errorf("For(%q, ...) = %q starts with %q; releasing one build would lift "+
+			"another's blocks", longer, id, prefix)
 	}
 }
