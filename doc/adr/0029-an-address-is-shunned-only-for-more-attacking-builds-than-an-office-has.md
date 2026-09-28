@@ -233,9 +233,10 @@ took in d29c7d27: a POST -- how a login form or a token request submits one --
 or a request whose `Authorization` carried a password (Basic, Digest), which
 is how HTTP authentication is guessed over GET. It is decided by
 `presentsPassword`, the function the traces' `passwordAuth` flag is set from,
-so the two detectors cannot disagree about what an attempt is. A bearer token
-or session cookie re-presented after it expired is not an attempt; neither is
-an NTLM or Negotiate handshake, whose first legs are answered 401 by design.
+so the two detectors cannot disagree about what an attempt is. A GET that
+re-presents a bearer token or session cookie after it expired is not an
+attempt; neither is an NTLM or Negotiate handshake over GET, whose first legs
+are answered 401 by design.
 Credential stuffing (POSTs refused 401) and Basic guessing over GET are still
 shunned (`TestCredentialStuffingIsStillShunned`,
 `TestBasicAuthGuessingOverGetIsStillShunned`, a POST refused 401 or 403),
@@ -257,10 +258,14 @@ records once per request, 257.3 ns → 263.4 ns for a success (p=0.25), 260.8 �
 (`BenchmarkInfraChain_TraceOff`) 531.8 ns → 511.7 ns (p=0.28), 610 B and 7
 allocations unchanged. No difference is distinguishable from noise.
 
-Residue, as in the per-IP detector: a POST refused 403 -- by the WAF, a
-policy or the origin -- is still a refused credential attempt, so a client
-that POSTs into a refusal most of the time still reads as guessing; and
-credentials guessed through a GET query string are not counted.
+Residue, as in the per-IP detector. A POST refused 401 or 403 is a refused
+credential attempt whatever it carried: a login form, but also a GraphQL,
+gRPC-Web or JSON-RPC client that polls with POST and keeps presenting a
+bearer token after it expired, and a POST the WAF or a policy refuses. One
+that does so for most of its requests still reads as guessing. Not counting a
+POST that presents a token rather than a password would close that, at the
+price of token guessing over POST, and should be decided for both detectors at
+once. Credentials guessed through a GET query string are not counted.
 
 ## Related
 
