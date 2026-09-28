@@ -7,9 +7,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html"
 	"net/http"
+	neturl "net/url"
 	"strings"
 	"time"
 
@@ -138,13 +140,13 @@ func sendWebhook(ctx context.Context, url string, payload any) error {
 
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
 	if err != nil {
-		return err
+		return withoutURL(err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return err
+		return withoutURL(err)
 	}
 	defer resp.Body.Close()
 
@@ -152,4 +154,17 @@ func sendWebhook(ctx context.Context, url string, payload any) error {
 		return fmt.Errorf("webhook returned status %d", resp.StatusCode)
 	}
 	return nil
+}
+
+// withoutURL drops the address from a request error. Both a malformed URL and
+// a failed send come back as *url.Error, which quotes the whole URL, and here
+// the URL is the credential: the path of a Slack or Discord incoming webhook,
+// a Telegram bot token. The manager logs send errors, and the log stream is
+// readable by every viewer.
+func withoutURL(err error) error {
+	var uerr *neturl.Error
+	if errors.As(err, &uerr) {
+		return fmt.Errorf("%s: %w", uerr.Op, uerr.Err)
+	}
+	return err
 }

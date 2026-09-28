@@ -68,6 +68,14 @@ func eachSecret(c *gateonv1.GlobalConfig, fn func(url bool, p *string)) {
 	}
 }
 
+// MaskURL is a connection URL as it may be shown or logged: with any password
+// in it replaced by Sentinel, and hidden whole when the password cannot be
+// found for certain. The log stream is readable by every viewer, so a DSN
+// logged as it is hands them the database password.
+func MaskURL(v string) string {
+	return masked(v, true)
+}
+
 func masked(v string, url bool) string {
 	switch {
 	case v == "" || IsReference(v):

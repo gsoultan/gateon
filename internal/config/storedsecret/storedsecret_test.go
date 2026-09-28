@@ -257,8 +257,8 @@ func TestMaskURL(t *testing.T) {
 		{"host=db user=gateon password=pw dbname=gateon", Sentinel},
 		{"gateon:pw@tcp(db:3306)/gateon", Sentinel},
 	} {
-		if got := masked(tc.in, true); got != tc.want {
-			t.Errorf("masked(%q) = %q, want %q", tc.in, got, tc.want)
+		if got := MaskURL(tc.in); got != tc.want {
+			t.Errorf("MaskURL(%q) = %q, want %q", tc.in, got, tc.want)
 		}
 	}
 }
