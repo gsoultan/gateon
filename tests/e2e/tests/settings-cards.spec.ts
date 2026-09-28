@@ -14,6 +14,10 @@ import { test, expect, type APIRequestContext, type Locator, type Page } from '@
 
 type Playwright = { request: { newContext: (o: object) => Promise<APIRequestContext> } };
 
+// What GET /v1/global returns for a stored secret: storedsecret.Sentinel in the
+// gateway and STORED_SECRET_SENTINEL in the dashboard, pinned equal by a Go test.
+const STORED_SECRET = '__gateon_redacted__';
+
 function adminApi(playwright: Playwright) {
   return playwright.request.newContext({ baseURL: 'http://localhost:8080', storageState: 'tests/.auth/admin.json' });
 }
@@ -159,15 +163,17 @@ test.describe('Settings cards', () => {
     expect(body.audit).toMatchObject({ enabled: true, signEntries: true });
     expect(body.audit?.signatureKey ?? '').toBe('');
 
+    // The key itself is never read back (ADR 0028): a stored one reads as the
+    // placeholder, and the card shows it as stored rather than as a value.
     const api = await adminApi(playwright);
     try {
       const stored = (await (await api.get('/v1/global')).json()) as { audit?: { signatureKey?: string } };
-      expect(stored.audit?.signatureKey?.length ?? 0, 'the gateway generated no signing key').toBeGreaterThanOrEqual(32);
+      expect(stored.audit?.signatureKey, 'the gateway generated no signing key').toBe(STORED_SECRET);
     } finally {
       await api.dispose();
     }
     await openSettings(page);
-    await expect(card(page, 'Forensic Audit Logging').getByLabel('Signature Key')).not.toHaveValue('');
+    await expect(card(page, 'Forensic Audit Logging').getByText('Stored', { exact: true })).toBeVisible();
   });
 
   test('Trace archive: retention and size limit are saved and read back', async ({ page }) => {

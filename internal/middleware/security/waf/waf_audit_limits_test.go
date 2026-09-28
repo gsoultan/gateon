@@ -97,7 +97,9 @@ func TestWAF_Shunning(t *testing.T) {
 	// Initialize telemetry store for escalation logic
 	dbPath := filepath.Join(t.TempDir(), "gateon_shun_test.db")
 
-	_ = telemetry.InitPathStatsStore(dbPath, 1)
+	if err := telemetry.InitPathStatsStore(dbPath, 1); err != nil {
+		t.Fatalf("init telemetry store: %v", err)
+	}
 	defer telemetry.ClosePathStatsStore(context.Background())
 
 	mockEbpf := &mockEbpfManager{}
@@ -126,28 +128,39 @@ func TestWAF_Shunning(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}))
 
-	ip := "1.2.3.4"
-	// Simulate 3 attacks from different fingerprints
-	for i := 1; i <= 3; i++ {
+	// An address no other test uses: the evidence towards a shun is kept per
+	// address, across tests.
+	const ip = "198.51.100.223"
+	attack := func(build int) {
 		req := httptest.NewRequest("GET", "/?test=shunme", nil)
 		req.RemoteAddr = ip + ":1234"
-		// Set unique JA4+ for each request to simulate different users
-		ja4plus := "user-" + string(rune('0'+i)) + "_ge11nn0200_90c635b248af"
+		ja4plus := "user-" + string(rune('0'+build)) + "_ge11nn0200_90c635b248af"
 		rs := &request.RequestState{JA4Plus: ja4plus}
 		req = req.WithContext(context.WithValue(req.Context(), request.RequestStateContextKey{}, rs))
-
 		rr := httptest.NewRecorder()
 		handler.ServeHTTP(rr, req)
-
 		if rr.Code != http.StatusForbidden {
-			t.Errorf("request %d: expected 403, got %d", i, rr.Code)
+			t.Errorf("build %d: expected 403, got %d", build, rr.Code)
 		}
 	}
 
-	// Wait for background worker to process threats and escalate to IP mitigation
-	time.Sleep(200 * time.Millisecond)
-
-	if mockEbpf.getShunnedIP() != ip {
-		t.Errorf("expected IP %s to be shunned after 3 attacks, got %q", ip, mockEbpf.getShunnedIP())
+	// Threats are processed off the request path; FlushThreats waits for the
+	// store to finish them, escalation included. Checking without it raced the
+	// store, and passed only while there were few threats to process.
+	//
+	// Five client builds refused by the WAF is the bar ADR 0029 sets for
+	// shunning an address. Four is an office with a few infected machines: each
+	// build is refused on its own, and the address stays up.
+	for build := 1; build <= 4; build++ {
+		attack(build)
+	}
+	telemetry.FlushThreats()
+	if got := mockEbpf.getShunnedIP(); got != "" {
+		t.Fatalf("%s was shunned after 4 attacking builds; the bar is 5", got)
+	}
+	attack(5)
+	telemetry.FlushThreats()
+	if got := mockEbpf.getShunnedIP(); got != ip {
+		t.Errorf("expected %s to be shunned after 5 attacking builds, got %q", ip, got)
 	}
 }

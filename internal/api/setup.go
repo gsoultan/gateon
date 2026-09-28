@@ -113,8 +113,13 @@ func (s *ApiService) Setup(ctx context.Context, req *gateonv1.SetupRequest) (*ga
 		return &gateonv1.SetupResponse{Success: false, Error: "failed to update config: " + err.Error()}, nil
 	}
 
-	// 3. Update Auth Manager key in-memory
-	s.Auth.UpdateSymmetricKey(req.PasetoSecret)
+	// 3. Put the saved key in force now. The administrator and the config are
+	// already written, so a failure is reported, not returned: the next start
+	// reads the saved key.
+	if err := s.Auth.UpdateSymmetricKey(req.PasetoSecret); err != nil {
+		logger.L.LogError("setup saved the session key but could not put it in force; restart the gateway",
+			"error", err)
+	}
 
 	s.logAudit(ctx, "setup", "system", "System initial setup completed")
 	// Nothing is left for the token to open, and its file should not outlive it.

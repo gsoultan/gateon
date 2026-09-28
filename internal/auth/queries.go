@@ -45,4 +45,12 @@ const (
 	// are bound.
 	QueryUpdatePassword = "UPDATE users SET password = ? WHERE id = ?"
 	QueryUpdate2FA      = "UPDATE users SET two_factor_enabled = ?, two_factor_secret = ?, recovery_codes = ? WHERE id = ?"
+
+	// QueryTwoFactorSecrets and QueryUpdateTwoFactorSecret re-encrypt every
+	// stored second factor when the session key is rotated.
+	// #nosec G101 -- a query naming a column, not a credential.
+	QueryTwoFactorSecrets = "SELECT id, two_factor_secret FROM users WHERE two_factor_secret <> ''"
+	// #nosec G101 -- a parameterised statement, not a credential. Every value
+	// is bound.
+	QueryUpdateTwoFactorSecret = "UPDATE users SET two_factor_secret = ? WHERE id = ?"
 )

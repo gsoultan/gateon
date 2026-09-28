@@ -20,6 +20,7 @@ import (
 	"github.com/gsoultan/gateon/internal/audit"
 	"github.com/gsoultan/gateon/internal/auth"
 	"github.com/gsoultan/gateon/internal/config"
+	"github.com/gsoultan/gateon/internal/config/storedsecret"
 	"github.com/gsoultan/gateon/internal/db"
 	"github.com/gsoultan/gateon/internal/ebpf"
 	"github.com/gsoultan/gateon/internal/inits"
@@ -412,7 +413,7 @@ func initTelemetry(globalReg *config.GlobalRegistry, ctx context.Context) {
 		}
 	}
 	if err := telemetry.InitPathStatsStore(databaseURL, retention); err != nil {
-		logger.L.LogError("failed to init path stats store", "error", err, "database_url", databaseURL)
+		logger.L.LogError("failed to init path stats store", "error", err, "database_url", storedsecret.MaskURL(databaseURL))
 	}
 
 	// Copies each closed hour of traces to the trace archive when archiving is

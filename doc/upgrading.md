@@ -11,6 +11,154 @@ here after the fact.
 
 ## Unreleased
 
+### Stored secrets are no longer returned by the API — **API clients that read secrets stop getting them**
+
+`GET /v1/global` and `GetGlobalConfig` returned every stored credential to any
+caller who may write the global configuration: the PASETO key that signs
+sessions, the audit chain's HMAC key, the database, Redis and HA passwords, the
+MaxMind key, the GitOps token, the bot-management and proof-of-work secrets, the
+canary token, the IP-reputation API keys and the alert webhook URLs and Telegram
+bot tokens. One stolen administrator session was enough to mint a session for
+any account. Secrets are now write-only. See ADR 0028.
+
+- A stored secret now reads as `__gateon_redacted__` (the placeholder the
+  middleware API already uses); a secret configured as a reference (`$env:…`,
+  `$vault:…`, `$aws-sm:…`) still reads as the reference; an unset one reads `""`.
+  A database or repository URL shows everything but its password:
+  `postgres://gateon:__gateon_redacted__@db/gateon`.
+- **GET → modify → PUT keeps working.** Send the placeholders back unchanged and
+  every stored secret is kept exactly as it is held.
+- **To rotate a secret, send the new value.** `""` clears an optional credential;
+  the session key, the audit signing key and the proof-of-work key cannot be
+  cleared, and `""` keeps them.
+- A kept secret is refused, with `400` and the field's name, when the same save
+  changes where it is sent: the Redis address, a database's driver, host or port,
+  the GitOps repository's host, an IP-reputation integration's provider. Send
+  the secret again with the new destination.
+- Secrets in alert dispatchers and IP-reputation integrations are matched to the
+  stored element by `id`. A placeholder in an element whose `id` is missing or
+  unknown is refused with `400` naming the element. Elements stored without an
+  `id` get one when the configuration is loaded; read it before you save.
+- The placeholder is never stored as a secret: a save that would store it is
+  refused, whatever path it comes by.
+- Viewers still read every secret as `""`.
+
+**Who is affected:** scripts and tools that read credentials out of
+`GET /v1/global` or `GetGlobalConfig` (they now get the placeholder), and anyone
+who relied on the dashboard to show a stored key. Keep your own copy of any key
+you need to see again; the gateway will not show it.
+
+### A new session key takes effect when it is saved — **saving a new key signs everyone out at once**
+
+A PASETO key changed in Settings (or through the API) used to take effect only at
+the next restart, and that restart also broke every two-factor sign-in, because
+stored second factors are encrypted under the same key: 2FA accounts, the
+administrator who rotated included, could no longer sign in. The new key now
+takes effect as soon as it is saved: every session ends immediately, yours
+included, and every two-factor enrolment is re-encrypted under the new key and
+keeps working. A key shorter than 32 bytes is refused (`400`) instead of being
+saved and failing the next start. The dashboard asks before it lets you replace
+the key, and says what will happen.
+
+**Who is affected:** anyone who rotates the session key. If several gateway
+instances share one user database, give every instance the new key and restart
+them; until then the others keep accepting sessions signed with the old key,
+and their two-factor sign-ins fail.
+
+### Rotating the audit signing key — **older entries verify only with the old key**
+
+The dashboard now asks before replacing the audit signing key, because entries
+written before the change verify only with the old key, which the gateway no
+longer shows. If you will need to verify them, copy the key from `global.json`
+on the gateway host before you save the new one.
+
+**Who is affected:** installs with audit signing on that rotate its key.
+
+### Alert and startup logs no longer carry credentials
+
+A failed alert send logged the webhook URL or Telegram bot URL, which is the
+credential; the startup log line for a path-stats store that could not open
+carried the auth database URL with its password. Both are now logged without
+the secret. The log stream is readable by viewers, so a credential that reached
+it was readable by them.
+
+**Who is affected:** nobody needs to change anything. If your logs are shipped
+somewhere, rotate any webhook, bot token or database password that may be in
+older log lines.
+
+### An address is shunned automatically only when five client builds behind it attack — **fewer automatic IP shuns**
+
+Besides blocking a fingerprint, every recorded threat could shun its source
+address: a row on the IP mitigation list, refused with `Forbidden: IP Shunned
+by Security Policy` on every entrypoint and route and dropped in the kernel when
+eBPF runs, until an operator releases it -- it does not expire. The shun was
+triggered by three different JA4+ fingerprints behind one address with any
+refused request, and the count never lapsed. A JA4+ changes with a request's
+method and whether it sent a cookie or a `Referer`, so one browser whose
+requests the WAF refused could shun its own address; rate-limit rejections, geo
+and bot-policy blocks and reputation blocks counted as if they were attacks, so
+three browser builds behind an office egress that each hit a rate limit shunned
+the office; and `GATEON_MITIGATION_ALLOWLIST` was not consulted.
+
+An address is now shunned automatically when five different client builds --
+the fingerprint's class, the part a client cannot vary per request, as for
+fingerprint blocks -- each produce attack evidence from it within ten minutes:
+a WAF block on a payload, a trap, a malware upload, a brute-force or
+exploit-scan detection. Rate limits and policy blocks never count. A build
+counts for ten minutes after its latest attack. Allowlisted addresses are never
+shunned by this path, and nothing they do while allowlisted is held against
+them afterwards. Fewer than five attacking builds -- an office with a few
+infected machines, say -- are handled build by build: each is blocked on its
+network by the fingerprint block after three attacks in ten minutes, and the
+address stays up (ADR 0029). There is no new setting.
+
+- The reason on an automatic shun reads `IP shunning triggered: attack evidence
+  from 5 different client builds at this address within 10m0s` (it used to read
+  `... N unique malicious users detected from this IP`).
+- Releasing an address still exempts it from the automatic shun from then on,
+  and now also discards the evidence gathered against it.
+- Shuns already on the list are not touched.
+
+**Who is affected:** installs behind which many users share an address (office
+egress, CGNAT, VPN exits): far fewer automatic shuns. A client that changes its
+TLS fingerprint on every connection is shunned at its fifth within ten minutes.
+
+### The mitigation allowlist and loopback are exempt from fingerprint blocks
+
+A fingerprint block (the "User Mitigations" list, refused with `Forbidden:
+Compromised Fingerprint`) refused clients on `GATEON_MITIGATION_ALLOWLIST`, and
+loopback clients, whenever their browser build was blocked on their network --
+typically by someone else's attacks, since a block covers a build on a /24 or
+/64. The reputation blocker already served both; the fingerprint block now
+serves them too. Threats from allowlisted addresses are still recorded, listed
+and correlated, but no longer count towards an automatic fingerprint block or
+an automatic IP shun: a block earned by an allowlisted scanner refused its
+neighbours running the same build.
+
+**Who is affected:** installs that set `GATEON_MITIGATION_ALLOWLIST` (an
+operator's own scanners, monitoring or office egress), and installs behind a
+local proxy that sets no forwarding header, where every client is loopback.
+An allowlisted address's threats still lower its build's reputation on its
+network, as before.
+
+### Brute-force detection counts login attempts, not every 401 and 403 — **an expired dashboard tab is no longer shunned**
+
+With `anomaly_detection.enable_brute_force_detection` on, the anomaly detector
+counted every 401 and 403 an address received as a failed login, and shunned
+the address when they were over 80% of its requests. A dashboard tab left open
+after its session expired -- every poll a GET answered 401 -- was shunned
+within a check interval, and so was a client refused 403 on GETs by a policy or
+the WAF. It now counts credential attempts refused 401 or 403: POSTs, and any
+request whose `Authorization` header carries a password (HTTP Basic or Digest),
+the rule the per-IP threat detector already uses. A GET that re-presents an
+expired session cookie or bearer token is not counted. Exploit scanning is
+still detected from WAF blocks, by its own check.
+
+**Who is affected:** installs with brute-force detection enabled (it is off by
+default). Credentials guessed through a GET query string are not counted, and a
+client that POSTs into a 401 or 403 most of the time still is -- including a
+GraphQL or gRPC-Web client that keeps polling with an expired bearer token.
+
 ### gRPC on a plaintext TCP entrypoint is authenticated — **upgrade if you run one**
 
 On a plaintext TCP entrypoint, gRPC and gRPC-Web went straight to the gateway's

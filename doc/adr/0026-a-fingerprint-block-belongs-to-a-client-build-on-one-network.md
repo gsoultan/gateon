@@ -162,6 +162,7 @@ a day later.
   each hit a rate limit shun the office. It needs the class (`repid.Class`),
   the attack-evidence rule and a decision about the office NAT -- a change to
   what shuns an address, not a drive-by in this one.
+  Settled by ADR 0029: five attacking classes within ten minutes, attack evidence only.
 
 ## Related
 

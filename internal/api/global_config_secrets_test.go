@@ -9,10 +9,13 @@ import (
 	"strings"
 	"testing"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/protojson"
 
 	"github.com/gsoultan/gateon/internal/auth"
 	"github.com/gsoultan/gateon/internal/config"
+	"github.com/gsoultan/gateon/internal/config/storedsecret"
 	"github.com/gsoultan/gateon/internal/middleware"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
@@ -106,11 +109,15 @@ func TestGetGlobalConfigWithholdsCredentialsFromAViewer(t *testing.T) {
 	}
 }
 
-// TestGetGlobalConfigRoundTripsCredentialsForAWriter pins the other half: the
-// settings editor sends the whole config back on save, so a role that can
-// write it must still receive every value.
-func TestGetGlobalConfigRoundTripsCredentialsForAWriter(t *testing.T) {
-	svc := &ApiService{Globals: globalRegistryWithSecrets(t)}
+// TestGetGlobalConfigGivesAWriterNoCredential pins the other half: a role that
+// may write the config reads each credential as the placeholder, and a save of
+// what it read, unchanged, keeps every stored credential. It used to read every
+// value -- the settings editor sends the config back on save -- so a stolen
+// administrator session, or script in the dashboard, carried them all off.
+func TestGetGlobalConfigGivesAWriterNoCredential(t *testing.T) {
+	reg := globalRegistryWithSecrets(t)
+	svc := &ApiService{Globals: reg}
+	before := protojson.Format(reg.Get(context.Background()))
 	for _, role := range []string{auth.RoleAdmin, auth.RoleOperator} {
 		resp, err := svc.GetGlobalConfig(withRole(role), &gateonv1.GetGlobalConfigRequest{})
 		if err != nil {
@@ -118,9 +125,31 @@ func TestGetGlobalConfigRoundTripsCredentialsForAWriter(t *testing.T) {
 		}
 		got := protojson.Format(resp.Config)
 		for _, secret := range globalCredentials {
-			if !strings.Contains(got, secret) {
-				t.Errorf("%s no longer receives %q, so saving settings would blank it", role, secret)
+			if strings.Contains(got, secret) {
+				t.Errorf("%s received the stored credential %q", role, secret)
 			}
 		}
+		if _, err := svc.UpdateGlobalConfig(withRole(role), &gateonv1.UpdateGlobalConfigRequest{Config: resp.Config}); err != nil {
+			t.Fatalf("saving what %s read, unchanged: %v", role, err)
+		}
+		if after := protojson.Format(reg.Get(context.Background())); after != before {
+			t.Fatalf("saving what %s read, unchanged, changed the stored config:\n got %s\nwant %s", role, after, before)
+		}
+	}
+}
+
+// TestUpdateGlobalConfigRefusesAPlaceholderItCannotKeep: the refusal is
+// InvalidArgument, names the element, and stores nothing.
+func TestUpdateGlobalConfigRefusesAPlaceholderItCannotKeep(t *testing.T) {
+	reg := globalRegistryWithSecrets(t)
+	svc := &ApiService{Globals: reg}
+	before := protojson.Format(reg.Get(context.Background()))
+	update := &gateonv1.GlobalConfig{Redis: &gateonv1.RedisConfig{Addr: "attacker.example:6379", Password: storedsecret.Sentinel}}
+	_, err := svc.UpdateGlobalConfig(withRole(auth.RoleAdmin), &gateonv1.UpdateGlobalConfigRequest{Config: update})
+	if status.Code(err) != codes.InvalidArgument || !strings.Contains(err.Error(), "redis.password") {
+		t.Fatalf("UpdateGlobalConfig = %v; want InvalidArgument naming redis.password", err)
+	}
+	if after := protojson.Format(reg.Get(context.Background())); after != before {
+		t.Fatal("a refused update changed the stored config")
 	}
 }

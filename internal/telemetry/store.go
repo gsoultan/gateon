@@ -30,6 +30,7 @@ import (
 	"github.com/gsoultan/gateon/internal/httputil"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/request"
+	"github.com/gsoultan/gateon/internal/security/mitigation"
 	"github.com/gsoultan/gateon/internal/syncutil"
 	"github.com/gsoultan/gateon/internal/telemetry/repid"
 	lru "github.com/hashicorp/golang-lru"
@@ -260,10 +261,12 @@ var (
 		subscribers: make(map[chan *MetricsSnapshot]struct{}),
 	}
 
-	// ipMaliciousFingerprints tracks unique malicious fingerprints per IP for escalation to IP shunning.
-	// map[IP]map[Fingerprint]struct{}
-	ipMaliciousFingerprints, _ = lru.NewARC(10000)
-	ipMaliciousMu              sync.Mutex
+	// addressEvidence remembers, per source address, which client classes
+	// produced attack evidence there and when each last did: the escalation to
+	// an IP shun (escalateAddress). map[IP]*addressSightings, ARC-bounded at
+	// maxEvidenceAddresses addresses of at most ipShunMinClasses classes each.
+	addressEvidence, _ = lru.NewARC(maxEvidenceAddresses)
+	addressEvidenceMu  sync.Mutex
 
 	// fingerprintSightings tracks, per JA4+, how many qualifying threats it has
 	// produced and how many distinct source addresses it has been seen from.
@@ -1766,12 +1769,6 @@ const (
 
 	// typeBruteForce is the threat type recorded for repeated auth failures.
 	typeBruteForce = "brute_force_attempt"
-
-	// ipShunUniqueUserThreshold is how many distinct malicious fingerprints must
-	// appear behind one address before the address itself is shunned. One IP can
-	// front a whole office, so this trades a little dwell time for not blocking
-	// everyone behind a NAT on the strength of a single bad client.
-	ipShunUniqueUserThreshold = 3
 )
 
 // normalizeThreatHeaders formats the captured headers and redacts them before
@@ -1795,12 +1792,20 @@ func normalizeThreatHeaders(st *SecurityThreat) {
 // escalateMitigation blocks the actor behind a threat, not just the request.
 //
 // A fingerprint is blocked on the threat's network once that class has
-// attacked from there repeatedly (escalateFingerprint, ADR 0026). An IP is only
-// mitigated once ipShunUniqueUserThreshold distinct malicious fingerprints have
-// been seen behind it, because one address can front an entire office; shunning
-// on the first bad fingerprint would take out everyone sharing the NAT.
+// attacked from there repeatedly (escalateFingerprint, ADR 0026). The address
+// itself is shunned only once more client classes have attacked from it than
+// an office's few infected machines or misjudged browser builds produce
+// (escalateAddress, ADR 0029): one address can front an entire office, and a
+// shun refuses all of it until an operator releases it.
 //
 // Mitigation threats are excluded, or acting on one would produce another.
+//
+// So is everything from an allowlisted source. Its threats are recorded,
+// listed and correlated like any other -- the allowlist exempts enforcement,
+// never observation -- but they are not evidence towards a block: a
+// fingerprint block is kept for a build on a network and would refuse the
+// source's neighbours who share its build, and evidence kept towards a shun
+// would be held against the address the day it left the allowlist (ADR 0029).
 func escalateMitigation(st *SecurityThreat) {
 	if !st.Mitigated && st.Category != "reputation" && st.Score < autoMitigateScore {
 		return
@@ -1809,33 +1814,12 @@ func escalateMitigation(st *SecurityThreat) {
 	case "user_mitigation", "ip_mitigation", "ip_shunning":
 		return
 	}
-
-	escalateFingerprint(st)
-	if st.SourceIP == "" || st.Fingerprint == "" {
+	if mitigation.IsAllowlisted(st.SourceIP) {
 		return
 	}
 
-	ipMaliciousMu.Lock()
-	val, _ := ipMaliciousFingerprints.Get(st.SourceIP)
-	fps, _ := val.(map[string]struct{})
-	if fps == nil {
-		fps = make(map[string]struct{})
-	}
-	fps[st.Fingerprint] = struct{}{}
-	ipMaliciousFingerprints.Add(st.SourceIP, fps)
-	uniqueUsers := len(fps)
-	ipMaliciousMu.Unlock()
-
-	if uniqueUsers >= ipShunUniqueUserThreshold && !IsIPUnmitigated(st.SourceIP) {
-		if err := MarkIPMitigated(st.SourceIP, fmt.Sprintf(
-			"IP shunning triggered: %d unique malicious users detected from this IP", uniqueUsers)); err != nil {
-			// Nobody is waiting on this one, so logging is all there is -- but
-			// an automatic shun that did not persist is a block the operator
-			// will never know was not applied.
-			logger.Default().LogError("automatic IP shun did not persist",
-				"ip", st.SourceIP, "unique_users", uniqueUsers, "error", err)
-		}
-	}
+	escalateFingerprint(st)
+	escalateAddress(st)
 }
 
 // enrichThreatOrigin fills in geolocation and ASN when the caller did not.
@@ -2185,6 +2169,11 @@ func MarkIPUnmitigated(ip string) error {
 	// entry was evicted the block came back on its own.
 	if err == nil && s.unmitigatedCache != nil {
 		s.unmitigatedCache.Add(ip, true)
+	}
+	// A release is a ruling on the evidence that earned the shun, so none of
+	// it may count towards another (ADR 0029).
+	if err == nil {
+		forgetAddressEvidence(ip)
 	}
 
 	// Real-time eBPF synchronization to restore access immediately

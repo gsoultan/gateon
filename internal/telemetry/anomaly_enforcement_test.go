@@ -48,8 +48,9 @@ func TestAnomalyShunIsEnforced(t *testing.T) {
 			name: "brute force", ip: "203.0.113.81", threatType: "brute_force_attempt",
 			cfg: &gateonv1.AnomalyDetectionConfig{Sensitivity: 0.5, EnableBruteForceDetection: true},
 			traffic: func(agg *telemetry.LocalMetricsAggregator, ip string) {
+				login := httptest.NewRequest(http.MethodPost, "/login", nil)
 				for range 20 {
-					agg.RecordRequest(ip, http.StatusUnauthorized)
+					agg.RecordRequest(ip, http.StatusUnauthorized, login)
 				}
 			},
 		},
@@ -57,8 +58,9 @@ func TestAnomalyShunIsEnforced(t *testing.T) {
 			name: "exploit scanning", ip: "203.0.113.82", threatType: "exploit_scan",
 			cfg: &gateonv1.AnomalyDetectionConfig{Sensitivity: 1, EnableExploitDetection: true},
 			traffic: func(agg *telemetry.LocalMetricsAggregator, ip string) {
+				probe := httptest.NewRequest(http.MethodGet, "/.env", nil)
 				for range 30 {
-					agg.RecordRequest(ip, http.StatusForbidden)
+					agg.RecordRequest(ip, http.StatusForbidden, probe)
 					agg.RecordWAFBlock(ip)
 				}
 			},
@@ -100,15 +102,16 @@ func TestAnomalyThrottleIsNotClaimedWithoutAKernel(t *testing.T) {
 	cfg := &gateonv1.AnomalyDetectionConfig{
 		Enabled: true, CheckIntervalSeconds: 1, Sensitivity: 0.5, EnableBruteForceDetection: true,
 	}
-	// 16 of 20 failing: above the detection rate, not above the shun rate.
+	// 16 of 20 logins refused: above the detection rate, not above the shun rate.
 	th := runDetectorUntil(t, cfg, "brute_force_attempt", ip, func() {
 		agg := telemetry.GetAggregator()
+		login := httptest.NewRequest(http.MethodPost, "/login", nil)
 		for i := range 20 {
 			status := http.StatusOK
 			if i < 16 {
 				status = http.StatusUnauthorized
 			}
-			agg.RecordRequest(ip, status)
+			agg.RecordRequest(ip, status, login)
 		}
 	})
 	if th.ActionTaken == telemetry.ActionThrottled {

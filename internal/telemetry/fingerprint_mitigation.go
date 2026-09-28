@@ -4,6 +4,7 @@
 package telemetry
 
 import (
+	"hash/maphash"
 	"os"
 	"strconv"
 	"strings"
@@ -283,4 +284,172 @@ func mitigationCutoff() string {
 // the block's TTL and a release's hold, a row decides nothing.
 func userMitigationRetention() time.Duration {
 	return max(mitigationTTL, unmitigationHoldWindow)
+}
+
+// When an address, rather than a class on its network, is safe to shun.
+//
+// A shun refuses every request from one address, on every route and, with eBPF,
+// in the kernel; and it does not lapse: it holds until an operator releases it.
+// One address can be an office, a campus, a carrier's NAT pool. So the evidence
+// for a shun must be something the per-class controls cannot answer, and
+// something an address full of ordinary users does not produce.
+//
+// A few client classes attacking from one address is what an office with a few
+// infected machines looks like, or a few browser builds tripping one misjudged
+// WAF rule. The WAF refuses each of those requests, and the fingerprint block
+// and the reputation blocker refuse each class on its network once it repeats,
+// so a shun would add only the people behind the address who did nothing. What
+// the per-class controls cannot contain is a client presenting a new class per
+// connection (ADR 0024's residue): each class earns too little to be blocked on
+// its own, and the address presents a stream of them. That is what counting
+// classes behind an address is for, and why the bar sits above "a few".
+//
+// Only attack evidence counts (AttackEvidenceWeight), classes are what a client
+// cannot vary per request (repid.Class), a class counts for
+// mitigationEvidenceWindow after its latest evidence, and an allowlisted source
+// is never counted (escalateMitigation). ADR 0029.
+const (
+	// ipShunMinClasses is how many distinct client classes must produce attack
+	// evidence from one address, within mitigationEvidenceWindow, before the
+	// address is shunned.
+	ipShunMinClasses = 5
+
+	// maxEvidenceAddresses bounds the addresses whose evidence is remembered.
+	// The key is the attacker's to choose, and an address evicted early only
+	// loses evidence, which can delay a shun but never cause one.
+	maxEvidenceAddresses = 10000
+)
+
+// addressSightings is the evidence towards shunning one address: the classes
+// that attacked from it, each with when it last did. The decision needs no
+// more than ipShunMinClasses of them, so no more are kept.
+type addressSightings struct {
+	classes [ipShunMinClasses]classSighting
+	n       int
+}
+
+// classSighting is one class's latest attack evidence at an address. The class
+// is kept as a hash, so the table holds nothing a client wrote.
+type classSighting struct {
+	class uint64
+	last  int64 // UnixNano
+}
+
+// classSeed keys the class hashes for the life of the process.
+var classSeed = maphash.MakeSeed()
+
+// escalateAddress shuns the address a threat came from once ipShunMinClasses
+// classes have attacked from it within the window.
+func escalateAddress(st *SecurityThreat) {
+	if st.SourceIP == "" || st.Fingerprint == "" || AttackEvidenceWeight(st) == 0 {
+		return
+	}
+	classes := recordAddressEvidence(st.SourceIP, repid.Class(st.Fingerprint), evidenceTime(st))
+	if classes < ipShunMinClasses || IsIPUnmitigated(st.SourceIP) {
+		return
+	}
+	reason := "IP shunning triggered: attack evidence from " + strconv.Itoa(classes) +
+		" different client builds at this address within " + mitigationEvidenceWindow.String()
+	if err := MarkIPMitigated(st.SourceIP, reason); err != nil {
+		// Nobody is waiting on this one, so logging is all there is -- but an
+		// automatic shun that did not persist is a block the operator will never
+		// know was not applied. The evidence is kept, so the next piece retries.
+		logger.Default().LogError("automatic IP shun did not persist",
+			"ip", st.SourceIP, "classes", classes, "error", err)
+		return
+	}
+	forgetAddressEvidence(st.SourceIP)
+}
+
+// evidenceTime dates a threat's evidence by when it happened, which the
+// recording path stamps, rather than by when the store got to it; never later
+// than now.
+func evidenceTime(st *SecurityThreat) time.Time {
+	now := time.Now()
+	if st.Time.IsZero() || st.Time.After(now) {
+		return now
+	}
+	return st.Time
+}
+
+// recordAddressEvidence records attack evidence from class at ip, dated at, and
+// returns how many distinct classes have attacked from ip within
+// mitigationEvidenceWindow of the latest evidence there.
+func recordAddressEvidence(ip, class string, at time.Time) int {
+	h := maphash.String(classSeed, class)
+	addressEvidenceMu.Lock()
+	defer addressEvidenceMu.Unlock()
+
+	var s *addressSightings
+	if v, ok := addressEvidence.Get(ip); ok {
+		s, _ = v.(*addressSightings)
+	}
+	if s == nil {
+		s = &addressSightings{}
+	}
+	s.record(h, at.UnixNano())
+	addressEvidence.Add(ip, s)
+	return s.n
+}
+
+// record adds one piece of evidence from class at at. Classes whose latest
+// evidence is more than a window older than the newest here lapse first, and a
+// piece that is itself that old -- a threat the store reached late -- is not
+// counted.
+func (s *addressSightings) record(class uint64, at int64) {
+	newest := at
+	for _, c := range s.classes[:s.n] {
+		newest = max(newest, c.last)
+	}
+	s.dropBefore(newest - int64(mitigationEvidenceWindow))
+	if newest-at > int64(mitigationEvidenceWindow) {
+		return
+	}
+	for i := range s.classes[:s.n] {
+		if s.classes[i].class == class {
+			s.classes[i].last = max(s.classes[i].last, at)
+			return
+		}
+	}
+	if s.n < len(s.classes) {
+		s.classes[s.n] = classSighting{class: class, last: at}
+		s.n++
+		return
+	}
+	// Every slot holds a class inside the window, which is already a shun's
+	// worth; the stalest makes way, and the count stays at the bar.
+	s.classes[s.stalest()] = classSighting{class: class, last: at}
+}
+
+// dropBefore removes the classes whose latest evidence is older than cutoff.
+func (s *addressSightings) dropBefore(cutoff int64) {
+	kept := 0
+	for _, c := range s.classes[:s.n] {
+		if c.last >= cutoff {
+			s.classes[kept] = c
+			kept++
+		}
+	}
+	s.n = kept
+}
+
+// stalest returns the index of the class whose latest evidence is oldest.
+func (s *addressSightings) stalest() int {
+	oldest := 0
+	for i, c := range s.classes[:s.n] {
+		if c.last < s.classes[oldest].last {
+			oldest = i
+		}
+	}
+	return oldest
+}
+
+// forgetAddressEvidence drops what is remembered against ip: after a shun,
+// which needs no more of it, and after an operator's release, so that nothing
+// gathered before a release counts after it -- the rule ADR 0025 set for every
+// automatic limit.
+func forgetAddressEvidence(ip string) {
+	addressEvidenceMu.Lock()
+	defer addressEvidenceMu.Unlock()
+	addressEvidence.Remove(ip)
 }

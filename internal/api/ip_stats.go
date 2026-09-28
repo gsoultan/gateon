@@ -96,7 +96,7 @@ func (s *IPStats) estimatedRequests(sampleRate uint32) float64 {
 // the whole address, and one address can carry an office, a CGNAT pool or a
 // VPN exit, so the harmful traffic has to be most of what it sends, not one
 // user's worth of it. The escalation to an IP shun makes the same trade
-// (ipShunUniqueUserThreshold in the telemetry store).
+// (ipShunMinClasses in the telemetry store, ADR 0029).
 const (
 	harmMinFailures     = 10  // failed requests before an address can look like a scan
 	harmMinFailedPaths  = 10  // distinct paths those failures were spread over

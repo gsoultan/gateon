@@ -62,7 +62,10 @@ import {
   PresetsCard,
   AppearanceCard,
   ResourceProfileCard,
+  StoredSecretInput,
+  type SecretReplaceConfirm,
 } from "../components/settings";
+import { isStoredSecret } from "../utils/storedSecret";
 import { usePermissions } from "../hooks/usePermissions";
 import { useGateonStatus } from "../hooks/useGateonStatus";
 import { useNetworkInterfaces } from "../hooks/useNetworkInterfaces";
@@ -78,13 +81,27 @@ import { TraceArchiveSettingsCard } from "../components/Traces/TraceArchiveSetti
 function inferDriver(
   databaseUrl?: string,
   sqlitePath?: string
-): DatabaseConfig["driver"] {
+): DatabaseConfig["driver"] | null {
+  // A connection URL hidden whole says nothing about its driver.
+  if (isStoredSecret(databaseUrl)) return null;
   const raw = databaseUrl || sqlitePath || "";
   if (raw.startsWith("postgres")) return "postgres";
   if (raw.startsWith("mysql")) return "mysql";
   if (raw.startsWith("mariadb")) return "mariadb";
   return "sqlite";
 }
+
+// What saving a new session key does, said before it can be typed. Every
+// session is signed with this key; replacing it is how a key that may have
+// leaked stops working, and it takes effect when the settings are saved.
+const SESSION_KEY_ROTATION: SecretReplaceConfirm = {
+  title: "Replace the session signing key?",
+  consequences:
+    "When you save, every session ends at once -- everyone, you included, signs in again. " +
+    "Two-factor enrolments are kept. Other gateway instances that share this user database " +
+    "keep the old key until they are given the new one and restarted.",
+  confirmLabel: "Replace the key and sign everyone out on save",
+};
 
 export default function SettingsPage() {
   const { canEditGlobal, canImportConfig, canExportConfig } = usePermissions();
@@ -654,18 +671,17 @@ export default function SettingsPage() {
                   }
                   radius="md"
                 />
-                <TextInput
+                <StoredSecretInput
                   label="Password"
-                  type="password"
+                  clearable
                   disabled={formDisabled || !redis.enabled}
-                  value={redis.password || ""}
-                  onChange={(e) =>
+                  value={redis.password}
+                  onChange={(password) =>
                     setConfig({
                       ...config,
-                      redis: { ...redis, password: e.currentTarget.value },
+                      redis: { ...redis, password },
                     })
                   }
-                  radius="md"
                 />
               </Group>
             </Stack>
@@ -1048,41 +1064,19 @@ export default function SettingsPage() {
               />
               {config?.auth?.enabled && (
                 <Stack gap="md">
-                  <TextInput
+                  <StoredSecretInput
                     label="PASETO Symmetric Key"
                     placeholder="32 characters minimum"
                     disabled={formDisabled}
-                    value={config?.auth?.pasetoSecret || ""}
-                    onChange={(e) =>
+                    value={config?.auth?.pasetoSecret}
+                    onChange={(pasetoSecret) =>
                       setConfig({
                         ...config,
-                        auth: {
-                          ...(config?.auth || {}),
-                          pasetoSecret: e.currentTarget.value,
-                        },
+                        auth: { ...(config?.auth || {}), pasetoSecret },
                       })
                     }
-                    radius="md"
-                    type="password"
-                    rightSection={
-                      <Tooltip label="Generate">
-                        <ActionIcon
-                          variant="subtle"
-                          onClick={() =>
-                            setConfig({
-                              ...config,
-                              auth: {
-                                ...(config?.auth || {}),
-                                pasetoSecret: generateRandomString(32),
-                              },
-                            })
-                          }
-                          disabled={formDisabled}
-                        >
-                          <IconRefresh size="1.1rem" />
-                        </ActionIcon>
-                      </Tooltip>
-                    }
+                    generate={() => generateRandomString(32)}
+                    confirm={SESSION_KEY_ROTATION}
                   />
                   <Box>
                     <Text size="sm" fw={600} mb="xs">
@@ -1124,8 +1118,14 @@ export default function SettingsPage() {
                       radius="md"
                       mb="md"
                     />
+                    {isStoredSecret(config?.auth?.databaseUrl) && !config?.auth?.databaseConfig?.driver && (
+                      <Text size="xs" c="dimmed" mb="md">
+                        The gateway connects with a stored database URL, which is hidden because it holds a
+                        password. It is kept unless you choose a driver here and configure the database instead.
+                      </Text>
+                    )}
                     {(config?.auth?.databaseConfig?.driver === "sqlite" ||
-                      !config?.auth?.databaseConfig?.driver) && (
+                      (!config?.auth?.databaseConfig?.driver && !isStoredSecret(config?.auth?.databaseUrl))) && (
                       <TextInput
                         label="SQLite path"
                         placeholder="gateon.db"
@@ -1134,7 +1134,8 @@ export default function SettingsPage() {
                           config?.auth?.databaseConfig?.sqlitePath ??
                           config?.auth?.sqlitePath ??
                           (config?.auth?.databaseUrl &&
-                          !config.auth.databaseUrl.includes("://")
+                          !config.auth.databaseUrl.includes("://") &&
+                          !isStoredSecret(config.auth.databaseUrl)
                             ? config.auth.databaseUrl
                             : "")
                         }
@@ -1228,47 +1229,22 @@ export default function SettingsPage() {
                           }
                           radius="md"
                         />
-                        <TextInput
+                        <StoredSecretInput
                           label="Password"
-                          type="password"
-                          placeholder="••••••••"
+                          clearable
                           disabled={formDisabled}
-                          value={config?.auth?.databaseConfig?.password || ""}
-                          onChange={(e) =>
+                          value={config?.auth?.databaseConfig?.password}
+                          onChange={(password) =>
                             setConfig({
                               ...config,
                               auth: {
                                 ...(config?.auth || {}),
-                                databaseConfig: {
-                                  ...(config?.auth?.databaseConfig || {}),
-                                  password: e.currentTarget.value,
-                                },
+                                databaseConfig: { ...(config?.auth?.databaseConfig || {}), password },
                               },
                             })
                           }
-                          radius="md"
-                          rightSection={
-                            <Tooltip label="Generate">
-                              <ActionIcon
-                                variant="subtle"
-                                onClick={() =>
-                                  setConfig({
-                                    ...config,
-                                    auth: {
-                                      ...(config?.auth || {}),
-                                      databaseConfig: {
-                                        ...(config?.auth?.databaseConfig || {}),
-                                        password: generateRandomString(24),
-                                      },
-                                    },
-                                  })
-                                }
-                                disabled={formDisabled}
-                              >
-                                <IconRefresh size="1.1rem" />
-                              </ActionIcon>
-                            </Tooltip>
-                          }
+                          generate={() => generateRandomString(24)}
+                          description="Changing the host, port or driver needs the password entered again: a stored password is only sent where it was entered for."
                         />
                         <TextInput
                           label="Database"

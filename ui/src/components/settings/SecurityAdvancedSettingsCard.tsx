@@ -17,7 +17,6 @@ import {
   SimpleGrid,
   Paper,
   ActionIcon,
-  PasswordInput,
   Select,
   Checkbox,
   Button,
@@ -34,6 +33,7 @@ import {
   IconPlus,
 } from "@tabler/icons-react";
 import type { GlobalConfig, SecurityAdvancedConfig, IPReputationIntegration } from "../../types/gateon";
+import { StoredSecretInput } from "./StoredSecretInput";
 
 interface SecurityAdvancedSettingsCardProps {
   config: GlobalConfig;
@@ -172,12 +172,13 @@ export const SecurityAdvancedSettingsCard: React.FC<SecurityAdvancedSettingsCard
                         onChange={(e) => updateSection("deception", { canaryHeader: e.currentTarget.value })}
                         disabled={disabled}
                       />
-                      <TextInput
+                      <StoredSecretInput
                         label="Canary Token"
                         description="The token to watch for in subsequent requests."
                         placeholder="debug-mode-admin-true"
-                        value={security.deception?.canaryToken || ""}
-                        onChange={(e) => updateSection("deception", { canaryToken: e.currentTarget.value })}
+                        clearable
+                        value={security.deception?.canaryToken}
+                        onChange={(canaryToken) => updateSection("deception", { canaryToken })}
                         disabled={disabled}
                       />
                     </SimpleGrid>
@@ -382,12 +383,13 @@ export const SecurityAdvancedSettingsCard: React.FC<SecurityAdvancedSettingsCard
                               disabled={disabled}
                             />
                           </SimpleGrid>
-                          <PasswordInput
+                          <StoredSecretInput
                             label="API Key"
+                            clearable
                             value={integration.apiKey}
-                            onChange={(e) => updateIntegration(index, { apiKey: e.currentTarget.value })}
-                            size="xs"
+                            onChange={(apiKey) => updateIntegration(index, { apiKey })}
                             disabled={disabled}
+                            description="Changing the provider needs the key entered again: a stored key is only sent to the provider it was entered for."
                           />
                           <Group grow>
                             <NumberInput

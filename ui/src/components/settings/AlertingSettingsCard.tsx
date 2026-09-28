@@ -34,6 +34,7 @@ import {
 } from "@tabler/icons-react";
 import type { GlobalConfig, AlertingConfig, AlertDispatcher, AlertPlaybook } from "../../types/gateon";
 import { generateRandomString } from "../../utils/random";
+import { StoredSecretInput } from "./StoredSecretInput";
 
 interface AlertingSettingsCardProps {
   config: GlobalConfig;
@@ -243,11 +244,10 @@ export const AlertingSettingsCard: React.FC<AlertingSettingsCardProps> = ({
             />
             {editingDispatcher.type === "slack" && (
               <>
-                <TextInput
+                <StoredSecretInput
                   label="Webhook URL"
                   value={editingDispatcher.webhookUrl}
-                  onChange={(e) => setEditingDispatcher({ ...editingDispatcher, webhookUrl: e.currentTarget.value })}
-                  required
+                  onChange={(webhookUrl) => setEditingDispatcher({ ...editingDispatcher, webhookUrl })}
                 />
                 <TextInput
                   label="Channel (optional)"
@@ -257,30 +257,20 @@ export const AlertingSettingsCard: React.FC<AlertingSettingsCardProps> = ({
                 />
               </>
             )}
-            {editingDispatcher.type === "discord" && (
-              <TextInput
+            {(editingDispatcher.type === "discord" || editingDispatcher.type === "webhook") && (
+              <StoredSecretInput
                 label="Webhook URL"
                 value={editingDispatcher.webhookUrl}
-                onChange={(e) => setEditingDispatcher({ ...editingDispatcher, webhookUrl: e.currentTarget.value })}
-                required
-              />
-            )}
-            {editingDispatcher.type === "webhook" && (
-              <TextInput
-                label="Webhook URL"
-                value={editingDispatcher.webhookUrl}
-                onChange={(e) => setEditingDispatcher({ ...editingDispatcher, webhookUrl: e.currentTarget.value })}
-                required
+                onChange={(webhookUrl) => setEditingDispatcher({ ...editingDispatcher, webhookUrl })}
               />
             )}
             {editingDispatcher.type === "telegram" && (
               <>
-                <TextInput
+                <StoredSecretInput
                   label="Bot Token"
                   placeholder="123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11"
                   value={editingDispatcher.telegramBotToken}
-                  onChange={(e) => setEditingDispatcher({ ...editingDispatcher, telegramBotToken: e.currentTarget.value })}
-                  required
+                  onChange={(telegramBotToken) => setEditingDispatcher({ ...editingDispatcher, telegramBotToken })}
                 />
                 <TextInput
                   label="Chat ID"

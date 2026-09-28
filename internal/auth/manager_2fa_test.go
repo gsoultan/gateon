@@ -102,7 +102,7 @@ func TestSetup2FAStoresEncryptedSecret(t *testing.T) {
 	if stored == secret {
 		t.Fatal("secret stored in plaintext")
 	}
-	dec, err := decryptSecret(m.encKey, stored)
+	dec, err := decryptSecret(m.keys.Load().enc, stored)
 	if err != nil {
 		t.Fatalf("decryptSecret: %v", err)
 	}

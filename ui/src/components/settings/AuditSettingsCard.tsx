@@ -9,14 +9,13 @@ import {
   Stack,
   Group,
   Switch,
-  TextInput,
   ThemeIcon,
   Divider,
-  Button,
   NumberInput,
 } from "@mantine/core";
-import { IconHistory, IconFingerprint, IconRefresh, IconArchive } from "@tabler/icons-react";
+import { IconHistory, IconFingerprint, IconArchive } from "@tabler/icons-react";
 import type { GlobalConfig, AuditConfig } from "../../types/gateon";
+import { StoredSecretInput, type SecretReplaceConfirm } from "./StoredSecretInput";
 
 // generateSignatureKey returns a cryptographically-random 256-bit key as hex,
 // matching the backend's audit.GenerateSignatureKey format.
@@ -25,6 +24,19 @@ function generateSignatureKey(): string {
   crypto.getRandomValues(bytes);
   return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 }
+
+// What replacing the audit key does to the chain already written. Entries are
+// signed with one key and verified with one key, and no entry records which
+// key signed it, so the entries before a rotation verify only with the key
+// being replaced -- which the gateway no longer shows anyone.
+const AUDIT_KEY_ROTATION: SecretReplaceConfirm = {
+  title: "Replace the audit signing key?",
+  consequences:
+    "When you save, new audit entries are signed with the new key. Entries written before then " +
+    "verify only with the current key, which the gateway does not show: if you will need to verify " +
+    "them, copy the key from global.json on the gateway host before you save.",
+  confirmLabel: "Replace the audit key on save",
+};
 
 interface AuditSettingsCardProps {
   config: GlobalConfig;
@@ -94,31 +106,19 @@ export const AuditSettingsCard: React.FC<AuditSettingsCardProps> = ({
               </Group>
 
               {audit.signEntries && (
-                <Stack gap={6}>
-                  <TextInput
+                <Group gap="xs" align="flex-start" wrap="nowrap">
+                  <IconFingerprint size={16} style={{ marginTop: 4 }} />
+                  <StoredSecretInput
                     label="Signature Key"
-                    placeholder="Enter a secret key, or generate one — leave blank to auto-generate on save"
-                    type="password"
-                    value={audit.signatureKey || ""}
-                    onChange={(e) => updateAudit({ signatureKey: e.currentTarget.value })}
+                    placeholder="Enter a key, generate one, or leave blank to have one generated on save"
+                    value={audit.signatureKey}
+                    onChange={(signatureKey) => updateAudit({ signatureKey })}
                     disabled={disabled}
-                    leftSection={<IconFingerprint size={16} />}
+                    generate={generateSignatureKey}
+                    confirm={AUDIT_KEY_ROTATION}
+                    description="HMAC-SHA256 key. It is needed to verify the audit chain, and the gateway will not show it."
                   />
-                  <Group justify="space-between" align="center">
-                    <Text size="xs" c="dimmed">
-                      HMAC-SHA256 key. Store it securely — it's required to verify the audit chain.
-                    </Text>
-                    <Button
-                      size="xs"
-                      variant="light"
-                      leftSection={<IconRefresh size={14} />}
-                      disabled={disabled}
-                      onClick={() => updateAudit({ signatureKey: generateSignatureKey() })}
-                    >
-                      Generate key
-                    </Button>
-                  </Group>
-                </Stack>
+                </Group>
               )}
 
               <Divider variant="dashed" />

@@ -34,10 +34,7 @@ func (h *reputationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// exempt at all. Comparing the resolved client address instead makes the
 	// guard mean what it says.
 	clientIP := telemetry.ClientIPOf(r)
-	if httputil.IsLoopback(clientIP) || mitigation.IsAllowlisted(clientIP) {
-		// The allowlist exempts enforcement, never observation: the threat is
-		// still recorded downstream and still feeds correlation. An operator who
-		// allowlists their own pentest team wants to see what it found.
+	if exemptFromEnforcement(clientIP) {
 		h.next.ServeHTTP(w, r)
 		return
 	}
@@ -90,6 +87,19 @@ func (h *reputationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.next.ServeHTTP(w, r)
+}
+
+// exemptFromEnforcement reports whether a client is never refused by the
+// identity blocks -- reputation and the fingerprint block alike, one rule for
+// both: loopback, which is the gateway's own management traffic and, behind a
+// local proxy that sets no forwarding header, every client; and
+// GATEON_MITIGATION_ALLOWLIST.
+//
+// It exempts enforcement, never observation: the threat is still recorded
+// downstream and still feeds correlation. An operator who allowlists their own
+// pentest team wants to see what it found.
+func exemptFromEnforcement(clientIP string) bool {
+	return httputil.IsLoopback(clientIP) || mitigation.IsAllowlisted(clientIP)
 }
 
 // ReputationBlocker returns a middleware that blocks clients with extremely low reputation.

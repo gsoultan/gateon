@@ -60,31 +60,8 @@ func TestUserMitigation(t *testing.T) {
 	}
 }
 
-func TestIPEscalation(t *testing.T) {
-	// Initialize store
-	freshStore(t)
-
-	ip := "1.1.1.1"
-
-	// 1. Record 3 threats with different fingerprints from same IP
-	for i := 1; i <= 3; i++ {
-		st := SecurityThreat{
-			SourceIP:    ip,
-			Fingerprint: "user-" + string(rune('0'+i)),
-			Score:       100,
-			ActionTaken: "blocked",
-		}
-		RecordSecurityThreat(st)
-	}
-
-	// Wait for background worker to process threats and escalate to IP mitigation
-	time.Sleep(200 * time.Millisecond)
-
-	// 2. Check if IP is now mitigated
-	if !IsIPMitigated(ip) {
-		t.Error("Expected IP to be escalated to mitigation after 3 unique malicious users")
-	}
-}
+// The escalation of attack evidence to an IP shun is pinned in
+// address_shun_test.go (ADR 0029).
 
 // A release applied in the same second as the block it undoes must win.
 //

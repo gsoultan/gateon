@@ -80,7 +80,8 @@ func (ad *AnomalyDetector) runChecks(ctx context.Context, now time.Time) {
 	// 2. Latency Anomaly Detection (P99)
 	ad.checkLatency(ctx, now)
 
-	// 3. Brute Force Detection (401/403 spikes)
+	// 3. Brute Force Detection: refused credential attempts, not every
+	// 401 and 403 (credentialRefusal)
 	if ad.config.GetEnableBruteForceDetection() {
 		ad.checkBruteForce(ctx, now)
 	}
