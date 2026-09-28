@@ -2261,7 +2261,10 @@ func ShunAutomatically(ip, reason string) (ShunResult, error) {
 	if s == nil {
 		return ShunResult{}, errNoTelemetryStore
 	}
-	if ip == "" || httputil.IsLoopback(ip) || mitigation.IsAllowlisted(ip) {
+	if ip == "" || mitigation.ExemptFromEnforcement(ip) {
+		// The same rule the kernel Holder and the data paths apply (ADR 0035):
+		// loopback and an allowlisted address are never shunned automatically,
+		// and evidence is not kept against them for the day they leave the list.
 		return ShunResult{Outcome: ShunExempt}, nil
 	}
 	now := time.Now().UTC().Truncate(time.Second)

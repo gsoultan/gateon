@@ -9,7 +9,6 @@ import (
 	"os"
 	"time"
 
-	"github.com/gsoultan/gateon/internal/httputil"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware/kind"
 	"github.com/gsoultan/gateon/internal/request"
@@ -102,7 +101,11 @@ func (h *reputationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // downstream and still feeds correlation. An operator who allowlists their own
 // pentest team wants to see what it found.
 func exemptFromEnforcement(clientIP string) bool {
-	return httputil.IsLoopback(clientIP) || mitigation.IsAllowlisted(clientIP)
+	// One rule for the whole gateway: the request path, the automatic shun and
+	// the kernel shun map all decide exemption here (ADR 0035), so the three can
+	// never drift. It stays off the pass-through path -- read only for a request
+	// a block would otherwise refuse -- so the delegation costs nothing there.
+	return mitigation.ExemptFromEnforcement(clientIP)
 }
 
 // ReputationBlocker returns a middleware that blocks clients with extremely low reputation.

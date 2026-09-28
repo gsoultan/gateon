@@ -34,6 +34,7 @@ import (
 	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/resource"
 	"github.com/gsoultan/gateon/internal/security"
+	"github.com/gsoultan/gateon/internal/security/mitigation"
 	"github.com/gsoultan/gateon/internal/security/reputation"
 	"github.com/gsoultan/gateon/internal/security/waf"
 	"github.com/gsoultan/gateon/internal/server"
@@ -148,6 +149,12 @@ func main() {
 	// pointer or forcing a restart. The supervisor's first reconcile applies the
 	// boot-time config (privilege gating, Start, poll loop).
 	ebpfHolder := ebpf.GlobalHolder
+	// The kernel shun map honours the same exemption as the HTTP and TCP data
+	// paths: an allowlisted or loopback address the operator blocked by hand is
+	// served everywhere else, so it must not be dropped in the kernel below them
+	// (ADR 0035). The predicate reads the live allowlist, so wiring it once here
+	// -- before any shun -- keeps it current across config reloads.
+	ebpfHolder.SetExemption(mitigation.ExemptFromEnforcement)
 	telemetry.SetEbpfManager(&ebpfAdapter{ebpfHolder})
 	// Every adaptive rate limit is leased; this is what lifts the ones whose
 	// writer stopped renewing them. See ebpf.AdaptiveLimitLease.
