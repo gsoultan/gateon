@@ -9,7 +9,6 @@ package ui
 import (
 	"bytes"
 	"embed"
-	"fmt"
 	"io/fs"
 	"mime"
 	"net/http"
@@ -81,7 +80,11 @@ func StaticHandler(content fs.FS, subDir string) http.Handler {
 				w.Header().Set("Content-Type", contentType)
 				w.Header().Set("X-Content-Type-Options", "nosniff")
 				w.WriteHeader(http.StatusNotFound)
-				fmt.Fprintf(w, "Asset not found: %s\n", cleanPath)
+				// Not the path: it is the requester's to choose, and the
+				// Content-Type above follows its extension, so an echoed
+				// "/assets/....html" was markup served as HTML on the
+				// dashboard's own origin.
+				_, _ = w.Write([]byte("Asset not found\n"))
 				return
 			}
 			serveIndex(w, r)
