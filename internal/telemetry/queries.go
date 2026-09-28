@@ -137,12 +137,22 @@ const (
 	QueryReadIPShunEnd    = `SELECT status, expires_at FROM ip_mitigations WHERE ip = ?`
 	QueryReadIPShunStatus = `SELECT status FROM ip_mitigations WHERE ip = ?`
 
-	// QueryMarkIPMitigated is an operator's block: no expiry, whatever the
-	// address had.
+	// QueryMarkIPMitigated is an operator's block that holds until released: no
+	// expiry, whatever the address had.
 	QueryMarkIPMitigated = `INSERT INTO ip_mitigations (ip, status, reason, mitigated_at, expires_at, updated_at)
 		VALUES (?, 'mitigated', ?, ?, NULL, CURRENT_TIMESTAMP)
 		ON CONFLICT(ip) DO UPDATE SET status = 'mitigated', reason = excluded.reason,
 			mitigated_at = excluded.mitigated_at, expires_at = NULL, updated_at = CURRENT_TIMESTAMP`
+
+	// QueryMarkIPMitigatedFor is an operator's block that lapses at a chosen
+	// expires_at (ADR 0037). Like QueryMarkIPMitigated it is an operator action
+	// and overrides whatever the row held -- another block, an automatic shun, a
+	// release: an operator setting a bounded block means it, so the write is
+	// unconditional, not the conditional one an automatic shun uses.
+	QueryMarkIPMitigatedFor = `INSERT INTO ip_mitigations (ip, status, reason, mitigated_at, expires_at, updated_at)
+		VALUES (?, 'mitigated', ?, ?, ?, CURRENT_TIMESTAMP)
+		ON CONFLICT(ip) DO UPDATE SET status = 'mitigated', reason = excluded.reason,
+			mitigated_at = excluded.mitigated_at, expires_at = excluded.expires_at, updated_at = CURRENT_TIMESTAMP`
 
 	// QueryWriteAutoShun is an automatic shun, written only if the row does
 	// not hold a shun in force (the first bound time is now) or a release

@@ -937,7 +937,15 @@ func (s *ApiService) MitigateThreat(ctx context.Context, req *gateonv1.MitigateT
 		// Error deliberately not returned here: the read-back on the next line
 		// is the stronger check, because it asks the same predicate the request
 		// path asks rather than trusting the writer's own account.
-		_ = telemetry.MarkIPMitigated(source, reason)
+		//
+		// A positive duration bounds the block so it lapses on its own (ADR
+		// 0037); zero or absent holds it until released, as before. Only an IP
+		// block carries this -- a fingerprint block has its own TTL.
+		if d := req.GetDurationSeconds(); d > 0 {
+			_ = telemetry.MarkIPMitigatedFor(source, reason, time.Duration(d)*time.Second)
+		} else {
+			_ = telemetry.MarkIPMitigated(source, reason)
+		}
 		mitigated = telemetry.IsIPMitigated(source)
 	} else {
 		// A fingerprint is blocked on a network, never everywhere (ADR 0026).

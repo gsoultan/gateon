@@ -24,6 +24,10 @@ export function ManualMitigationModal({ opened, onClose }: ManualMitigationModal
   const [type, setType] = useState<string | null>("IP");
   const [category, setCategory] = useState<string | null>("manual");
   const [reason, setReason] = useState("");
+  // A block holds until released ("0") unless a duration is chosen, after which
+  // it lapses on its own (ADR 0037). Only an IP block honours this; a
+  // fingerprint block carries its own TTL.
+  const [duration, setDuration] = useState<string | null>("0");
   const mitigate = useMitigateThreat();
 
   const handleMitigate = async () => {
@@ -33,11 +37,13 @@ export function ManualMitigationModal({ opened, onClose }: ManualMitigationModal
         type: type || "IP",
         category: category || "manual",
         reason,
+        durationSeconds: type === "IP" ? Number(duration ?? "0") : 0,
       });
       onClose();
       setSource("");
       setReason("");
-    } catch (err) {
+      setDuration("0");
+    } catch {
       // Error handled by hook
     }
   };
@@ -86,6 +92,21 @@ export function ManualMitigationModal({ opened, onClose }: ManualMitigationModal
           value={category}
           onChange={setCategory}
         />
+        {type === "IP" && (
+          <Select
+            label="Duration"
+            description="A bounded block lapses on its own with no operator; an open-ended block holds until released."
+            data={[
+              { value: "0", label: "Until released (no expiry)" },
+              { value: "3600", label: "1 hour" },
+              { value: "21600", label: "6 hours" },
+              { value: "86400", label: "24 hours" },
+              { value: "604800", label: "7 days" },
+            ]}
+            value={duration}
+            onChange={setDuration}
+          />
+        )}
         <Textarea
           label="Reason"
           placeholder="Why are you mitigating this source?"

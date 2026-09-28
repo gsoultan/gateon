@@ -956,6 +956,10 @@ export type MitigateThreatRequest = {
   type?: string;
   reason?: string;
   category?: string;
+  // durationSeconds > 0 bounds a manual IP block so it lapses on its own that
+  // many seconds after it is applied (ADR 0037); 0 or absent holds it until
+  // released. Ignored for a fingerprint block.
+  durationSeconds?: number;
 };
 
 export type MitigateThreatResponse = {

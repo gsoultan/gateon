@@ -172,6 +172,12 @@ message MitigateThreatRequest {
   string type = 2;   // e.g., JA4+, IP
   string reason = 3;
   string category = 4;
+  // duration_seconds, when > 0, bounds a manual IP block: it lapses on its own
+  // that many seconds after it is applied, as an automatic shun does (ADR
+  // 0037), and needs no operator to lift it. Zero or absent is a block that
+  // holds until released, the behaviour before this field. Ignored for a
+  // fingerprint block, which carries its own hour-long TTL (ADR 0026).
+  int32 duration_seconds = 5;
 }
 
 message MitigateThreatResponse {

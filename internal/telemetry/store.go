@@ -522,8 +522,9 @@ type IPMitigation struct {
 	MitigatedAt   time.Time  `json:"mitigatedAt"`
 	UnmitigatedAt *time.Time `json:"unmitigatedAt,omitempty"`
 	UpdatedAt     time.Time  `json:"updatedAt"`
-	// ExpiresAt is when an automatic shun lifts (ShunAutomatically); nil for
-	// an operator's block, which holds until released.
+	// ExpiresAt is when the shun lifts on its own: an automatic shun
+	// (ShunAutomatically) or a manual block given a duration (ADR 0037). Nil
+	// for an open-ended operator block, which holds until released.
 	ExpiresAt *time.Time `json:"expiresAt,omitempty"`
 }
 
@@ -538,7 +539,8 @@ type CombinedMitigation struct {
 	MitigatedAt   time.Time  `json:"mitigatedAt"`
 	UnmitigatedAt *time.Time `json:"unmitigatedAt,omitempty"`
 	UpdatedAt     time.Time  `json:"updatedAt"`
-	// ExpiresAt is when an automatic address shun lifts; nil otherwise.
+	// ExpiresAt is when an address shun lifts on its own -- automatic, or a
+	// manual block given a duration (ADR 0037); nil otherwise.
 	ExpiresAt *time.Time `json:"expiresAt,omitempty"`
 }
 
@@ -2363,12 +2365,43 @@ var errNoTelemetryStore = errors.New("telemetry: store is not initialised")
 // that did not persist, announced as "blocked via middleware and shunned at
 // XDP level", is a security control the operator believes is on.
 func MarkIPMitigated(ip string, reason string) error {
+	return markIPMitigated(ip, reason, 0)
+}
+
+// MarkIPMitigatedFor records an operator's block that lapses on its own after
+// duration, needing no operator to lift it -- as an automatic shun does (ADR
+// 0037), but chosen by the operator rather than the ladder. A non-positive
+// duration is MarkIPMitigated: a block that holds until released. Enforcement
+// (IsIPMitigated) reads the expiry and lifts the block the moment it lapses;
+// the kernel entry is leased to lapse with it.
+func MarkIPMitigatedFor(ip string, reason string, duration time.Duration) error {
+	return markIPMitigated(ip, reason, duration)
+}
+
+// markIPMitigated writes an operator's block of ip. With a positive duration it
+// sets expires_at and the block lapses there; otherwise it holds until
+// released. Both are unconditional operator actions that override whatever the
+// row held (unlike the automatic shun's conditional write). It returns the
+// write error rather than only logging it, so a caller can tell the operator
+// the truth about a block that did not persist.
+func markIPMitigated(ip string, reason string, duration time.Duration) error {
 	s := getStore()
 	if s == nil {
 		return errNoTelemetryStore
 	}
-	now := sqlUTC(time.Now())
-	_, err := s.db.Exec(s.dialect.Rebind(QueryMarkIPMitigated), ip, reason, now)
+	// Truncate now to the second as the automatic path does, so the cached end
+	// (Unix nanoseconds) and the stored end (a second-resolution UTC string)
+	// name the same instant.
+	now := time.Now().UTC().Truncate(time.Second)
+	cacheEnd := shunForever
+	var err error
+	if duration > 0 {
+		until := now.Add(duration)
+		cacheEnd = shunUntil(until.UnixNano())
+		_, err = s.db.Exec(s.dialect.Rebind(QueryMarkIPMitigatedFor), ip, reason, sqlUTC(now), sqlUTC(until))
+	} else {
+		_, err = s.db.Exec(s.dialect.Rebind(QueryMarkIPMitigated), ip, reason, sqlUTC(now))
+	}
 	if err != nil {
 		logger.Default().LogError("failed to mark IP as mitigated", "ip", ip, "error", err)
 	}
@@ -2383,16 +2416,29 @@ func MarkIPMitigated(ip string, reason string) error {
 	// On failure the cache is left alone, so IsIPMitigated falls through to
 	// the database, finds nothing, and the verification reports the truth.
 	if err == nil && s.unmitigatedCache != nil {
-		s.unmitigatedCache.Add(ip, shunForever)
+		s.unmitigatedCache.Add(ip, cacheEnd)
 	}
 
-	// Real-time eBPF synchronization for immediate effect at XDP layer
+	// Real-time eBPF synchronization for immediate effect at XDP layer. A
+	// bounded block leases the kernel entry so it lapses with the block, as an
+	// automatic shun does; an open-ended block holds until released.
+	markIPMitigatedInKernel(ip, now, duration)
+	return err
+}
+
+// markIPMitigatedInKernel pushes an operator's block to the kernel shun map: a
+// lease that lapses with a bounded block, or an unleased entry for one that
+// holds until released.
+func markIPMitigatedInKernel(ip string, now time.Time, duration time.Duration) {
+	if duration > 0 {
+		shunInKernelUntil(ip, now.Add(duration))
+		return
+	}
 	if val := globalEbpfManager.Load(); val != nil {
 		if container, ok := val.(*ebpfProviderContainer); ok && container.p != nil {
 			_ = container.p.ShunIP(ip)
 		}
 	}
-	return err
 }
 
 // MarkIPUnmitigated records an operator's release of an address: its shun
