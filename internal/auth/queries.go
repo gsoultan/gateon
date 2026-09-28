@@ -48,6 +48,7 @@ const (
 
 	// QueryTwoFactorSecrets and QueryUpdateTwoFactorSecret re-encrypt every
 	// stored second factor when the session key is rotated.
+	// #nosec G101 -- a query naming a column, not a credential.
 	QueryTwoFactorSecrets = "SELECT id, two_factor_secret FROM users WHERE two_factor_secret <> ''"
 	// #nosec G101 -- a parameterised statement, not a credential. Every value
 	// is bound.
