@@ -244,7 +244,7 @@ func TestHTTP3SharesTheEntrypointsConnectionLimit(t *testing.T) {
 	serverTLS, clientTLS := selfSignedTLS(t)
 	deps := mockDepsForInspection(t)
 	deps.TLSConfig = serverTLS
-	ep := &gateonv1.EntryPoint{Id: "capped-h3", Address: freeAddr(t), Type: gateonv1.EntryPoint_HTTP3,
+	ep := &gateonv1.EntryPoint{Id: "capped-h3", Address: freeTCPAndUDPAddr(t), Type: gateonv1.EntryPoint_HTTP3,
 		Tls: &gateonv1.TlsConfig{Enabled: true}, MaxConnections: 1}
 	addr := httpEntrypointFor(t, ep, deps)
 
@@ -271,6 +271,21 @@ func TestHTTP3SharesTheEntrypointsConnectionLimit(t *testing.T) {
 			t.Fatalf("no TCP connection was served within %v of the QUIC connection closing", sessionBound)
 		}
 	}
+}
+
+// freeTCPAndUDPAddr is a loopback port free for both TCP and UDP, which an
+// HTTP/3 entrypoint listens on at once; freeAddr checks TCP alone.
+func freeTCPAndUDPAddr(t *testing.T) string {
+	t.Helper()
+	for range 20 {
+		addr := freeAddr(t)
+		if pc, err := net.ListenPacket("udp", addr); err == nil {
+			_ = pc.Close()
+			return addr
+		}
+	}
+	t.Fatal("no loopback port was free for both TCP and UDP in 20 tries")
+	return ""
 }
 
 // quicServedBy opens a QUIC connection to addr and returns it once the

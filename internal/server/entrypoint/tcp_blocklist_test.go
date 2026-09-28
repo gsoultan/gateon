@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gsoultan/gateon/internal/middleware/security/identity"
 	"github.com/gsoultan/gateon/internal/security/mitigation"
 	"github.com/gsoultan/gateon/internal/syncutil"
 	"github.com/gsoultan/gateon/internal/telemetry"
@@ -205,6 +206,25 @@ func TestAnExemptShunnedAddressIsServedByATCPEntrypoint(t *testing.T) {
 	_ = echoed(t, dialBounded(t, ep.Address), "released\n")
 	if n := sessions.Load(); n != 2 {
 		t.Errorf("the backend was given %d sessions, want the allowlisted and the released address's 2", n)
+	}
+}
+
+// BenchmarkTCPEntrypointBlockListCheck is what the check adds to each
+// connection a TCP entrypoint accepts and serves: its client's address and one
+// lookup on the list, for a client the list's cache has an answer for -- the
+// steady state. A client it has not seen costs a database query once, and is
+// cached after. The session benchmarks cannot resolve this against the noise
+// of a loopback connection; this measures it alone.
+func BenchmarkTCPEntrypointBlockListCheck(b *testing.B) {
+	withTelemetryStore(b)
+	s := &tcpServer{ep: &gateonv1.EntryPoint{Id: "bench"}, blocked: identity.AddressBlocked}
+	var c net.Conn = peerConn{peer: &net.TCPAddr{IP: net.ParseIP("198.51.100.90"), Port: 40000}}
+	if s.refuseBlocked(c) { // the first lookup reads the database, and caches its answer
+		b.Fatal("a client not on the list was refused")
+	}
+	b.ReportAllocs()
+	for b.Loop() {
+		s.refuseBlocked(c)
 	}
 }
 

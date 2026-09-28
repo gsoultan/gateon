@@ -169,7 +169,10 @@ type writerOnly struct{ io.Writer }
 // closes, whatever number of streams it carries. Its handshake is done by the
 // time it is accepted, so refusing one costs more than refusing a TCP
 // connection does -- a cost of QUIC living in user space, which the kernel
-// cannot turn away for us.
+// cannot turn away for us. CloseWithError returns once the connection's own
+// loop has sent the close, which it does at once: the accept loop waits for
+// that, never for a slot, and a goroutine per refusal would only move the
+// wait somewhere nothing joins it.
 type cappedQUICListener struct {
 	http3.QUICListener
 	slots *connSlots
