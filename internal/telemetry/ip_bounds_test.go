@@ -5,9 +5,14 @@ package telemetry
 
 import (
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"sync"
 	"testing"
 )
+
+// servedRequest is an ordinary request the aggregator is handed with a 200.
+var servedRequest = httptest.NewRequest(http.MethodGet, "/", nil)
 
 // rotatingAddress returns the i-th of a run of distinct IPv6 addresses. A
 // client on a /64 has 2^64 of these to choose from, so "one entry per address"
@@ -31,7 +36,7 @@ func TestAggregatorIPWindowIsBounded(t *testing.T) {
 	a := &LocalMetricsAggregator{ipStats: &sync.Map{}}
 	distinct := 2 * maxAggregatorIPs
 	for i := range distinct {
-		a.RecordRequest(rotatingAddress(i), 200)
+		a.RecordRequest(rotatingAddress(i), http.StatusOK, servedRequest)
 	}
 
 	n := 0
@@ -74,14 +79,14 @@ func TestHHHCounterIsBounded(t *testing.T) {
 func TestAggregatorPruneDoesNotRaceWithRecord(t *testing.T) {
 	a := &LocalMetricsAggregator{ipStats: &sync.Map{}}
 	const ip = "203.0.113.7"
-	a.RecordRequest(ip, 200)
+	a.RecordRequest(ip, http.StatusOK, servedRequest)
 
 	var wg sync.WaitGroup
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
 		for range 2000 {
-			a.RecordRequest(ip, 200)
+			a.RecordRequest(ip, http.StatusOK, servedRequest)
 		}
 	}()
 	go func() {

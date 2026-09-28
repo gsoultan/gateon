@@ -6,6 +6,7 @@ package telemetry
 import (
 	"context"
 	"math"
+	"net/http"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -61,8 +62,10 @@ type IPStats struct {
 	mu         sync.Mutex
 	LastUpdate time.Time
 	Requests   float64
-	AuthFail   float64
-	WafBlocks  float64
+	// AuthFail counts refused credential attempts (credentialRefusal), not
+	// every 401 and 403: the brute-force check reads it.
+	AuthFail  float64
+	WafBlocks float64
 }
 
 // maxAggregatorIPs bounds the per-IP anomaly window. It is keyed by the client
@@ -235,15 +238,38 @@ func (a *LocalMetricsAggregator) pruneIPs() {
 	})
 }
 
-func (a *LocalMetricsAggregator) RecordRequest(ip string, status int) {
+// RecordRequest counts one finished request from ip, answered status. r is the
+// request, read only when the answer was a refusal (credentialRefusal).
+func (a *LocalMetricsAggregator) RecordRequest(ip string, status int, r *http.Request) {
+	refused := credentialRefusal(status, r)
 	s := a.getIPStats(ip)
 	s.mu.Lock()
 	s.Requests++
 	s.LastUpdate = time.Now()
-	if status == 401 || status == 403 {
+	if refused {
 		s.AuthFail++
 	}
 	s.mu.Unlock()
+}
+
+// credentialRefusal reports whether a finished request was a credential
+// attempt the server refused: answered 401 or 403, and either a POST -- how a
+// login form or a token request submits one -- or carrying a password in its
+// Authorization header, which is how HTTP Basic and Digest are guessed over
+// GET. The per-IP threat detector judges its traces by the same rule, and the
+// traces' passwordAuth flag is presentsPassword too, so the two detectors agree
+// on what an attempt is.
+//
+// Any other refusal is not a guess: a tab polling after its session expired, a
+// client re-presenting a stale bearer token, a scanner the WAF refused (which
+// the exploit check reads from WafBlocks). Counting those shunned the expired
+// tab. Read only for a 401 or 403, from the method and the header's scheme,
+// allocating nothing.
+func credentialRefusal(status int, r *http.Request) bool {
+	if (status != http.StatusUnauthorized && status != http.StatusForbidden) || r == nil {
+		return false
+	}
+	return r.Method == http.MethodPost || presentsPassword(r.Header)
 }
 
 func (a *LocalMetricsAggregator) RecordWAFBlock(ip string) {

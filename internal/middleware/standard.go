@@ -547,8 +547,10 @@ type perRequestSample struct {
 // both the entrypoint's metrics and the route's, anomaly detection saw every
 // client at twice its real rate.
 func recordPerRequest(r *http.Request, s perRequestSample) {
-	// Bounded per-IP analytics (heavy-hitters / reputation) always run.
-	telemetry.GetAggregator().RecordRequest(s.clientIP, s.status)
+	// Bounded per-IP analytics (heavy-hitters / reputation) always run. The
+	// request goes too: whether a refusal was a credential attempt is read from
+	// its method and Authorization scheme, and only for a 401 or 403.
+	telemetry.GetAggregator().RecordRequest(s.clientIP, s.status, r)
 	// Unbounded per-IP Prometheus series is opt-in (GATEON_PER_IP_METRICS)
 	// to avoid label-cardinality memory growth under many distinct clients.
 	if telemetry.PerIPMetricsEnabled() {

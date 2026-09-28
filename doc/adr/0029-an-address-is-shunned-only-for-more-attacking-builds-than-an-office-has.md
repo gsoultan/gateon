@@ -100,9 +100,9 @@ can:
   block on a payload, a trap sprung, a malware upload, a brute-force or
   exploit-scan detection -- that passes the existing entry guard. Rate-limit,
   geo, bot-policy, reputation and mitigation refusals never count.
-- **Who** is the class, `repid.Class`: the JA4 with TLS, the JA4H without its
-  method, cookie and referer bits without. One client is one class whatever
-  its requests say.
+- **Who** is the class, `repid.Class`: the JA4 with TLS; without it, the JA4H
+  with its method, cookie and referer bits masked. One client is one class
+  whatever its requests say.
 - **When**: a class counts for `mitigationEvidenceWindow` -- ten minutes, the
   fingerprint escalation's -- after its latest evidence at the address.
   Evidence is dated by the threat (the time the recording path stamped),
@@ -213,6 +213,54 @@ recorded, so an allowlist check tidied into the recording path fails it too.
   shun needs a critical threat with no action taken, and neither of its
   callers passes one: the store stamps an action before the hook runs, and
   the CORS middleware files its violations as medium.
+
+### Brute-force detection counts credential attempts
+
+The anomaly detector's brute-force check (opt-in:
+`anomaly_detection.enable_brute_force_detection`) reads, per address, how many
+of its requests failed authentication, from the local metrics aggregator the
+request path feeds. The aggregator counted every 401 and 403 as a failure, and
+above 80% of an address's requests the detector shuns it. A dashboard tab left
+open after its session expired polls, every poll a GET answered 401: 100%.
+A scanner the WAF refuses is answered 403: 100%. With brute-force detection
+on, both were shunned within a check interval.
+`TestAnExpiredSessionPollerIsNeitherThrottledNorShunned` and
+`TestAScannersWAFRefusalsAreNotBruteForce` (`internal/telemetry`) failed
+before this change.
+
+It now counts credential attempts only, the rule the per-IP threat detector
+took in d29c7d27: a POST -- how a login form or a token request submits one --
+or a request whose `Authorization` carried a password (Basic, Digest), which
+is how HTTP authentication is guessed over GET. It is decided by
+`presentsPassword`, the function the traces' `passwordAuth` flag is set from,
+so the two detectors cannot disagree about what an attempt is. A bearer token
+or session cookie re-presented after it expired is not an attempt; neither is
+an NTLM or Negotiate handshake, whose first legs are answered 401 by design.
+Credential stuffing (POSTs refused 401) and Basic guessing over GET are still
+shunned (`TestCredentialStuffingIsStillShunned`,
+`TestBasicAuthGuessingOverGetIsStillShunned`, a POST refused 401 or 403),
+and `TestMetricsCountsRefusedLoginsAndNotRefusedPolls`
+(`internal/middleware`) pins that the Metrics middleware hands the request
+over: without it no refusal would be an attempt, and brute force would never
+be reported.
+
+The decision is made on the request path, where the Metrics middleware hands
+the finished request to the aggregator, and only for a request answered 401 or
+403: it reads the method and, failing that, the `Authorization` header's
+scheme, and allocates nothing. Measured (benchstat, n=10, old and new test
+binaries interleaved, Apple M5 Pro):
+`BenchmarkRecordPerRequest`, which runs everything the Metrics middleware
+records once per request, 257.3 ns → 263.4 ns for a success (p=0.25), 260.8 →
+264.9 ns for a GET refused 401 (p=0.74), 262.1 → 265.9 ns for a POST refused
+401 (p=0.85) and 265.1 → 266.7 ns for a Basic GET refused 401 (p=0.72), all
+0 B and 0 allocations before and after; the full infrastructure chain
+(`BenchmarkInfraChain_TraceOff`) 531.8 ns → 511.7 ns (p=0.28), 610 B and 7
+allocations unchanged. No difference is distinguishable from noise.
+
+Residue, as in the per-IP detector: a POST refused 403 -- by the WAF, a
+policy or the origin -- is still a refused credential attempt, so a client
+that POSTs into a refusal most of the time still reads as guessing; and
+credentials guessed through a GET query string are not counted.
 
 ## Related
 

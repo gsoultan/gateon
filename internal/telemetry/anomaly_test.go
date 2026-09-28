@@ -6,6 +6,8 @@ package telemetry
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -36,10 +38,12 @@ func TestAnomalyDetector_Local(t *testing.T) {
 
 	// 1. Test Brute Force Detection
 	// We need enough requests to trigger the GetIPStats(10) check
+	page := httptest.NewRequest(http.MethodGet, "/", nil)
+	login := httptest.NewRequest(http.MethodPost, "/login", nil)
 	for i := range 15 {
-		agg.RecordRequest("1.1.1.1", 200)
+		agg.RecordRequest("1.1.1.1", http.StatusOK, page)
 		if i < 12 {
-			agg.RecordRequest("1.1.1.1", 401)
+			agg.RecordRequest("1.1.1.1", http.StatusUnauthorized, login)
 		}
 	}
 

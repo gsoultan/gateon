@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -66,17 +67,18 @@ func TestBruteForceDetectionDoesNotFallAsSensitivityRises(t *testing.T) {
 	}
 }
 
-// reportsBruteForce runs one detection pass over requests from ip, failures of
-// them answered 401, and reports whether a brute-force threat was recorded.
+// reportsBruteForce runs one detection pass over login POSTs from ip, failures
+// of them refused 401, and reports whether a brute-force threat was recorded.
 func reportsBruteForce(t *testing.T, sensitivity float64, ip string, requests, failures int) bool {
 	t.Helper()
 	agg := newIsolatedAggregator()
+	login := httptest.NewRequest(http.MethodPost, "/login", nil)
 	for i := range requests {
 		status := http.StatusOK
 		if i < failures {
 			status = http.StatusUnauthorized
 		}
-		agg.RecordRequest(ip, status)
+		agg.RecordRequest(ip, status, login)
 	}
 	ad := &AnomalyDetector{
 		config: &gateonv1.AnomalyDetectionConfig{
