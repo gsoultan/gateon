@@ -11,6 +11,31 @@ here after the fact.
 
 ## Unreleased
 
+### A middleware resolves a secret reference only where the host allows — **set `GATEON_MIDDLEWARE_SECRET_REFS` if a middleware uses one**
+
+A middleware's fields resolve `$env:`, `$vault:` and `$aws-sm:` references, and a
+middleware is written by an operator, not only an administrator. Nothing
+constrained it: an operator could name any secret the process can reach -- the
+encryption key, a database password, a session key held as a reference -- and
+read it back through a response header, or send it to a URL the middleware
+names. Now a reference is resolved only when it is in a field that holds a
+secret (not one whose value is echoed to the client) **and** the host has listed
+it in `GATEON_MIDDLEWARE_SECRET_REFS`, a comma-separated list of the exact
+references a middleware may use, read from the environment where the API cannot
+write it. Unset, no middleware field resolves a reference.
+
+A middleware whose field holds a reference that is not allowed is refused, and
+its route serves the refusal it serves for any security middleware it cannot
+build; the error names the reference and the variable. A literal or encrypted
+secret in a field is not a reference and is unaffected. The global
+configuration's own fields, which only an administrator writes, are unchanged.
+See ADR 0034.
+
+**Who is affected:** an install that uses `$env:`, `$vault:` or `$aws-sm:` in a
+middleware field (a JWT/HMAC secret, an OAuth client secret, an API key). List
+those references in `GATEON_MIDDLEWARE_SECRET_REFS`, or put the values in
+directly, before upgrading. A middleware with no such reference needs nothing.
+
 ### Automatic IP shuns lapse, and a released address can be shunned again after a day
 
 Every address the gateway shunned on its own -- the address shun (five

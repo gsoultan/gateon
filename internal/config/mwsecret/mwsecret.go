@@ -57,6 +57,16 @@ const apiKeyPrefix = "key_"
 // usersKey is the basic-auth middleware's user list.
 const usersKey = "users"
 
+// IsSecretField reports whether the entry key holds a secret in a middleware of
+// type mwType: a scalar secret, a basic-auth user list, an API key, or a
+// header or query value set under a credential name. The factory asks before it
+// resolves a $env:/$vault:/$aws-sm: reference, so a reference is refused in a
+// field that holds no secret -- where its resolved value would only be echoed
+// back, never used as a credential.
+func IsSecretField(mwType, key string) bool {
+	return classify(mwType, key) != plain
+}
+
 // classify says what the entry key holds in a middleware of type mwType, for a
 // caller who may write it.
 func classify(mwType, key string) kind {

@@ -44,6 +44,7 @@ ADRs follow a lightweight [MADR](https://adr.github.io/madr/)-style format:
 | [0031](./0031-an-automatic-shun-lapses-and-a-repeat-lasts-longer.md) | An automatic shun lapses, and a repeat lasts longer | Accepted |
 | [0032](./0032-every-entrypoint-is-capped-and-refuses-blocked-addresses.md) | Every entrypoint is capped, and every entrypoint refuses a blocked address | Accepted |
 | [0033](./0033-middleware-secrets-are-write-only.md) | Middleware secrets are write-only | Accepted |
+| [0034](./0034-a-middleware-resolves-only-the-secret-references-the-host-allows.md) | A middleware resolves only the secret references the host allows | Accepted |
 
 ## Conventions
 
