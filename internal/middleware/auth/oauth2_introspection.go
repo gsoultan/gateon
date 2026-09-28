@@ -101,11 +101,11 @@ func (v *OAuth2IntrospectionValidator) Handler(next http.Handler) http.Handler {
 			// and trace IDs whenever the provider was unhealthy. All the caller
 			// needs to know is that its token could not be checked.
 			logger.L.LogError("auth: token introspection failed", "error", err)
-			v.config.HandleFailure(w, r, next, errors.New("token introspection unavailable"))
+			v.config.refuseToken(w, r, next, errors.New("token introspection unavailable"))
 			return
 		}
 		if !resp.Active {
-			v.config.HandleFailure(w, r, next, fmt.Errorf("token inactive or invalid"))
+			v.config.refuseToken(w, r, next, fmt.Errorf("token inactive or invalid"))
 			return
 		}
 
@@ -117,7 +117,7 @@ func (v *OAuth2IntrospectionValidator) Handler(next http.Handler) http.Handler {
 		}
 
 		if err := v.config.ValidateClaims(claims); err != nil {
-			v.config.HandleFailure(w, r, next, err)
+			v.config.refuseToken(w, r, next, err)
 			return
 		}
 

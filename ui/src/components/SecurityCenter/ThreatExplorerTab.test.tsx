@@ -194,4 +194,42 @@ describe("ThreatExplorerTab mitigated rows", () => {
     // A block with no expiry of its own says nothing about lifting.
     expect(html.match(/data-testid="lifts-in"/g)?.length).toBe(1);
   });
+
+  // An automatic address shun lapses (ADR 0031) and its row carries when, as
+  // a kernel throttle's does; an operator's block holds until released and
+  // shows no end.
+  test("counts down to an automatic shun's expiry and not to an operator's block", () => {
+    const automatic: Anomaly = {
+      id: "t-3",
+      type: "ip_shunning",
+      severity: "high",
+      description: "IP shunning triggered: attack evidence from 5 different client builds",
+      timestamp: new Date().toISOString(),
+      source: "10.60.0.6",
+      recommendation: "",
+      mitigated: true,
+      expiresAt: new Date(Date.now() + 42 * 60_000 - 5_000).toISOString(),
+    };
+    const operator: Anomaly = {
+      id: "t-4",
+      type: "ip_shunning",
+      severity: "high",
+      description: "Manually mitigated by administrator",
+      timestamp: "2026-09-27T14:00:00Z",
+      source: "10.60.0.7",
+      recommendation: "",
+      mitigated: true,
+    };
+    threatsQuery = {
+      data: { threats: [automatic, operator], totalCount: 2 },
+      isLoading: false,
+      error: null,
+      refetch: async () => undefined,
+    };
+
+    const html = render();
+
+    expect(html).toContain("lifts in 42m");
+    expect(html.match(/data-testid="lifts-in"/g)?.length).toBe(1);
+  });
 });

@@ -70,8 +70,15 @@ type IPStats struct {
 // token-guessing client presenting a different bearer token each time. Neither
 // is how credential guessing is done against a login form or Basic auth, and
 // counting every refused GET to catch them is what reported the expired tab.
+//
+// Nor is a request the gateway itself refused for the token it presented
+// (TraceRecord.Refusal, from the mark the refusing middleware wrote): a
+// Connect, gRPC-Web or GraphQL poller re-presenting an expired session over
+// POST -- the dashboard's own calls among them -- is a session that ended, not
+// a guess (ADR 0031). A POST a backend refused is still counted: the gateway
+// did not check its credential and cannot say what it was.
 func credentialAttempt(tr *telemetry.TraceRecord) bool {
-	return tr.Method == http.MethodPost || tr.PasswordAuth
+	return tr.Refusal == "" && (tr.Method == http.MethodPost || tr.PasswordAuth)
 }
 
 // Failures is how many of the address's traced requests failed (4xx or 5xx).

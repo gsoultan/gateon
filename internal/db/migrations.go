@@ -6,7 +6,9 @@ package db
 import (
 	"database/sql"
 	"fmt"
+	"slices"
 	"strings"
+	"time"
 )
 
 func init() {
@@ -1595,6 +1597,92 @@ func init() {
 		}
 		return addColumns(db, dialect, `ALTER TABLE users ADD COLUMN session_epoch INTEGER NOT NULL DEFAULT 0`)
 	})
+
+	// An automatic address shun used to hold until an operator released it.
+	// It now lapses at expires_at (ADR 0031); an operator's block keeps a NULL
+	// one and holds until released. Rows written before this carry no expiry,
+	// and the automatic ones among them get the one they would have been
+	// given: the first rung, from when they were written (lapseLegacyShuns).
+	Register(66, "ip_mitigations_expires_at", func(db *sql.DB, dialect Dialect) error {
+		stmt := `ALTER TABLE ip_mitigations ADD COLUMN expires_at TIMESTAMP`
+		if dialect.Driver == DriverPostgres {
+			stmt = `ALTER TABLE ip_mitigations ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP`
+		}
+		if err := addColumns(db, dialect, stmt); err != nil {
+			return err
+		}
+		return lapseLegacyShuns(db, dialect)
+	})
+}
+
+// legacyShunFirstRung is how long the first automatic shun lasted when
+// migration 66 introduced the expiry. Frozen: it describes what the migration
+// did, so a later change to the ladder must not change it.
+const legacyShunFirstRung = 15 * time.Minute
+
+// legacyAutomaticShunReasons are the reasons the automatic shun paths wrote
+// before migration 66 -- the address shun, the anomaly detector, alert
+// playbooks, the alerting manager's autonomous mitigation and the incident
+// responder. An operator's block was written as "Manual recommendation applied
+// via API" or with the reason the operator gave. Frozen, for the same reason.
+var legacyAutomaticShunReasons = []string{
+	"IP shunning triggered", "Anomaly detection: ", "Alert playbook: ",
+	"Autonomous mitigation", "correlated critical incident: ",
+}
+
+// legacyShun is one row lapseLegacyShuns gives an expiry to.
+type legacyShun struct {
+	ip  string
+	end time.Time
+}
+
+// lapseLegacyShuns gives each automatic shun written before migration 66 the
+// expiry it would have had: legacyShunFirstRung after it was written. Most of
+// them lapse at once. They were earned under rules ADR 0029 replaced -- three
+// JA4+ strings, rate-limit refusals counted -- and were the widest and longest
+// decisions the gateway had taken on its own; an address still attacking
+// earns a new shun within minutes. An operator's block keeps no expiry.
+func lapseLegacyShuns(db *sql.DB, dialect Dialect) error {
+	shuns, err := legacyAutomaticShuns(db, dialect)
+	if err != nil {
+		return err
+	}
+	update := dialect.Rebind(`UPDATE ip_mitigations SET expires_at = ? WHERE ip = ? AND expires_at IS NULL`)
+	for _, sh := range shuns {
+		if _, err := db.Exec(update, sh.end.UTC().Format(time.DateTime), sh.ip); err != nil {
+			return fmt.Errorf("lapse the legacy shun of %s: %w", sh.ip, err)
+		}
+	}
+	return nil
+}
+
+// legacyAutomaticShuns reads the shuns in force with no expiry whose reason an
+// automatic path wrote, and when each would lapse. A row with no time written
+// lapses now.
+func legacyAutomaticShuns(db *sql.DB, dialect Dialect) ([]legacyShun, error) {
+	rows, err := db.Query(dialect.Rebind(
+		`SELECT ip, COALESCE(reason, ''), mitigated_at FROM ip_mitigations WHERE status = 'mitigated' AND expires_at IS NULL`))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []legacyShun
+	for rows.Next() {
+		var ip, reason string
+		var at sql.NullTime
+		if err := rows.Scan(&ip, &reason, &at); err != nil {
+			return nil, err
+		}
+		if !slices.ContainsFunc(legacyAutomaticShunReasons, func(p string) bool { return strings.HasPrefix(reason, p) }) {
+			continue
+		}
+		end := time.Now()
+		if at.Valid {
+			end = at.Time.Add(legacyShunFirstRung)
+		}
+		out = append(out, legacyShun{ip: ip, end: end})
+	}
+	return out, rows.Err()
 }
 
 // addColumns runs ADD COLUMN statements. Postgres's carry IF NOT EXISTS;

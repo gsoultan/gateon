@@ -9,10 +9,9 @@ import (
 
 	"github.com/gsoultan/gateon/internal/audit"
 	"github.com/gsoultan/gateon/internal/auth"
+	"github.com/gsoultan/gateon/internal/config/mwsecret"
 	"github.com/gsoultan/gateon/internal/request"
-	"github.com/gsoultan/gateon/internal/security/secretmask"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
-	"google.golang.org/protobuf/proto"
 )
 
 // MiddlewarePreset defines a predefined bundle of middlewares.
@@ -129,15 +128,8 @@ func registerMiddlewareHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Dep
 			WriteHTTPError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		// The caller was shown a placeholder instead of each credential, so a
-		// save that did not touch them sends the placeholder back. Writing it
-		// literally would destroy the secret through an edit that had nothing to
-		// do with it.
-		if mw.Id != "" {
-			if prev, ok := d.MwService.GetMiddleware(r.Context(), mw.Id); ok && prev != nil {
-				mw.Config = secretmask.Preserve(mw.Config, prev.Config)
-			}
-		}
+		// The service keeps every stored secret the caller sent the
+		// placeholder back for, and refuses one it cannot keep (ADR 0033).
 		if err := d.MwService.SaveMiddleware(r.Context(), &mw); err != nil {
 			// Validation/config errors are client errors
 			WriteHTTPError(w, http.StatusBadRequest, err.Error())
@@ -148,7 +140,8 @@ func registerMiddlewareHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Dep
 		userID := auditUser(r)
 		audit.Log(r.Context(), userID, "save", "middleware", "Saved middleware: "+mw.Id, request.ClientAddr(r))
 
-		WriteProtoResponse(w, http.StatusOK, &mw)
+		// mw now holds the kept secrets, so it is answered masked like a read.
+		WriteProtoResponse(w, http.StatusOK, mwsecret.Mask(&mw))
 	})
 	mux.HandleFunc("DELETE /v1/middlewares/{id}", func(w http.ResponseWriter, r *http.Request) {
 		if !RequirePermission(w, r, auth.ActionWrite, auth.ResourceMiddlewares) {
@@ -172,40 +165,18 @@ func registerMiddlewareHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Dep
 	})
 }
 
-// maskMiddlewares replaces every credential with a placeholder unless the caller
-// could change it anyway.
+// maskMiddlewares hides every stored secret from every caller (ADR 0033).
 //
-// Write permission is the right line. Someone who can set the secret gains
-// nothing by reading it -- they can already replace it with one they know --
-// while a caller who can only read gains the signing key for a protected route.
-// Drawing it here also leaves config export working for the operators and admins
-// who use it for backup, which masking unconditionally would have broken.
-//
-// The returned messages are copies. The originals are the live configuration,
-// and masking them in place would delete the credentials from the running
-// gateway on a GET.
+// Write permission used to be the line: a writer read every secret verbatim,
+// on the reasoning that someone who can replace a secret gains nothing by
+// reading it. They gain the secret. A replaced credential breaks the clients
+// that hold it, which somebody notices; a read one is used quietly as it is,
+// and outlives the stolen session or the script in the dashboard that took
+// it. So a writer reads the placeholder, which keeps the secret when sent
+// back, and a reader additionally reads no value the headers or rewrite
+// middlewares set. The messages returned are copies of the live configuration.
 func maskMiddlewares(r *http.Request, mws []*gateonv1.Middleware) []*gateonv1.Middleware {
-	if hasPermission(r, auth.ActionWrite, auth.ResourceMiddlewares) {
-		return mws
-	}
-	out := make([]*gateonv1.Middleware, 0, len(mws))
-	for _, mw := range mws {
-		if mw == nil {
-			continue
-		}
-		// proto.Clone rather than a struct copy: a generated message carries
-		// internal state that must not be copied by value, and listing the
-		// fields by hand would silently drop any field added to Middleware
-		// later -- from the masked response only, which is the half nobody
-		// would be looking at.
-		clone, ok := proto.Clone(mw).(*gateonv1.Middleware)
-		if !ok {
-			continue
-		}
-		clone.Config = secretmask.Config(mw.Config)
-		out = append(out, clone)
-	}
-	return out
+	return mwsecret.MaskAll(mws, hasPermission(r, auth.ActionWrite, auth.ResourceMiddlewares))
 }
 
 // hasPermission answers the same question as RequirePermission without writing a

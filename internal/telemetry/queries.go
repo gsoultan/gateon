@@ -114,6 +114,51 @@ const (
 	ON CONFLICT(id) DO NOTHING;`
 )
 
+// Address shuns (ip_mitigations). An operator's block has no expires_at and
+// holds until released; an automatic shun lapses at expires_at and is not in
+// force from then on (ADR 0031). Times are bound as UTC strings in the layout
+// CURRENT_TIMESTAMP writes on SQLite (sqlUTC), so one comparison serves both
+// engines.
+const (
+	inForceIPMitigation = `status = 'mitigated' AND (expires_at IS NULL OR expires_at > ?)`
+
+	QueryCountInForceIPMitigations = `SELECT COUNT(*) FROM ip_mitigations WHERE ` + inForceIPMitigation
+
+	QueryListInForceIPMitigations = `SELECT ip, status, reason, mitigated_at, unmitigated_at, updated_at, expires_at
+		FROM ip_mitigations
+		WHERE ` + inForceIPMitigation + `
+		ORDER BY mitigated_at DESC
+		LIMIT ? OFFSET ?`
+
+	QueryReadIPShun = `SELECT status, mitigated_at, expires_at, unmitigated_at FROM ip_mitigations WHERE ip = ?`
+
+	// QueryReadIPShunEnd and QueryReadIPShunStatus are what enforcement reads
+	// (readIPShunUntil): nothing it does not need.
+	QueryReadIPShunEnd    = `SELECT status, expires_at FROM ip_mitigations WHERE ip = ?`
+	QueryReadIPShunStatus = `SELECT status FROM ip_mitigations WHERE ip = ?`
+
+	// QueryMarkIPMitigated is an operator's block: no expiry, whatever the
+	// address had.
+	QueryMarkIPMitigated = `INSERT INTO ip_mitigations (ip, status, reason, mitigated_at, expires_at, updated_at)
+		VALUES (?, 'mitigated', ?, ?, NULL, CURRENT_TIMESTAMP)
+		ON CONFLICT(ip) DO UPDATE SET status = 'mitigated', reason = excluded.reason,
+			mitigated_at = excluded.mitigated_at, expires_at = NULL, updated_at = CURRENT_TIMESTAMP`
+
+	// QueryWriteAutoShun is an automatic shun, written only if the row does
+	// not hold a shun in force (the first bound time is now) or a release
+	// newer than the hold's cutoff (the second).
+	QueryWriteAutoShun = `INSERT INTO ip_mitigations (ip, status, reason, mitigated_at, expires_at, updated_at)
+		VALUES (?, 'mitigated', ?, ?, ?, CURRENT_TIMESTAMP)
+		ON CONFLICT(ip) DO UPDATE SET status = 'mitigated', reason = excluded.reason,
+			mitigated_at = excluded.mitigated_at, expires_at = excluded.expires_at, updated_at = CURRENT_TIMESTAMP
+		WHERE NOT (ip_mitigations.status = 'mitigated'
+				AND (ip_mitigations.expires_at IS NULL OR ip_mitigations.expires_at > ?))
+			AND NOT (ip_mitigations.status = 'unmitigated' AND ip_mitigations.unmitigated_at > ?)`
+
+	QueryReleaseIPMitigation = `UPDATE ip_mitigations SET status = 'unmitigated', unmitigated_at = ?,
+		expires_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE ip = ?`
+)
+
 // Fingerprint blocks (user_mitigations). A block's key is repid.For: a client
 // class, '|', and the network it is blocked on (ADR 0026). A key with no '|'
 // was written before blocks were scoped and is never enforced, and a row older

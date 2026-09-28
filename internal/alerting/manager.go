@@ -13,7 +13,6 @@ import (
 	"github.com/gsoultan/gateon/internal/ebpf"
 	"github.com/gsoultan/gateon/internal/httputil"
 	"github.com/gsoultan/gateon/internal/logger"
-	"github.com/gsoultan/gateon/internal/security/mitigation"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
@@ -147,12 +146,16 @@ func (m *AlertingManager) process(threat *telemetry.SecurityThreat) {
 				// We only perform kernel-level IP shunning for extremely severe threats
 				// where the risk to infrastructure outweighs the potential for NAT false positives.
 				if threat.Severity == "critical" && threat.JA4 == "" {
-					if err := m.ebpfManager.ShunIP(threat.SourceIP); err == nil {
+					// The automatic shun every path takes: it lapses, and it is
+					// leased in the kernel (ADR 0031). Shunning the kernel here
+					// first, as this did, left an entry that never lapsed.
+					res, err := telemetry.ShunAutomatically(threat.SourceIP, "Autonomous mitigation (score > 150 or critical)")
+					if err != nil {
+						logger.L.LogError("autonomous mitigation did not persist; the source is not blocked",
+							"ip", threat.SourceIP, "error", err)
+					}
+					if err == nil && res.Shunned() {
 						threat.ActionTaken = "Autonomous Mitigation"
-						if err := telemetry.MarkIPMitigated(threat.SourceIP, "Autonomous mitigation (score > 150 or critical)"); err != nil {
-							logger.L.LogError("autonomous mitigation did not persist; the source is not blocked",
-								"ip", threat.SourceIP, "error", err)
-						}
 						logger.L.LogInfo("autonomous smart mitigation: shunned high-risk IP",
 							"ip", threat.SourceIP,
 							"total_score", score,
@@ -239,21 +242,23 @@ func (m *AlertingManager) executePlaybook(pb *gateonv1.AlertPlaybook, threat tel
 // shun was recorded nowhere, so it was invisible on the mitigation list, could
 // not be released from it, and vanished on restart.
 //
-// MarkIPMitigated is the block the request path reads on every entrypoint and
-// route, and it still pushes the address to the kernel when eBPF is running.
-// Loopback, the mitigation allowlist and an address the operator released are
-// left alone, as every other automatic block treats them.
+// ShunAutomatically is the block the request path reads on every entrypoint
+// and route, and it still pushes the address to the kernel when eBPF is
+// running. Loopback, the mitigation allowlist and an address the operator
+// released are left alone, as every other automatic block treats them.
 func blockSource(pb *gateonv1.AlertPlaybook, ip string) {
-	if httputil.IsLoopback(ip) || mitigation.IsAllowlisted(ip) || telemetry.IsIPUnmitigated(ip) {
-		logger.L.LogInfo("playbook block skipped: the source is exempt", "ip", ip, "playbook", pb.GetName())
-		return
-	}
-	if err := telemetry.MarkIPMitigated(ip, "Alert playbook: "+pb.GetName()); err != nil {
+	// A playbook's block is automatic -- nobody looked at this address -- so it
+	// lapses like every automatic shun, and exempts what they exempt (ADR 0031).
+	res, err := telemetry.ShunAutomatically(ip, "Alert playbook: "+pb.GetName())
+	switch {
+	case err != nil:
 		logger.L.LogError("playbook block did not persist; the source is not blocked",
 			"ip", ip, "playbook", pb.GetName(), "error", err)
-		return
+	case !res.Shunned():
+		logger.L.LogInfo("playbook block skipped: the source is exempt", "ip", ip, "playbook", pb.GetName())
+	default:
+		logger.L.LogInfo("playbook blocked IP", "ip", ip, "playbook", pb.GetName())
 	}
-	logger.L.LogInfo("playbook blocked IP", "ip", ip, "playbook", pb.GetName())
 }
 
 // dispatch delivers one alert on its own goroutine, unless maxAlertSends are

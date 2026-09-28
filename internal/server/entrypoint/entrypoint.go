@@ -9,8 +9,6 @@ import (
 	"net"
 	"net/http"
 	"sync"
-	"sync/atomic"
-	"time"
 
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/logger"
@@ -77,7 +75,7 @@ type openConns struct {
 	closing  bool
 	drained  chan struct{}
 	signaled bool
-	lastWarn atomic.Int64 // unix nanoseconds of the last at-limit warning
+	warn     limitWarning // when it last said it was at its limit
 }
 
 func newOpenConns(limit int) *openConns {
@@ -107,20 +105,6 @@ func (o *openConns) add(c net.Conn) admission {
 	}
 	o.conns[c] = struct{}{}
 	return admitted
-}
-
-// atLimitWarningEvery spaces the warnings a full entrypoint logs: every
-// refusal counts, but a flood of them must not become a flood of log lines.
-const atLimitWarningEvery = time.Minute
-
-// warnDue reports whether a refusal at now should log, at most once per
-// atLimitWarningEvery.
-func (o *openConns) warnDue(now time.Time) bool {
-	last := o.lastWarn.Load()
-	if now.UnixNano()-last < int64(atLimitWarningEvery) {
-		return false
-	}
-	return o.lastWarn.CompareAndSwap(last, now.UnixNano())
 }
 
 // remove forgets c once the goroutine serving it is done with it.

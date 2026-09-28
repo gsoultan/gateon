@@ -139,7 +139,7 @@ func (*httpRunner) Run(ctx context.Context, ep *gateonv1.EntryPoint, deps *Deps,
 	if ep.Address == "" {
 		return
 	}
-	e := &httpEntrypoint{ep: ep, deps: deps, wg: wg}
+	e := &httpEntrypoint{ep: ep, deps: deps, wg: wg, slots: newConnSlots(ep)}
 	if ep.Tls != nil && ep.Tls.Enabled {
 		e.tlsConfig = deps.TLSConfig.Clone()
 	}
@@ -160,6 +160,10 @@ type httpEntrypoint struct {
 	deps      *Deps
 	wg        *syncutil.WaitGroup
 	tlsConfig *tls.Config
+	// slots is the entrypoint's max_connections, which its TCP and QUIC
+	// listeners draw on alike. Nil on the server a TCP entrypoint hands its
+	// HTTP connections to, whose own limit has already admitted them.
+	slots *connSlots
 }
 
 // frontHandler is the entrypoint chain around the base handler and the global
@@ -192,14 +196,24 @@ func (e *httpEntrypoint) startHTTP3(h http.Handler) http.Handler {
 	}
 	addr := e.ep.Address
 	h3Server := newHTTP3Server(addr, h, e.tlsConfig)
+	// Listened on here rather than by ListenAndServe, so that the listener
+	// the server accepts from is the one that holds the entrypoint's limit.
+	ln, err := quic.ListenAddrEarly(addr, http3.ConfigureTLSConfig(e.tlsConfig), h3Server.QUICConfig.Clone())
+	if err != nil {
+		logger.L.LogError("HTTP/3 listen failed", "error", err, "addr", addr)
+		return h
+	}
 	if e.deps.ShutdownRegistry != nil {
 		e.deps.ShutdownRegistry.Register(func(ctx context.Context) error {
-			return h3Server.Close()
+			err := h3Server.Close()
+			_ = ln.Close() // ServeListener leaves closing it to its caller
+			return err
 		})
 	}
 	e.wg.Go(func() {
 		logger.L.LogInfo("starting HTTP/3 (QUIC) entrypoint", "addr", addr)
-		if err := h3Server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		err := h3Server.ServeListener(&cappedQUICListener{QUICListener: ln, slots: e.slots})
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			logger.L.LogError("HTTP/3 server failed", "error", err, "addr", addr)
 		}
 	})
@@ -267,7 +281,9 @@ func (e *httpEntrypoint) newServer(h http.Handler) *http.Server {
 }
 
 // serveTCP listens on the entrypoint's address and serves, over TLS when the
-// entrypoint has it.
+// entrypoint has it, holding at most its max_connections at once. The limit
+// is taken before the TLS handshake, so a connection past it costs no more
+// than its accept.
 func (e *httpEntrypoint) serveTCP(server *http.Server) {
 	addr := e.ep.Address
 	l, err := net.Listen("tcp", addr)
@@ -278,6 +294,7 @@ func (e *httpEntrypoint) serveTCP(server *http.Server) {
 	if e.deps.Phantom != nil {
 		l = e.deps.Phantom.OptimizeListener(l)
 	}
+	l = &cappedListener{Listener: l, slots: e.slots}
 	if e.tlsConfig != nil {
 		logger.L.LogInfo("starting HTTPS entrypoint", "addr", addr, "type", e.ep.Type.String())
 		e.wg.Go(func() {

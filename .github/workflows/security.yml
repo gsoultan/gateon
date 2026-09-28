@@ -177,7 +177,7 @@ jobs:
         run: |
           gosec -fmt sarif -out gosec.sarif \
             -exclude=G115 \
-            -exclude-dir=proto -exclude-dir=tests -exclude-dir=ui \
+            -exclude-dir=proto -exclude-dir=tests -exclude-dir=node_modules -exclude-dir=.bun-cache \
             -exclude-generated \
             ./...
 

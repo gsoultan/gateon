@@ -63,6 +63,30 @@ change one, so the next verify re-reads the account and the check gets stricter
 rather than weaker. See
 `doc/adr/0012-session-revocation-propagates-but-expiry-guarantees.md`.
 
+**Rotating the session key.** The key in `auth.paseto_secret` signs every
+session and encrypts every stored second factor. Replacing it in Settings, or
+through the API, ends every session at once and re-encrypts the second factors
+under the new key in the same step, so every enrolment survives. It changes this
+instance only.
+
+- **One instance:** replace it in Settings. Nothing else is needed.
+- **Several instances sharing one user database:** every instance must hold the
+  same key, and until they do, sessions and two-factor sign-ins through the ones
+  still on the old key fail. Replace it on one instance, give the others the new
+  key -- in their `global.json`, or better in a secret store every instance names
+  (`$vault:...`, `$aws-sm:...`, `$env:...`) -- and restart them. The first
+  instance has already moved the second factors, so the others find nothing to
+  move.
+- **A key changed any other way** -- `global.json` edited, the secret a reference
+  names rotated at the source -- moves no second factor by itself. At startup
+  every instance checks each stored second factor against its key and logs an
+  error with the number that do not decrypt: those accounts cannot complete a
+  two-factor sign-in. Set `GATEON_PREVIOUS_SESSION_KEY` to the previous key on
+  the instances you restart with the new one; the first to start re-encrypts
+  those second factors under the new key, and the variable can be removed once it
+  has. The previous key only ever decrypts second factors. It never verifies a
+  session, so a rotated-away key stays rotated away.
+
 **On upgrade, everyone is logged out once.** Tokens minted before this
 mechanism carry no binding and are refused rather than grandfathered in.
 

@@ -80,6 +80,8 @@ func (h *reputationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				ActionTaken: kind.ActionBlocked,
 			}))
 
+			// No credential was checked, so this is not an attempt (ADR 0031).
+			request.MarkRefused(r, request.RefusalMitigation)
 			w.WriteHeader(http.StatusForbidden)
 			_, _ = w.Write([]byte("Forbidden by Security Policy (Reputation Block)"))
 			return
@@ -90,9 +92,10 @@ func (h *reputationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // exemptFromEnforcement reports whether a client is never refused by the
-// identity blocks -- reputation and the fingerprint block alike, one rule for
-// both: loopback, which is the gateway's own management traffic and, behind a
-// local proxy that sets no forwarding header, every client; and
+// identity blocks -- reputation, the fingerprint block and the IP block
+// (AddressBlocked) alike, one rule for all three, on HTTP and TCP entrypoints:
+// loopback, which is the gateway's own management traffic and, behind a local
+// proxy that sets no forwarding header, every client; and
 // GATEON_MITIGATION_ALLOWLIST.
 //
 // It exempts enforcement, never observation: the threat is still recorded

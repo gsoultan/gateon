@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/gsoultan/gateon/internal/httputil"
+	"github.com/gsoultan/gateon/internal/request"
 )
 
 // AuthBaseConfig contains common authentication configuration fields.
@@ -175,6 +176,24 @@ func (c AuthBaseConfig) HandleFailure(w http.ResponseWriter, r *http.Request, ne
 	}
 
 	httputil.WriteJSONError(w, http.StatusUnauthorized, msg, "")
+}
+
+// refuseToken is HandleFailure for a request refused because the token it
+// presented failed the gateway's own verification: invalid, expired, revoked,
+// unverifiable or short of the route's scopes and roles. It marks the request
+// so (request.RefusalToken): a client re-presenting a token it was issued --
+// a GraphQL or Connect poller whose session expired, the dashboard's own tab
+// among them -- is not guessing a password, and the brute-force detectors
+// used to shun it as if it were (ADR 0031).
+//
+// Called only after a token was found and checked; a request that presented
+// none is refused by HandleFailure and stays a possible attempt. In dry run
+// nothing is refused, so nothing is marked.
+func (c AuthBaseConfig) refuseToken(w http.ResponseWriter, r *http.Request, next http.Handler, err error) {
+	if !c.DryRun {
+		request.MarkRefused(r, request.RefusalToken)
+	}
+	c.HandleFailure(w, r, next, err)
 }
 
 // authNotRequiredKey carries the management base handler's decision that a

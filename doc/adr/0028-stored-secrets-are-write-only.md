@@ -95,7 +95,14 @@ readable by every viewer.
 - To rotate a credential, send the new value. Rotating the session key signs
   everyone out, now. It is per instance: another gateway sharing the user
   database keeps the old key until it is given the new one and restarted, and
-  its second-factor sign-ins fail meanwhile.
+  its second-factor sign-ins fail meanwhile. The key is not sent to the other
+  instances: a message on the Redis channel may only invalidate, never
+  populate (ADR 0012), and one that carried a session key would let anyone who
+  can publish there mint sessions. A key changed outside the dashboard moves no
+  second factor; each instance counts the ones it cannot decrypt at startup and
+  moves them from `GATEON_PREVIOUS_SESSION_KEY` when that is set, a key used
+  only to decrypt second factors and never to verify a session
+  (`doc/security-posture.md`, "Rotating the session key").
 - Rotating the audit key: new entries are signed with the new key, and the
   chain's links continue across the change. No entry records which key signed
   it and `VerifyChain` takes one key, so the entries written before the

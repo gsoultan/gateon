@@ -220,11 +220,13 @@ staticcheck:
 ##        int->int32/uint conversions that are bounded by construction, and a
 ##        gate nobody can read is a gate nobody runs. Exclude-dirs cover
 ##        generated protobuf, the e2e harness, and Go files vendored inside the
-##        bun cache under ui/.
+##        bun cache and node_modules under ui/. They name those directories, not
+##        ui: an exclude matches a directory name at any depth, and "ui" also
+##        hid internal/ui, the Go code that serves the dashboard.
 gosec:
 	go run github.com/securego/gosec/v2/cmd/gosec@latest \
 		-exclude=G115 \
-		-exclude-dir=proto -exclude-dir=tests -exclude-dir=ui \
+		-exclude-dir=proto -exclude-dir=tests -exclude-dir=node_modules -exclude-dir=.bun-cache \
 		-exclude-generated \
 		./...
 

@@ -1,44 +1,32 @@
 // Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
 // SPDX-License-Identifier: MIT
 
-// Package secretmask hides credentials in configuration that is being read back.
+// Package secretmask says which configuration values are credentials, by name,
+// and owns the placeholder the management API shows in their place.
 //
 // A middleware's config is a map[string]string, and for the auth middlewares the
 // values in it are credentials: "secret" for jwt, hmac and pow, "password" and
-// "users" for basic auth, "client_secret" for oidc. The list and get endpoints
-// returned those maps as stored, and RoleViewer -- the lowest role there is,
-// read-only by definition -- holds ActionRead on ResourceMiddlewares.
+// "users" for basic auth, "client_secret" for oidc and oauth2. For jwt and hmac
+// the value is the signing key for a route the gateway protects, so anyone
+// holding it can mint a token the gateway will accept.
 //
-// That is not a configuration disclosure. For jwt and hmac the value is the
-// signing key for a route the gateway is protecting, so anyone holding it can
-// mint a token the gateway will accept. A read-only dashboard account became
-// access to the backend as any user.
-//
-// One credential hides in the key NAME rather than the value: the apikey
-// middleware stores each accepted key as "key_<APIKEY>=<tenant>". Masking only
-// values left those in plaintext, so Config masks secret-bearing key names too.
+// Masking and restoring a middleware's secrets is internal/config/mwsecret's
+// (ADR 0033); this package is the vocabulary it and the stores share.
 package secretmask
 
 import (
-	"strconv"
+	"slices"
 	"strings"
 )
 
-// secretKeyNamePrefix marks config keys whose SUFFIX is itself the credential
-// rather than the value. The apikey middleware stores each accepted key as
-// "key_<APIKEY>=<tenant>", so the secret is the map key. Masking only values
-// (Config's original behaviour) walked straight past it and returned every API
-// key in plaintext to anyone who could read the middleware -- the read-only
-// viewer included -- who could then authenticate to the protected backend as
-// that client.
-const secretKeyNamePrefix = "key_"
-
-// Placeholder is what a masked value is replaced with.
+// Placeholder is what the API returns in place of a stored secret, and what a
+// client sends back to keep it.
 //
 // A fixed, recognisable string rather than an empty one: the dashboard has to be
 // able to tell "this middleware has a secret configured" from "this field is
 // unset", because those need different screens. It also has to be able to
-// recognise the value on the way back -- see Preserve.
+// recognise the value on the way back, which is why no store accepts it as a
+// value (Held).
 const Placeholder = "__gateon_redacted__"
 
 // secretKeys are the config keys whose values are credentials.
@@ -87,73 +75,57 @@ func IsSecret(key string) bool {
 	return k == "token" || strings.HasSuffix(k, "_token")
 }
 
-// Config returns a copy of cfg with every credential replaced by Placeholder.
-//
-// A copy, always. The maps handed to this come straight from the live
-// configuration registry, and masking in place would not hide the secret -- it
-// would delete it, from the running gateway, on a GET.
-func Config(cfg map[string]string) map[string]string {
-	if cfg == nil {
-		return nil
-	}
-	out := make(map[string]string, len(cfg))
-	keyNameSecrets := 0
-	for k, v := range cfg {
-		// The credential is the key name itself (apikey's "key_<APIKEY>"). Drop
-		// the original so the secret is not returned, and emit a placeholder that
-		// still tells the dashboard a key is configured. Indexed so several keys
-		// stay several entries rather than colliding into one; the caller who may
-		// read this cannot write it back, so the index need not be stable. The
-		// value is a tenant label, not a credential, and is kept.
-		if suffix, ok := strings.CutPrefix(k, secretKeyNamePrefix); ok && suffix != "" {
-			out[secretKeyNamePrefix+Placeholder+"_"+strconv.Itoa(keyNameSecrets)] = v
-			keyNameSecrets++
-			continue
-		}
-		if v != "" && IsSecret(k) {
-			out[k] = Placeholder
-			continue
-		}
-		out[k] = v
-	}
-	return out
+// credentialHeaders are the header names that carry a credential whatever
+// they are set to.
+var credentialHeaders = map[string]bool{
+	"authorization":       true,
+	"proxy-authorization": true,
+	"cookie":              true,
+	"set-cookie":          true,
 }
 
-// Preserve merges an incoming config over a stored one, keeping the stored value
-// wherever the caller sent the placeholder back.
+// credentialFragments are the parts of a header or query-parameter name that
+// say its value is a credential: X-Api-Key, X-Auth-Token, X-Session-Id,
+// access_token, client_secret, X-Amz-Signature and the like.
+var credentialFragments = []string{
+	"token", "secret", "passw", "key", "auth", "session", "credential", "signature", "bearer", "jwt",
+}
+
+// IsCredentialName reports whether a header or query parameter of this name
+// carries a credential, so that a value the headers or rewrite middleware sets
+// for it is a secret.
 //
-// Without this, masking breaks the thing it protects. The dashboard reads a
-// middleware, shows the mask, an operator edits the name and saves -- and the
-// placeholder is written over the real secret, so the credential is destroyed by
-// an edit that had nothing to do with it. Masking a value on the way out means
-// recognising it on the way back in.
-func Preserve(incoming, stored map[string]string) map[string]string {
-	if incoming == nil {
-		return nil
+// A name is all there is to go on, and it errs towards masking: Sec-WebSocket-Key
+// and WWW-Authenticate are caught, which costs an operator a "Stored" badge
+// where a value would have done. What it cannot catch is a credential in a
+// header whose name gives nothing away (X-Upstream: <token>); ADR 0033 records
+// that residue.
+func IsCredentialName(name string) bool {
+	n := strings.ToLower(strings.TrimSpace(name))
+	if credentialHeaders[n] {
+		return true
 	}
-	out := make(map[string]string, len(incoming))
-	for k, v := range incoming {
-		// A masked key name (apikey's "key_<Placeholder>_N") is a display marker,
-		// never a real config key. Writing it literally would add a bogus API key
-		// named after the placeholder while silently dropping the real ones the
-		// stored config still holds. A caller shown masked key names cannot write
-		// anyway, so this only fires defensively -- but a placeholder must no more
-		// be persisted as a key than as a value.
-		if strings.HasPrefix(k, secretKeyNamePrefix+Placeholder) {
-			continue
+	for _, frag := range credentialFragments {
+		if strings.Contains(n, frag) {
+			return true
 		}
-		if v == Placeholder {
-			// Reading a nil map is fine and returns not-found, which is the
-			// case that matters: if there is no stored value behind the
-			// placeholder the key is dropped rather than written through.
-			// Writing it literally would set the credential to a string
-			// published in this file, which is worse than leaving it unset.
-			if prev, ok := stored[k]; ok {
-				out[k] = prev
-			}
-			continue
-		}
-		out[k] = v
 	}
-	return out
+	return false
+}
+
+// Held names every entry of a middleware config whose key or value contains
+// Placeholder, sorted. No stored config may hold one: Placeholder is what a
+// client sends to keep a stored secret, and stored as a value it would replace
+// the credential with a string published in this file -- an HMAC key anyone
+// could sign with. The stores refuse such a config and the factory refuses to
+// build one, whichever path it came by.
+func Held(cfg map[string]string) []string {
+	var names []string
+	for k, v := range cfg {
+		if strings.Contains(k, Placeholder) || strings.Contains(v, Placeholder) {
+			names = append(names, k)
+		}
+	}
+	slices.Sort(names)
+	return names
 }

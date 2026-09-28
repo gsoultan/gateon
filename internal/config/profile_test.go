@@ -58,8 +58,8 @@ func TestDefaultsFor_ConservativeMinimal(t *testing.T) {
 		t.Error("RetentionDays must be non-decreasing minimal<=standard<=enterprise")
 	}
 	// A TCP entrypoint with max_connections 0 takes this; 0 here would be no cap.
-	if min.TCPMaxConnections <= 0 || min.TCPMaxConnections > std.TCPMaxConnections ||
-		std.TCPMaxConnections > ent.TCPMaxConnections {
-		t.Error("TCPMaxConnections must be positive and non-decreasing minimal<=standard<=enterprise")
+	if min.EntryPointMaxConnections <= 0 || min.EntryPointMaxConnections > std.EntryPointMaxConnections ||
+		std.EntryPointMaxConnections > ent.EntryPointMaxConnections {
+		t.Error("EntryPointMaxConnections must be positive and non-decreasing minimal<=standard<=enterprise")
 	}
 }

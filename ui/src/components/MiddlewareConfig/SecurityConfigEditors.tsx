@@ -21,6 +21,7 @@ import { useState } from "react";
 import { IconPlus, IconTrash } from "@tabler/icons-react";
 
 import { apiFetch, getCloudflareIPs } from "../../hooks/useGateon";
+import { StoredSecretInput } from "../settings/StoredSecretInput";
 import { WAF_APP_PROFILES } from "../../types/gateon";
 
 interface EditorProps {
@@ -314,13 +315,12 @@ export function TurnstileConfigEditor({ config, updateConfig }: EditorProps) {
 
   return (
     <Stack gap="md">
-      <TextInput
+      <StoredSecretInput
         label="Secret Key"
         description="Cloudflare Turnstile secret. Or set GATEON_TURNSTILE_SECRET env"
         placeholder="0x4AAAAAAA..."
-        type="password"
         value={config.secret || ""}
-        onChange={(e) => updateConfig("secret", e.currentTarget.value)}
+        onChange={(v) => updateConfig("secret", v)}
       />
       <TextInput
         label="Token Header"
@@ -367,13 +367,13 @@ export function BotManagementConfigEditor({ config, updateConfig }: EditorProps)
         onChange={(val) => updateConfig("challenge_timeout", (val ?? 3600).toString())}
         min={60}
       />
-      <TextInput
+      <StoredSecretInput
         label="Secret Key"
-        description="Secret used for signing challenge tokens"
+        description="Secret used for signing challenge tokens. Empty uses the global one."
         placeholder="gateon-default-secret"
-        type="password"
         value={config.secret_key || ""}
-        onChange={(e) => updateConfig("secret_key", e.currentTarget.value)}
+        onChange={(v) => updateConfig("secret_key", v)}
+        clearable
       />
     </Stack>
   );
@@ -532,13 +532,12 @@ export function HMACConfigEditor({ config, updateConfig }: EditorProps) {
 
   return (
     <Stack gap="md">
-      <TextInput
+      <StoredSecretInput
         label="Secret"
         description="HMAC secret for signature verification. Or GATEON_HMAC_SECRET env"
-        type="password"
         placeholder="webhook-secret"
         value={config.secret || ""}
-        onChange={(e) => updateConfig("secret", e.currentTarget.value)}
+        onChange={(v) => updateConfig("secret", v)}
       />
       <TextInput
         label="Signature Header"
@@ -842,13 +841,12 @@ export function OIDCConfigEditor({ config, updateConfig }: EditorProps) {
           onChange={(e) => updateConfig("client_id", e.currentTarget.value)}
           required
         />
-        <TextInput
+        <StoredSecretInput
           label="Client Secret"
+          description="Kept only while the issuer stays the same."
           placeholder="your-client-secret"
-          type="password"
           value={config.client_secret || ""}
-          onChange={(e) => updateConfig("client_secret", e.currentTarget.value)}
-          required
+          onChange={(v) => updateConfig("client_secret", v)}
         />
       </Group>
       <TextInput

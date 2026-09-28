@@ -22,6 +22,7 @@ import (
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware"
 	"github.com/gsoultan/gateon/internal/middleware/security"
+	"github.com/gsoultan/gateon/internal/middleware/security/identity"
 	"github.com/gsoultan/gateon/internal/middleware/traffic"
 	"github.com/gsoultan/gateon/internal/syncutil"
 	"github.com/gsoultan/gateon/internal/telemetry"
@@ -242,23 +243,38 @@ func newManagementHTTPServer(addr string, handler http.Handler) *http.Server {
 
 func startTCPServer(addr string, ep *gateonv1.EntryPoint, deps *Deps, wg *syncutil.WaitGroup, shutdownReg *ShutdownRegistry) {
 	logger.L.Info().Str("addr", addr).Str("ep", ep.Id).Msg("starting TCP entrypoint")
-	var l net.Listener
-	var err error
+	s := newTCPServer(ep, deps, wg)
+	l, err := s.listen(addr)
+	if err != nil {
+		logger.L.LogError("TCP listen failed", "error", err, "addr", addr)
+		return
+	}
+	s.start(l, shutdownReg)
+}
+
+// newTCPServer is ep's accept loop and connection accounting, not yet
+// listening.
+func newTCPServer(ep *gateonv1.EntryPoint, deps *Deps, wg *syncutil.WaitGroup) *tcpServer {
 	// terminatesTLS decides both how to listen and whether to inspect. The
 	// inspection decision used to key off deps.TLSConfig alone, which is the
 	// gateway-wide config that any HTTPS entrypoint creates, so a plaintext TCP
 	// entrypoint next to an HTTPS one silently lost SSH, RDP and HTTP detection.
 	terminatesTLS := ep.Tls != nil && ep.Tls.Enabled && deps.TLSConfig != nil
-	if terminatesTLS {
-		l, err = tls.Listen("tcp", addr, deps.TLSConfig)
-	} else {
-		l, err = net.Listen("tcp", addr)
+	return &tcpServer{ep: ep, deps: deps, wg: wg, conns: newOpenConns(connLimit(ep)),
+		plaintext: !terminatesTLS, blocked: identity.AddressBlocked}
+}
+
+// listen binds addr, over TLS on an entrypoint that terminates it.
+func (s *tcpServer) listen(addr string) (net.Listener, error) {
+	if s.plaintext {
+		return net.Listen("tcp", addr)
 	}
-	if err != nil {
-		logger.L.LogError("TCP listen failed", "error", err, "addr", addr)
-		return
-	}
-	s := &tcpServer{ep: ep, deps: deps, wg: wg, conns: newOpenConns(tcpConnLimit(ep)), plaintext: !terminatesTLS}
+	return tls.Listen("tcp", addr, s.deps.TLSConfig)
+}
+
+// start serves l until shutdown, which closes it and then ends the
+// connections still open when its deadline passes.
+func (s *tcpServer) start(l net.Listener, shutdownReg *ShutdownRegistry) {
 	if shutdownReg != nil {
 		shutdownReg.Register(func(ctx context.Context) error {
 			err := l.Close()
@@ -266,7 +282,7 @@ func startTCPServer(addr string, ep *gateonv1.EntryPoint, deps *Deps, wg *syncut
 			return err
 		})
 	}
-	wg.Go(func() { s.serve(l) })
+	s.wg.Go(func() { s.serve(l) })
 }
 
 // tcpServer is a TCP entrypoint's accept loop and the connections it holds.
@@ -276,16 +292,10 @@ type tcpServer struct {
 	wg        *syncutil.WaitGroup
 	conns     *openConns
 	plaintext bool
-}
-
-// tcpConnLimit is the most connections ep holds open at once: its
-// max_connections, or the resource profile's default when that is 0. It was
-// stored and shown and read by nothing, so a TCP entrypoint had no cap at all.
-func tcpConnLimit(ep *gateonv1.EntryPoint) int {
-	if n := int(ep.GetMaxConnections()); n > 0 {
-		return n
-	}
-	return config.CurrentTierDefaults().TCPMaxConnections
+	// blocked reports whether a client address is refused by the IP
+	// mitigation list: identity.AddressBlocked, the rule the HTTP entrypoints
+	// apply. A test gives it a lookup that is slow on purpose.
+	blocked func(ip string) bool
 }
 
 // serve accepts until l is closed. A connection past the limit is closed at
@@ -315,8 +325,16 @@ func (s *tcpServer) serve(l net.Listener) {
 }
 
 // handle serves one admitted connection: inspected on a plaintext
-// entrypoint, proxied to the entrypoint's route on one that terminates TLS.
+// entrypoint, proxied to the entrypoint's route on one that terminates TLS --
+// unless its client is on the IP mitigation list. That is asked first, before
+// a byte is read or a handshake made, and on every path: the tcp-only fast
+// path too, where no HTTP request ever reaches IPMitigation. A blocked address
+// used to connect to a TCP entrypoint as freely as any other whenever eBPF was
+// not there to drop it in the kernel.
 func (s *tcpServer) handle(c net.Conn) {
+	if s.refuseBlocked(c) {
+		return
+	}
 	if s.plaintext {
 		handleTCPConnWithInspection(c, s.ep, s.deps, s.wg)
 		return
@@ -336,7 +354,7 @@ func (s *tcpServer) handle(c net.Conn) {
 func (s *tcpServer) refuseOverLimit(c net.Conn) {
 	_ = c.Close()
 	telemetry.IncInflightRejected("tcp_max_connections")
-	if s.conns.warnDue(time.Now()) {
+	if s.conns.warn.due(time.Now()) {
 		logger.L.LogWarn("TCP entrypoint at its connection limit, refusing new connections",
 			"ep", s.ep.Id, "max_connections", s.conns.limit)
 	}

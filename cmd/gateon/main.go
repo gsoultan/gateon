@@ -151,7 +151,7 @@ func main() {
 	telemetry.SetEbpfManager(&ebpfAdapter{ebpfHolder})
 	// Every adaptive rate limit is leased; this is what lifts the ones whose
 	// writer stopped renewing them. See ebpf.AdaptiveLimitLease.
-	go ebpfHolder.ExpireAdaptiveLimits(ctx, adaptiveLimitSweep)
+	go ebpfHolder.ExpireLeases(ctx, adaptiveLimitSweep)
 	var wafUpdater *wafmw.WAFUpdater
 	var clamavManager *security.ClamAVManager
 
@@ -195,7 +195,7 @@ func main() {
 	// Correlate recorded threats into MITRE-annotated incidents, drive graduated
 	// mitigation (reputation degrade -> restrict -> optional eBPF shun), and (when
 	// configured via GATEON_SIEM_*) export them to an external SIEM.
-	startThreatPipeline(ctx, version(), ebpfHolder)
+	startThreatPipeline(ctx, version())
 
 	// Initialize the reputation store if enabled.
 	var ipReputation *reputation.IPReputationStore

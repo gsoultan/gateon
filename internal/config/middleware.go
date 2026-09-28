@@ -13,7 +13,9 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/gsoultan/gateon/internal/config/storedsecret"
 	"github.com/gsoultan/gateon/internal/logger"
+	"github.com/gsoultan/gateon/internal/security/secretmask"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 	"gopkg.in/yaml.v3"
 )
@@ -148,11 +150,27 @@ func (r *MiddlewareRegistry) All(ctx context.Context) map[string]*gateonv1.Middl
 }
 
 func (r *MiddlewareRegistry) Update(ctx context.Context, m *gateonv1.Middleware) error {
+	if err := RefusePlaceholder(m); err != nil {
+		return err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	r.middlewares[m.Id] = m
 	return r.saveLocked()
+}
+
+// RefusePlaceholder refuses a middleware whose config holds the stored-secret
+// placeholder anywhere. Every store calls it before writing, whichever path
+// the middleware came by -- the API, a config import, the seed from a file, a
+// sync: stored, the placeholder would stand in for a secret, and it is a
+// string anyone can read in the source (ADR 0033).
+func RefusePlaceholder(m *gateonv1.Middleware) error {
+	if held := secretmask.Held(m.GetConfig()); len(held) > 0 {
+		return fmt.Errorf("middleware %q: %w: %s", m.GetId(), storedsecret.ErrPlaceholderStored,
+			strings.Join(held, ", "))
+	}
+	return nil
 }
 
 func (r *MiddlewareRegistry) Delete(ctx context.Context, id string) error {

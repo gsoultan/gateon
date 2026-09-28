@@ -10,11 +10,13 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/gsoultan/gateon/internal/syncutil"
+	"github.com/gsoultan/gateon/internal/telemetry"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
@@ -365,7 +367,12 @@ func TestATLSEntrypointCarriesAServerFirstSession(t *testing.T) {
 // server-first client wait for its greeting: on the mixed entrypoint,
 // serverFirstWait -- in which the client shows it is not going to speak -- and
 // the dial; on the tcp-only one, the dial.
+//
+// The telemetry store is open, as it is in cmd/gateon: a TCP entrypoint looks
+// each connection's client up on the IP mitigation list kept there, and
+// without a store the lookup would return before costing anything.
 func BenchmarkServerFirstSession(b *testing.B) {
+	withTelemetryStore(b)
 	backend, stopBackend := serveBackend(b, greetThenEcho)
 	defer stopBackend()
 	addr, stop := plaintextTCPEntrypoint(b, backend)
@@ -375,6 +382,18 @@ func BenchmarkServerFirstSession(b *testing.B) {
 	b.Run("direct", func(b *testing.B) { benchServerFirstSession(b, backend) })
 	b.Run("entrypoint", func(b *testing.B) { benchServerFirstSession(b, addr) })
 	b.Run("tcp-only", func(b *testing.B) { benchServerFirstSession(b, only) })
+}
+
+// withTelemetryStore opens a telemetry store of the caller's own -- where the
+// IP mitigation list is kept -- and closes it when the caller ends.
+func withTelemetryStore(tb testing.TB) {
+	tb.Helper()
+	tb.Setenv("GATEON_TRACE_DIR", filepath.Join(tb.TempDir(), "traces"))
+	_ = telemetry.ClosePathStatsStore(tb.Context())
+	if err := telemetry.InitPathStatsStore(filepath.Join(tb.TempDir(), "telemetry.db"), 1); err != nil {
+		tb.Fatalf("init telemetry store: %v", err)
+	}
+	tb.Cleanup(func() { _ = telemetry.ClosePathStatsStore(context.Background()) })
 }
 
 func benchServerFirstSession(b *testing.B, addr string) {

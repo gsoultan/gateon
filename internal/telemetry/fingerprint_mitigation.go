@@ -289,7 +289,8 @@ func userMitigationRetention() time.Duration {
 // When an address, rather than a class on its network, is safe to shun.
 //
 // A shun refuses every request from one address, on every route and, with eBPF,
-// in the kernel; and it does not lapse: it holds until an operator releases it.
+// in the kernel, for at least fifteen minutes and up to a day (ShunAutomatically,
+// ADR 0031).
 // One address can be an office, a campus, a carrier's NAT pool. So the evidence
 // for a shun must be something the per-class controls cannot answer, and
 // something an address full of ordinary users does not produce.
@@ -345,12 +346,13 @@ func escalateAddress(st *SecurityThreat) {
 		return
 	}
 	classes := recordAddressEvidence(st.SourceIP, repid.Class(st.Fingerprint), evidenceTime(st))
-	if classes < ipShunMinClasses || IsIPUnmitigated(st.SourceIP) {
+	if classes < ipShunMinClasses {
 		return
 	}
 	reason := "IP shunning triggered: attack evidence from " + strconv.Itoa(classes) +
 		" different client builds at this address within " + mitigationEvidenceWindow.String()
-	if err := MarkIPMitigated(st.SourceIP, reason); err != nil {
+	res, err := ShunAutomatically(st.SourceIP, reason)
+	if err != nil {
 		// Nobody is waiting on this one, so logging is all there is -- but an
 		// automatic shun that did not persist is a block the operator will never
 		// know was not applied. The evidence is kept, so the next piece retries.
@@ -358,7 +360,11 @@ func escalateAddress(st *SecurityThreat) {
 			"ip", st.SourceIP, "classes", classes, "error", err)
 		return
 	}
-	forgetAddressEvidence(st.SourceIP)
+	// Applied or already in force, the evidence has been acted on; a shun that
+	// lapses is earned again only with new evidence (ADR 0031).
+	if res.Shunned() {
+		forgetAddressEvidence(st.SourceIP)
+	}
 }
 
 // evidenceTime dates a threat's evidence by when it happened, which the

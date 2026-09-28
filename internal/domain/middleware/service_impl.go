@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/gsoultan/gateon/internal/config"
+	"github.com/gsoultan/gateon/internal/config/mwsecret"
 	"github.com/gsoultan/gateon/internal/domain/proxy"
 	"github.com/gsoultan/gateon/internal/logger"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
@@ -53,6 +54,19 @@ func (s *serviceImpl) GetMiddleware(ctx context.Context, id string) (*gateonv1.M
 
 // SaveMiddleware validates, assigns ID if needed, persists, and invalidates affected route proxies.
 func (s *serviceImpl) SaveMiddleware(ctx context.Context, mw *gateonv1.Middleware) error {
+	if mw == nil {
+		return errors.New("missing middleware")
+	}
+	// Every caller reads a stored secret as the placeholder and sends it back
+	// to keep it (ADR 0033). Restored here, on the one path REST, gRPC and
+	// config import share, so no transport keeps a secret another would refuse.
+	var stored *gateonv1.Middleware
+	if mw.Id != "" {
+		stored, _ = s.store.Get(ctx, mw.Id)
+	}
+	if err := mwsecret.Restore(mw, stored); err != nil {
+		return err
+	}
 	if s.validator != nil {
 		if err := s.validator.Validate(mw); err != nil {
 			return err

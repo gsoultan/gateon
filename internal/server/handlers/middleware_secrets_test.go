@@ -146,13 +146,15 @@ func TestMiddlewareListDoesNotLeakApiKeysToAViewer(t *testing.T) {
 	}
 }
 
-// TestMiddlewareListStillShowsSecretsToSomeoneWhoCanChangeThem draws the line.
+// TestMiddlewareListShowsAWriterThePlaceholderNotTheSecret draws the line.
 //
-// Write permission is the boundary. Someone who can set the secret gains nothing
-// by reading it -- they can already replace it with one they chose -- and
-// masking it for them would break config export, which operators use for backup
-// and which has to round-trip.
-func TestMiddlewareListStillShowsSecretsToSomeoneWhoCanChangeThem(t *testing.T) {
+// It used to be write permission, on the reasoning that someone who can set the
+// secret gains nothing by reading it. They gain the secret: a replaced
+// credential breaks the clients holding it, which gets noticed, while a read one
+// is used quietly and outlives the session that took it. ADR 0033 moved the line:
+// nobody reads a stored secret, and a writer reads the placeholder, which keeps
+// the secret when sent back -- so export still round-trips.
+func TestMiddlewareListShowsAWriterThePlaceholderNotTheSecret(t *testing.T) {
 	const signingKey = "SUPER-SECRET-SIGNING-KEY"
 	d := &Deps{MwService: &secretsStore{mw: &gateonv1.Middleware{
 		Id: "jwt-1", Type: "jwt",
@@ -169,10 +171,11 @@ func TestMiddlewareListStillShowsSecretsToSomeoneWhoCanChangeThem(t *testing.T) 
 		rr := httptest.NewRecorder()
 		mux.ServeHTTP(rr, req)
 
-		if !strings.Contains(rr.Body.String(), signingKey) {
-			t.Errorf("%s could not read a secret they are allowed to overwrite; "+
-				"config export round-trips through this and would restore a "+
-				"placeholder as the credential", role)
+		if strings.Contains(rr.Body.String(), signingKey) {
+			t.Errorf("%s read the stored signing key; a writer may replace a secret, not read it", role)
+		}
+		if !strings.Contains(rr.Body.String(), "__gateon_redacted__") {
+			t.Errorf("%s was not shown the placeholder for a stored secret: %s", role, rr.Body.String())
 		}
 	}
 }

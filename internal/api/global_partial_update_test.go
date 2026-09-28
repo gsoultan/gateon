@@ -20,6 +20,12 @@ import (
 // certificates -- and the next start rebuilt them from defaults.
 func TestUpdateGlobalConfigKeepsTheSectionsItWasNotSent(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "global.json")
+	// A registry becomes the process's global config when it is made, and the
+	// "minimal" profile stored below would then set the tier every later test
+	// reads: a detector test that ran after this one failed on minimal's
+	// defaults. The next test finds a registry with the shipped defaults.
+	restore := filepath.Join(t.TempDir(), "restore.json")
+	t.Cleanup(func() { config.NewGlobalRegistry(restore) })
 	reg := config.NewGlobalRegistry(path)
 	stored := &gateonv1.GlobalConfig{
 		Auth:       &gateonv1.AuthConfig{Enabled: true, PasetoSecret: "PASETO-KEY-32-BYTES-LONG-SECRET!", DatabaseUrl: "postgres://gateon:db-pass@db/gateon"},

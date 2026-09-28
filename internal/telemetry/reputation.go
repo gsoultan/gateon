@@ -19,6 +19,7 @@ import (
 	"github.com/gsoultan/gateon/internal/httputil"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/request"
+	"github.com/gsoultan/gateon/internal/security/mitigation"
 	"github.com/gsoultan/gateon/internal/telemetry/repid"
 	lru "github.com/hashicorp/golang-lru"
 )
@@ -214,6 +215,27 @@ func GetReputationScore(fingerprint string) float64 {
 	return 100.0
 }
 
+// DecreaseReputationOf lowers the score the class of fingerprint holds on
+// sourceIP's network (repid.For) for a threat sourceIP produced, unless
+// sourceIP is on GATEON_MITIGATION_ALLOWLIST. It is how a threat moves a
+// score: the store's recording path and the incident responder both call it.
+//
+// Since ADR 0024 a score is shared by every client of one class on one
+// network, and the reputation blocker refuses all of them once it falls, so
+// the score is an enforcement input rather than a record of what one client
+// did. An allowlisted scanner's threats lowering it refused the scanner's
+// neighbours who run the same build: enforcement the allowlist exists to
+// prevent, landing on clients it does not even name. The threats themselves
+// are still recorded, listed and correlated (ADR 0031).
+func DecreaseReputationOf(fingerprint, sourceIP string, penalty float64, reason string) {
+	if mitigation.IsAllowlisted(sourceIP) {
+		return
+	}
+	DecreaseReputation(repid.For(fingerprint, sourceIP), penalty, reason)
+}
+
+// DecreaseReputation lowers the score kept under an identity: a repid.For key.
+// A threat moves one through DecreaseReputationOf, which applies the allowlist.
 func DecreaseReputation(fingerprint string, penalty float64, reason string) {
 	if fingerprint == "" || (os.Getenv("GATEON_TEST") != "" && os.Getenv("GATEON_ENABLE_TEST_REPUTATION") == "") {
 		return
@@ -262,20 +284,14 @@ func DecreaseReputation(fingerprint string, penalty float64, reason string) {
 		delete(shard.dirty, fingerprint)
 	}
 
-	// Automated eBPF Shunning: If reputation is very low, push to XDP layer.
-	if r.Score < 20.0 {
-		if val := globalEbpfManager.Load(); val != nil {
-			if container, ok := val.(*ebpfProviderContainer); ok && container.p != nil {
-				// Only IPs are shunned in the kernel. A JA4+ fingerprint is left
-				// to ReputationBlocker at L7: XDP has no ShunJA4, and L7 is the
-				// more precise place to act on a fingerprint anyway, since one
-				// shared IP can carry many clients.
-				if net.ParseIP(fingerprint) != nil {
-					_ = container.p.ShunIP(fingerprint)
-				}
-			}
-		}
-	}
+	// A score below 20 under a bare address -- what repid.For keys a threat
+	// with no fingerprint under, the anomaly detector's findings among them --
+	// used to shun that address in the kernel here. That shun was recorded
+	// nowhere, so it was not listed, could not be released from the list, and
+	// never lapsed; it ignored the allowlist and an operator's release; and it
+	// escalated findings whose detector had already chosen to throttle rather
+	// than shun. Every automatic shun now goes through ShunAutomatically, and
+	// the detectors that shun call it themselves (ADR 0031).
 
 	// Broadcast the update to the cluster via Gossip.
 	BroadcastReputation(fingerprint, r.Score, r.ViolationCount, r.History)

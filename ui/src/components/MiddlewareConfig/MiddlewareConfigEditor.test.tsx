@@ -119,6 +119,43 @@ describe("auth editor", () => {
   });
 });
 
+// The gateway returns every stored middleware secret as the stored-secret
+// placeholder (ADR 0033). An editor that put it in an input as text would show
+// "__gateon_redacted__" as a password, and saving an edit to it would send a
+// value that is neither the stored secret nor a new one.
+describe("stored secrets", () => {
+  const P = "__gateon_redacted__";
+  const html = (el: ReactElement) => renderToString(<MantineProvider>{el}</MantineProvider>);
+
+  test("a stored secret, API key, user password or header value reads as Stored, never as a value", () => {
+    const pages = [
+      html(<AuthConfigEditor config={{ type: "jwt", secret: P }} onChange={() => {}} />),
+      html(<AuthConfigEditor config={{ type: "apikey", [`key_${P}_0123456789abcdef`]: "tenant-a" }} onChange={() => {}} />),
+      html(<AuthConfigEditor config={{ type: "basic", users: `alice:${P},bob:${P}` }} onChange={() => {}} />),
+      html(<HeadersConfigEditor config={{ set_request_Authorization: P }} onChange={() => {}} />),
+    ];
+    for (const page of pages) {
+      expect(page).toContain("Stored");
+      expect(page).not.toContain(`value="${P}"`);
+      expect(page).not.toContain(`value="${P}_0123456789abcdef"`);
+    }
+    expect(pages[1]).toContain("tenant-a");
+    expect(pages[2]).toContain("alice");
+    expect(pages[2]).toContain("bob");
+  });
+
+  test("removing one basic-auth user keeps the others' stored passwords", () => {
+    const c = capture();
+    const tree = AuthConfigEditor({ config: { type: "basic", users: `alice:${P},bob:${P}` }, onChange: c.onChange });
+    const users = findElement(tree, (el) => typeof el.type === "function" && el.type.name === "BasicUsersEditor");
+    expect(users).not.toBeNull();
+    const render = users!.type as (p: Props) => ReactNode;
+    const remove = findElement(render(users!.props), (el) => el.props["aria-label"] === "Remove the user bob");
+    (remove!.props.onClick as () => void)();
+    expect(c.last).toMatchObject({ users: `alice:${P}` });
+  });
+});
+
 describe("bot management editor", () => {
   test("challenge toggles are bound to enable_js_challenge and enable_browser_integrity", () => {
     const c = capture();

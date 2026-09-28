@@ -426,9 +426,11 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 
 				ja4 := ""
 				ja4h := ""
+				refused := request.RefusalNone
 				if rs != nil {
 					ja4 = rs.JA4
 					ja4h = rs.JA4H
+					refused = rs.Refused
 				}
 
 				if recordDetailed {
@@ -460,6 +462,7 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 						routeDelay,
 						middlewareDelay,
 						serviceDelay,
+						refused,
 					)
 				} else {
 					telemetry.RecordTrace(
@@ -488,6 +491,7 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 						routeDelay,
 						middlewareDelay,
 						serviceDelay,
+						refused,
 					)
 				}
 			}

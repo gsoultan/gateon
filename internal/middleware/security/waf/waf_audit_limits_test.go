@@ -93,6 +93,16 @@ type telemetryMockWrapper struct {
 
 func (w *telemetryMockWrapper) GetTopIPs(limit int) ([]ebpf.IPStat, error) { return nil, nil }
 
+// ShunIPUntil is how an automatic shun reaches the kernel: leased to lapse
+// with it (ADR 0031), as the eBPF Holder does. A shun with no future end is
+// not recorded, so the test also proves the lease is a real one.
+func (w *telemetryMockWrapper) ShunIPUntil(ip string, until time.Time) error {
+	if !until.After(time.Now()) {
+		return nil
+	}
+	return w.ShunIP(ip)
+}
+
 func TestWAF_Shunning(t *testing.T) {
 	// Initialize telemetry store for escalation logic
 	dbPath := filepath.Join(t.TempDir(), "gateon_shun_test.db")

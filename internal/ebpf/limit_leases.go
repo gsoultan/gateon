@@ -5,12 +5,14 @@ package ebpf
 
 import (
 	"context"
+	"errors"
 	"net"
 	"slices"
 	"strings"
 	"sync"
 	"time"
 
+	cebpf "github.com/cilium/ebpf"
 	"github.com/gsoultan/gateon/internal/logger"
 )
 
@@ -136,9 +138,9 @@ func leaseKey(s string) (string, bool) {
 	return ip.Mask(net.CIDRMask(64, 128)).String(), true
 }
 
-// ExpireAdaptiveLimits releases adaptive limits whose lease has run out,
-// checking every interval until ctx ends.
-func (h *Holder) ExpireAdaptiveLimits(ctx context.Context, every time.Duration) {
+// ExpireLeases releases the adaptive limits and the shuns whose lease has run
+// out, checking every interval until ctx ends.
+func (h *Holder) ExpireLeases(ctx context.Context, every time.Duration) {
 	ticker := time.NewTicker(every)
 	defer ticker.Stop()
 	for {
@@ -146,9 +148,86 @@ func (h *Holder) ExpireAdaptiveLimits(ctx context.Context, every time.Duration) 
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			h.expireAdaptiveLimits(time.Now())
+			now := time.Now()
+			h.expireAdaptiveLimits(now)
+			h.expireShuns(now)
 		}
 	}
+}
+
+// shunLeases records each shun the Holder put in the kernel, keyed as the
+// kernel keys it (leaseKey), with when it lapses: the zero time for a shun
+// that holds until released. Bounded like limitLeases, by the kernel maps.
+type shunLeases struct {
+	mu      sync.Mutex
+	entries map[string]time.Time
+}
+
+// hold records until as the end of key's shun. One key can carry several
+// shuns -- two addresses in one IPv6 /64 -- so a shun with no end outlasts any
+// lease, and of two leases the later end is kept: the sweep never lifts an
+// entry something still holds.
+func (l *shunLeases) hold(key string, until time.Time) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.entries == nil {
+		l.entries = make(map[string]time.Time)
+	}
+	cur, ok := l.entries[key]
+	if !ok || (!cur.IsZero() && (until.IsZero() || until.After(cur))) {
+		l.entries[key] = until
+	}
+}
+
+// drop forgets key's shun.
+func (l *shunLeases) drop(key string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	delete(l.entries, key)
+}
+
+// reset forgets every shun: a swapped-in manager starts with empty maps.
+func (l *shunLeases) reset() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	clear(l.entries)
+}
+
+// takeExpired removes and returns the keys whose lease ended by now.
+func (l *shunLeases) takeExpired(now time.Time) []string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	var expired []string
+	for key, until := range l.entries {
+		if !until.IsZero() && !until.After(now) {
+			expired = append(expired, key)
+			delete(l.entries, key)
+		}
+	}
+	return expired
+}
+
+// expireShuns lifts every shun whose lease ended by now. One the kernel no
+// longer holds is done; any other failure is retried on the next pass, since
+// a forgotten lease is a shun nothing will ever lift.
+func (h *Holder) expireShuns(now time.Time) {
+	m := h.Current()
+	if m == nil {
+		return
+	}
+	for _, key := range h.shuns.takeExpired(now) {
+		if err := m.UnshunIP(key); err != nil && !errors.Is(err, cebpf.ErrKeyNotExist) {
+			logger.L.LogWarn("failed to lift a lapsed shun from the kernel; will retry", "ip", key, "error", err)
+			h.shuns.hold(key, now)
+		}
+	}
+}
+
+// ShunLeaseCount is how many shuns the Holder has in the kernel.
+func (h *Holder) ShunLeaseCount() int {
+	h.shuns.mu.Lock()
+	defer h.shuns.mu.Unlock()
+	return len(h.shuns.entries)
 }
 
 // expireAdaptiveLimits releases every limit whose lease ended by now. A
