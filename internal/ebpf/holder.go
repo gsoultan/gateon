@@ -34,6 +34,19 @@ type Holder struct {
 	// until released (ShunIP). ADR 0031.
 	shuns shunLeases
 	now   func() time.Time // injectable for tests
+
+	// exempt decides which addresses are never put in the kernel shun map:
+	// loopback and GATEON_MITIGATION_ALLOWLIST, the rule the HTTP and TCP data
+	// paths apply (mitigation.ExemptFromEnforcement, ADR 0035). It is installed
+	// once at startup through SetExemption and read here, at the one point every
+	// kernel shun funnels through, so no caller of ShunIP or ShunIPUntil -- now
+	// or later -- can drop an address the rest of the gateway serves. Nil (the
+	// default, and what a test or a build with no policy leaves) exempts nothing.
+	//
+	// It is an injected predicate rather than a direct import so this low-level
+	// kernel mechanism does not depend on the security-policy package: the arrow
+	// points the safe way.
+	exempt func(ip string) bool
 }
 
 type managerContainer struct {
@@ -54,6 +67,17 @@ func (h *Holder) Swap(m Manager) {
 	h.leases.reset()
 	h.shuns.reset()
 	h.current.Store(&managerContainer{m: m})
+}
+
+// SetExemption installs the predicate that decides which addresses are never
+// put in the kernel shun map -- loopback and GATEON_MITIGATION_ALLOWLIST, wired
+// at startup to mitigation.ExemptFromEnforcement (ADR 0035). It is called once,
+// before the Holder serves any shun, so a plain field carries it; passing nil
+// clears the gate. Every shun and every leased shun is checked against it, so an
+// address the operator has also allowlisted is not dropped in the kernel while
+// the HTTP and TCP paths serve it.
+func (h *Holder) SetExemption(exempt func(ip string) bool) {
+	h.exempt = exempt
 }
 
 // Current returns the active underlying manager, or nil when none is installed.
@@ -93,6 +117,15 @@ func (h *Holder) ShunIPUntil(ip string, until time.Time) error {
 // once the kernel accepted the entry, so the table is bounded by the shun
 // maps' capacity (10240 IPv4 addresses and 10240 IPv6 /64s).
 func (h *Holder) shun(ip string, until time.Time) error {
+	// The exemption is the kernel's half of ADR 0032's one rule: loopback and an
+	// allowlisted address are served by every HTTP and TCP entrypoint, so the
+	// kernel must not drop them below the paths that serve them. Skipping the
+	// push is success, not an error -- "never mitigated" is the allowlist's
+	// promise -- and it is the last gate before the map, so a future caller of
+	// ShunIP/ShunIPUntil cannot get past it.
+	if h.exempt != nil && h.exempt(ip) {
+		return nil
+	}
 	m := h.Current()
 	if m == nil {
 		return nil

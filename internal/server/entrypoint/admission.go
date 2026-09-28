@@ -8,12 +8,17 @@ import (
 	"errors"
 	"io"
 	"net"
+	"os"
+	"strconv"
+	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware/kind"
+	"github.com/gsoultan/gateon/internal/middleware/security/identity"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 	"github.com/quic-go/quic-go"
@@ -32,6 +37,94 @@ func connLimit(ep *gateonv1.EntryPoint) int {
 		return n
 	}
 	return config.CurrentTierDefaults().EntryPointMaxConnections
+}
+
+// perAddrConnLimit is the most concurrent connections one source address may
+// hold on an entrypoint: GATEON_ENTRYPOINT_MAX_CONN_PER_ADDR when it is set,
+// else the resource profile's default (config.TierDefaults). 0, or a negative
+// value, disables the per-address cap. It complements connLimit, which bounds
+// the entrypoint as a whole -- both apply, and this is the tighter for a single
+// client: connLimit stops a flood costing the gateway without bound, this stops
+// one client being that flood (ADR 0036).
+func perAddrConnLimit() int {
+	if v, ok := os.LookupEnv("GATEON_ENTRYPOINT_MAX_CONN_PER_ADDR"); ok {
+		if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil {
+			return n
+		}
+	}
+	return config.CurrentTierDefaults().EntryPointMaxConnPerAddr
+}
+
+// tcpPerAddrReason and httpPerAddrReason are the fixed labels a per-address
+// refusal is counted under. Neither is "max_connections_per_ip" -- the
+// request-inflight counter -- so both fall in with the other connection-limit
+// rejections, as ADR 0036 says they should.
+const (
+	tcpPerAddrReason  = "tcp_max_conn_per_addr"
+	httpPerAddrReason = "http_max_conn_per_addr"
+)
+
+// perAddrLimiter caps concurrent connections per source address on one
+// entrypoint. The map holds an entry only while an address has a connection
+// open, so it is bounded by the entrypoint's own connection cap, not by the
+// address space: many addresses at once are already bounded by connLimit, and
+// an entry is deleted when its last connection closes. Loopback and the
+// mitigation allowlist are exempt and never tracked, so a local proxy -- behind
+// which every client is loopback -- is not capped by the one address it shares.
+type perAddrLimiter struct {
+	mu     sync.Mutex
+	counts map[string]int
+	limit  int
+	warn   limitWarning
+}
+
+// newPerAddrLimiter builds a limiter, or nil when limit is not positive, which
+// is the cap disabled: a nil *perAddrLimiter admits every connection.
+func newPerAddrLimiter(limit int) *perAddrLimiter {
+	if limit <= 0 {
+		return nil
+	}
+	return &perAddrLimiter{counts: make(map[string]int), limit: limit}
+}
+
+// acquire reserves a slot for ip and reports whether one was free. A nil
+// limiter (the cap disabled) and an exempt address always succeed and hold no
+// entry, so the map never grows for loopback or the allowlist.
+func (p *perAddrLimiter) acquire(ip string) bool {
+	if p == nil || perAddrExempt(ip) {
+		return true
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.counts[ip] >= p.limit {
+		return false
+	}
+	p.counts[ip]++
+	return true
+}
+
+// release returns ip's slot; its entry is deleted when the last connection
+// from it closes, so the map retains no address that holds nothing.
+func (p *perAddrLimiter) release(ip string) {
+	if p == nil || perAddrExempt(ip) {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	switch n := p.counts[ip]; {
+	case n <= 1:
+		delete(p.counts, ip)
+	default:
+		p.counts[ip] = n - 1
+	}
+}
+
+// perAddrExempt reports whether ip is never capped per address: an address that
+// did not resolve, loopback, and GATEON_MITIGATION_ALLOWLIST -- the same
+// exemption the IP block applies (identity.ExemptFromEnforcement), so the two
+// agree on which addresses are never turned away.
+func perAddrExempt(ip string) bool {
+	return ip == "" || identity.ExemptFromEnforcement(ip)
 }
 
 // atLimitWarningEvery spaces the warnings a full entrypoint logs: every
@@ -104,7 +197,8 @@ func (s *connSlots) refused() {
 // arrives instead of queueing in the kernel behind the ones that are.
 type cappedListener struct {
 	net.Listener
-	slots *connSlots
+	slots   *connSlots
+	perAddr *perAddrLimiter
 }
 
 func (l *cappedListener) Accept() (net.Conn, error) {
@@ -113,11 +207,37 @@ func (l *cappedListener) Accept() (net.Conn, error) {
 		if err != nil {
 			return nil, err
 		}
-		if l.slots.take() {
-			return &slotConn{Conn: c, slots: l.slots}, nil
+		if !l.slots.take() {
+			_ = c.Close()
+			l.slots.refused()
+			continue
 		}
-		_ = c.Close()
-		l.slots.refused()
+		// The per-address cap is the tighter of the two, so it is checked
+		// after the entrypoint-wide slot is held and gives it back on refusal.
+		// peerIP is read only when the cap is on, so an entrypoint without one
+		// pays nothing for it.
+		ip := ""
+		if l.perAddr != nil {
+			ip = peerIP(c)
+			if !l.perAddr.acquire(ip) {
+				l.slots.release()
+				_ = c.Close()
+				l.refusedPerAddr()
+				continue
+			}
+		}
+		return &slotConn{Conn: c, slots: l.slots, perAddr: l.perAddr, addr: ip}, nil
+	}
+}
+
+// refusedPerAddr counts a connection closed at accept because its source
+// address already holds its per-address limit, and says so at most once a
+// minute -- counted with the other connection-limit rejections.
+func (l *cappedListener) refusedPerAddr() {
+	telemetry.IncInflightRejected(httpPerAddrReason)
+	if l.perAddr.warn.due(time.Now()) {
+		logger.L.LogWarn("HTTP entrypoint refusing a connection: source address at its per-address connection limit",
+			"ep", l.slots.epID, "max_conn_per_addr", l.perAddr.limit)
 	}
 }
 
@@ -126,14 +246,17 @@ func (l *cappedListener) Accept() (net.Conn, error) {
 // a TLS connection closes the one beneath it too.
 type slotConn struct {
 	net.Conn
-	slots  *connSlots
-	closed atomic.Bool
+	slots   *connSlots
+	perAddr *perAddrLimiter
+	addr    string
+	closed  atomic.Bool
 }
 
 func (c *slotConn) Close() error {
 	err := c.Conn.Close()
 	if c.closed.CompareAndSwap(false, true) {
 		c.slots.release()
+		c.perAddr.release(c.addr)
 	}
 	return err
 }
@@ -175,7 +298,8 @@ type writerOnly struct{ io.Writer }
 // wait somewhere nothing joins it.
 type cappedQUICListener struct {
 	http3.QUICListener
-	slots *connSlots
+	slots   *connSlots
+	perAddr *perAddrLimiter
 }
 
 func (l *cappedQUICListener) Accept(ctx context.Context) (*quic.Conn, error) {
@@ -184,15 +308,40 @@ func (l *cappedQUICListener) Accept(ctx context.Context) (*quic.Conn, error) {
 		if err != nil {
 			return nil, err
 		}
-		if l.slots.take() {
-			// The slot is the connection's, not the accept call's: it is
-			// freed when the connection's own context ends, as it closes.
-			//nolint:contextcheck // bound to the connection's lifetime on purpose, not to ctx.
-			context.AfterFunc(c.Context(), l.slots.release)
-			return c, nil
+		if !l.slots.take() {
+			_ = c.CloseWithError(quic.ApplicationErrorCode(http3.ErrCodeExcessiveLoad), "")
+			l.slots.refused()
+			continue
 		}
-		_ = c.CloseWithError(quic.ApplicationErrorCode(http3.ErrCodeExcessiveLoad), "")
-		l.slots.refused()
+		ip := ""
+		if l.perAddr != nil {
+			ip = addrIP(c.RemoteAddr())
+			if !l.perAddr.acquire(ip) {
+				l.slots.release()
+				_ = c.CloseWithError(quic.ApplicationErrorCode(http3.ErrCodeExcessiveLoad), "")
+				l.refusedPerAddr()
+				continue
+			}
+		}
+		// The slots are the connection's, not the accept call's: freed when
+		// the connection's own context ends, as it closes.
+		//nolint:contextcheck // bound to the connection's lifetime on purpose, not to ctx.
+		context.AfterFunc(c.Context(), func() {
+			l.slots.release()
+			l.perAddr.release(ip)
+		})
+		return c, nil
+	}
+}
+
+// refusedPerAddr counts a QUIC connection closed at accept because its source
+// address already holds its per-address limit, and says so at most once a
+// minute -- counted with the other connection-limit rejections.
+func (l *cappedQUICListener) refusedPerAddr() {
+	telemetry.IncInflightRejected(httpPerAddrReason)
+	if l.perAddr.warn.due(time.Now()) {
+		logger.L.LogWarn("HTTP/3 entrypoint refusing a connection: source address at its per-address connection limit",
+			"ep", l.slots.epID, "max_conn_per_addr", l.perAddr.limit)
 	}
 }
 
@@ -200,10 +349,21 @@ func (l *cappedQUICListener) Accept(ctx context.Context) (*quic.Conn, error) {
 // mitigation list keeps addresses in. An IPv4 client of a dual-stack listener
 // is written as IPv4.
 func peerIP(c net.Conn) string {
-	if a, ok := c.RemoteAddr().(*net.TCPAddr); ok {
-		return a.IP.String()
+	return addrIP(c.RemoteAddr())
+}
+
+// addrIP is the host part of a, without its port. It handles the TCP and UDP
+// address types without an allocation for the string form, and falls back to
+// SplitHostPort for anything else -- the QUIC connections of an HTTP/3
+// entrypoint arrive as *net.UDPAddr.
+func addrIP(a net.Addr) string {
+	switch v := a.(type) {
+	case *net.TCPAddr:
+		return v.IP.String()
+	case *net.UDPAddr:
+		return v.IP.String()
 	}
-	host, _, err := net.SplitHostPort(c.RemoteAddr().String())
+	host, _, err := net.SplitHostPort(a.String())
 	if err != nil {
 		return ""
 	}

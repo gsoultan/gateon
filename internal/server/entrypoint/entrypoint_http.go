@@ -139,7 +139,7 @@ func (*httpRunner) Run(ctx context.Context, ep *gateonv1.EntryPoint, deps *Deps,
 	if ep.Address == "" {
 		return
 	}
-	e := &httpEntrypoint{ep: ep, deps: deps, wg: wg, slots: newConnSlots(ep)}
+	e := &httpEntrypoint{ep: ep, deps: deps, wg: wg, slots: newConnSlots(ep), perAddr: newPerAddrLimiter(perAddrConnLimit())}
 	if ep.Tls != nil && ep.Tls.Enabled {
 		e.tlsConfig = deps.TLSConfig.Clone()
 	}
@@ -164,6 +164,10 @@ type httpEntrypoint struct {
 	// listeners draw on alike. Nil on the server a TCP entrypoint hands its
 	// HTTP connections to, whose own limit has already admitted them.
 	slots *connSlots
+	// perAddr caps concurrent connections per source address, the tighter of
+	// the two, drawn on by the same TCP and QUIC listeners. Nil when the cap is
+	// disabled (ADR 0036).
+	perAddr *perAddrLimiter
 }
 
 // frontHandler is the entrypoint chain around the base handler and the global
@@ -212,7 +216,7 @@ func (e *httpEntrypoint) startHTTP3(h http.Handler) http.Handler {
 	}
 	e.wg.Go(func() {
 		logger.L.LogInfo("starting HTTP/3 (QUIC) entrypoint", "addr", addr)
-		err := h3Server.ServeListener(&cappedQUICListener{QUICListener: ln, slots: e.slots})
+		err := h3Server.ServeListener(&cappedQUICListener{QUICListener: ln, slots: e.slots, perAddr: e.perAddr})
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			logger.L.LogError("HTTP/3 server failed", "error", err, "addr", addr)
 		}
@@ -294,7 +298,7 @@ func (e *httpEntrypoint) serveTCP(server *http.Server) {
 	if e.deps.Phantom != nil {
 		l = e.deps.Phantom.OptimizeListener(l)
 	}
-	l = &cappedListener{Listener: l, slots: e.slots}
+	l = &cappedListener{Listener: l, slots: e.slots, perAddr: e.perAddr}
 	if e.tlsConfig != nil {
 		logger.L.LogInfo("starting HTTPS entrypoint", "addr", addr, "type", e.ep.Type.String())
 		e.wg.Go(func() {

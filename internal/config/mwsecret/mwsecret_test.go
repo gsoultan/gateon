@@ -4,8 +4,6 @@
 package mwsecret
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"maps"
 	"strings"
@@ -79,6 +77,34 @@ func TestMaskShowsUsersByNameAndAPIKeysByFingerprint(t *testing.T) {
 	opaque := mw("b", "auth", map[string]string{"users": "enc:Zm9vYmFy"})
 	if u := Mask(opaque).GetConfig()["users"]; u != placeholder {
 		t.Errorf("an encrypted user list read as %q, want the placeholder: its parts are not users", u)
+	}
+}
+
+// TestASaveKeepsAnAPIKeyMadeBeforeARestart: a marker read or exported names its
+// stored key by fingerprint, and a save sends the marker back to keep that key.
+// With a per-process random key the fingerprint changed on restart, so the
+// marker matched nothing and the key was refused; a stable fingerprint keeps it
+// (ADR 0037).
+func TestASaveKeepsAnAPIKeyMadeBeforeARestart(t *testing.T) {
+	saved := fingerprintKey
+	t.Cleanup(func() { fingerprintKey = saved })
+	t.Setenv("GATEON_ENCRYPTION_KEY", "")
+
+	// Before the restart: the dashboard read the middleware and holds the API
+	// key's marker.
+	fingerprintKey = newFingerprintKey()
+	marker := apiKeyMarker("a", "AK1")
+
+	// The restart: a fresh process derives its fingerprint key again.
+	fingerprintKey = newFingerprintKey()
+
+	stored := mw("a", "auth", map[string]string{"type": "basic", "key_AK1": "tenant-1"})
+	update := mw("a", "auth", map[string]string{"type": "basic", marker: "tenant-1"})
+	if err := Restore(update, stored); err != nil {
+		t.Fatalf("a save made before a restart was refused: %v", err)
+	}
+	if update.Config["key_AK1"] != "tenant-1" {
+		t.Errorf("the stored API key was not kept across the restart: %v", update.Config)
 	}
 }
 
@@ -175,30 +201,42 @@ func TestRestoreBindsAForwardAuthSecretToItsAddress(t *testing.T) {
 	}
 }
 
-// TestFingerprintIsKeyed: an unkeyed hash of an API key would let anyone who
-// reads middlewares test guesses offline. With GATEON_ENCRYPTION_KEY the key is
-// derived from it (stable across restarts and gateways sharing it); without,
-// it is random per process.
-func TestFingerprintIsKeyed(t *testing.T) {
+// TestFingerprintIsStableWithoutAnEncryptionKey: a fingerprint identifies a
+// stored key so a marker read or exported can be saved back later, which needs
+// it to be identical across a restart. With GATEON_ENCRYPTION_KEY the key is
+// derived from it (stable, and per-install so a leaked masked config cannot be
+// offline-tested); without it, a fixed constant keys the derivation, so the
+// fingerprint is deterministic rather than random per process (ADR 0037).
+func TestFingerprintIsStableWithoutAnEncryptionKey(t *testing.T) {
 	saved := fingerprintKey
 	t.Cleanup(func() { fingerprintKey = saved })
 
-	unkeyed := sha256.Sum256([]byte("a\x00partner-2024"))
-	if fingerprint("a", "partner-2024") == hex.EncodeToString(unkeyed[:8]) {
-		t.Fatal("the fingerprint is an unkeyed hash of the API key")
+	// Two fresh states -- two processes -- with no encryption key must agree,
+	// or every marker read before a restart is refused by tenant.
+	t.Setenv("GATEON_ENCRYPTION_KEY", "")
+	fingerprintKey = newFingerprintKey()
+	first := fingerprint("a", "partner-2024")
+	fingerprintKey = newFingerprintKey()
+	if fingerprint("a", "partner-2024") != first {
+		t.Error("without GATEON_ENCRYPTION_KEY the fingerprint changed between two fresh states; a marker read " +
+			"before a restart no longer matches its stored key and every API key is refused")
 	}
+
+	// Setting the key changes the fingerprint (it is keyed per install then)
+	// and it is still stable across two derivations.
 	t.Setenv("GATEON_ENCRYPTION_KEY", "a-shared-encryption-key-of-some-length")
 	fingerprintKey = newFingerprintKey()
 	seeded := fingerprint("a", "partner-2024")
+	if seeded == first {
+		t.Error("the fingerprint is the same with and without GATEON_ENCRYPTION_KEY; the key is not used")
+	}
 	fingerprintKey = newFingerprintKey()
 	if fingerprint("a", "partner-2024") != seeded {
 		t.Error("with GATEON_ENCRYPTION_KEY set the fingerprint changed between two derivations; it must survive a restart")
 	}
-	t.Setenv("GATEON_ENCRYPTION_KEY", "")
-	fingerprintKey = newFingerprintKey()
-	if fingerprint("a", "partner-2024") == seeded {
-		t.Error("without GATEON_ENCRYPTION_KEY the fingerprint equals the seeded one; the key must be random")
-	}
+
+	// The middleware id separates keys, so one API key reused in two
+	// middlewares still shows as two fingerprints.
 	if fingerprint("a", "k") == fingerprint("b", "k") {
 		t.Error("one API key has the same fingerprint in two middlewares; reuse across them would show")
 	}

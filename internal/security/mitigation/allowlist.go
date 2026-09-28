@@ -6,6 +6,8 @@ package mitigation
 import (
 	"net/netip"
 	"sync/atomic"
+
+	"github.com/gsoultan/gateon/internal/httputil"
 )
 
 // GATEON_MITIGATION_ALLOWLIST is documented as a "CIDR/IP list never mitigated",
@@ -86,6 +88,28 @@ func allowlistContains(prefixes []netip.Prefix, ip string) bool {
 		}
 	}
 	return false
+}
+
+// ExemptFromEnforcement reports whether a client at ip is never actively
+// mitigated: loopback -- the gateway's own management traffic and, behind a
+// local proxy that sets no forwarding header, every client -- or an address in
+// GATEON_MITIGATION_ALLOWLIST. It is the single expression of the rule the
+// reputation blocker, the fingerprint block and the IP block already apply on
+// the HTTP and TCP data paths (identity.exemptFromEnforcement composes the same
+// two primitives), so a caller that cannot import the request-path package --
+// the telemetry store, the kernel Holder -- applies the very same decision
+// instead of a copy that could drift from it.
+//
+// The kernel shun map consults it too (ADR 0035): an allowlisted or loopback
+// address the operator blocked by hand is served by every data path, so it must
+// not be dropped in the kernel below them. It exempts enforcement, never
+// observation.
+//
+// Loopback is checked first because it is a handful of string comparisons over
+// a value that never allocates; the allowlist is one atomic load when nothing
+// is configured, the common case.
+func ExemptFromEnforcement(ip string) bool {
+	return httputil.IsLoopback(ip) || IsAllowlisted(ip)
 }
 
 // AllowlistSize reports how many prefixes are configured, for startup logging so

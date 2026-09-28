@@ -22,11 +22,19 @@ type serviceImpl struct {
 	store       config.RouteStore
 	invalidator proxy.Invalidator
 	logger      logger.Logger
+	guard       SaveGuard
 }
 
-// NewService creates a Route Service.
-func NewService(store config.RouteStore, invalidator proxy.Invalidator, l logger.Logger) Service {
-	return &serviceImpl{store: store, invalidator: invalidator, logger: l}
+// NewService creates a Route Service. An optional SaveGuard authorizes saves
+// that bind a credential-injecting middleware; a build that passes none is
+// unguarded, which is why every caller that serves the management API passes
+// one.
+func NewService(store config.RouteStore, invalidator proxy.Invalidator, l logger.Logger, guard ...SaveGuard) Service {
+	s := &serviceImpl{store: store, invalidator: invalidator, logger: l}
+	if len(guard) > 0 {
+		s.guard = guard[0]
+	}
+	return s
 }
 
 // ListPaginated returns paginated routes.
@@ -50,6 +58,14 @@ func (s *serviceImpl) SaveRoute(ctx context.Context, rt *gateonv1.Route) error {
 	}
 	if rt.Id == "" {
 		rt.Id = uuid.NewString()
+	}
+	// Authorized after the id is assigned, so the guard can read the stored
+	// route (an update) or find none (a create), and before persistence, so a
+	// refusal changes nothing.
+	if s.guard != nil {
+		if err := s.guard.AuthorizeRouteSave(ctx, rt); err != nil {
+			return err
+		}
 	}
 	if err := s.nameIsFree(ctx, rt); err != nil {
 		return err

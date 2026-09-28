@@ -11,6 +11,142 @@ here after the fact.
 
 ## Unreleased
 
+### Binding a credential-injecting middleware to a route now needs an administrator
+
+A route that binds a middleware which injects a credential toward the backend --
+a `headers` middleware that sets or adds a **request** header under a credential
+name (`Authorization`, `Proxy-Authorization`, `Cookie`, `X-Api-Key`, or any name
+`secretmask.IsCredentialName` flags), or a `rewrite` middleware that adds a query
+parameter under one -- can now be created or changed only by an administrator.
+
+Concretely, a caller with the **operator** role (write on routes/services, but
+not admin) is now refused, `403` over REST and `PermissionDenied` over
+Connect/gRPC, when they:
+
+- create or edit a route so that it **newly binds** such a middleware; or
+- **repoint** a route that carries one to a different service; or
+- **repoint the service** (change its targets or discovery URL) that a
+  credential-carrying route depends on.
+
+An operator is **not** affected when they:
+
+- manage a route that carries no such middleware (the common case); or
+- edit a route an administrator built with such a middleware **without** adding a
+  binding and without changing its service (priorities, rules, entrypoints, TLS
+  and the like are all still theirs); or
+- edit a credential-backed service without changing where it sends traffic.
+
+Administrators are unaffected and may do all of the above. Deployments running
+with authentication **off** are unaffected -- there is no operator/administrator
+distinction to enforce.
+
+The same refusal applies to a config **import** performed by an operator: a route
+in the imported config that binds a credential-injecting middleware is rejected
+(named in the per-item errors), while the rest of the import proceeds.
+
+**Who is affected:** operators (role `operator`) who today attach an
+auth-injecting `headers`/`rewrite` middleware to a route, or repoint such a route
+or its service. They must have an administrator make or change that binding.
+Nothing else about route or service management changes. See ADR 0038.
+
+### A block now ends an address's open L4 sessions, not only its new connections
+
+Blocking an address -- by hand, or automatically -- now closes that address's
+**already-open** connections on every TCP entrypoint (SSH, database, mail and
+other L4 sessions), not only the connections it opens afterwards. Before, an
+open L4 session ran until its client ended it, because an L4 session has no
+request boundary at which the block would take effect; only new connections were
+refused, and only eBPF (where present) dropped an open session's packets. The
+close honours the mitigation allowlist: an address on
+`GATEON_MITIGATION_ALLOWLIST` (or loopback) that an operator also blocks is not
+cut, exactly as the accept-time check leaves it served.
+
+**Who is affected:** operators running non-HTTP (L4) routes -- SSH, databases,
+SMTP/IMAP/POP3, and similar -- through TCP entrypoints. If you block or shun an
+address, its live sessions now end promptly instead of lingering. No
+configuration change is required. HTTP entrypoints are unchanged: an open
+connection from a blocked address is still refused at its next request.
+
+### New per-source-address connection cap on every entrypoint
+
+Every entrypoint now limits how many concurrent connections one source address
+may hold, so a single client cannot fill an entrypoint by opening many
+connections. This complements the existing entrypoint-wide `max_connections`
+(both apply; the per-address cap is the tighter for one client) and the existing
+`GATEON_MAX_CONN_PER_IP`, which counts requests in flight rather than
+connections. The default is per tier: **128** (minimal), **256** (standard),
+**1024** (enterprise). Set `GATEON_ENTRYPOINT_MAX_CONN_PER_ADDR` to override it,
+or to `0` to disable it. Loopback and `GATEON_MITIGATION_ALLOWLIST` are exempt,
+so a gateway behind a local reverse proxy -- where every client appears as
+loopback -- is not capped by the one address it shares. A connection past the
+cap is closed at accept and counted with the other connection-limit rejections
+(`inflight_rejected.max_connections` on the Diagnostics limit card).
+
+**Who is affected:** every deployment. A legitimate client behind a large shared
+NAT that opens more than the per-tier default of concurrent connections to one
+entrypoint would see connections past the cap refused; raise
+`GATEON_ENTRYPOINT_MAX_CONN_PER_ADDR` for such a deployment. A gateway placed
+directly behind a single reverse proxy or load balancer with no PROXY-protocol
+input sees all traffic as one address (the proxy's); if that address is not
+loopback, set `GATEON_ENTRYPOINT_MAX_CONN_PER_ADDR=0` or allowlist the proxy so
+its aggregated connections are not capped as one client's.
+
+### The kernel shun map now honours GATEON_MITIGATION_ALLOWLIST and loopback
+
+The eBPF shun map (where XDP/TC drops a blocked address's packets) now applies
+the same exemption every HTTP and TCP entrypoint already applies: an address in
+`GATEON_MITIGATION_ALLOWLIST`, or a loopback address, is never pushed to the
+kernel shun map, even when an operator has explicitly blocked it. Before, the
+kernel dropped such an address even though every other path served it (the gap
+ADR 0032 left open under "still not uniform: the kernel").
+
+The block itself is still recorded and still appears in the mitigation list --
+the allowlist exempts *enforcement*, not the record of the operator's decision.
+Automatic shuns already honoured the allowlist and are unaffected.
+
+**Who is affected:** deployments running the eBPF data plane (`ebpf.enabled`)
+that also configure `GATEON_MITIGATION_ALLOWLIST` **and** hand-block an address
+they have allowlisted. On those, such an address is now served in the kernel as
+it already was in user space. No configuration change is required.
+
+**One residual to know:** if you hand-blocked an address *before* adding it to
+the allowlist, the kernel entry placed at block time is not swept out
+automatically. Release that block (or restart) to clear the kernel entry;
+automatic shuns clear themselves as their lease lapses. This affects only a
+manual block of an address later allowlisted.
+
+### A manual IP block may carry an optional duration
+
+The mitigate API (`MitigateThreatRequest`) gains an optional `duration_seconds`
+field, and the Security Center's Add Mitigation control gains a Duration choice
+for an IP block (until released, 1 hour, 6 hours, 24 hours, 7 days). A block
+given a positive duration lapses on its own that many seconds after it is
+applied -- it is listed with a countdown to when it lifts and needs no operator
+to release it. A block with no duration (or `duration_seconds = 0`) holds until
+released, exactly as every manual block did before. The duration applies only
+to an IP block; a fingerprint block keeps its own hour-long TTL.
+
+**Who is affected:** anyone scripting the mitigate API who wants a time-boxed
+block can now set `duration_seconds`; existing callers that omit it are
+unchanged. No configuration or migration is required -- the change reuses the
+`ip_mitigations.expires_at` column added in the previous release.
+
+### The API-key fingerprint is stable across a restart without an encryption key
+
+The dashboard shows a stored apikey-middleware API key as a placeholder marker
+that carries a fingerprint, and saving the form sends the marker back to keep
+the stored key. When `GATEON_ENCRYPTION_KEY` was unset, that fingerprint was
+random per process, so a form opened or a config exported before a restart
+could no longer be saved afterward -- every API key in it was refused ("no
+stored API key has this fingerprint"). The fingerprint is now stable across a
+restart when no encryption key is set, so such a save succeeds.
+
+**Who is affected:** deployments that run the apikey middleware **without**
+setting `GATEON_ENCRYPTION_KEY`. Setting `GATEON_ENCRYPTION_KEY` was, and
+remains, the way to get per-install fingerprints that a leaked masked config
+cannot be tested against offline; its behaviour is unchanged. Deployments that
+already set it see no difference.
+
 ### A middleware resolves a secret reference only where the host allows — **set `GATEON_MIDDLEWARE_SECRET_REFS` if a middleware uses one**
 
 A middleware's fields resolve `$env:`, `$vault:` and `$aws-sm:` references, and a

@@ -5,14 +5,18 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync/atomic"
 	"time"
 
 	"golang.org/x/sync/singleflight"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/gsoultan/gateon/internal/audit"
 	"github.com/gsoultan/gateon/internal/auth"
+	"github.com/gsoultan/gateon/internal/authz/routebind"
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/domain/entrypoint"
 	dmw "github.com/gsoultan/gateon/internal/domain/middleware"
@@ -363,12 +367,19 @@ func NewApiService(cfg ApiServiceConfig) *ApiService {
 // which is how the tests build one -- gets the rules too, instead of a fallback
 // that skips them.
 
+// bindingGuard holds the credential-binding rule (ADR 0038). Built per call
+// like the domain services above, so a bare ApiService literal with the stores
+// set is guarded too, and constructed from the same stores the RPCs read.
+func (s *ApiService) bindingGuard() *routebind.Guard {
+	return routebind.NewGuard(s.Routes, s.Services, s.Middlewares)
+}
+
 func (s *ApiService) routeService() route.Service {
-	return route.NewService(s.Routes, s.invalidator(), logger.Default())
+	return route.NewService(s.Routes, s.invalidator(), logger.Default(), s.bindingGuard())
 }
 
 func (s *ApiService) serviceService() service.Service {
-	return service.NewService(s.Services, s.Routes, s.invalidator(), logger.Default())
+	return service.NewService(s.Services, s.Routes, s.invalidator(), logger.Default(), s.bindingGuard())
 }
 
 func (s *ApiService) entryPointService() entrypoint.Service {
@@ -425,4 +436,15 @@ func callerClaims(ctx context.Context) (claims *auth.Claims, present bool) {
 		return nil, true
 	}
 	return c, true
+}
+
+// mapBindingRefusal renders a domain refusal of a credential-binding change
+// (ADR 0038) as PermissionDenied, so it is not surfaced to the caller as an
+// Unknown error the way any other save failure would be. Other errors pass
+// through unchanged.
+func mapBindingRefusal(err error) error {
+	if errors.Is(err, routebind.ErrRequiresAdmin) {
+		return status.Error(codes.PermissionDenied, err.Error())
+	}
+	return err
 }

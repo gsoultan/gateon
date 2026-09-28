@@ -16,6 +16,7 @@ export async function mitigateOrThrow(req: MitigateThreatRequest) {
     type: req.type,
     reason: req.reason,
     category: req.category,
+    durationSeconds: req.durationSeconds ?? 0,
   });
   if (!res.success) {
     throw new Error(res.message || `${req.source} was not blocked.`);

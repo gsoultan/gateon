@@ -22,11 +22,18 @@ type serviceImpl struct {
 	routeStore  config.RouteStore
 	invalidator proxy.Invalidator
 	logger      logger.Logger
+	guard       SaveGuard
 }
 
-// NewService creates a Service Service.
-func NewService(store config.ServiceStore, routeStore config.RouteStore, invalidator proxy.Invalidator, l logger.Logger) Service {
-	return &serviceImpl{store: store, routeStore: routeStore, invalidator: invalidator, logger: l}
+// NewService creates a Service Service. An optional SaveGuard authorizes a
+// repoint of a service backing a credential-carrying route; a build that passes
+// none is unguarded.
+func NewService(store config.ServiceStore, routeStore config.RouteStore, invalidator proxy.Invalidator, l logger.Logger, guard ...SaveGuard) Service {
+	s := &serviceImpl{store: store, routeStore: routeStore, invalidator: invalidator, logger: l}
+	if len(guard) > 0 {
+		s.guard = guard[0]
+	}
+	return s
 }
 
 // ListPaginated returns paginated services.
@@ -43,6 +50,13 @@ func (s *serviceImpl) GetService(ctx context.Context, id string) (*gateonv1.Serv
 func (s *serviceImpl) SaveService(ctx context.Context, svc *gateonv1.Service) error {
 	if svc.Id == "" {
 		svc.Id = uuid.NewString()
+	}
+	// Authorized after the id is assigned (so the guard can look the service up
+	// as an update) and before persistence (so a refusal changes nothing).
+	if s.guard != nil {
+		if err := s.guard.AuthorizeServiceSave(ctx, svc); err != nil {
+			return err
+		}
 	}
 	if err := s.store.Update(ctx, svc); err != nil {
 		return fmt.Errorf("failed to update service: %w", err)

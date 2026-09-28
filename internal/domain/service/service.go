@@ -16,3 +16,11 @@ type Service interface {
 	SaveService(ctx context.Context, svc *gateonv1.Service) error
 	DeleteService(ctx context.Context, id string) error
 }
+
+// SaveGuard authorizes a service save that would repoint the backend of a route
+// carrying a credential-injecting middleware. It runs inside SaveService so
+// every transport is held to the same rule (ADR 0038); a nil guard is
+// unrestricted.
+type SaveGuard interface {
+	AuthorizeServiceSave(ctx context.Context, updated *gateonv1.Service) error
+}

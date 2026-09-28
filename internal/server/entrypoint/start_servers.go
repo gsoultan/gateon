@@ -260,7 +260,8 @@ func newTCPServer(ep *gateonv1.EntryPoint, deps *Deps, wg *syncutil.WaitGroup) *
 	// gateway-wide config that any HTTPS entrypoint creates, so a plaintext TCP
 	// entrypoint next to an HTTPS one silently lost SSH, RDP and HTTP detection.
 	terminatesTLS := ep.Tls != nil && ep.Tls.Enabled && deps.TLSConfig != nil
-	return &tcpServer{ep: ep, deps: deps, wg: wg, conns: newOpenConns(connLimit(ep)),
+	return &tcpServer{ep: ep, deps: deps, wg: wg,
+		conns:     newOpenConns(connLimit(ep), newPerAddrLimiter(perAddrConnLimit())),
 		plaintext: !terminatesTLS, blocked: identity.AddressBlocked}
 }
 
@@ -273,12 +274,16 @@ func (s *tcpServer) listen(addr string) (net.Listener, error) {
 }
 
 // start serves l until shutdown, which closes it and then ends the
-// connections still open when its deadline passes.
+// connections still open when its deadline passes. The entrypoint's connection
+// set is registered so a block event can reach its open sessions, and
+// deregistered when it shuts down so a hot-reload does not leak it.
 func (s *tcpServer) start(l net.Listener, shutdownReg *ShutdownRegistry) {
+	blockedSessions.add(s.conns)
 	if shutdownReg != nil {
 		shutdownReg.Register(func(ctx context.Context) error {
 			err := l.Close()
 			s.conns.shutdown(ctx)
+			blockedSessions.remove(s.conns)
 			return err
 		})
 	}
@@ -313,6 +318,8 @@ func (s *tcpServer) serve(l net.Listener) {
 			_ = conn.Close()
 		case refusedFull:
 			s.refuseOverLimit(conn)
+		case refusedPerAddr:
+			s.refusePerAddr(conn)
 		case admitted:
 			telemetry.GlobalDiagnostics.RecordConnection(s.ep.Id)
 			s.wg.Go(func() {
@@ -357,6 +364,20 @@ func (s *tcpServer) refuseOverLimit(c net.Conn) {
 	if s.conns.warn.due(time.Now()) {
 		logger.L.LogWarn("TCP entrypoint at its connection limit, refusing new connections",
 			"ep", s.ep.Id, "max_connections", s.conns.limit)
+	}
+}
+
+// refusePerAddr closes a connection accepted from a source address that already
+// holds its per-address limit on this entrypoint, without blocking the accept
+// loop. Counted with the other connection-limit rejections; the log says so at
+// most once a minute. The entrypoint-wide limit and this both apply -- this is
+// the tighter for one client (ADR 0036).
+func (s *tcpServer) refusePerAddr(c net.Conn) {
+	_ = c.Close()
+	telemetry.IncInflightRejected(tcpPerAddrReason)
+	if s.conns.perAddr.warn.due(time.Now()) {
+		logger.L.LogWarn("TCP entrypoint refusing a connection: source address at its per-address connection limit",
+			"ep", s.ep.Id, "max_conn_per_addr", s.conns.perAddr.limit)
 	}
 }
 

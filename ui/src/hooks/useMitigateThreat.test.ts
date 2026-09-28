@@ -7,8 +7,14 @@ import { describe, expect, mock, test } from "bun:test";
 // a fingerprint named without a network, or one an operator released in the
 // last day. The dashboard showed that as a green "Success" carrying the refusal.
 let answer: { success: boolean; message: string } = { success: true, message: "" };
+let lastRequest: Record<string, unknown> | undefined;
 mock.module("../services/client", () => ({
-  api: { mitigateThreat: async () => answer },
+  api: {
+    mitigateThreat: async (req: Record<string, unknown>) => {
+      lastRequest = req;
+      return answer;
+    },
+  },
 }));
 
 const { mitigateOrThrow } = await import("./useMitigateThreat");
@@ -24,5 +30,21 @@ describe("mitigateOrThrow", () => {
     answer = { success: true, message: "Source 203.0.113.7 successfully mitigated." };
     const res = await mitigateOrThrow({ source: "203.0.113.7", type: "IP", reason: "", category: "manual" });
     expect(res.message).toBe(answer.message);
+  });
+
+  // A bounded block's duration must reach the API, or the control does nothing
+  // and every manual block is open-ended (ADR 0037).
+  test("forwards a bounded block's duration to the API", async () => {
+    answer = { success: true, message: "ok" };
+    await mitigateOrThrow({ source: "203.0.113.7", type: "IP", reason: "", category: "manual", durationSeconds: 3600 });
+    expect(lastRequest?.durationSeconds).toBe(3600);
+  });
+
+  // With no duration the request still carries an explicit 0, so an open-ended
+  // block is unambiguous rather than an omitted field the backend must guess.
+  test("sends 0 when no duration is chosen", async () => {
+    answer = { success: true, message: "ok" };
+    await mitigateOrThrow({ source: "203.0.113.7", type: "IP", reason: "", category: "manual" });
+    expect(lastRequest?.durationSeconds).toBe(0);
   });
 });

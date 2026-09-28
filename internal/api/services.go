@@ -25,7 +25,7 @@ func (s *ApiService) UpdateService(ctx context.Context, req *gateonv1.UpdateServ
 	// without an id is given one, where stored directly it sat under "" and
 	// neither transport could delete it. See domain_services.go.
 	if err := s.serviceService().SaveService(ctx, req.Service); err != nil {
-		return &gateonv1.UpdateServiceResponse{Success: false}, err
+		return &gateonv1.UpdateServiceResponse{Success: false}, mapBindingRefusal(err)
 	}
 	s.logAudit(ctx, "update", "service", fmt.Sprintf("Updated service %s", req.Service.Id))
 	return &gateonv1.UpdateServiceResponse{Success: true}, nil

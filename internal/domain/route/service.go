@@ -17,3 +17,12 @@ type Service interface {
 	SaveRoute(ctx context.Context, rt *gateonv1.Route) error
 	DeleteRoute(ctx context.Context, id string) error
 }
+
+// SaveGuard authorizes a route save that may bind a middleware injecting a
+// credential toward the backend. It runs inside SaveRoute so every transport
+// -- REST, Connect/gRPC and config-import -- is held to the same rule (ADR
+// 0038). A nil guard means no restriction: an internal save, or a build wired
+// before the guard exists.
+type SaveGuard interface {
+	AuthorizeRouteSave(ctx context.Context, updated *gateonv1.Route) error
+}

@@ -14,6 +14,7 @@ import (
 	"github.com/gsoultan/gateon/internal/ai"
 	"github.com/gsoultan/gateon/internal/api"
 	"github.com/gsoultan/gateon/internal/auth"
+	"github.com/gsoultan/gateon/internal/authz/routebind"
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/domain/canary"
 	dentrypoint "github.com/gsoultan/gateon/internal/domain/entrypoint"
@@ -161,8 +162,13 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 			apiService.SetMLLowPower(true)
 		})
 	}
-	routeService := route.NewService(s.RouteStore, proxyInvalidator, s.Logger)
-	serviceService := service.NewService(s.ServiceStore, s.RouteStore, proxyInvalidator, s.Logger)
+	// The binding guard holds only an administrator to attaching a
+	// credential-injecting middleware to a route, or repointing a route (or its
+	// service) that carries one; it runs inside the domain saves, so REST,
+	// Connect/gRPC and config-import are all covered (ADR 0038).
+	bindingGuard := routebind.NewGuard(s.RouteStore, s.ServiceStore, s.MwStore)
+	routeService := route.NewService(s.RouteStore, proxyInvalidator, s.Logger, bindingGuard)
+	serviceService := service.NewService(s.ServiceStore, s.RouteStore, proxyInvalidator, s.Logger, bindingGuard)
 	epService := dentrypoint.NewService(s.EpStore, proxyInvalidator, s.Logger)
 
 	// Tell the WAF which hostnames this gateway answers on, so the off-origin
