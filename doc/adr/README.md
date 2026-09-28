@@ -40,6 +40,7 @@ ADRs follow a lightweight [MADR](https://adr.github.io/madr/)-style format:
 | [0027](./0027-no-credential-means-nobody-unless-the-base-handler-waives-it.md) | No credential means nobody, unless the base handler waived it | Accepted |
 | [0028](./0028-stored-secrets-are-write-only.md) | Stored secrets are write-only | Accepted |
 | [0029](./0029-an-address-is-shunned-only-for-more-attacking-builds-than-an-office-has.md) | An address is shunned only for more attacking client builds than an office has | Accepted |
+| [0030](./0030-challenges-are-their-own-package.md) | Challenges are their own package | Accepted |
 
 ## Conventions
 

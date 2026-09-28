@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
 // SPDX-License-Identifier: MIT
 
-package security
+package challenge
 
 import (
 	"context"
@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"sync"
 
+	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware/kind"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
@@ -50,11 +51,11 @@ func fallbackBotSecret() string {
 }
 
 // globalBotManagement returns the global bot-management settings, or nil.
-func globalBotManagement(d Deps) *gateonv1.BotManagementConfig {
-	if d.GlobalStore == nil {
+func globalBotManagement(store config.GlobalConfigStore) *gateonv1.BotManagementConfig {
+	if store == nil {
 		return nil
 	}
-	global := d.GlobalStore.Get(context.TODO())
+	global := store.Get(context.TODO())
 	if global == nil || global.Waf == nil {
 		return nil
 	}
@@ -63,7 +64,7 @@ func globalBotManagement(d Deps) *gateonv1.BotManagementConfig {
 
 // resolveBotSecret picks the HMAC key for challenge tokens: the route's own, the
 // global one, or a generated fallback. It never returns a constant.
-func resolveBotSecret(cfg map[string]string, g *gateonv1.BotManagementConfig, d Deps) string {
+func resolveBotSecret(cfg map[string]string, g *gateonv1.BotManagementConfig) string {
 	if s := cfg["secret_key"]; s != "" {
 		return s
 	}
@@ -73,8 +74,14 @@ func resolveBotSecret(cfg map[string]string, g *gateonv1.BotManagementConfig, d 
 	return fallbackBotSecret()
 }
 
-func NewBotManagement(cfg map[string]string, d Deps) (kind.Middleware, error) {
-	g := globalBotManagement(d)
+// NewBotManagement builds the bot-management middleware from a route's config
+// map, falling back to the global settings for anything the route leaves out.
+//
+// It takes the global store rather than security.Deps because the store is the
+// only field it ever read, and importing security for the struct would make
+// this package depend on the one it was extracted from (ADR-0030).
+func NewBotManagement(cfg map[string]string, store config.GlobalConfigStore) (kind.Middleware, error) {
+	g := globalBotManagement(store)
 
 	// Each flag falls back to its global value only when the route does not
 	// mention the key at all: absence and "false" are different, or the global
@@ -107,7 +114,7 @@ func NewBotManagement(cfg map[string]string, d Deps) (kind.Middleware, error) {
 		timeout = 3600 // Default 1 hour
 	}
 
-	secret := resolveBotSecret(cfg, g, d)
+	secret := resolveBotSecret(cfg, g)
 
 	return BotManagement(BotManagementConfig{
 		Enabled:                 enabled,

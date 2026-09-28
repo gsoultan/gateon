@@ -16,6 +16,7 @@ import (
 	"github.com/gsoultan/gateon/internal/ebpf"
 	"github.com/gsoultan/gateon/internal/middleware/kind"
 	"github.com/gsoultan/gateon/internal/middleware/security"
+	"github.com/gsoultan/gateon/internal/middleware/security/challenge"
 	"github.com/gsoultan/gateon/internal/middleware/security/identity"
 	"github.com/gsoultan/gateon/internal/middleware/security/waf"
 	"github.com/gsoultan/gateon/internal/middleware/traffic"
@@ -188,7 +189,7 @@ func (f *Factory) Create(m *gateonv1.Middleware, routeID string) (Middleware, er
 	case "graphql_firewall":
 		return security.NewGraphQLFirewall(cfg)
 	case "bot_management":
-		return security.NewBotManagement(cfg, f.securityDeps())
+		return challenge.NewBotManagement(cfg, f.globalStore)
 	case "xss_recognition":
 		return security.XSSRecognition(routeID), nil
 	case "sqli_recognition":
@@ -200,7 +201,7 @@ func (f *Factory) Create(m *gateonv1.Middleware, routeID string) (Middleware, er
 	case "honeypot":
 		return security.NewHoneypot(cfg), nil
 	case "turnstile":
-		return security.NewTurnstile(cfg)
+		return challenge.NewTurnstile(cfg)
 	case "geoip":
 		return security.NewGeoIP(cfg)
 	case "hmac":
@@ -256,7 +257,7 @@ func (f *Factory) Create(m *gateonv1.Middleware, routeID string) (Middleware, er
 		if threshold == 0 {
 			threshold = 20.0
 		}
-		return security.Pow(difficulty, threshold, cfg["secret"], routeID), nil
+		return challenge.Pow(difficulty, threshold, cfg["secret"], routeID), nil
 	case "policy":
 		return security.NewPolicy(cfg)
 	case "xfcc":

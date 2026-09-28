@@ -149,6 +149,7 @@ github.com/gsoultan/gateon/internal/middleware 74.8%
 github.com/gsoultan/gateon/internal/middleware/auth 65.8%
 github.com/gsoultan/gateon/internal/middleware/kind 60.5%
 github.com/gsoultan/gateon/internal/middleware/security 59.3%
+github.com/gsoultan/gateon/internal/middleware/security/challenge 57.7%
 github.com/gsoultan/gateon/internal/middleware/security/identity 85.7%
 github.com/gsoultan/gateon/internal/middleware/security/waf 73.6%
 github.com/gsoultan/gateon/internal/middleware/traffic 29.6%
