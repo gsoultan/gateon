@@ -15,6 +15,21 @@ export function getThreatColor(type: string, category?: string) {
   return 'teal.7';
 }
 
+/**
+ * A fingerprint block is a client build on one network, listed as
+ * "<build>|<network>" (ADR 0026): the /24 as its first three octets, an IPv6
+ * /64 as a prefix. splitScopedBlock names both halves, the /24 written as one,
+ * so a confirmation can say exactly whom a release re-admits; null for any
+ * other source.
+ */
+export function splitScopedBlock(source: string | undefined): { build: string; network: string } | null {
+  const i = source ? source.lastIndexOf("|") : -1;
+  if (!source || i <= 0 || i === source.length - 1) return null;
+  const scope = source.slice(i + 1);
+  const network = !scope.includes("/") && scope.split(".").length === 3 ? `${scope}.0/24` : scope;
+  return { build: source.slice(0, i), network };
+}
+
 export function getSeverityColor(sev: string) {
   const s = (sev || '').toLowerCase();
   if (s === 'critical' || s === 'high') return 'red';

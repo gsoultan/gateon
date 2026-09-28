@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
 // SPDX-License-Identifier: MIT
 
-import { test, expect, type Locator, type Page } from '@playwright/test';
+import { test, expect, type APIRequestContext, type Locator, type Page, type Route } from '@playwright/test';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -98,19 +98,52 @@ test.describe('Command palette as an operator', () => {
 });
 
 test.describe('Command palette sign out', () => {
-  // A session of its own: signing out revokes it, and the shared admin
-  // session in .auth/admin.json is every other spec's.
+  // An account of its own, not just a session of its own: signing out ends
+  // every session of the account, so signing out as the shared admin would
+  // end the session in .auth/admin.json that every other spec runs on.
   test.use({ storageState: { cookies: [], origins: [] } });
+
+  const USER = `e2e-sign-out-${Date.now()}`;
+  const PASSWORD = 'correct-horse-battery-staple-7';
+
+  async function adminApi(playwright: { request: { newContext: (o: object) => Promise<APIRequestContext> } }) {
+    return playwright.request.newContext({
+      baseURL: 'http://localhost:8080',
+      storageState: path.resolve(__dirname, '.auth/admin.json'),
+    });
+  }
+
+  test.beforeAll(async ({ playwright }) => {
+    const api = await adminApi(playwright);
+    try {
+      const made = await api.put('/v1/users', { data: { username: USER, password: PASSWORD, role: 'viewer' } });
+      expect(made.ok(), `creating ${USER}: ${made.status()}`).toBe(true);
+    } finally {
+      await api.dispose();
+    }
+  });
+
+  test.afterAll(async ({ playwright }) => {
+    const api = await adminApi(playwright);
+    try {
+      const list = await api.get(`/v1/users?search=${encodeURIComponent(USER)}`);
+      const users = ((await list.json()) as { users?: { id: string; username: string }[] }).users ?? [];
+      for (const u of users.filter((x) => x.username === USER)) await api.delete(`/v1/users/${u.id}`);
+    } finally {
+      await api.dispose();
+    }
+  });
 
   /** Logs in, signs out from the palette, and returns the session cookie's value from before. */
   async function signOutFromPalette(page: Page): Promise<string> {
-    const login = await page.request.post('/v1/login', { data: { username: 'admin', password: 'password123' } });
+    const login = await page.request.post('/v1/login', { data: { username: USER, password: PASSWORD } });
     expect(login.ok(), `login failed: ${login.status()}`).toBe(true);
     const session = (await page.context().cookies()).find((c) => c.name === 'gateon_session');
     expect(session, 'login set no gateon_session cookie').toBeDefined();
 
-    const { search } = await openPalette(page);
+    const { palette, search } = await openPalette(page);
     await search.fill('sign out');
+    await expect(palette.getByText('Ends every session of this account, on every device')).toBeVisible();
     const loggedOut = page.waitForResponse(
       (r) => new URL(r.url()).pathname === '/v1/logout' && r.request().method() === 'POST',
     );
@@ -128,17 +161,62 @@ test.describe('Command palette sign out', () => {
   });
 
   test('a signed-out session cannot be used again', async ({ page }) => {
-    // OPEN (mgmt/sec, internal/server/handlers/global.go and internal/auth):
-    // POST /v1/logout clears the cookie and writes an audit entry, but the
-    // PASETO it was holding stays valid until it expires (auth.TokenLifetime,
-    // eight hours). Revocation in revocation.go is implicit -- password, role
-    // and disabled changes -- and deliberately keeps no list, so a copied
-    // cookie outlives the sign-out that was meant to end it. When sign-out
-    // revokes the token this test passes and the annotation must go.
-    test.fail();
+    // POST /v1/logout used to clear the cookie and nothing else: the PASETO it
+    // held stayed valid until it expired, eight hours later, for anyone with a
+    // copy. Signing out now advances the account's session epoch, which every
+    // earlier session of the account stops matching (internal/auth).
     const token = await signOutFromPalette(page);
     // The old cookie, presented on purpose, as whoever copied it would.
     const replay = await page.request.get('/v1/me', { headers: { Cookie: `gateon_session=${token}` } });
     expect(replay.status(), 'the signed-out session still works').toBe(401);
+  });
+
+  // Every sign-out control used to throw away the gateway's answer and go to
+  // the sign-in page as though every session had ended. Both answers below are
+  // staged, because neither can be caused from outside: ending the sessions is
+  // a database write.
+
+  /** Logs in and starts a sign-out from the palette, with /v1/logout answered by `answer`. */
+  async function signOutAnswered(page: Page, answer: (route: Route) => Promise<void>) {
+    // An address of its own, so these logins count against no other spec's.
+    const login = await page.request.post('/v1/login', {
+      data: { username: USER, password: PASSWORD },
+      headers: { 'X-Forwarded-For': '198.51.100.64' },
+    });
+    expect(login.ok(), `login failed: ${login.status()}`).toBe(true);
+    await page.route('**/v1/logout', answer);
+    const { search } = await openPalette(page);
+    await search.fill('sign out');
+    await search.press('Enter');
+  }
+
+  test('a sign-out that could not end the other sessions says so', async ({ page }) => {
+    // The gateway answers 500 when it clears this browser's cookie but cannot
+    // end the account's other sessions. Here the sign-out really happens, and
+    // only its status is replaced.
+    await signOutAnswered(page, async (route) => {
+      const real = await route.fetch();
+      await route.fulfill({
+        response: real,
+        status: 500,
+        body: JSON.stringify({ error: "signed out on this device, but the account's other sessions could not be ended" }),
+      });
+    });
+    await expect(page).toHaveURL(/\/login$/);
+    const warning = page.getByRole('alert').filter({ hasText: 'Other sessions may still be signed in' });
+    await expect(warning, 'a sign-out that failed was reported as a success').toBeVisible();
+    await expect(warning).toContainText('did not confirm');
+  });
+
+  test('a sign-out the gateway refused leaves you signed in, and says so', async ({ page }) => {
+    // Nothing reaches the gateway, so nothing was signed out, this browser's
+    // session included.
+    await signOutAnswered(page, (route) =>
+      route.fulfill({ status: 503, contentType: 'text/plain', body: 'Service Unavailable' }),
+    );
+    const refused = page.getByRole('alert').filter({ hasText: 'Could not sign out' });
+    await expect(refused, 'a refused sign-out went unreported').toBeVisible();
+    await expect(page, 'a refused sign-out still left the dashboard').not.toHaveURL(/\/login$/);
+    expect((await page.request.get('/v1/me')).status(), 'the session the refusal left should still work').toBe(200);
   });
 });

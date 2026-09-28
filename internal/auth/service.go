@@ -24,6 +24,10 @@ type Service interface {
 	SetUserDisabled(id string, disabled bool) error
 	SetTwoFactorPending(id string, pending bool) error
 
+	// EndSessions ends every live session of account id: a sign-out, which
+	// signs the account out everywhere. See Manager.EndSessions.
+	EndSessions(id string) error
+
 	// InvalidateBinding drops a cached session binding without republishing it.
 	// It is how an invalidation from another instance is applied; see ADR 0012
 	// for why the remote path may only invalidate and never populate.

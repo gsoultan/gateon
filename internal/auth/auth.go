@@ -22,6 +22,10 @@ var (
 	ErrTwoFactorRequired      = errors.New("two-factor authentication required")
 	ErrTwoFactorSetupRequired = errors.New("two-factor authentication setup required")
 	ErrInvalidTwoFactorCode   = errors.New("invalid two-factor authentication code")
+
+	// ErrUsernameTaken refuses a create, or a rename, under a username another
+	// account already has. Nothing was written.
+	ErrUsernameTaken = errors.New("a user with that username already exists")
 )
 
 const (

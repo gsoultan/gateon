@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"sync"
 	"testing"
+	"time"
 )
 
 // escalateMitigation blocked a JA4+ on the first qualifying threat. A JA4+ is a
@@ -15,13 +16,15 @@ import (
 // for the cost of a single injection.
 //
 // Against the pre-fix code the first subtest fails: one sighting was enough.
+// The keys here stand for a class on a network (repid.For); the counting does
+// not look inside them, and user_mitigation_scope_test.go covers the window.
 
 func TestFingerprintNotMitigatedBeforeThreshold(t *testing.T) {
 	ResetFingerprintSightings()
 
 	const fp = "t_threshold"
 	for i := 1; i < mitigateAfter; i++ {
-		ok, reason := shouldMitigateFingerprint(fp, "203.0.113.1")
+		ok, reason := shouldMitigateFingerprint(fp, "203.0.113.1", time.Now())
 		if ok {
 			t.Fatalf("mitigated after %d sighting(s), threshold is %d; one blocked "+
 				"request is noise, and blocking on it hands an attacker a way to "+
@@ -32,7 +35,7 @@ func TestFingerprintNotMitigatedBeforeThreshold(t *testing.T) {
 		}
 	}
 
-	if ok, _ := shouldMitigateFingerprint(fp, "203.0.113.1"); !ok {
+	if ok, _ := shouldMitigateFingerprint(fp, "203.0.113.1", time.Now()); !ok {
 		t.Errorf("a single actor still not mitigated after %d sightings; the gate "+
 			"is meant to delay the block, not prevent it", mitigateAfter)
 	}
@@ -46,10 +49,10 @@ func TestFingerprintNotMitigatedWhenBlastRadiusIsWide(t *testing.T) {
 	const fp = "t_blast"
 	// Well past both the threshold and the address ceiling.
 	for i := range maxBlastRadius + 5 {
-		shouldMitigateFingerprint(fp, "203.0.113."+strconv.Itoa(i+1))
+		shouldMitigateFingerprint(fp, "203.0.113."+strconv.Itoa(i+1), time.Now())
 	}
 
-	ok, reason := shouldMitigateFingerprint(fp, "203.0.113.200")
+	ok, reason := shouldMitigateFingerprint(fp, "203.0.113.200", time.Now())
 	if ok {
 		t.Errorf("mitigated a fingerprint spanning %d+ addresses; that is a client "+
 			"population, and blocking it is the denial of service", maxBlastRadius)
@@ -73,9 +76,9 @@ func TestFingerprintSightingsArePerFingerprint(t *testing.T) {
 	ResetFingerprintSightings()
 
 	for range mitigateAfter + 2 {
-		shouldMitigateFingerprint("t_noisy", "203.0.113.1")
+		shouldMitigateFingerprint("t_noisy", "203.0.113.1", time.Now())
 	}
-	if ok, _ := shouldMitigateFingerprint("t_quiet", "203.0.113.1"); ok {
+	if ok, _ := shouldMitigateFingerprint("t_quiet", "203.0.113.1", time.Now()); ok {
 		t.Error("a fingerprint seen once was mitigated; sightings are leaking between keys")
 	}
 }
@@ -88,9 +91,9 @@ func TestFingerprintEmptySourceIPDoesNotWidenBlastRadius(t *testing.T) {
 
 	const fp = "t_noip"
 	for range mitigateAfter + 3 {
-		shouldMitigateFingerprint(fp, "")
+		shouldMitigateFingerprint(fp, "", time.Now())
 	}
-	if ok, reason := shouldMitigateFingerprint(fp, ""); !ok {
+	if ok, reason := shouldMitigateFingerprint(fp, "", time.Now()); !ok {
 		t.Errorf("a repeat offender with no source address was never mitigated: %s", reason)
 	}
 }
@@ -103,7 +106,7 @@ func TestShouldMitigateFingerprintIsConcurrencySafe(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			shouldMitigateFingerprint("t_race", "203.0.113."+strconv.Itoa(i%8+1))
+			shouldMitigateFingerprint("t_race", "203.0.113."+strconv.Itoa(i%8+1), time.Now())
 		}(i)
 	}
 	wg.Wait()

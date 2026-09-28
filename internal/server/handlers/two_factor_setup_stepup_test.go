@@ -54,7 +54,7 @@ func (f stepUpFixture) setup(t *testing.T, body string) *httptest.ResponseRecord
 	t.Helper()
 	self := &auth.Claims{ID: f.id, Username: "alice", Role: auth.RoleAdmin}
 	rr := httptest.NewRecorder()
-	f.mux.ServeHTTP(rr, claimsRequest(t, "/v1/auth/2fa/setup", body, self))
+	f.mux.ServeHTTP(rr, authWaived(claimsRequest(t, "/v1/auth/2fa/setup", body, self)))
 	return rr
 }
 
@@ -194,7 +194,7 @@ func TestTwoFactorEnrolmentWrongCodeIsNotASignOut(t *testing.T) {
 
 	self := &auth.Claims{ID: "the-user", Username: "user", Role: auth.RoleViewer}
 	rr := httptest.NewRecorder()
-	mux.ServeHTTP(rr, claimsRequest(t, "/v1/auth/2fa/verify", `{"id":"the-user","code":"000000"}`, self))
+	mux.ServeHTTP(rr, authWaived(claimsRequest(t, "/v1/auth/2fa/verify", `{"id":"the-user","code":"000000"}`, self)))
 	if rr.Code != http.StatusForbidden {
 		t.Errorf("signed-in enrolment, wrong code: status %d, want 403", rr.Code)
 	}
@@ -202,7 +202,7 @@ func TestTwoFactorEnrolmentWrongCodeIsNotASignOut(t *testing.T) {
 	rr = httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/auth/2fa/verify", strings.NewReader(`{"id":"the-user","code":"000000"}`))
 	req.Header.Set("Content-Type", "application/json")
-	mux.ServeHTTP(rr, req)
+	mux.ServeHTTP(rr, authWaived(req))
 	if rr.Code != http.StatusUnauthorized {
 		t.Errorf("sign-in step, wrong code: status %d, want 401", rr.Code)
 	}

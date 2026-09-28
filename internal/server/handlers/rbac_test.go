@@ -17,14 +17,27 @@ func TestRequirePermission(t *testing.T) {
 	tests := []struct {
 		name     string
 		claims   *auth.Claims
+		waived   bool
 		action   auth.Action
 		resource auth.Resource
 		wantOK   bool
 		wantCode int
 	}{
 		{
-			name:     "nil claims allows (auth disabled)",
+			// No claims and no mark from the base handler: the request reached
+			// the check some other way -- gRPC on a plaintext TCP entrypoint
+			// did -- and nobody is not "auth disabled". ADR 0027.
+			name:     "nil claims without the base handler's waiver refused",
 			claims:   nil,
+			action:   auth.ActionWrite,
+			resource: auth.ResourceRoutes,
+			wantOK:   false,
+			wantCode: http.StatusUnauthorized,
+		},
+		{
+			name:     "nil claims the base handler waived allows (auth disabled)",
+			claims:   nil,
+			waived:   true,
 			action:   auth.ActionWrite,
 			resource: auth.ResourceRoutes,
 			wantOK:   true,
@@ -73,6 +86,9 @@ func TestRequirePermission(t *testing.T) {
 			if tt.claims != nil {
 				ctx = context.WithValue(ctx, middleware.UserContextKey, tt.claims)
 			}
+			if tt.waived {
+				ctx = middleware.WithAuthNotRequired(ctx)
+			}
 			r := httptest.NewRequest(http.MethodPut, "/v1/routes", nil).WithContext(ctx)
 			w := httptest.NewRecorder()
 
@@ -87,5 +103,19 @@ func TestRequirePermission(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestNobodyWithoutAWaiverGetsTheRestrictedView: a read shaped by what the
+// caller could change -- the global config and its credentials -- treated a
+// request with no claims as "auth disabled" and gave it the full view. Now no
+// claims is nobody unless the base handler waived authentication. ADR 0027.
+func TestNobodyWithoutAWaiverGetsTheRestrictedView(t *testing.T) {
+	bare := httptest.NewRequest(http.MethodGet, "/v1/global", nil)
+	if callerMayWrite(bare, auth.ResourceGlobal) {
+		t.Error("a request with no claims and no waiver from the base handler was given the full view")
+	}
+	if !callerMayWrite(authWaived(bare), auth.ResourceGlobal) {
+		t.Error("a request the base handler waived (auth off) lost the full view")
 	}
 }

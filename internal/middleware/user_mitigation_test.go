@@ -13,6 +13,7 @@ import (
 	"github.com/gsoultan/gateon/internal/middleware/security/identity"
 	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/telemetry"
+	"github.com/gsoultan/gateon/internal/telemetry/repid"
 )
 
 func TestUserMitigationMiddleware(t *testing.T) {
@@ -26,9 +27,12 @@ func TestUserMitigationMiddleware(t *testing.T) {
 	ja4_2 := "mitigated-ja4-2"
 	ja4h := "mitigated-ja4h"
 
-	telemetry.MarkUserMitigated(ja4_1, "JA4", "Test mitigation", "TestCategory")
-	telemetry.MarkUserMitigated(ja4_2, "JA4", "Test mitigation JA4", "TestCategory")
-	telemetry.MarkUserMitigated(ja4_2+"_"+ja4h, "JA4", "Test mitigation JA4+JA4H", "TestCategory")
+	// A block is a class on a network (ADR 0026): these block each fingerprint
+	// on the network httptest's requests come from.
+	const clientAddr = "192.0.2.1"
+	telemetry.MarkUserMitigated(repid.For(ja4_1, clientAddr), "JA4", "Test mitigation", "TestCategory")
+	telemetry.MarkUserMitigated(repid.For(ja4_2, clientAddr), "JA4", "Test mitigation JA4", "TestCategory")
+	telemetry.MarkUserMitigated(repid.For(ja4_2+"_"+ja4h, clientAddr), "JA4", "Test mitigation JA4+JA4H", "TestCategory")
 
 	mw := identity.UserMitigation()
 	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -93,7 +97,7 @@ func TestUserMitigationMiddleware(t *testing.T) {
 
 	t.Run("Immediate Effect of Unmitigation", func(t *testing.T) {
 		// Unmitigate
-		telemetry.MarkUserUnmitigated(ja4_1)
+		telemetry.MarkUserUnmitigated(repid.For(ja4_1, clientAddr))
 
 		req := httptest.NewRequest("GET", "/", nil)
 		rs := &request.RequestState{JA4Plus: ja4_1}

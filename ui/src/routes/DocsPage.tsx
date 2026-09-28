@@ -14,21 +14,47 @@ import {
   ThemeIcon,
   Anchor,
 } from "@mantine/core";
-import { IconMail, IconBook2, IconSettings } from "@tabler/icons-react";
+import { useState, type ReactNode } from "react";
+import { IconMail, IconBook2, IconSettings, IconShieldLock, IconPlugConnected } from "@tabler/icons-react";
 import ReactMarkdown from "react-markdown";
-import readmeContent from "../../docs/README.md?raw";
-import emailBackendSetup from "../../docs/email-backend-setup.md?raw";
-import proxyProtocolContent from "../../docs/proxy-protocol.md?raw";
-import servicesContent from "../../docs/services.md?raw";
+import remarkGfm from "remark-gfm";
+import { GUIDES, guideIdForHref, isExternalHref } from "../components/docs/guides";
 
-const docs = [
-  { id: "intro", label: "Introduction", icon: IconBook2, content: readmeContent },
-  { id: "proxy-protocol", label: "Proxy Protocol", icon: IconBook2, content: proxyProtocolContent },
-  { id: "email-backend", label: "Email Backend (SMTP, IMAP, POP3)", icon: IconMail, content: emailBackendSetup },
-  { id: "running-service", label: "Running as a Service", icon: IconSettings, content: servicesContent },
-];
+const ICONS: Record<string, typeof IconBook2> = {
+  "management-entrypoint": IconShieldLock,
+  "email-backend": IconMail,
+  "running-service": IconSettings,
+  "websockets-sse": IconPlugConnected,
+};
+
+/**
+ * GuideLink renders a link in a guide. A link to another guide opens its tab:
+ * the guides link to each other as files, which the gateway does not serve, so
+ * followed as links they opened a window reading "Not Found". A link to another
+ * site opens in a new tab without handing it this page. Anything else would be
+ * a dead link, so it is shown as text.
+ */
+function GuideLink({ href, children, onGuide }: { href?: string; children: ReactNode; onGuide: (id: string) => void }) {
+  const guide = guideIdForHref(href);
+  if (guide) {
+    return (
+      <Anchor component="button" type="button" size="sm" onClick={() => onGuide(guide)}>
+        {children}
+      </Anchor>
+    );
+  }
+  if (isExternalHref(href)) {
+    return (
+      <Anchor href={href} target="_blank" rel="noopener noreferrer" size="sm">
+        {children}
+      </Anchor>
+    );
+  }
+  return <>{children}</>;
+}
 
 export default function DocsPage() {
+  const [active, setActive] = useState<string | null>("intro");
   return (
     <Stack gap="md">
       <div>
@@ -38,10 +64,10 @@ export default function DocsPage() {
         </Text>
       </div>
 
-      <Tabs defaultValue="intro">
+      <Tabs value={active} onChange={setActive}>
         <Tabs.List>
-          {docs.map((d) => {
-            const Icon = d.icon;
+          {GUIDES.map((d) => {
+            const Icon = ICONS[d.id] ?? IconBook2;
             return (
               <Tabs.Tab key={d.id} value={d.id} leftSection={<Icon size={16} />}>
                 {d.label}
@@ -50,11 +76,12 @@ export default function DocsPage() {
           })}
         </Tabs.List>
 
-        {docs.map((d) => (
+        {GUIDES.map((d) => (
           <Tabs.Panel key={d.id} value={d.id} pt="md">
             <Paper withBorder p="lg" radius="md">
               <ScrollArea.Autosize mah="calc(100vh - 280px)">
                 <ReactMarkdown
+                  remarkPlugins={[remarkGfm]}
                   components={{
                     h1: ({ children }) => (
                       <Title order={2} mb="sm" mt="lg">
@@ -128,9 +155,9 @@ export default function DocsPage() {
                     th: ({ children }) => <Table.Th>{children}</Table.Th>,
                     td: ({ children }) => <Table.Td>{children}</Table.Td>,
                     a: ({ href, children }) => (
-                      <Anchor href={href} target="_blank" rel="noopener noreferrer" size="sm">
+                      <GuideLink href={href} onGuide={setActive}>
                         {children}
-                      </Anchor>
+                      </GuideLink>
                     ),
                   }}
                 >

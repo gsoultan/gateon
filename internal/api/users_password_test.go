@@ -86,15 +86,20 @@ func TestChangePasswordRPCWithTheCurrentPassword(t *testing.T) {
 
 // TestUpdateUserRPCCannotSetTheCallersPassword: UpdateUser writes a password
 // when the user it is given has one; for the caller's own account that would
-// walk around ChangePassword's step-up.
+// walk around ChangePassword's step-up. By id it is refused as such. A fresh
+// id with the caller's username used to land on the caller's account too; it
+// is a create now, which the taken username refuses.
 func TestUpdateUserRPCCannotSetTheCallersPassword(t *testing.T) {
 	svc, ctx, id := ownAccount(t)
-	for _, u := range []*gateonv1.User{
-		{Id: id, Username: "alice", Role: auth.RoleAdmin, Password: "new-pass"},
-		{Id: "fresh-id", Username: "alice", Role: auth.RoleAdmin, Password: "new-pass"},
+	for _, tc := range []struct {
+		u    *gateonv1.User
+		want codes.Code
+	}{
+		{&gateonv1.User{Id: id, Username: "alice", Role: auth.RoleAdmin, Password: "new-pass"}, codes.PermissionDenied},
+		{&gateonv1.User{Id: "fresh-id", Username: "alice", Role: auth.RoleAdmin, Password: "new-pass"}, codes.AlreadyExists},
 	} {
-		if _, err := svc.UpdateUser(ctx, &gateonv1.UpdateUserRequest{User: u}); status.Code(err) != codes.PermissionDenied {
-			t.Errorf("UpdateUser(id %q) err = %v, want PermissionDenied", u.GetId(), err)
+		if _, err := svc.UpdateUser(ctx, &gateonv1.UpdateUserRequest{User: tc.u}); status.Code(err) != tc.want {
+			t.Errorf("UpdateUser(id %q) err = %v, want %s", tc.u.GetId(), err, tc.want)
 		}
 	}
 	if _, _, err := svc.Auth.Authenticate("alice", "right-pass"); err != nil {

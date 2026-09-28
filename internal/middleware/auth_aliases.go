@@ -45,6 +45,8 @@ var (
 	NewOAuth2IntrospectionValidator = auth.NewOAuth2IntrospectionValidator
 	NewOIDCValidator                = auth.NewOIDCValidator
 	NewPasetoVerifier               = auth.NewPasetoVerifier
+	WithAuthNotRequired             = auth.WithAuthNotRequired
+	AuthNotRequired                 = auth.AuthNotRequired
 	NewMemoryAPIKeyStore            = auth.NewMemoryAPIKeyStore
 	NewRedisAPIKeyStore             = auth.NewRedisAPIKeyStore
 	NewRedisRevocationStore         = auth.NewRedisRevocationStore

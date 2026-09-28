@@ -12,13 +12,21 @@ import (
 )
 
 // RequirePermission checks that the request has a valid user with permission for the action on resource.
-// When auth is disabled (no PasetoAuth), claims are nil and we allow. Returns false if forbidden.
+// A request with no claims is allowed only when the base handler marked it as
+// needing none (authentication off for the deployment; see
+// middleware.AuthNotRequired); otherwise it is refused as unauthenticated.
+// Returns false if refused.
 func RequirePermission(w http.ResponseWriter, r *http.Request, action auth.Action, resource auth.Resource) bool {
 	logger.L.LogDebug("checking permission", "path", r.URL.Path, "action", action, "resource", resource)
 	claimsVal := r.Context().Value(middleware.UserContextKey)
 	if claimsVal == nil {
-		// Auth disabled: PasetoAuth never ran, allow
-		return true
+		if middleware.AuthNotRequired(r.Context()) {
+			return true
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"error":"authentication required"}`))
+		return false
 	}
 	claims, ok := claimsVal.(*auth.Claims)
 	if !ok || claims == nil {
@@ -61,13 +69,29 @@ func RequirePermission(w http.ResponseWriter, r *http.Request, action auth.Actio
 func callerClaims(r *http.Request) (*auth.Claims, bool) {
 	v := r.Context().Value(middleware.UserContextKey)
 	if v == nil {
-		return nil, true
+		// Nobody, which is acceptable only where the base handler said nobody
+		// is needed (auth off, or a path that works before a session exists).
+		return nil, middleware.AuthNotRequired(r.Context())
 	}
 	claims, isClaims := v.(*auth.Claims)
 	if !isClaims || claims == nil {
 		return nil, false
 	}
 	return claims, true
+}
+
+// callerOrSelfAuthenticated is callerClaims for a handler that verifies a
+// credential of its own when no claims arrived -- the log stream accepts its
+// token in the query string, which a WebSocket needs. For such a handler "no
+// claims" is not a refusal but a cue to authenticate, so it is (nil, true)
+// whether or not the base handler waived authentication; the handler then
+// denies unless its own verification succeeds. An unreadable claims value is
+// still (nil, false).
+func callerOrSelfAuthenticated(r *http.Request) (*auth.Claims, bool) {
+	if r.Context().Value(middleware.UserContextKey) == nil {
+		return nil, true
+	}
+	return callerClaims(r)
 }
 
 // callerMayWrite reports whether the caller holds ActionWrite on resource,

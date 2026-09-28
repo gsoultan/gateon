@@ -300,55 +300,94 @@ func (m *Manager) ListUsers(page, pageSize int32, search string) ([]*gateonv1.Us
 	return users, int32(totalCount), nil
 }
 
+// UpsertUser creates u, or edits the account u.Id names.
+//
+// Creates and edits share it -- the API has one UpdateUser for both -- and it
+// used to be one statement for both, INSERT ... ON CONFLICT(username) DO
+// UPDATE SET password, role. A create under a username that existed therefore
+// replaced that account's password and role and reported success: from Add
+// User, an administrator who typed a colleague's name took over their account.
+//
+// An edit now writes by id, and anything else -- no id, or an id no account
+// has -- is a create, a plain INSERT. A username that is taken, by a create or
+// by an edit renaming onto it, is refused with ErrUsernameTaken and nothing is
+// written. The table's unique constraint refuses it rather than a lookup
+// beforehand, so two requests racing for one name cannot both win.
 func (m *Manager) UpsertUser(u *gateonv1.User) error {
-	if u.Id == "" {
-		u.Id = uuid.New().String()
-	}
-
 	if u.Role == "" {
 		u.Role = RoleViewer
 	} else if !ValidRole(u.Role) {
 		return fmt.Errorf("invalid role: %s", u.Role)
 	}
-
-	if u.Password != "" {
-		hashed, err := bcrypt.GenerateFromPassword([]byte(u.Password), bcrypt.DefaultCost)
-		if err != nil {
-			return fmt.Errorf("failed to hash password: %w", err)
-		}
-		return m.upsertUserWithPassword(u.Id, u.Username, string(hashed), u.Role)
-	}
-	return m.upsertUserWithPassword(u.Id, u.Username, "", u.Role)
-}
-
-// upsertUserWithPassword is the single funnel both dialects go through, which
-// makes it the one place that has to invalidate the session binding. A role
-// change here is a privilege change — demoting an administrator to viewer must
-// not leave them holding an administrator token.
-func (m *Manager) upsertUserWithPassword(id, username, password, role string) error {
-	err := m.upsertSQLitePostgres(id, username, password, role)
+	hashed, err := hashPassword(u.Password)
 	if err != nil {
 		return err
 	}
-	m.revokeSessions(id)
+	if u.Id != "" {
+		if updated, err := m.updateUser(u, hashed); err != nil || updated {
+			return err
+		}
+	} else {
+		u.Id = uuid.New().String()
+	}
+	return m.insertUser(u, hashed)
+}
+
+// hashPassword returns the bcrypt hash of password, or "" for no password.
+func hashPassword(password string) (string, error) {
+	if password == "" {
+		return "", nil
+	}
+	hashed, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return "", fmt.Errorf("failed to hash password: %w", err)
+	}
+	return string(hashed), nil
+}
+
+// updateUser writes u's username, role and -- when hashed is not empty --
+// password to the account u.Id names, and reports whether there is one. It is
+// the one place an existing account is edited, so it is where the session
+// binding is invalidated: a role change is a privilege change, and demoting an
+// administrator must not leave them holding an administrator's token.
+func (m *Manager) updateUser(u *gateonv1.User, hashed string) (bool, error) {
+	q, args := QueryUpdateUser, []any{u.Username, u.Role, u.Id}
+	if hashed != "" {
+		q, args = QueryUpdateUserWithPassword, []any{u.Username, hashed, u.Role, u.Id}
+	}
+	res, err := m.db.Exec(m.dialect.Rebind(q), args...)
+	if err != nil {
+		return false, userWriteError(err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("failed to update user: %w", err)
+	}
+	if n == 0 {
+		return false, nil
+	}
+	m.revokeSessions(u.Id)
+	return true, nil
+}
+
+// insertUser creates u. A new account has no session to revoke.
+func (m *Manager) insertUser(u *gateonv1.User, hashed string) error {
+	q := m.dialect.Rebind(QueryInsertUser)
+	if _, err := m.db.Exec(q, u.Id, u.Username, hashed, u.Role); err != nil {
+		return userWriteError(err)
+	}
 	return nil
 }
 
-func (m *Manager) upsertSQLitePostgres(id, username, password, role string) error {
-	if password != "" {
-		q := m.dialect.Rebind(QueryInsertUserSQLitePostgresWithPassword)
-		_, err := m.db.Exec(q, id, username, password, role)
-		if err != nil {
-			return fmt.Errorf("failed to upsert user with password (sqlite/postgres): %w", err)
-		}
-		return nil
+// userWriteError names a unique-constraint refusal for what it means to the
+// caller, and wraps anything else. The one unique column besides the id is the
+// username; the id collides only when two creates race under one chosen id,
+// where the answer -- someone else has it -- is the same.
+func userWriteError(err error) error {
+	if db.IsUniqueViolation(err) {
+		return ErrUsernameTaken
 	}
-	q := m.dialect.Rebind(QueryInsertUserSQLitePostgresNoPassword)
-	_, err := m.db.Exec(q, id, username, "", role)
-	if err != nil {
-		return fmt.Errorf("failed to upsert user without password (sqlite/postgres): %w", err)
-	}
-	return nil
+	return fmt.Errorf("failed to save user: %w", err)
 }
 
 func (m *Manager) ChangePassword(id, password string) error {

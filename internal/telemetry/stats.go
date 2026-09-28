@@ -178,6 +178,40 @@ func requestHost(requestURI string) string {
 	return requestURI[:i]
 }
 
+// Authorization schemes whose credentials carry a password: Basic sends one,
+// and a Digest response is derived from one.
+const (
+	authSchemeBasic  = "Basic"
+	authSchemeDigest = "Digest"
+)
+
+// presentsPassword reports whether a request's Authorization header carries a
+// password, which is what makes a refused GET a guess rather than a poll.
+//
+// Bearer and every other scheme carry a token the server issued; a client that
+// keeps presenting a stale one is a session that ended, not someone guessing,
+// and the brute-force check must not report it any more than it reports a tab
+// whose session cookie expired. NTLM and Negotiate are left out as well: their
+// handshake answers its first legs 401 by design.
+//
+// It reads the scheme and nothing after it, and allocates nothing.
+func presentsPassword(header map[string][]string) bool {
+	for _, v := range header["Authorization"] {
+		if hasAuthScheme(v, authSchemeBasic) || hasAuthScheme(v, authSchemeDigest) {
+			return true
+		}
+	}
+	return false
+}
+
+// hasAuthScheme reports whether an Authorization value is credentials of the
+// given scheme: the scheme's name, matched without regard to case as RFC 9110
+// requires, then a space and something after it.
+func hasAuthScheme(value, scheme string) bool {
+	n := len(scheme)
+	return len(value) > n+1 && value[n] == ' ' && strings.EqualFold(value[:n], scheme)
+}
+
 // RecordTrace records a trace for an operation.
 func RecordTrace(id, operationName, serviceName, routeID string, durationMs float64, timestamp time.Time, status, path, sourceIP, fingerprint, countryCode, userAgent, method, referer, requestURI, ja4, ja4h string, reqHeader, respHeader map[string][]string, recommendation string, reputation float64, entrypointDelay, routeDelay, middlewareDelay, serviceDelay float64) {
 	tr := GetTraceRecord()
@@ -199,6 +233,7 @@ func RecordTrace(id, operationName, serviceName, routeID string, durationMs floa
 	tr.Host = requestHost(requestURI)
 	tr.JA4 = ja4
 	tr.JA4H = ja4h
+	tr.PasswordAuth = presentsPassword(reqHeader)
 	tr.rawReqHeader = CloneHeader(reqHeader)
 	tr.rawRespHeader = CloneHeader(respHeader)
 	if recommendation == "" {
@@ -233,6 +268,7 @@ func RecordTraceDetailed(id, operationName, serviceName, routeID string, duratio
 	tr.Host = requestHost(requestURI)
 	tr.JA4 = ja4
 	tr.JA4H = ja4h
+	tr.PasswordAuth = presentsPassword(reqHeader)
 	tr.rawReqHeader = CloneHeader(reqHeader)
 	tr.RequestBody = reqBody
 	tr.rawRespHeader = CloneHeader(respHeader)

@@ -46,8 +46,8 @@ import { ManualMitigationModal } from "./ManualMitigationModal";
 import TraceVisualizer from "../Diagnostics/TraceVisualizer";
 import { QueryError } from "../QueryError";
 import type { Anomaly } from "../../types/gateon";
-import { safeFormatDate } from "../../utils/format";
-import { getSeverityColor } from "../../utils/security";
+import { formatLiftsIn, msUntilLiftsInChanges, safeFormatDate } from "../../utils/format";
+import { getSeverityColor, splitScopedBlock } from "../../utils/security";
 import { notifications } from "@mantine/notifications";
 import { usePermissions } from "../../hooks/usePermissions";
 
@@ -58,6 +58,27 @@ const PAGE_SIZE = 15;
 // in place of a URL. See throttleAnomaly in internal/api.
 const KERNEL_THROTTLE = "kernel_throttle";
 const isKernelThrottle = (threat: Anomaly | null) => threat?.type === KERNEL_THROTTLE;
+
+// LiftsIn counts down to a mitigation's expiry and stays right while the page
+// is open. It keeps no interval: it sleeps until its own text would change
+// (msUntilLiftsInChanges), and the timer is cleared with the row.
+function LiftsIn({ expiresAt }: { expiresAt: string }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const wait = msUntilLiftsInChanges(expiresAt, now);
+    if (wait === null) return;
+    const timer = setTimeout(() => setNow(Date.now()), wait);
+    return () => clearTimeout(timer);
+  }, [expiresAt, now]);
+
+  const text = formatLiftsIn(expiresAt, now);
+  if (!text) return null;
+  return (
+    <Tooltip label={safeFormatDate(expiresAt, "MMM d, HH:mm:ss")}>
+      <Text size="xs" c="dimmed" data-testid="lifts-in">{text}</Text>
+    </Tooltip>
+  );
+}
 
 export function ThreatExplorerTab() {
   const { canWrite } = usePermissions();
@@ -242,13 +263,16 @@ export function ThreatExplorerTab() {
           </Badge>
         </Table.Td>
         <Table.Td>
-          {isKernelThrottle(threat) ? (
-            <Badge color="yellow" variant="light" size="xs">Throttled</Badge>
-          ) : (
-            <Badge color={threat.mitigated ? "teal" : "orange"} variant="light" size="xs">
-              {threat.mitigated ? "Mitigated" : "Detected"}
-            </Badge>
-          )}
+          <Stack gap={2}>
+            {isKernelThrottle(threat) ? (
+              <Badge color="yellow" variant="light" size="xs">Throttled</Badge>
+            ) : (
+              <Badge color={threat.mitigated ? "teal" : "orange"} variant="light" size="xs">
+                {threat.mitigated ? "Mitigated" : "Detected"}
+              </Badge>
+            )}
+            {threat.expiresAt && <LiftsIn expiresAt={threat.expiresAt} />}
+          </Stack>
         </Table.Td>
         <Table.Td>
           <Group gap={4}>
@@ -388,11 +412,19 @@ export function ThreatExplorerTab() {
               This lifts the kernel rate limit on <b>{pendingAllow?.source}</b> and resets the automatic
               history that set it. It will be able to send at full rate again.
             </Alert>
+          ) : splitScopedBlock(pendingAllow?.source) ? (
+            <Alert color="red" icon={<IconAlertTriangle size={16} />}>
+              This lifts the block on the client build <b>{splitScopedBlock(pendingAllow?.source)?.build}</b> for
+              clients on <b>{splitScopedBlock(pendingAllow?.source)?.network}</b>. They will be able to reach your
+              services again.
+            </Alert>
           ) : (
             <Alert color="red" icon={<IconAlertTriangle size={16} />}>
               This removes the mitigation for <b>{pendingAllow?.source}</b>
-              {pendingAllow?.ja4plus ? ` (fingerprint ${pendingAllow.ja4plus})` : ""}. It will be able to
-              reach your services again.
+              {pendingAllow?.ja4plus && pendingAllow.ja4plus !== pendingAllow.source
+                ? ` (fingerprint ${pendingAllow.ja4plus})`
+                : ""}
+              . It will be able to reach your services again.
             </Alert>
           )}
           <Group justify="flex-end" gap="sm">

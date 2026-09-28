@@ -13,6 +13,7 @@ import (
 
 	"connectrpc.com/connect"
 	"github.com/gsoultan/gateon/internal/api"
+	"github.com/gsoultan/gateon/internal/middleware"
 	"github.com/gsoultan/gateon/internal/telemetry/tracearchive"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 	"github.com/gsoultan/gateon/proto/gateon/v1/gateonv1connect"
@@ -26,7 +27,11 @@ func TestAPIConnectHandler_CarriesStatusCodes(t *testing.T) {
 	t.Setenv(tracearchive.EnvDir, t.TempDir())
 	mux := http.NewServeMux()
 	mux.Handle(apiConnectHandler(&api.ApiService{}))
-	srv := httptest.NewServer(mux)
+	// The base handler's decision for a deployment with authentication off;
+	// this test is about status codes, not about who may call.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mux.ServeHTTP(w, r.WithContext(middleware.WithAuthNotRequired(r.Context())))
+	}))
 	defer srv.Close()
 	client := gateonv1connect.NewApiServiceClient(srv.Client(), srv.URL)
 	ctx := context.Background()

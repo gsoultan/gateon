@@ -21,7 +21,7 @@ func doPostureRequest(t *testing.T, d *Deps) (*httptest.ResponseRecorder, Securi
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/v1/security/posture", nil)
 	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, req)
+	mux.ServeHTTP(rec, authWaived(req))
 
 	var report SecurityPostureReport
 	if rec.Code == http.StatusOK {

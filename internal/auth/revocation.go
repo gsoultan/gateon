@@ -9,6 +9,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"os"
 	"strconv"
 	"strings"
@@ -24,11 +25,21 @@ var (
 	// ErrSessionRevoked means the token is cryptographically valid but the
 	// account it was issued for has since changed in a way that must end every
 	// live session.
-	ErrSessionRevoked = errors.New("session revoked: the account was disabled, deleted, or its role or password changed")
+	ErrSessionRevoked = errors.New("session revoked: the account signed out, was disabled or deleted, or its role or password changed")
 )
 
-// sessionBinding derives a short, stable fingerprint of the security-relevant
-// state of a user row.
+// accountState is the part of a users row a session is bound to: the columns
+// whose change must end every live session of the account.
+type accountState struct {
+	passwordHash string
+	role         string
+	disabled     bool
+	// sessionEpoch counts the account's sign-outs; see EndSessions.
+	sessionEpoch int64
+}
+
+// binding derives a short, stable fingerprint of the security-relevant state
+// of a user row.
 //
 // A PASETO here is a bearer token with a fixed lifetime and, before this
 // existed, nothing consulted the database on the way in: VerifyToken checked
@@ -41,20 +52,30 @@ var (
 // Binding the token to a digest of (password hash, role, disabled) makes all
 // four of those events revoke implicitly: each one changes an input, the digest
 // stops matching, and every token minted before the change is refused. It needs
-// no schema change and no revocation list to keep, which matters because a
-// denylist is another unbounded structure to size and expire.
+// no revocation list to keep, which matters because a denylist is another
+// unbounded structure to size and expire. A sign-out is the fifth event, and
+// the session epoch is its input.
+//
+// The epoch is written only once it is above zero. Every account starts at
+// zero, and until an account first signs out its digest is byte for byte the
+// one the previous release minted -- so upgrading ends nobody's session, and a
+// token issued before the upgrade verifies after it.
 //
 // The password hash is an input, not an output: it never leaves this function,
 // and only its digest reaches the token.
-func sessionBinding(passwordHash, role string, disabled bool) string {
+func (a accountState) binding() string {
 	h := sha256.New()
-	// Length-prefixed so ("ab","c") and ("a","bc") cannot collide.
-	writeField(h, passwordHash)
-	writeField(h, role)
-	if disabled {
+	// Length-prefixed so ("ab","c") and ("a","bc") cannot collide, and so a
+	// digest with an epoch cannot equal one without.
+	writeField(h, a.passwordHash)
+	writeField(h, a.role)
+	if a.disabled {
 		writeField(h, "1")
 	} else {
 		writeField(h, "0")
+	}
+	if a.sessionEpoch > 0 {
+		writeField(h, strconv.FormatInt(a.sessionEpoch, 10))
 	}
 	sum := h.Sum(nil)
 	return hex.EncodeToString(sum[:16])
@@ -180,26 +201,55 @@ func (m *Manager) currentBinding(id string) (string, error) {
 		return b, nil
 	}
 
-	var (
-		passwordHash string
-		role         string
-		disabled     bool
-	)
+	var st accountState
 	q := m.dialect.Rebind(QuerySessionBindingByID)
-	if err := m.db.QueryRow(q, id).Scan(&passwordHash, &role, &disabled); err != nil {
+	if err := m.db.QueryRow(q, id).Scan(&st.passwordHash, &st.role, &st.disabled, &st.sessionEpoch); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			// Deleted account. Its tokens must stop working immediately.
 			return "", ErrSessionRevoked
 		}
 		return "", err
 	}
-	if role == "" {
-		role = RoleViewer
+	if st.role == "" {
+		st.role = RoleViewer
 	}
 
-	b := sessionBinding(passwordHash, role, disabled)
+	b := st.binding()
 	m.bindings.put(id, b)
 	return b, nil
+}
+
+// EndSessions signs account id out everywhere: every session it holds, on
+// every device, stops working.
+//
+// Sign-out used to clear the browser's cookie and nothing else. A PASETO is a
+// bearer token that the gateway keeps no record of, so a copy of the cookie --
+// taken by malware, left on a shared machine, written to a proxy's log -- went
+// on working for the rest of its eight hours after its owner had signed out.
+// Advancing the epoch changes an input of the session binding, the way a
+// password change does, so every token issued before it is refused on its next
+// request.
+//
+// It is every session of the account, not only the one that asked, on purpose:
+// one token cannot be revoked on its own without a record of every token, and
+// signing out is also what someone does who suspects the session was copied --
+// which only helps if the copy ends too.
+//
+// In a cluster the node that handles the sign-out refuses the old sessions at
+// once. The others follow when their cached binding expires (DefaultBindingTTL,
+// GATEON_SESSION_BINDING_TTL), or within a round trip when the Redis
+// invalidation channel is configured; the epoch is in the shared database, so
+// no node can go on accepting a signed-out session for longer than the TTL.
+func (m *Manager) EndSessions(id string) error {
+	if id == "" {
+		return nil
+	}
+	q := m.dialect.Rebind(QueryAdvanceSessionEpoch)
+	if _, err := m.db.Exec(q, id); err != nil {
+		return fmt.Errorf("failed to end sessions: %w", err)
+	}
+	m.revokeSessions(id)
+	return nil
 }
 
 // checkSessionBinding rejects a token whose binding no longer matches the

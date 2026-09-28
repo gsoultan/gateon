@@ -48,7 +48,7 @@ import { safeToFixed, safeToDateLocaleString } from "../utils/format";
 import { notifications } from "@mantine/notifications";
 import type { Anomaly } from "../types/gateon";
 import TraceVisualizer from "./Diagnostics/TraceVisualizer";
-import { getSeverityColor } from "../utils/security";
+import { getSeverityColor, splitScopedBlock } from "../utils/security";
 
 interface SecurityAnomalyModalProps {
   anomaly: Anomaly | null;
@@ -693,8 +693,18 @@ export function SecurityAnomalyModal({ anomaly: initialAnomaly, opened, onClose 
       >
         <Stack gap="md">
           <Alert color="red" icon={<IconAlertTriangle size={16} />}>
-            Are you sure you want to remove the mitigation for IP <b>{anomaly.source}</b>? 
-            This will allow the IP to access your services again.
+            {splitScopedBlock(anomaly.source) ? (
+              <>
+                Are you sure you want to lift the block on the client build{" "}
+                <b>{splitScopedBlock(anomaly.source)?.build}</b> for clients on{" "}
+                <b>{splitScopedBlock(anomaly.source)?.network}</b>? They will be able to access your services again.
+              </>
+            ) : (
+              <>
+                Are you sure you want to remove the mitigation for IP <b>{anomaly.source}</b>?
+                This will allow the IP to access your services again.
+              </>
+            )}
           </Alert>
           <Group justify="flex-end" gap="sm">
             <Button variant="default" onClick={closeConfirm}>Cancel</Button>

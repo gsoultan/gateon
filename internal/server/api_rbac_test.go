@@ -243,9 +243,26 @@ func TestGRPCRBAC_UnaryInterceptor(t *testing.T) {
 		}
 	})
 
+	// No claims used to mean "auth disabled" and serve. gRPC on a plaintext TCP
+	// entrypoint reached this interceptor without the base handler, carried no
+	// claims either, and so reached UpdateGlobalConfig with no credential.
+	t.Run("no claims without the base handler's waiver is refused", func(t *testing.T) {
+		reached, err := call("", updateGlobal)
+		if reached || status.Code(err) != codes.Unauthenticated {
+			t.Fatalf("no claims and no waiver: reached=%v err=%v; want Unauthenticated and the handler untouched", reached, err)
+		}
+	})
+
 	t.Run("auth disabled still serves", func(t *testing.T) {
-		if _, err := call("", updateGlobal); err != nil {
-			t.Fatalf("no claims means PasetoAuth never ran; got %v", err)
+		ctx := middleware.WithAuthNotRequired(context.Background())
+		reached := false
+		_, err := interceptor(ctx, nil, &grpc.UnaryServerInfo{FullMethod: updateGlobal},
+			func(context.Context, any) (any, error) {
+				reached = true
+				return nil, nil
+			})
+		if err != nil || !reached {
+			t.Fatalf("the base handler waived authentication (auth disabled); got reached=%v err=%v", reached, err)
 		}
 	})
 }
@@ -311,8 +328,10 @@ func TestAuthorizeProcedure(t *testing.T) {
 		{"login is public", context.Background(), procedureFor("Login"), false},
 		{"setup is public", context.Background(), procedureFor("Setup"), false},
 
-		// Auth disabled: PasetoAuth never ran, matching handlers.RequirePermission.
-		{"no claims allows", context.Background(), procedureFor("MitigateThreat"), false},
+		// No claims is nobody, unless the base handler waived authentication
+		// (auth disabled for the deployment). ADR 0027.
+		{"no claims without a waiver denied", context.Background(), procedureFor("MitigateThreat"), true},
+		{"no claims with the base handler's waiver allows", middleware.WithAuthNotRequired(context.Background()), procedureFor("MitigateThreat"), false},
 
 		// Fails closed.
 		{"unmapped denied", claims(auth.RoleAdmin), procedureFor("SomeRpcAddedLater"), true},

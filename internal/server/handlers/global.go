@@ -101,6 +101,8 @@ func writeServiceRefusal(w http.ResponseWriter, err error) {
 		WriteHTTPError(w, http.StatusForbidden, st.Message())
 	case codes.ResourceExhausted:
 		WriteHTTPError(w, http.StatusTooManyRequests, st.Message())
+	case codes.AlreadyExists:
+		WriteHTTPError(w, http.StatusConflict, st.Message())
 	default:
 		logger.L.LogError("management request failed", "error", err)
 		WriteHTTPError(w, http.StatusInternalServerError, "the request could not be completed")
@@ -865,13 +867,33 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 		data, _ := ProtojsonOptions().Marshal(resp)
 		_, _ = w.Write(data)
 	})
-	mux.HandleFunc("POST /v1/logout", func(w http.ResponseWriter, r *http.Request) {
-		// Audit Log
-		if claims, _ := callerClaims(r); claims != nil {
-			audit.Log(r.Context(), claims.Username, "logout", "auth", "User logged out", request.ClientAddr(r))
-		}
+	mux.HandleFunc("POST /v1/logout", handleLogout(d))
+}
+
+// handleLogout signs the caller out everywhere.
+//
+// It used to clear the cookie and nothing else, so the session token the
+// cookie held kept working until it expired -- up to eight hours -- for anyone
+// holding a copy of it. It now ends every session of the account
+// (auth.Manager.EndSessions). The cookie is cleared either way: this browser is
+// signed out even when the gateway cannot end the others, and says so.
+func handleLogout(d *Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
 		middleware.ClearSessionCookie(w, r)
 		w.Header().Set("Content-Type", "application/json")
+		claims, _ := callerClaims(r)
+		if claims != nil && auth.Available(d.AuthManager) {
+			if err := d.AuthManager.EndSessions(claims.ID); err != nil {
+				logger.L.LogError("sign-out could not end the account's sessions; "+
+					"a copy of its session cookie still works until it expires",
+					"error", err, "user", claims.ID)
+				WriteHTTPError(w, http.StatusInternalServerError,
+					"signed out on this device, but the account's other sessions could not be ended")
+				return
+			}
+			audit.Log(r.Context(), claims.Username, "logout", "auth",
+				"User signed out; every session of the account ended", request.ClientAddr(r))
+		}
 		_ = json.NewEncoder(w).Encode(map[string]bool{"success": true})
-	})
+	}
 }

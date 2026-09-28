@@ -10,7 +10,17 @@ Gateon can proxy email servers (SMTP, IMAP, POP3) using its **L4 TCP proxy**. Th
 | **IMAP** | 143, 993             | L4 TCP         |
 | **POP3** | 110, 995             | L4 TCP         |
 
-Gateon’s L4 proxy forwards raw TCP bytes. It does not inspect the application protocol, so any TCP service works.
+Once a connection is routed, Gateon’s L4 proxy forwards raw TCP bytes. It does not interpret the mail protocol, so SMTP, IMAP, POP3 and their STARTTLS upgrades pass through unchanged.
+
+## The mail server speaks first
+
+In SMTP, IMAP and POP3 the server greets first (`220 ...`, `* OK ...`, `+OK ...`) and the client waits for the greeting. A plaintext TCP entrypoint chooses a route by reading what the client sends first, because one port can serve HTTP, SSH, RDP and TCP routes together. Set the entrypoints up so it knows there is nothing to read:
+
+1. **Give each mail port an entrypoint of its own, whose only route is its `tcp` route**: one entrypoint for 25, one for 587, one for 143, and so on. Gateon then hands each connection to the route as soon as it is accepted, and the greeting arrives at once. Everything sent to that port, HTTP included, goes to the mail server.
+2. **List entrypoints on every HTTP, gRPC and GraphQL route.** A route of one of those types that lists no entrypoints is served on every entrypoint, the mail ports included, and a port serving it is no longer a mail-only port. An `ssh` or `rdp` route on the port has the same effect; a `udp` route does not.
+3. **On a port that also serves other routes, the greeting takes half a second.** Gateon gives the client 500 ms to speak, then connects to the mail server and lets whichever speaks first decide: the server's greeting takes the connection to the `tcp` route, and a client's request is routed by what it says. Mail still works, it only starts later. A client of another protocol that says nothing for more than 500 ms after connecting reaches the mail server instead of its own route.
+4. **A TLS-terminating entrypoint never waits**: the client starts the handshake. See *TLS and STARTTLS* below for where its targets must point.
+5. **A TCP entrypoint holds at most `max_connections` connections.** At 0 it holds the resource profile's default: 1000 on `minimal`, 10000 on `standard`, 50000 on `enterprise`.
 
 ## DKIM
 
@@ -62,20 +72,26 @@ Configure your mail server to accept PROXY protocol and use the real client IP.
 
 Create one TCP entrypoint per port you want to expose, for example:
 
-| Entrypoint        | Port | TLS         | Use case        |
-|-------------------|------|-------------|-----------------|
-| `smtp-submission` | 587  | Yes (recommended) | SMTP submission |
-| `smtps`           | 465  | Yes         | SMTPS           |
-| `imaps`           | 993  | Yes         | IMAP over TLS   |
-| `pop3s`           | 995  | Yes         | POP3 over TLS   |
-| `smtp`            | 25   | Optional    | SMTP relay      |
+| Entrypoint   | Port | TLS on the entrypoint | Use case                           |
+|--------------|------|-----------------------|------------------------------------|
+| `smtp`       | 25   | No                    | SMTP relay, upgraded with STARTTLS |
+| `submission` | 587  | No                    | SMTP submission, with STARTTLS     |
+| `smtps`      | 465  | Yes, or No            | SMTP submission over implicit TLS  |
+| `imap`       | 143  | No                    | IMAP, with STARTTLS                |
+| `imaps`      | 993  | Yes, or No            | IMAP over implicit TLS             |
+| `pop3`       | 110  | No                    | POP3, with STARTTLS                |
+| `pop3s`      | 995  | Yes, or No            | POP3 over implicit TLS             |
+
+Leave TLS off on the STARTTLS ports (25, 587, 143, 110). Their clients connect in plaintext, read the greeting and then ask the mail server to upgrade; a TLS-terminating entrypoint on one of them would wait for a handshake the client never starts. For the implicit-TLS ports, *TLS and STARTTLS* below explains both choices.
 
 ### 3. Create Routes
 
 - **Type:** `tcp`
-- **Entrypoints:** select the TCP entrypoint(s) you use
+- **Entrypoints:** the mail entrypoints this service answers on
 - **Service:** the service created above
 - **Rule:** `L4()` (automatic for L4 routes)
+
+Serve nothing else on the mail entrypoints, and give every HTTP route its own entrypoints, so the greeting is not delayed (see *The mail server speaks first*).
 
 ### 4. Configure Backend Mail Server
 
@@ -89,8 +105,15 @@ When your server sends mail, it typically connects directly to recipient MTAs. Y
 
 ## TLS and STARTTLS
 
-- **Ports 465, 993, 995:** Enable TLS on the Gateon entrypoint and point targets to the backend’s TLS ports.
-- **STARTTLS (e.g. 25, 587):** Gateon passes bytes through; STARTTLS upgrades work without extra config.
+- **Implicit TLS (465, 993, 995):** choose who terminates TLS.
+  - *The mail server:* a TCP entrypoint **without** TLS, with targets on the server's TLS
+    ports (`mail.internal:993`). Gateon relays the encrypted bytes untouched.
+  - *Gateon:* enable TLS on the entrypoint and point the targets at the server's
+    **plaintext** ports (`mail.internal:143` for IMAPS, `:110` for POP3S, `:25` or `:587`
+    for SMTPS). A TLS-terminating entrypoint forwards plaintext, so a target on the
+    server's TLS port would receive plaintext on a TLS listener and fail.
+- **STARTTLS (25, 587, 143, 110):** Gateon relays the bytes, so the upgrade happens
+  between the client and the mail server without extra config.
 
 ## Summary
 

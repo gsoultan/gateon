@@ -216,37 +216,17 @@ func (p *TCPBackendPool) Release(addr string) {
 }
 
 // ProxyTCP proxies a client connection to a backend from the pool.
+//
+// The client socket belongs to this call, whichever way it ends: the
+// plaintext entrypoint that hands connections here does not close them, so
+// this is the only close.
 func (p *TCPBackendPool) ProxyTCP(ctx context.Context, client net.Conn) {
-	// The client socket belongs to this call: the error paths below close it
-	// explicitly, and the normal path only half-closed it, leaving the
-	// descriptor to the garbage collector. The plaintext entrypoint that hands
-	// connections here does not close them either, so this is the only close.
-	defer client.Close()
-	addr := p.Pick()
-	if addr == "" {
-		_ = client.Close()
-		return
-	}
-	defer p.Release(addr)
-
-	dialer := net.Dialer{Timeout: 10 * time.Second}
-	backend, err := dialer.DialContext(ctx, "tcp", addr)
+	b, err := p.DialBackend(ctx, client)
 	if err != nil {
 		_ = client.Close()
 		return
 	}
-	defer backend.Close()
-
-	if p.proxyProtocol {
-		if err := writeProxyHeader(backend, client.RemoteAddr(), backend.RemoteAddr()); err != nil {
-			_ = client.Close()
-			return
-		}
-	}
-	if client, err = takeReadAhead(client, backend); err != nil {
-		return
-	}
-	pipeHalfClose(client, backend)
+	b.Proxy(client, nil)
 }
 
 // takeReadAhead sends a ReadAheadConn's unread bytes to backend and returns the
@@ -361,6 +341,12 @@ func copyPooled(dst io.Writer, src io.Reader) {
 
 // writeProxyHeader sends HAProxy PROXY protocol v1 header so the backend sees the original client IP.
 // Format: "PROXY TCP4 src_ip dst_ip src_port dst_port\r\n" (or TCP6 for IPv6).
+//
+// The destination is serverAddr, the address the client connected to -- the
+// client connection's local address. It was the backend's own address, which
+// told the backend nothing it did not know, and came from a different socket
+// than the source, so a client and a backend of different address families
+// produced a header naming one of each.
 func writeProxyHeader(backend net.Conn, clientAddr, serverAddr net.Addr) error {
 	srcIP, srcPort := parseAddr(clientAddr)
 	dstIP, dstPort := parseAddr(serverAddr)

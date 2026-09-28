@@ -7,7 +7,9 @@ Date: 2026-09-27
 Accepted. Amends ADR 0011: it changes which part of the fingerprint the
 network-scoped identity is built from. Co-signed `arch` ↔ `sec`: it moves both
 edges of the boundary a reputation refusal acts on -- whom one refusal reaches
-inside a network, and what a refused client can do to step outside it.
+inside a network, and what a refused client can do to step outside it. The
+`UserMitigation` reader listed under Consequences is keyed on this identity
+by ADR 0026.
 
 ## Context
 

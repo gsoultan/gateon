@@ -146,6 +146,61 @@ func TestAnIPv6ThrottleIsListedAndReleasedByItsSlash64(t *testing.T) {
 	}
 }
 
+// TestAThrottleIsListedWithWhenItLifts: when a kernel throttle lapses was only
+// in the row's description, as prose, so the dashboard could not count down to
+// it. The row carries the lease's end as a field of its own, from the Holder's
+// lease table, and a renewal moves it.
+func TestAThrottleIsListedWithWhenItLifts(t *testing.T) {
+	s, _ := throttleTestService(t)
+	holder := holderOf(t, s)
+	if err := holder.SetAdaptiveRateLimitFor("10.64.0.1", time.Second, "test"); err != nil {
+		t.Fatal(err)
+	}
+	row := listedThrottle(t, s, "ipMitigated", "10.64.0.1")
+	if row == nil {
+		t.Fatal("the throttle is not listed")
+	}
+	lease := holder.AdaptiveLimits()[0]
+	want := lease.Expires.UTC().Format(time.RFC3339)
+	if row.GetExpiresAt() != want {
+		t.Fatalf("expires_at = %q, want the lease's end %q", row.GetExpiresAt(), want)
+	}
+	at, err := time.Parse(time.RFC3339, row.GetExpiresAt())
+	if err != nil {
+		t.Fatalf("expires_at %q is not RFC 3339: %v", row.GetExpiresAt(), err)
+	}
+	if d := at.Sub(lease.SetAt); d < ebpf.AdaptiveLimitLease-time.Second || d > ebpf.AdaptiveLimitLease {
+		t.Errorf("expires_at is %s after the limit was set, want the %s lease", d, ebpf.AdaptiveLimitLease)
+	}
+
+	// A stored mitigation carries no lease; the field stays empty rather than
+	// naming a moment nothing will act on.
+	if err := telemetry.MarkIPMitigated("10.64.0.2", "test"); err != nil {
+		t.Fatal(err)
+	}
+	resp, err := s.ListSecurityThreats(t.Context(), &gateonv1.ListSecurityThreatsRequest{Status: "ipMitigated", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, a := range resp.GetThreats() {
+		if a.GetSource() == "10.64.0.2" && a.GetExpiresAt() != "" {
+			t.Errorf("a stored IP block, which has no expiry, is listed as lifting at %q", a.GetExpiresAt())
+		}
+	}
+}
+
+// TestTheExpiryOfNothingIsEmpty: a zero time formats as year one, which a
+// countdown would show as a limit that lifted two thousand years ago.
+func TestTheExpiryOfNothingIsEmpty(t *testing.T) {
+	if got := rfc3339OrEmpty(time.Time{}); got != "" {
+		t.Errorf("rfc3339OrEmpty(zero) = %q, want empty", got)
+	}
+	at := time.Date(2026, 9, 27, 23, 5, 0, 0, time.FixedZone("x", 7*3600))
+	if got := rfc3339OrEmpty(at); got != "2026-09-27T16:05:00Z" {
+		t.Errorf("rfc3339OrEmpty = %q, want it in UTC", got)
+	}
+}
+
 // listedThrottle is the kernel_throttle row for source on the mitigation list
 // status names, or nil.
 func listedThrottle(t *testing.T, s *ApiService, status, source string) *gateonv1.Anomaly {

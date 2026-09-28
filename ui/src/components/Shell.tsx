@@ -24,9 +24,9 @@ import {
   useMantineColorScheme,
 } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
-import { Link, Outlet, useLocation, useNavigate } from "@tanstack/react-router";
-import { apiFetch, useGateonStatus } from "../hooks/useGateon";
-import { queryClient } from "../queryClient";
+import { Link, Outlet, useLocation } from "@tanstack/react-router";
+import { useGateonStatus } from "../hooks/useGateon";
+import { useSignOut } from "../hooks/useSignOut";
 import { usePermissions } from "../hooks/usePermissions";
 import { useIsMobile } from "../hooks/useMobile";
 import { GlobalHealthBar } from "./GlobalHealthBar";
@@ -35,6 +35,7 @@ import { usePreferencesStore } from "../store/usePreferencesStore";
 import { CommandPaletteProvider } from "./CommandPalette";
 import { CommandSearchButton } from "./CommandPalette/CommandSearchButton";
 import { ConnectionStatus } from "./ConnectionStatus";
+import { SIGN_OUT_SCOPE } from "./signOut";
 import {
   IconDashboard,
   IconRoute,
@@ -86,8 +87,7 @@ export function Shell() {
   const location = useLocation();
   const { data: status, refetch, isFetching } = useGateonStatus();
   const { colorScheme, setColorScheme } = useMantineColorScheme();
-  const logout = useAuthStore((state) => state.logout);
-  const navigate = useNavigate();
+  const signOut = useSignOut();
   const user = useAuthStore((state) => state.user);
   const isViewer = usePermissions().isViewer;
   const isMobile = useIsMobile();
@@ -319,22 +319,12 @@ export function Shell() {
           <Menu.Item
             color="red"
             leftSection={<IconLogout size={16} stroke={1.5} />}
-            onClick={() => {
-              void (async () => {
-                try {
-                  await apiFetch("/v1/logout", { method: "POST" });
-                } catch {
-                  // Ignore network errors; clear local session regardless.
-                } finally {
-                  // Drop cached, potentially sensitive data from this session.
-                  queryClient.clear();
-                  logout();
-                  void navigate({ to: "/login" });
-                }
-              })();
-            }}
+            onClick={() => void signOut()}
           >
             Sign out
+            <Text size="xs" c="dimmed">
+              {SIGN_OUT_SCOPE}
+            </Text>
           </Menu.Item>
         </Menu.Dropdown>
       </Menu>

@@ -177,6 +177,31 @@ func (c AuthBaseConfig) HandleFailure(w http.ResponseWriter, r *http.Request, ne
 	httputil.WriteJSONError(w, http.StatusUnauthorized, msg, "")
 }
 
+// authNotRequiredKey carries the management base handler's decision that a
+// request needs no credential. An unexported struct type, so no string key
+// from anywhere else can forge it.
+type authNotRequiredKey struct{}
+
+// WithAuthNotRequired records on ctx that the management base handler decided
+// this request needs no credential: authentication is off for the deployment,
+// or the path must work before there is a session (setup, sign-in, the second
+// factor, health). Only that handler calls it.
+func WithAuthNotRequired(ctx context.Context) context.Context {
+	return context.WithValue(ctx, authNotRequiredKey{}, true)
+}
+
+// AuthNotRequired reports whether ctx carries that decision.
+//
+// An authorization check that found no claims used to read that as "auth is
+// disabled" and allow. A request that reached the check without passing the
+// base handler carried no claims either -- gRPC on a plaintext TCP entrypoint
+// did -- so the management API answered anyone who could reach the port. No
+// claims now means nobody, unless the base handler said nobody is needed.
+func AuthNotRequired(ctx context.Context) bool {
+	v, _ := ctx.Value(authNotRequiredKey{}).(bool)
+	return v
+}
+
 // InjectContext injects auth metadata into context.
 func InjectContext(ctx context.Context, claims any) context.Context {
 	ctx = context.WithValue(ctx, UserContextKey, claims)

@@ -9,12 +9,14 @@ import (
 	"time"
 )
 
+// Keys are a class on a network, as repid.For builds them (ADR 0026); the
+// store neither writes nor enforces one without the network.
 func TestUserMitigation(t *testing.T) {
 	// Initialize store
 	freshStore(t)
 
-	ja4_1 := "test-ja4-1"
-	ja4_2 := "test-ja4-2"
+	ja4_1 := "test-ja4-1|203.0.113"
+	ja4_2 := "test-ja4-2|203.0.113"
 	ja4h := "test-ja4h"
 
 	// 1. Initially should not be mitigated
@@ -106,7 +108,7 @@ func TestUnmitigationWinsSameSecondTie(t *testing.T) {
 	// re-mitigation of the same fingerprint for 24h, so reusing one would test
 	// that suppression rather than the tie-break.
 	for i := range 10 {
-		fp := "tie-ja4plus-" + strconv.Itoa(i)
+		fp := "tie-ja4plus-" + strconv.Itoa(i) + "|203.0.113"
 		MarkUserMitigated(fp, "JA4+", "blocked", "waf")
 		if !IsUserMitigated(fp) {
 			t.Fatalf("iteration %d: fingerprint not mitigated after MarkUserMitigated", i)
@@ -126,7 +128,7 @@ func TestUnmitigationWinsSameSecondTie(t *testing.T) {
 func TestUnmitigationHoldsAcrossSecondBoundary(t *testing.T) {
 	freshStore(t)
 
-	const fp = "hold-ja4plus"
+	const fp = "hold-ja4plus|203.0.113"
 
 	MarkUserMitigated(fp, "JA4+", "blocked", "waf")
 	MarkUserUnmitigated(fp)
@@ -168,7 +170,7 @@ func TestUserMitigationExpiresAfterTTL(t *testing.T) {
 	mitigationTTL = 1 * time.Second
 	defer func() { mitigationTTL = orig }()
 
-	const fp = "ttl-ja4plus"
+	const fp = "ttl-ja4plus|203.0.113"
 	MarkUserMitigated(fp, "JA4+", "blocked", "waf")
 	if !IsUserMitigated(fp) {
 		t.Fatal("not mitigated immediately after being marked")
@@ -192,7 +194,7 @@ func TestUserMitigationExpiresAfterTTL(t *testing.T) {
 func TestMarkUserUnmitigatedReportsWhatItReleased(t *testing.T) {
 	freshStore(t)
 
-	const fp = "release-report-ja4plus"
+	const fp = "release-report-ja4plus|203.0.113"
 
 	if MarkUserUnmitigated(fp) {
 		t.Error("reported a release for a fingerprint that was never mitigated")
@@ -207,41 +209,12 @@ func TestMarkUserUnmitigatedReportsWhatItReleased(t *testing.T) {
 	}
 }
 
-// The removal path must not rebuild a key: MarkUserMitigated files a row under
-// whichever string its caller chose, and the two shapes in the tree are the
-// fingerprint alone and the ja4+"_"+ja4h composite.
-func TestFindUserMitigationKeyResolvesTheStoredShape(t *testing.T) {
-	freshStore(t)
-
-	const (
-		plain = "find-key-ja4"
-		ja4h  = "find-key-ja4h"
-	)
-
-	if key, ok := FindUserMitigationKey(plain, ja4h); ok {
-		t.Errorf("resolved %q with nothing mitigated", key)
-	}
-
-	MarkUserMitigated(plain, "JA4+", "blocked", "waf")
-	if key, ok := FindUserMitigationKey(plain, ja4h); !ok || key != plain {
-		t.Errorf("got (%q, %v), want (%q, true): a block filed under the plain "+
-			"fingerprint is invisible to a caller that only guesses the composite",
-			key, ok, plain)
-	}
-
-	composite := "find-key-other-ja4" + fingerprintKeySeparator + ja4h
-	MarkUserMitigated(composite, "JA4+", "blocked", "waf")
-	if key, ok := FindUserMitigationKey("find-key-other-ja4", ja4h); !ok || key != composite {
-		t.Errorf("got (%q, %v), want (%q, true)", key, ok, composite)
-	}
-}
-
 // The TTL must not resurrect an explicit release, and must not be so eager that
 // a fresh block is useless.
 func TestUserMitigationHoldsWithinTTL(t *testing.T) {
 	freshStore(t)
 
-	const fp = "ttl-hold-ja4plus"
+	const fp = "ttl-hold-ja4plus|203.0.113"
 	MarkUserMitigated(fp, "JA4+", "blocked", "waf")
 	time.Sleep(1100 * time.Millisecond)
 

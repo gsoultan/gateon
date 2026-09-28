@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/logger"
@@ -24,6 +25,7 @@ type Resolver struct {
 	mu           sync.RWMutex
 	tcpPools     map[tcpPoolKey]*cachedTCPPool
 	udpProxies   map[string]*cachedUDPProxy
+	claims       atomic.Pointer[routeClaims] // see OnlyTCPRoute
 }
 
 // tcpPoolKey names a cached TCP pool: one per route per entrypoint. An

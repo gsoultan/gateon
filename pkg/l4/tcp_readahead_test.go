@@ -118,6 +118,43 @@ func TestProxyTCPTellsAReadAheadClientWhenTheBackendHangsUp(t *testing.T) {
 	}
 }
 
+// TestTheProxyHeaderNamesBothEndsOfTheClientsConnection: a PROXY header tells
+// the backend who connected and to what -- the client's address and the
+// address it connected to -- which is the only reason a mail server or a
+// database behind the gateway can check SPF, apply host rules or log the
+// right peer. The destination was the backend's own address, so a backend
+// that listens on several addresses, or checks which one a client used,
+// learned only that the gateway had reached it.
+func TestTheProxyHeaderNamesBothEndsOfTheClientsConnection(t *testing.T) {
+	headers := make(chan string, 1)
+	client, _ := proxiedPair(t, "", true, func(c net.Conn) {
+		line, _ := bufio.NewReader(c).ReadString('\n')
+		headers <- line
+	})
+	src, dst := hostPort(t, client.LocalAddr()), hostPort(t, client.RemoteAddr())
+	want := "PROXY TCP4 " + src.host + " " + dst.host + " " + src.port + " " + dst.port + "\r\n"
+	select {
+	case got := <-headers:
+		if got != want {
+			t.Errorf("backend read the PROXY header %q, want %q: source is the client, destination "+
+				"the address the client connected to", got, want)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the backend never received a PROXY header")
+	}
+}
+
+type addrParts struct{ host, port string }
+
+func hostPort(t *testing.T, a net.Addr) addrParts {
+	t.Helper()
+	host, port, err := net.SplitHostPort(a.String())
+	if err != nil {
+		t.Fatalf("split %v: %v", a, err)
+	}
+	return addrParts{host, port}
+}
+
 // TestProxyTCPDeliversReadAheadBytesFirst: the bytes the entrypoint read to
 // identify the protocol reach the backend before the rest of the stream, and
 // after the PROXY header when there is one -- whichever way the proxy moves

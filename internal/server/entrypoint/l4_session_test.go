@@ -59,25 +59,38 @@ func serveBackend(tb testing.TB, handle func(net.Conn)) (addr string, stop func(
 	}
 }
 
-// l4Resolver builds the resolver cmd/gateon builds, over registries holding
-// one generic TCP route from entrypoint epID to backend.
+// l4Resolver builds the resolver cmd/gateon builds, over registries holding a
+// generic TCP route from entrypoint epID to backend and an HTTP route on epID:
+// an entrypoint serving both reads each connection's first bytes, which is
+// the path these fixtures exist to exercise. tcpOnlyEntrypoint builds the
+// other kind.
 func l4Resolver(tb testing.TB, epID, backend string) L4Resolver {
+	tb.Helper()
+	return routesResolver(tb, epID, backend, true)
+}
+
+// routesResolver builds the resolver cmd/gateon builds over route and service
+// registries holding a tcp route from epID to backend, unless backend is "",
+// and an HTTP route listing epID when withHTTP.
+func routesResolver(tb testing.TB, epID, backend string, withHTTP bool) L4Resolver {
 	tb.Helper()
 	dir := tb.TempDir()
 	routes := config.NewRouteRegistry(filepath.Join(dir, "routes.json"))
 	services := config.NewServiceRegistry(filepath.Join(dir, "services.json"))
-	svc := &gateonv1.Service{
-		Id:              "l4-svc",
-		Name:            "l4-svc",
-		BackendType:     "tcp",
-		WeightedTargets: []*gateonv1.Target{{Url: "tcp://" + backend, Weight: 1}},
+	ctx := context.Background()
+	if backend != "" {
+		svc := &gateonv1.Service{Id: "l4-svc", Name: "l4-svc", BackendType: "tcp",
+			WeightedTargets: []*gateonv1.Target{{Url: "tcp://" + backend, Weight: 1}}}
+		rt := &gateonv1.Route{Id: "l4-route", Type: "tcp", Entrypoints: []string{epID}, ServiceId: svc.Id}
+		if services.Update(ctx, svc) != nil || routes.Update(ctx, rt) != nil {
+			tb.Fatal("could not store the tcp route")
+		}
 	}
-	if err := services.Update(context.Background(), svc); err != nil {
-		tb.Fatalf("add service: %v", err)
-	}
-	rt := &gateonv1.Route{Id: "l4-route", Type: "tcp", Entrypoints: []string{epID}, ServiceId: svc.Id}
-	if err := routes.Update(context.Background(), rt); err != nil {
-		tb.Fatalf("add route: %v", err)
+	if withHTTP {
+		web := &gateonv1.Route{Id: "web", Type: "http", Entrypoints: []string{epID}, Rule: "PathPrefix(`/`)", ServiceId: "web-svc"}
+		if routes.Update(ctx, web) != nil {
+			tb.Fatal("could not store the HTTP route")
+		}
 	}
 	return WrapL4Resolver(l4.NewResolver(routes, services))
 }
@@ -89,9 +102,23 @@ func plaintextTCPEntrypoint(tb testing.TB, backend string) (addr string, stop fu
 	return l4Entrypoint(tb, backend, nil)
 }
 
-// l4Entrypoint starts a TCP entrypoint whose one route leads to backend,
-// terminating TLS with serverTLS when it is not nil.
+// l4Entrypoint starts a TCP entrypoint whose tcp route leads to backend,
+// beside an HTTP route, terminating TLS with serverTLS when it is not nil.
 func l4Entrypoint(tb testing.TB, backend string, serverTLS *tls.Config) (addr string, stop func()) {
+	tb.Helper()
+	return startL4Entrypoint(tb, serverTLS, func(epID string) L4Resolver { return l4Resolver(tb, epID, backend) })
+}
+
+// tcpOnlyL4Entrypoint starts a plaintext TCP entrypoint whose one route is a
+// tcp route to backend.
+func tcpOnlyL4Entrypoint(tb testing.TB, backend string) (addr string, stop func()) {
+	tb.Helper()
+	return startL4Entrypoint(tb, nil, func(epID string) L4Resolver { return routesResolver(tb, epID, backend, false) })
+}
+
+// startL4Entrypoint starts a TCP entrypoint wired the way cmd/gateon wires
+// one, with the resolver resolve builds for its ID.
+func startL4Entrypoint(tb testing.TB, serverTLS *tls.Config, resolve func(epID string) L4Resolver) (addr string, stop func()) {
 	tb.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -115,7 +142,7 @@ func l4Entrypoint(tb testing.TB, backend string, serverTLS *tls.Config) (addr st
 		TLSManager:       gtls.NewManager(gtls.Config{}),
 		Limiter:          traffic.NoopRateLimiter{},
 		ShutdownRegistry: reg,
-		L4Resolver:       l4Resolver(tb, ep.Id, backend),
+		L4Resolver:       resolve(ep.Id),
 		GlobalStore:      config.NewGlobalRegistry(filepath.Join(tb.TempDir(), "global.json")),
 		Phantom:          phantom.NewPhantomCore(),
 	}

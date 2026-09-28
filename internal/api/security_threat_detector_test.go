@@ -55,7 +55,7 @@ func TestSecurityThreatDetector_Comprehensive(t *testing.T) {
 			}(),
 			expectedAnom:   1,
 			expectedType:   "brute_force_attempt",
-			expectedReason: "authentication failures",
+			expectedReason: "brute force on auth endpoints",
 		},
 		{
 			name: "Known scanning tool",
@@ -125,11 +125,9 @@ func TestSecurityThreatDetector_Comprehensive(t *testing.T) {
 				if tr.Referer != "" {
 					stats.Referers[tr.Referer]++
 				}
-				if tr.Status != "" {
-					if tr.Status == "401 Unauthorized" {
-						stats.Error401++
-					}
-				}
+				// The engine's own status counting, so a refused credential
+				// attempt is counted the way production counts it.
+				countStatus(stats, tr)
 				stats.LastSeen = tr.Timestamp
 			}
 

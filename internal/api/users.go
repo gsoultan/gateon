@@ -53,6 +53,11 @@ func (s *ApiService) UpdateUser(ctx context.Context, req *gateonv1.UpdateUserReq
 			"change your own password with the password change, which asks for your current password")
 	}
 	if err := s.Auth.UpsertUser(req.User); err != nil {
+		// A refusal, not a failure: the name belongs to another account and
+		// nothing was written. AlreadyExists is 409 over REST.
+		if errors.Is(err, auth.ErrUsernameTaken) {
+			return nil, status.Error(codes.AlreadyExists, auth.ErrUsernameTaken.Error())
+		}
 		return &gateonv1.UpdateUserResponse{Success: false}, err
 	}
 	// UpsertUser only covers username/password/role; the disabled and
@@ -74,29 +79,14 @@ func (s *ApiService) UpdateUser(ctx context.Context, req *gateonv1.UpdateUserReq
 }
 
 // updatesOwnAccount reports whether an update of u lands on the caller's own
-// account. UpsertUser writes by username -- a request with a fresh id and an
-// existing username updates that account -- so an id that differs from the
-// caller's proves nothing, and the username decides as well. An account list
-// that cannot be read answers yes, which refuses the password rather than
-// guessing.
+// account. UpsertUser writes an existing account by its id and nothing else:
+// a request with another id and the caller's username is a create, which the
+// taken username refuses. So the id decides. (It used to write by username,
+// and this looked the username up as well, to catch a fresh id carrying the
+// caller's name onto the caller's account.)
 func (s *ApiService) updatesOwnAccount(ctx context.Context, u *gateonv1.User) bool {
 	claims, _ := callerClaims(ctx)
-	if claims == nil {
-		return false
-	}
-	if u.GetId() == claims.ID {
-		return true
-	}
-	users, _, err := s.Auth.ListUsers(0, 0, u.GetUsername())
-	if err != nil {
-		return true
-	}
-	for _, existing := range users {
-		if existing.GetUsername() == u.GetUsername() {
-			return existing.GetId() == claims.ID
-		}
-	}
-	return false
+	return claims != nil && u.GetId() == claims.ID
 }
 
 func (s *ApiService) DeleteUser(ctx context.Context, req *gateonv1.DeleteUserRequest) (*gateonv1.DeleteUserResponse, error) {

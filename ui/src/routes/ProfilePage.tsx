@@ -30,11 +30,12 @@ import {
   IconUser,
   IconUserCircle,
 } from "@tabler/icons-react";
-import { apiFetch } from "../hooks/useGateon";
+import { useSignOut } from "../hooks/useSignOut";
 import { useAuthStore } from "../store/useAuthStore";
 import { queryClient } from "../queryClient";
 import { TwoFactorModal } from "../components/TwoFactorModal";
 import { ChangePasswordForm } from "../components/ChangePasswordForm";
+import { SIGN_OUT_SCOPE } from "../components/signOut";
 
 const ROLE_COLOR: Record<string, string> = {
   admin: "red",
@@ -57,6 +58,7 @@ export default function ProfilePage() {
 
   const [tfaOpened, { open: tfaOpen, close: tfaClose }] = useDisclosure(false);
   const [signingOut, setSigningOut] = useState(false);
+  const signOut = useSignOut();
 
   // Changing the password ends every session the account has, this one
   // included (the session is bound to the password), so say so and go to the
@@ -87,17 +89,8 @@ export default function ProfilePage() {
 
   const handleSignOut = async () => {
     setSigningOut(true);
-    try {
-      // Invalidate the server-side session (clears HttpOnly cookie).
-      await apiFetch("/v1/logout", { method: "POST" });
-    } catch {
-      // Clear local session regardless of network errors.
-    } finally {
-      // Drop any cached, potentially sensitive data from this session.
-      queryClient.clear();
-      logout();
-      void navigate({ to: "/login" });
-    }
+    // Still signed in: stop the spinner so the button can be pressed again.
+    if (!(await signOut())) setSigningOut(false);
   };
 
   const username = user?.username ?? "Account";
@@ -155,15 +148,17 @@ export default function ProfilePage() {
               </Text>
             </Stack>
           </Group>
-          <Button
-            color="red"
-            variant="light"
-            leftSection={<IconLogout size={16} />}
-            onClick={handleSignOut}
-            loading={signingOut}
-          >
-            Sign out
-          </Button>
+          <Tooltip label={SIGN_OUT_SCOPE}>
+            <Button
+              color="red"
+              variant="light"
+              leftSection={<IconLogout size={16} />}
+              onClick={handleSignOut}
+              loading={signingOut}
+            >
+              Sign out
+            </Button>
+          </Tooltip>
         </Group>
       </Card>
 

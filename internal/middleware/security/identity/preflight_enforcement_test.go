@@ -11,6 +11,7 @@ import (
 
 	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/telemetry"
+	"github.com/gsoultan/gateon/internal/telemetry/repid"
 )
 
 // asPreflight gives a request the shape kind.IsCorsPreflight recognises. Every
@@ -96,9 +97,11 @@ func TestUserMitigationRefusesAPreflightFromAMitigatedFingerprint(t *testing.T) 
 	}
 	defer telemetry.ClosePathStatsStore(t.Context())
 
+	// Blocked on the network httptest's requests come from (ADR 0026).
 	const fp = "t13d1516h2_preflight_enforcement_test"
-	telemetry.MarkUserMitigated(fp, "JA4", "preflight enforcement test", "test")
-	defer telemetry.MarkUserUnmitigated(fp)
+	key := repid.For(fp, "192.0.2.1")
+	telemetry.MarkUserMitigated(key, "JA4", "preflight enforcement test", "test")
+	defer telemetry.MarkUserUnmitigated(key)
 
 	var reached bool
 	h := UserMitigation()(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

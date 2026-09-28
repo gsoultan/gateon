@@ -173,14 +173,11 @@ test.describe('Users', () => {
   });
 
   test("adding a user whose name is taken leaves the existing account alone", async ({ page, playwright }) => {
-    // OPEN (mgmt/sec, internal/auth/queries.go): the user insert is
-    // "INSERT ... ON CONFLICT(username) DO UPDATE SET password, role", and the
-    // same PUT /v1/users serves Add User. So adding a user under a name that
-    // exists replaces that account's password and role, and the dashboard
-    // reports it as saved. Seen from Add User it is data loss; an administrator
-    // who types a colleague's name takes over their account. When the gateway
-    // refuses the duplicate, this test passes and the annotation must go.
-    test.fail();
+    // The user insert was "INSERT ... ON CONFLICT(username) DO UPDATE SET
+    // password, role", and the same PUT /v1/users serves Add User, so adding a
+    // user under a name that existed replaced that account's password and role
+    // and the dashboard reported it as saved. A create is a plain INSERT now:
+    // the taken name is refused with 409 and nothing is written.
     const taken = `${USER}-taken`;
     const api = await adminApi(playwright);
     try {
@@ -198,7 +195,7 @@ test.describe('Users', () => {
       await pickRole(page, create, 'Administrator (Full Access)');
       const answered = waitForUserSave(page);
       await create.getByRole('button', { name: 'Create User' }).click();
-      await answered;
+      expect((await answered).status(), 'PUT /v1/users under a taken username').toBe(409);
       // The existing account first: that is the damage.
       expect(
         await loginStatus(playwright, taken, PASSWORD, '198.51.100.62'),
@@ -208,9 +205,59 @@ test.describe('Users', () => {
         await loginStatus(playwright, taken, 'a-different-password-2', '198.51.100.62'),
         'the password typed into Add User opens the existing account',
       ).not.toBe(200);
-      await expect(page.getByRole('alert').filter({ hasText: 'Could not save user' })).toBeVisible({ timeout: 5000 });
+      const refused = page.getByRole('alert').filter({ hasText: 'Could not save user' });
+      await expect(refused).toBeVisible({ timeout: 5000 });
+      await expect(refused).toContainText('That username is already taken by another account.');
+      await expect(create, 'the form closed on a refused save').toBeVisible();
     } finally {
       await deleteUserById(playwright, taken);
+    }
+  });
+
+  test('editing an account keeps it disabled and keeps the 2FA it is required to set up', async ({
+    page,
+    playwright,
+  }) => {
+    // The gateway writes the disabled flag and the pending-2FA requirement from
+    // every save to PUT /v1/users, and the Edit form sent the name and the role
+    // and nothing else. Changing a disabled account's role enabled it again;
+    // changing the role of an account required to set up 2FA dropped the
+    // requirement.
+    const edited = `${USER}-edited`;
+    const api = await adminApi(playwright);
+    try {
+      const made = await api.put('/v1/users', {
+        data: { username: edited, password: PASSWORD, role: 'viewer', disabled: true, twoFactorPending: true },
+      });
+      expect(made.ok(), `PUT /v1/users: ${made.status()}`).toBe(true);
+    } finally {
+      await api.dispose();
+    }
+    try {
+      await page.goto('/users');
+      const row = userRow(page, edited);
+      await expect(row).toContainText('Disabled');
+      await expect(row).toContainText('2FA pending');
+
+      await page.getByRole('button', { name: `Edit user ${edited}` }).click();
+      const edit = page.getByRole('dialog', { name: 'Edit User' });
+      await pickRole(page, edit, 'Operator (Read/Write Config)');
+      const saved = waitForUserSave(page);
+      await edit.getByRole('button', { name: 'Update User' }).click();
+      expect((await saved).status()).toBe(200);
+      await expect(edit).toBeHidden();
+
+      // The role is what changed; wait for the table to show it before reading
+      // the rest of the row, so the old row cannot answer for the new one.
+      await expect(row).toContainText('operator');
+      await expect(row, 'changing the role enabled the account').toContainText('Disabled');
+      await expect(row, 'changing the role dropped the required 2FA').toContainText('2FA pending');
+      expect(
+        await loginStatus(playwright, edited, PASSWORD, '198.51.100.63'),
+        'the disabled account logged in after its role was changed',
+      ).not.toBe(200);
+    } finally {
+      await deleteUserById(playwright, edited);
     }
   });
 });

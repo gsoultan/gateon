@@ -8,7 +8,6 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
-	"fmt"
 	"io"
 	"log/slog"
 	"net"
@@ -259,53 +258,88 @@ func startTCPServer(addr string, ep *gateonv1.EntryPoint, deps *Deps, wg *syncut
 		logger.L.LogError("TCP listen failed", "error", err, "addr", addr)
 		return
 	}
-	conns := newOpenConns()
+	s := &tcpServer{ep: ep, deps: deps, wg: wg, conns: newOpenConns(tcpConnLimit(ep)), plaintext: !terminatesTLS}
 	if shutdownReg != nil {
 		shutdownReg.Register(func(ctx context.Context) error {
 			err := l.Close()
-			conns.shutdown(ctx)
+			s.conns.shutdown(ctx)
 			return err
 		})
 	}
-	wg.Go(func() {
-		defer l.Close()
-		plaintext := !terminatesTLS
-		for {
-			conn, err := l.Accept()
-			if err != nil {
-				telemetry.GlobalDiagnostics.RecordEPError(ep.Id, err.Error())
-				return
-			}
-			if !conns.add(conn) {
-				_ = conn.Close()
-				continue
-			}
-			telemetry.GlobalDiagnostics.RecordConnection(ep.Id)
-			c := conn
-			if plaintext {
-				wg.Go(func() {
-					defer conns.remove(c)
-					defer telemetry.GlobalDiagnostics.RecordDisconnect(ep.Id)
-					handleTCPConnWithInspection(c, ep, deps, wg)
-				})
-			} else {
-				var p l4.TCPProxy
-				if deps.L4Resolver != nil {
-					p = deps.L4Resolver.ResolveTCP(ep, "")
-				}
-				wg.Go(func() {
-					defer conns.remove(c)
-					defer telemetry.GlobalDiagnostics.RecordDisconnect(ep.Id)
-					defer c.Close()
-					if p != nil {
-						handleTCPProxyL4(c, p)
-					} else {
-						handleTCPConn(c)
-					}
-				})
-			}
+	wg.Go(func() { s.serve(l) })
+}
+
+// tcpServer is a TCP entrypoint's accept loop and the connections it holds.
+type tcpServer struct {
+	ep        *gateonv1.EntryPoint
+	deps      *Deps
+	wg        *syncutil.WaitGroup
+	conns     *openConns
+	plaintext bool
+}
+
+// tcpConnLimit is the most connections ep holds open at once: its
+// max_connections, or the resource profile's default when that is 0. It was
+// stored and shown and read by nothing, so a TCP entrypoint had no cap at all.
+func tcpConnLimit(ep *gateonv1.EntryPoint) int {
+	if n := int(ep.GetMaxConnections()); n > 0 {
+		return n
+	}
+	return config.CurrentTierDefaults().TCPMaxConnections
+}
+
+// serve accepts until l is closed. A connection past the limit is closed at
+// once, so the loop never waits for a slot.
+func (s *tcpServer) serve(l net.Listener) {
+	defer l.Close()
+	for {
+		conn, err := l.Accept()
+		if err != nil {
+			telemetry.GlobalDiagnostics.RecordEPError(s.ep.Id, err.Error())
+			return
 		}
-	})
+		switch s.conns.add(conn) {
+		case refusedClosing:
+			_ = conn.Close()
+		case refusedFull:
+			s.refuseOverLimit(conn)
+		case admitted:
+			telemetry.GlobalDiagnostics.RecordConnection(s.ep.Id)
+			s.wg.Go(func() {
+				defer s.conns.remove(conn)
+				defer telemetry.GlobalDiagnostics.RecordDisconnect(s.ep.Id)
+				s.handle(conn)
+			})
+		}
+	}
+}
+
+// handle serves one admitted connection: inspected on a plaintext
+// entrypoint, proxied to the entrypoint's route on one that terminates TLS.
+func (s *tcpServer) handle(c net.Conn) {
+	if s.plaintext {
+		handleTCPConnWithInspection(c, s.ep, s.deps, s.wg)
+		return
+	}
+	defer c.Close()
+	if p := resolveTCPRoute(s.ep, s.deps, ""); p != nil {
+		handleTCPProxyL4(c, p)
+		return
+	}
+	handleTCPConn(c)
+}
+
+// refuseOverLimit closes a connection accepted while the entrypoint already
+// holds its limit. Every refusal is counted with the other connection-limit
+// rejections; the log says so at most once a minute, so that a flood of them
+// is not also a flood of log lines.
+func (s *tcpServer) refuseOverLimit(c net.Conn) {
+	_ = c.Close()
+	telemetry.IncInflightRejected("tcp_max_connections")
+	if s.conns.warnDue(time.Now()) {
+		logger.L.LogWarn("TCP entrypoint at its connection limit, refusing new connections",
+			"ep", s.ep.Id, "max_connections", s.conns.limit)
+	}
 }
 
 func startUDPServer(addr string, ep *gateonv1.EntryPoint, deps *Deps, wg *syncutil.WaitGroup, shutdownReg *ShutdownRegistry) {
@@ -348,9 +382,19 @@ var (
 	}
 )
 
+// noRouteReply is what a connection no route claims is told before it is
+// closed. It used to be "Gateon TCP Entrypoint - " and the time, which said
+// nothing about why the connection was ending -- and time.Time's String form
+// ends in the process's monotonic clock reading, which is its uptime.
+const noRouteReply = "Gateon TCP Entrypoint - no route for this connection\n"
+
 func handleTCPConnWithInspection(conn net.Conn, ep *gateonv1.EntryPoint, deps *Deps, wg *syncutil.WaitGroup) {
 	if debugLogging() {
 		logger.L.LogDebug("TCP connection received for inspection", "ep", ep.Id, "remote", conn.RemoteAddr().String())
+	}
+	if p := onlyTCPRoute(ep, deps); p != nil {
+		proxyUninspected(conn, p, ep)
+		return
 	}
 	// The peek buffer goes back to the pool when this returns, which for an L4
 	// session is when the session ends: only a path that hands the bytes to
@@ -358,53 +402,23 @@ func handleTCPConnWithInspection(conn net.Conn, ep *gateonv1.EntryPoint, deps *D
 	peekPtr := peekPool.Get().(*[]byte)
 	defer peekPool.Put(peekPtr)
 
-	n, ok := peekFirstBytes(conn, *peekPtr, ep)
+	first, ok := awaitFirstBytes(conn, *peekPtr, ep, deps)
 	if !ok {
 		return
 	}
-	first := (*peekPtr)[:n]
-	if n > 0 && routeInspected(conn, first, ep, deps) {
+	if len(first) > 0 && routeInspected(conn, first, ep, deps) {
 		return
 	}
-	fallbackTCP(conn, first, ep)
+	answerUnrouted(conn, first, ep)
 }
 
-// peekFirstBytes reads the first bytes a client sends, to identify its
-// protocol. A client that sends nothing within a second is handled as generic
-// TCP (n is 0). ok is false when the client went away first, and conn has been
-// closed.
-func peekFirstBytes(conn net.Conn, peek []byte, ep *gateonv1.EntryPoint) (n int, ok bool) {
-	// Use a shorter deadline for the first byte, then a longer one for the rest
-	// to avoid blocking goroutines for slow/idle connections.
-	_ = conn.SetReadDeadline(time.Now().Add(1 * time.Second))
-	n, err := conn.Read(peek)
-	if err != nil {
-		var netErr net.Error
-		if errors.As(err, &netErr) && netErr.Timeout() {
-			_ = conn.SetReadDeadline(time.Time{})
-			return 0, true
-		}
-		// A client hanging up before it says anything -- a port scan, a TCP
-		// health probe -- is routine. It was logged at ERROR, a line per
-		// connection that buried the errors worth reading.
-		if debugLogging() {
-			logger.L.LogDebug("TCP inspection: client left before sending", "ep", ep.Id, "error", err)
-		}
-		_ = conn.Close()
-		return 0, false
+// resolveTCPRoute returns the entrypoint's TCP route for protocol -- "" asks
+// for its generic one -- or nil when there is none.
+func resolveTCPRoute(ep *gateonv1.EntryPoint, deps *Deps, protocol string) l4.TCPProxy {
+	if deps.L4Resolver == nil {
+		return nil
 	}
-
-	// If we got some data, try to read more if needed for HTTP/2 detection (24 bytes)
-	if n > 0 && n < PeekSize {
-		// If it looks like HTTP/2 preface start, try to read more
-		if peek[0] == 'P' || IsTCPAppHTTP(peek[:n]) {
-			_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
-			n2, _ := io.ReadAtLeast(conn, peek[n:], 0) // non-blocking best-effort
-			n += n2
-		}
-	}
-	_ = conn.SetReadDeadline(time.Time{})
-	return n, true
+	return deps.L4Resolver.ResolveTCP(ep, protocol)
 }
 
 // routeInspected hands a connection whose first bytes are first to where they
@@ -421,10 +435,7 @@ func routeInspected(conn net.Conn, first []byte, ep *gateonv1.EntryPoint, deps *
 		return true
 	}
 	protocol := l4Protocol(first)
-	var p l4.TCPProxy
-	if deps.L4Resolver != nil {
-		p = deps.L4Resolver.ResolveTCP(ep, protocol)
-	}
+	p := resolveTCPRoute(ep, deps, protocol)
 	if p == nil {
 		return false
 	}
@@ -450,15 +461,18 @@ func l4Protocol(first []byte) string {
 	}
 }
 
-// fallbackTCP answers a connection nothing claimed -- no protocol detected, or
-// no route for it -- with the entrypoint's banner.
-func fallbackTCP(conn net.Conn, first []byte, ep *gateonv1.EntryPoint) {
+// answerUnrouted tells a connection nothing claimed that there is no route for
+// it, and closes it: a client that sent a protocol the entrypoint has no route
+// for, or one that said nothing on an entrypoint without a TCP route (bytes is
+// 0). The DEBUG line used to call this a "fallback to generic TCP", which was
+// never what happened.
+func answerUnrouted(conn net.Conn, first []byte, ep *gateonv1.EntryPoint) {
 	if debugLogging() {
-		logger.L.LogDebug("TCP inspection fallback to generic TCP", "ep", ep.Id, "bytes", len(first))
+		logger.L.LogDebug("TCP inspection: no route for this connection, closing it",
+			"ep", ep.Id, "protocol", l4Protocol(first), "bytes", len(first), "remote", conn.RemoteAddr().String())
 	}
-	pc := newPeekedConn(conn, first)
-	handleTCPConn(pc)
-	_ = pc.Close()
+	handleTCPConn(conn)
+	_ = conn.Close()
 }
 
 // debugLogging reports whether DEBUG lines are written. The per-connection
@@ -467,8 +481,9 @@ func fallbackTCP(conn net.Conn, first []byte, ep *gateonv1.EntryPoint) {
 // variadic slice -- cost allocations on every connection even when dropped.
 func debugLogging() bool { return logger.L.IsEnabled(slog.LevelDebug) }
 
+// handleTCPConn answers a connection no route claims with noRouteReply.
 func handleTCPConn(conn net.Conn) {
-	_, _ = fmt.Fprintf(conn, "Gateon TCP Entrypoint - %s\n", time.Now().String())
+	_, _ = io.WriteString(conn, noRouteReply)
 }
 
 func handleTCPProxyL4(client net.Conn, pool l4.TCPProxy) {

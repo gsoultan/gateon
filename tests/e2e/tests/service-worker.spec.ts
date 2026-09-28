@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
 // SPDX-License-Identifier: MIT
 
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
 
 /**
  * The dashboard's service worker is scoped to "/" on the management origin, and
@@ -24,9 +24,32 @@ test.setTimeout(120000);
 
 const ADMIN = { username: 'admin', password: 'password123' };
 
-async function login(page: Page) {
-  const res = await page.request.post('/v1/login', { data: ADMIN });
+async function login(page: Page, as: { username: string; password: string } = ADMIN) {
+  const res = await page.request.post('/v1/login', { data: as });
   expect(res.ok(), `login failed: ${res.status()}`).toBe(true);
+}
+
+/**
+ * Runs fn with an administrator account of its own, deleted afterwards.
+ * Signing out ends every session of the account signed out of, so a test that
+ * signs out as the shared admin ends the session every other spec runs on.
+ */
+async function withOwnAdmin(
+  playwright: { request: { newContext: (o: object) => Promise<APIRequestContext> } },
+  fn: (account: { username: string; password: string }) => Promise<void>,
+) {
+  const account = { username: `e2e-sw-admin-${Date.now()}`, password: 'correct-horse-battery-staple-8' };
+  const api = await playwright.request.newContext({ baseURL: 'http://localhost:8080', storageState: 'tests/.auth/admin.json' });
+  try {
+    const made = await api.put('/v1/users', { data: { ...account, role: 'admin' } });
+    expect(made.ok(), `creating ${account.username}: ${made.status()}`).toBe(true);
+    await fn(account);
+  } finally {
+    const list = await api.get(`/v1/users?search=${encodeURIComponent(account.username)}`);
+    const users = ((await list.json()) as { users?: { id: string; username: string }[] }).users ?? [];
+    for (const u of users.filter((x) => x.username === account.username)) await api.delete(`/v1/users/${u.id}`);
+    await api.dispose();
+  }
 }
 
 /** Loads the dashboard and waits until the service worker controls the page. */
@@ -77,19 +100,21 @@ test('a config export reflects the configuration at the moment it is taken', asy
   }
 });
 
-test('nothing the API returned is readable from the page after logout', async ({ page }) => {
-  await controlledByWorker(page);
-  await login(page);
-  expect((await exportedServiceIds(page)).status).toBe(200);
+test('nothing the API returned is readable from the page after logout', async ({ page, playwright }) => {
+  await withOwnAdmin(playwright, async (account) => {
+    await controlledByWorker(page);
+    await login(page, account);
+    expect((await exportedServiceIds(page)).status).toBe(200);
 
-  const out = await page.request.post('/v1/logout');
-  expect(out.ok()).toBe(true);
+    const out = await page.request.post('/v1/logout');
+    expect(out.ok()).toBe(true);
 
-  const afterLogout = await exportedServiceIds(page);
-  expect(
-    afterLogout.status,
-    'the configuration export, credentials included, was still served to the page after logout',
-  ).toBe(401);
+    const afterLogout = await exportedServiceIds(page);
+    expect(
+      afterLogout.status,
+      'the configuration export, credentials included, was still served to the page after logout',
+    ).toBe(401);
+  });
 });
 
 test('an export cached by the old service worker is removed when the dashboard loads', async ({ page }) => {

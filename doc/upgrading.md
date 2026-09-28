@@ -11,6 +11,303 @@ here after the fact.
 
 ## Unreleased
 
+### gRPC on a plaintext TCP entrypoint is authenticated — **upgrade if you run one**
+
+On a plaintext TCP entrypoint, gRPC and gRPC-Web went straight to the gateway's
+own gRPC server, past the handler that authenticates the management API. The
+server's permission check read "no caller" as "authentication is off", so anyone
+who could reach the port could call the management API with no credential,
+`UpdateGlobalConfig` included. That traffic now goes through the same handler as
+everything else. A permission check also refuses a request that carries no
+caller unless that handler decided the request needs none. See ADR 0027.
+
+**Who is affected:** every install with a TCP entrypoint that is not TLS, on
+every release so far (the dispatch dates from v0.1.0). Nothing needs changing,
+but upgrade. Until you can, stop such an entrypoint being reachable from anywhere
+you do not trust. A gRPC route on such an entrypoint is now proxied to its
+backend; before, the gateway's own server answered it.
+
+### Signing out ends every session of the account — **a sign-out now signs out every device**
+
+Signing out cleared the browser's cookie and nothing else. The session token
+the cookie held is a bearer token, and it went on working until it expired --
+up to eight hours -- for anyone holding a copy of it. Signing out now advances a
+per-account session epoch that every session is bound to, so every session of
+the account ends: the one that signed out, any copy of its cookie, and the
+account's sessions in every other browser and API client. Signing in again
+works as before. The dashboard's sign-out controls (the profile menu, the
+Profile page and the command palette) now say that sign-out ends every session
+of the account.
+
+Migration 65 adds `users.session_epoch` (`INTEGER NOT NULL DEFAULT 0`) on SQLite
+and Postgres. Every existing account starts at 0, which the session binding
+leaves out, so the upgrade ends no session and tokens issued before it keep
+working.
+
+In a cluster, the node that handles the sign-out refuses the account's old
+sessions at once; the other nodes follow within the session-binding cache TTL
+(30 seconds, `GATEON_SESSION_BINDING_TTL`), or within a round trip where the
+Redis invalidation channel is configured. During a rolling upgrade, nodes still
+on the previous release do not read the epoch: until they are upgraded they keep
+accepting a signed-out session, and they refuse the sessions an upgraded node
+issues to an account after that account has signed out.
+
+**Who is affected:** anyone signed in to one account from more than one place --
+signing out in one browser now signs the others out too -- and automation that
+shares an account with a person: its token ends when that person signs out. Give
+scripts and API clients an account of their own. A failed sign-out (the gateway
+could not record it) now answers 500 and says the account's other sessions
+could not be ended; the browser's cookie is cleared either way, and the
+dashboard opens the sign-in page with a warning that the other sessions may
+still be signed in and how to end them. A sign-out that never reached the
+gateway leaves the dashboard where it was and says so, so it can be tried
+again.
+
+### Add User refuses a username that is taken — **it used to take that account over**
+
+`PUT /v1/users` (the dashboard's Add User and Edit User) and the `UpdateUser`
+RPC wrote accounts with `INSERT ... ON CONFLICT(username) DO UPDATE`, so adding
+a user under a username that already existed replaced that account's password
+and role and reported success: an administrator who typed a colleague's name
+into Add User took their account over. A request with no id, or with an id no
+account has, is now a create, and a username another account has is refused --
+`409 Conflict` over REST, `ALREADY_EXISTS` over gRPC -- with nothing written;
+the dashboard says "That username is already taken by another account. Choose
+a different username." and keeps the form open. A request carrying an existing
+account's id edits that account, and renaming it onto a taken username is
+refused the same way. Renaming a user now works; it used to fail with a
+database error.
+
+**Who is affected:** scripts that call `PUT /v1/users` without an id to reset an
+existing account's password or role. Send the account's `id` (from
+`GET /v1/users`) to edit it; without one the request is a create, and a taken
+username is refused.
+
+### Editing a user no longer enables a disabled account — **check your disabled accounts**
+
+The Users page's Edit form saved only the account's name and role, and the
+gateway writes the disabled flag and the "must set up 2FA" requirement from
+every save. So changing a disabled account's role or name enabled it again,
+and changing an account you had required to set up 2FA dropped that
+requirement. The form now keeps both.
+
+**Who is affected:** anyone who used Edit on a disabled account, or on one
+required to set up 2FA. Check the Users page: an account you disabled that
+shows no Disabled badge, or one you required 2FA of that shows no "2FA pending",
+was changed by an edit. Disable it or require 2FA again. Scripts that call
+`PUT /v1/users` are unaffected: the gateway still sets both flags from what
+the request sends, as it always has.
+
+### A browser signing in over gRPC gets no token in the reply
+
+`POST /v1/login` has answered a browser -- a request carrying `Sec-Fetch-Mode`,
+which every browser sends and page script cannot remove -- with the session
+cookie alone. The `Login` RPC answered every caller with the session token in
+its reply, and a browser can make that call: script on the dashboard's origin
+sending `application/grpc` over HTTP/2 to an HTTPS management listener. `Login`
+over gRPC now withholds the token from a call carrying `Sec-Fetch-Mode`; the
+sign-in otherwise succeeds and the reply still names the user. Native gRPC
+clients never send that header and still receive the token. gRPC-Web cannot
+call `Login` at all -- the management server refuses `application/grpc-web`
+with 415 before any RPC runs -- so there was nothing to withhold there.
+
+**Who is affected:** only code running in a browser that signs in over gRPC; it
+gets no token and must sign in through `POST /v1/login`, which sets the session
+cookie. The dashboard, API clients and gRPC libraries are unaffected.
+
+### A fingerprint block covers one browser build on one network — **existing fingerprint blocks are released on upgrade**
+
+A fingerprint block (the "User Mitigations" list, refused with `Forbidden:
+Compromised Fingerprint`) was kept for the whole JA4+ fingerprint, which names
+a browser build rather than a client: three WAF blocks from one attacker's
+stock Chrome refused every user of that Chrome build, on every network, for an
+hour. Rate-limit rejections, bot and geo policy blocks and reputation blocks
+counted towards it as if they were attacks, the count never lapsed, and the
+attacker shed the block by dropping a `Referer` header, which changes the
+fingerprint and not the browser.
+
+A block is now kept for the fingerprint's class -- its TLS fingerprint, or its
+header shape without the method, cookie and referer -- on the client's /24
+(IPv4) or /64 (IPv6), the identity reputation already uses (ADR 0026). It
+refuses that build on that network only, and a header toggle does not shed it.
+The automatic block needs three pieces of attack evidence -- WAF blocks on a
+payload, traps, malware uploads, brute-force or exploit-scan detections -- from
+one build on one network within ten minutes; rate limits and policy blocks no
+longer count. The one-hour expiry, `GATEON_JA4_MITIGATE_AFTER` and
+`GATEON_JA4_MITIGATION_TTL` are unchanged.
+
+- The user mitigation list shows each block as `<fingerprint class>|<network>`,
+  e.g. `t13d1516h2_8daaf6152771_b0da82dd1658|203.0.113`, and only blocks still
+  in force. Allow on a row lifts that one network's block.
+- Remove Mitigation with a fingerprint -- from a threat's detail view, or
+  `POST /v1/diagnostics/remove-mitigation` with the fingerprint as `source` --
+  lifts that browser build's block on every network it is blocked on, and holds
+  it for 24 hours, as before.
+- Add Mitigation (and `POST /v1/diagnostics/mitigate`) takes a fingerprint only
+  with a network: `<fingerprint>|<address>` blocks it on that address's /24 or
+  /64. A bare fingerprint is refused with that instruction. The dashboard now
+  shows a refused block as "Not blocked" with the reason, where it used to show
+  a green "Success".
+- "Apply automatic fix" on a finding whose source is a fingerprint (impossible
+  travel) is refused rather than blocking the build everywhere; on a finding
+  with a threat, it blocks the threat's address and the threat's build on the
+  threat's network.
+
+**Who is affected:** anyone with fingerprint blocks in force at upgrade time.
+They were stored without a network, so they cannot be moved to the new form;
+they stop being enforced and listed immediately and are deleted a day later.
+Every one would have expired within the hour anyway, and a client still
+attacking is blocked again after three more attacks. Scripts that block a bare
+fingerprint through the API must add `|<address>`.
+
+### A tab left open after its session expired is no longer reported as brute force
+
+The per-IP threat detector counted every 401 and 403 an address received as a
+failed login, so a dashboard tab polling after its session expired -- every
+poll a GET answered 401 -- was recorded as a `brute_force_attempt` within a few
+minutes, and its score cost the client reputation. Brute force is now judged
+on credential attempts only: POSTs (a login form, a token request), and any
+request whose `Authorization` header carries a password (HTTP Basic or Digest),
+which keeps Basic-auth guessing over GET visible. A client re-presenting an
+expired bearer token or session cookie is not an attempt. Traces record whether
+a request carried a password scheme (`passwordAuth`; nothing of the credential
+is stored).
+
+**Who is affected:** installs where browsers or API clients poll with expired
+sessions: fewer `brute_force_attempt` findings. Credential guessing through a
+GET query string is not counted.
+
+### Kernel throttles on the mitigation list count down to when they lift
+
+A kernel rate limit on the IP mitigation list gave its expiry only inside the
+description. It now carries it as a field (`expires_at` on the listed
+`Anomaly`, RFC 3339 UTC), and the list shows "lifts in 4m" under the row's
+status, which stays current while the page is open.
+
+**Who is affected:** nobody needs to act. API clients reading the mitigation
+list can use `expiresAt` instead of parsing the description.
+
+### Plaintext TCP entrypoints proxy protocols in which the server speaks first — SMTP, POP3, IMAP, FTP, MySQL
+
+A plaintext TCP entrypoint reads each connection's first bytes to choose
+between its HTTP server, an `ssh` or `rdp` route and its `tcp` route. A client
+of a server-first protocol sends nothing until it has the server's greeting,
+so the entrypoint waited for the client while the client waited for the
+server: after a second it wrote its own banner line and closed the
+connection, and the backend was never dialled. SMTP on 25 and 587, POP3,
+IMAP, FTP, MySQL and VNC could not be proxied through a plaintext TCP
+entrypoint at all, although `doc/email-backend-setup.md` described exactly
+that setup. They now work, in one of two ways depending on what else the
+entrypoint serves.
+
+**An entrypoint whose only route is a `tcp` route** has nothing to tell apart,
+so each connection goes to the route the moment it is accepted: no detection,
+no delay, the backend's greeting arrives at once (measured: under a
+millisecond on loopback, the direct connection plus the proxy's own dial).
+Everything the client sends is the backend's -- an HTTP request to such a port
+reaches the tcp backend, not the gateway's HTTP handling.
+
+**An entrypoint that also serves HTTP, gRPC, `ssh` or `rdp` routes** still reads
+first. A client that speaks within **500 ms** is routed by what it says,
+exactly as before. A client that has said nothing after 500 ms is raced
+against the `tcp` route's backend: the gateway connects to the backend and
+keeps listening to the client. If the backend speaks first, it is a
+server-first protocol and gets the session, greeting and all. If the client
+speaks first -- a browser that opened the connection before it had a request,
+a request whose first packet was lost and resent -- it is routed by what it
+said, and the backend connection is closed having received nothing. If neither
+speaks within the entrypoint's read timeout (15 s unless set), both are
+closed; if the backend cannot be reached, the client is closed at once.
+
+The 500 ms is measured, not chosen: a client that speaks first sends its
+opening bytes right after connecting at any round-trip time, and later only
+behind a slow uplink (~210 ms for a full packet at 64 kbit/s) or when that
+packet is lost and resent (~300 ms later at 50 ms RTT). There is no setting.
+
+**Who is affected:** plaintext TCP entrypoints with a `tcp` route.
+
+What an operator should do (`doc/email-backend-setup.md` gives the same rules for mail):
+
+1. **Give every server-first protocol an entrypoint of its own, with only its
+   `tcp` route** -- one entrypoint per port (25, 587, 110, 143, 21, 3306 ...).
+   Its greeting then arrives at once.
+2. **An entrypoint counts as tcp-only only if no HTTP-type route is served
+   there.** A route of type `http`, `grpc` or `graphql` that lists **no**
+   entrypoints is served on **every** entrypoint -- including your SMTP port --
+   and turns every entrypoint into a mixed one, with the 500 ms greeting delay
+   below. List entrypoints explicitly on HTTP routes. An `ssh` or `rdp` route
+   listing the entrypoint also makes it mixed; a `udp` route does not.
+3. **On a mixed entrypoint, a server-first greeting takes 500 ms.** The session
+   still works; only the greeting waits. And a client that speaks first (HTTP,
+   SSH, RDP) but more than 500 ms after connecting -- a slow or lossy link --
+   loses the race to a server-first backend and reaches it instead of its own
+   route. Against a backend that waits for its client (TLS passthrough,
+   PostgreSQL, Redis), a late client is never misrouted.
+4. **TLS-terminating TCP entrypoints** (SMTPS 465, IMAPS 993, POP3S 995 with TLS
+   enabled on the entrypoint) never inspected and were never affected: no
+   delay. Their backends receive plaintext -- point them at the backend's
+   plaintext ports.
+5. **An entrypoint with no `tcp` route** behaves as before: a client has a
+   second to say something, then is told there is no route (below).
+
+### A TCP entrypoint holds at most max_connections at once — a new default cap
+
+An entrypoint's `max_connections` was stored and read by nothing, so a TCP
+entrypoint had no connection limit: a flood of connections, which cost the
+client one packet each, cost the gateway two goroutines and several
+descriptors each without bound. A TCP entrypoint (plaintext or TLS) now holds
+at most `max_connections` connections at once -- L4 sessions and connections
+still being inspected; a connection past the limit is closed as soon as it is
+accepted. With `max_connections` at 0 (the default, and what every existing
+entrypoint has) the limit is the resource profile's: **1000** (`minimal`),
+**10000** (`standard`), **50000** (`enterprise`), selected by `GATEON_PROFILE`
+as for every other profile default. Refusals are counted with the other
+connection-limit rejections on the Diagnostics limit card, and logged at WARN
+at most once a minute per entrypoint (`TCP entrypoint at its connection
+limit, refusing new connections`). The limit is read when the entrypoint
+starts.
+
+**Who is affected:** a TCP entrypoint that holds more concurrent connections
+than its profile's default -- more than 10000 on the standard profile. Set
+`max_connections` on it (config file or API; the dashboard does not show the
+field yet). HTTP entrypoints still do not read `max_connections`.
+
+### The PROXY protocol header names the address the client connected to
+
+With **Send PROXY protocol** on a TCP service, the header's destination address
+and port were the backend's own, not the gateway address the client connected
+to, and came from a different socket than the source -- an IPv6 client behind
+an IPv4 backend got a header naming one of each, which PROXY readers reject.
+The destination is now the address and port the client connected to, as the
+PROXY protocol specifies.
+
+**Who is affected:** backends reading the PROXY header's destination -- a mail
+server or proxy that tells apart which gateway address or port a client used,
+or logs it. The source (the client) was always right.
+
+### A connection a TCP entrypoint has no route for is told so
+
+A connection nothing claims -- a client that says nothing to an entrypoint
+without a `tcp` route, or a protocol with no route -- is answered with one line
+and closed. The line was `Gateon TCP Entrypoint - <time>`, which said nothing
+about why the connection was ending, and whose time ended in the process's
+monotonic clock reading (`m=+12345.678`), i.e. its uptime. It is now:
+
+    Gateon TCP Entrypoint - no route for this connection
+
+The same line answers a TLS-terminating TCP entrypoint that has no route. On a
+plaintext entrypoint without a `tcp` route a silent client still has a full
+second to speak before it gets it, as before. The DEBUG line
+`TCP inspection fallback to generic TCP` -- there was never a generic fallback --
+is now `TCP inspection: no route for this connection, closing it`, with the
+protocol, the byte count (0 for a client that said nothing) and the client
+address. The race and the tcp-only path log their outcome at DEBUG
+(`TCP inspection: backend spoke first, proxying`, `... client spoke first,
+routing by its bytes`, `... the tcp route is all this entrypoint serves,
+proxying`). Nothing new is logged at INFO.
+
+**Who is affected:** anyone matching the old banner text or the old DEBUG line.
+
 ### First-run setup requires a setup token — **scripted setup must send it**
 
 Setup runs before any account exists, and it required nothing: whoever reached
@@ -833,6 +1130,18 @@ the item and its id.
 
 Creating, editing, disabling or deleting a user that the gateway refused used to
 do nothing visible. It now shows the gateway's message and keeps the form open.
+
+### The Docs page renders its tables, and its guide links open the guide
+
+The guides' tables -- the Introduction's index among them -- showed as raw
+`| Document | Description |` text: react-markdown renders GitHub tables only with
+the `remark-gfm` plugin, which is now included (it adds about 13 kB gzipped to the
+Docs page's own chunk, nothing to the rest of the dashboard). The index's links
+pointed at files the gateway does not serve and opened a window reading "Not
+Found"; each now opens its guide's tab, and the two guides that had no tab --
+Management Entrypoint and WebSockets & SSE -- have one.
+
+**Who is affected:** readers of the Docs page.
 
 ### Quick Presets keep the settings they do not name
 

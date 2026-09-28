@@ -53,7 +53,7 @@ func TestGeoIPUploadSuccess(t *testing.T) {
 	req := newGeoIPUploadRequest(t, "GeoLite2-Country.mmdb", []byte("mmdb-content"), nil)
 	rr := httptest.NewRecorder()
 
-	mux.ServeHTTP(rr, req)
+	mux.ServeHTTP(rr, authWaived(req))
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d, body: %s", rr.Code, http.StatusOK, rr.Body.String())
@@ -90,7 +90,7 @@ func TestGeoIPUploadRejectsInvalidExtension(t *testing.T) {
 	req := newGeoIPUploadRequest(t, "not-mmdb.txt", []byte("ignored"), nil)
 	rr := httptest.NewRecorder()
 
-	mux.ServeHTTP(rr, req)
+	mux.ServeHTTP(rr, authWaived(req))
 
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusBadRequest)
@@ -108,7 +108,7 @@ func TestGeoIPUploadRequiresWritePermission(t *testing.T) {
 	req := newGeoIPUploadRequest(t, "GeoLite2-Country.mmdb", []byte("ignored"), claims)
 	rr := httptest.NewRecorder()
 
-	mux.ServeHTTP(rr, req)
+	mux.ServeHTTP(rr, authWaived(req))
 
 	if rr.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusForbidden)

@@ -1581,6 +1581,20 @@ func init() {
 		}
 		return addColumns(db, dialect, `ALTER TABLE middlewares ADD COLUMN wasm_blob BLOB`)
 	})
+
+	// Signing out cleared the cookie and nothing else: the PASETO it held kept
+	// working until it expired, so a copied cookie outlived the sign-out meant
+	// to end it. The epoch is a per-account count of sign-outs that the session
+	// binding includes (internal/auth/revocation.go); a sign-out advances it and
+	// every session the account had stops matching. Every existing row starts
+	// at 0, which the binding leaves out, so no session is ended by the upgrade.
+	Register(65, "users_session_epoch", func(db *sql.DB, dialect Dialect) error {
+		if dialect.Driver == DriverPostgres {
+			return addColumns(db, dialect,
+				`ALTER TABLE users ADD COLUMN IF NOT EXISTS session_epoch INTEGER NOT NULL DEFAULT 0`)
+		}
+		return addColumns(db, dialect, `ALTER TABLE users ADD COLUMN session_epoch INTEGER NOT NULL DEFAULT 0`)
+	})
 }
 
 // addColumns runs ADD COLUMN statements. Postgres's carry IF NOT EXISTS;

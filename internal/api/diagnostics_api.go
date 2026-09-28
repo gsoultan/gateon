@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"math"
 	"net"
+	"net/netip"
 	"os"
 	"slices"
 	"strconv"
@@ -678,19 +679,13 @@ func (s *ApiService) applyBlockIPRecommendation(ctx context.Context, sourceIP st
 		return &gateonv1.ApplyRecommendationResponse{Success: false, Message: "Source IP is required to block"}, nil
 	}
 
-	// Several detectors put a client fingerprint in Source rather than an
-	// address -- detectMultiIPAttacks and detectImpossibleTravel both emit
-	// "security_threat" keyed by fingerprint. An ipfilter deny_list is parsed as
-	// addresses and CIDRs, so a fingerprint written there matches nothing: the
-	// middleware was created, attached to every route and reported as a block
-	// that could never fire. Mitigate the fingerprint through the mechanism that
-	// does enforce it (IsUserMitigated), as MitigateThreat already does.
+	// Some detectors put a client fingerprint in Source rather than an address
+	// -- detectImpossibleTravel emits "security_threat" keyed by fingerprint. An
+	// ipfilter deny_list is parsed as addresses and CIDRs, so a fingerprint
+	// written there matches nothing. It is blocked through the mechanism that
+	// does enforce it, and only on a network (applyFingerprintBlock).
 	if net.ParseIP(sourceIP) == nil {
-		telemetry.MarkUserMitigated(sourceIP, "JA4+", "Recommendation applied via API", "manual")
-		return &gateonv1.ApplyRecommendationResponse{
-			Success: true,
-			Message: fmt.Sprintf("Fingerprint %s mitigated. It is not an IP address, so no network-level block was applied.", sourceIP),
-		}, nil
+		return applyFingerprintBlock(sourceIP), nil
 	}
 
 	mwID := "block-ip-" + strings.ReplaceAll(sourceIP, ".", "-")
@@ -746,6 +741,28 @@ func (s *ApiService) applyBlockIPRecommendation(ctx context.Context, sourceIP st
 		Success: true,
 		Message: fmt.Sprintf("IP %s blocked via middleware and shunned at XDP level.", sourceIP),
 	}, nil
+}
+
+// applyFingerprintBlock blocks a fingerprint a finding names, on the network
+// named with it. A fingerprint on its own is refused rather than blocked
+// everywhere: it names a browser build shared by unrelated clients on every
+// network, and a block on it was the widest false positive the gateway could
+// produce (ADR 0026).
+func applyFingerprintBlock(source string) *gateonv1.ApplyRecommendationResponse {
+	key, ok := scopedFingerprintKey(source)
+	if !ok {
+		return refuseFix(fmt.Sprintf("%s is a client fingerprint, not an address, so it was not blocked. %s "+
+			"Or block the addresses the finding names.", source, fingerprintScopeHelp))
+	}
+	telemetry.MarkUserMitigated(key, "JA4+", "Recommendation applied via API", "manual")
+	if !telemetry.IsUserMitigated(key) {
+		return refuseFix(fmt.Sprintf("The block on %s is not in force. A fingerprint released in the last "+
+			"24 hours stays released until that hold expires.", key))
+	}
+	return &gateonv1.ApplyRecommendationResponse{
+		Success: true,
+		Message: fmt.Sprintf("Blocked %s: that client build, on that network only.", key),
+	}
 }
 
 func (s *ApiService) applyCORSRecommendation(ctx context.Context, threatID string) (*gateonv1.ApplyRecommendationResponse, error) {
@@ -923,13 +940,15 @@ func (s *ApiService) MitigateThreat(ctx context.Context, req *gateonv1.MitigateT
 		_ = telemetry.MarkIPMitigated(source, reason)
 		mitigated = telemetry.IsIPMitigated(source)
 	} else {
-		// Default to JA4+ for fingerprints if not specified
-		fpType := typ
-		if fpType == "" {
-			fpType = "JA4+"
+		// A fingerprint is blocked on a network, never everywhere (ADR 0026).
+		key, ok := scopedFingerprintKey(source)
+		if !ok {
+			return &gateonv1.MitigateThreatResponse{Success: false, Message: fmt.Sprintf(
+				"%s was not blocked: it is not an address. %s", source, fingerprintScopeHelp)}, nil
 		}
-		telemetry.MarkUserMitigated(source, fpType, reason, category)
-		mitigated = telemetry.IsUserMitigated(source)
+		telemetry.MarkUserMitigated(key, cmp.Or(typ, "JA4+"), reason, category)
+		source = key
+		mitigated = telemetry.IsUserMitigated(key)
 	}
 
 	if !mitigated {
@@ -1038,29 +1057,68 @@ func (s *ApiService) RemoveMitigatedThreat(ctx context.Context, req *gateonv1.Re
 // releaseFingerprintMitigation releases a non-IP source and reports whether an
 // in-force mitigation was actually removed.
 //
-// The key is the whole problem. MarkUserMitigated stores the fingerprint string
-// it is handed verbatim, so the only keys that exist are ones some caller
-// chose; rebuilding source+"_"+ja4h for a client too old to send ja4plus is a
-// guess at that choice, and a wrong guess matches no row while still returning
-// normally. So the legacy shape is used only when the store confirms a
-// mitigation is filed under it.
+// A fingerprint block is a client class on one network (repid.For, ADR 0026).
+// A row from the mitigation list names one exactly, and that one is released.
+// Anything else names a class -- a threat's whole JA4+, or a client too old to
+// send ja4plus sending the JA4 and JA4H apart -- and the class is released on
+// every network it is blocked on, and held there, as a fingerprint release did
+// when a block was the class everywhere.
 func releaseFingerprintMitigation(source, ja4plus, ja4h string) bool {
 	// Reputation is reset either way: it is a separate decay, not the block, and
 	// an operator who asked for a release should get it even when the block they
-	// were looking at has already expired. Every network's score for the class,
-	// because that is where the scores are: the bare fingerprint is not a key the
-	// reputation blocker reads.
+	// were looking at has already expired. For a class, every network's score,
+	// because that is where the scores are; for a key from the list, that
+	// network's, which is the key itself.
 	telemetry.ResetReputationClass(source)
 
-	key := ja4plus
-	if key == "" {
-		var found bool
-		if key, found = telemetry.FindUserMitigationKey(source, ja4h); !found {
-			return false
-		}
+	key := cmp.Or(ja4plus, source)
+	if repid.Scoped(key) {
+		return telemetry.MarkUserUnmitigated(key)
 	}
-	return telemetry.MarkUserUnmitigated(key)
+	if ja4plus == "" && ja4h != "" {
+		key = source + "_" + ja4h
+	}
+	return telemetry.ReleaseUserMitigationClass(key)
 }
+
+// scopedFingerprintKey turns what an operator names -- "fingerprint|address",
+// or a key as the mitigation list shows one, "fingerprint|network" -- into the
+// key UserMitigation enforces: the fingerprint's class on that address's /24 or
+// /64. A fingerprint on its own names a client build on every network and is
+// refused (ADR 0026).
+func scopedFingerprintKey(source string) (string, bool) {
+	i := strings.LastIndex(source, "|")
+	if i <= 0 {
+		return "", false
+	}
+	addr, ok := networkAddress(source[i+1:])
+	if !ok {
+		return "", false
+	}
+	return repid.For(source[:i], addr), true
+}
+
+// networkAddress is an address on the network where names: an address, the
+// first address of a prefix, or the first of a /24 written as the mitigation
+// list writes one ("203.0.113").
+func networkAddress(where string) (string, bool) {
+	if a, err := netip.ParseAddr(where); err == nil {
+		return a.String(), true
+	}
+	if p, err := netip.ParsePrefix(where); err == nil {
+		return p.Addr().String(), true
+	}
+	if a, err := netip.ParseAddr(where + ".0"); err == nil && a.Is4() {
+		return a.String(), true
+	}
+	return "", false
+}
+
+// fingerprintScopeHelp is what an operator is told when a fingerprint names no
+// network.
+const fingerprintScopeHelp = "A fingerprint names a client build, which every user of that build shares " +
+	"on every network, so it is blocked one network at a time: name an address on the network after " +
+	"it, as <fingerprint>|203.0.113.7, to block it on 203.0.113.0/24."
 
 func (s *ApiService) threatToAnomaly(ctx context.Context, t *telemetry.SecurityThreat) *gateonv1.Anomaly {
 	a := ThreatToAnomaly(t)
@@ -1144,22 +1202,28 @@ func (s *ApiService) resetReputationForIP(ctx context.Context, ip string) {
 	fps := telemetry.GetAssociatedFingerprints(ctx, ip)
 	for _, fp := range fps {
 		telemetry.ResetReputation(repid.For(fp, ip))
-		// Also remove user mitigation if it exists
-		telemetry.MarkUserUnmitigated(fp)
+		// And the fingerprint block, which is the class on this address's
+		// network (ADR 0026): the one this address's clients were refused by.
+		telemetry.MarkUserUnmitigated(repid.For(fp, ip))
 	}
 }
 
+// mitigateFingerprintFromThreat blocks the class a threat came from on the
+// network it came from, never the class everywhere (ADR 0026).
 func (s *ApiService) mitigateFingerprintFromThreat(ctx context.Context, threatID string) {
 	if threatID == "" {
 		return
 	}
-	if th, err := telemetry.GetSecurityThreatByID(ctx, threatID); err == nil {
-		if th.Fingerprint != "" {
-			telemetry.MarkUserMitigated(th.Fingerprint, "JA4+", "Mitigated via recommendation for "+th.Type, th.Category)
-		} else if th.JA4 != "" {
-			// Fallback if Fingerprint not set (though it should be now)
-			telemetry.MarkUserMitigated(th.JA4+"_"+th.JA4H, "JA4+", "Mitigated via recommendation for "+th.Type, th.Category)
-		}
+	th, err := telemetry.GetSecurityThreatByID(ctx, threatID)
+	if err != nil || th.SourceIP == "" {
+		return
+	}
+	fp := th.Fingerprint
+	if fp == "" && th.JA4 != "" {
+		fp = th.JA4 + "_" + th.JA4H
+	}
+	if fp != "" {
+		telemetry.MarkUserMitigated(repid.For(fp, th.SourceIP), "JA4+", "Mitigated via recommendation for "+th.Type, th.Category)
 	}
 }
 
@@ -1296,13 +1360,17 @@ func storedMitigationAnomaly(ctx context.Context, m telemetry.CombinedMitigation
 		Category:       m.Category,
 		Severity:       severityHigh,
 		ActionTaken:    telemetry.ActionBlocked,
-		Recommendation: "User/Fingerprint is mitigated based on behavioral patterns.",
-		Ja4:            m.Source,
-		Ja4H:           m.JA4H,
-		Ja4Plus:        m.Source,
+		Recommendation: "Clients of this build on this network are refused: the fingerprint's class and the network it attacked from.",
+		// The class, and the whole key: Allow on the row releases exactly this
+		// block, the class on this one network.
+		Ja4:     repid.ClassOf(m.Source),
+		Ja4H:    m.JA4H,
+		Ja4Plus: m.Source,
 	}
 	if m.SourceType == "ip" {
 		a.Recommendation = "IP address is mitigated/shunned at the network layer."
+		a.Ja4 = ""
+		a.Ja4Plus = ""
 	}
 	populateAnomalyGeo(ctx, a, m.Source)
 	return a
@@ -1359,11 +1427,23 @@ func throttleAnomaly(l ebpf.AdaptiveLimit) *gateonv1.Anomaly {
 		Category:    "kernel_rate_limit",
 		Severity:    severityMedium,
 		Timestamp:   l.SetAt.UTC().Format(time.RFC3339),
+		// The lease's end as a field of its own, so the dashboard can count
+		// down to it; it used to exist only inside the description's prose.
+		ExpiresAt: rfc3339OrEmpty(l.Expires),
 		Description: fmt.Sprintf("%s is rate-limited in the kernel to %s, after a burst of 64. Why: %s. "+
 			"Lapses at %s unless set again.", who, packetRate(l.Interval), reason, l.Expires.UTC().Format(time.RFC3339)),
 		Recommendation: "Allow lifts the limit now and resets the automatic history behind it. Left alone, it " +
 			"lapses on its own once nothing sets it again.",
 	}
+}
+
+// rfc3339OrEmpty formats t as RFC 3339 in UTC, or "" for the zero time, which
+// would otherwise read as a moment two thousand years ago.
+func rfc3339OrEmpty(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.UTC().Format(time.RFC3339)
 }
 
 // packetRate says how many packets a second an interval allows.

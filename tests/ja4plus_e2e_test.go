@@ -59,6 +59,9 @@ func TestJA4PlusMitigationE2E(t *testing.T) {
 	// computes blocks that client — and cannot drift from how the composite is
 	// assembled.
 	var seenJA4Plus string
+	// seenKey is what a block for this client is kept under: its class on its
+	// network (ADR 0026), read the way UserMitigation reads it.
+	var seenKey string
 
 	withJA4 := func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -69,6 +72,7 @@ func TestJA4PlusMitigationE2E(t *testing.T) {
 				rs.JA4Plus = ""
 			}
 			seenJA4Plus = telemetry.GetJA4Plus(r)
+			seenKey = telemetry.GetReputationID(r)
 			next.ServeHTTP(w, r)
 		})
 	}
@@ -99,7 +103,7 @@ func TestJA4PlusMitigationE2E(t *testing.T) {
 	if ja4plus == "" || !strings.HasPrefix(ja4plus, ja4+"_") {
 		t.Fatalf("gateway derived an unexpected JA4+ %q; want one starting %q_", ja4plus, ja4)
 	}
-	telemetry.MarkUserMitigated(ja4plus, "JA4+", "Malicious behavior detected", "gambling")
+	telemetry.MarkUserMitigated(seenKey, "JA4+", "Malicious behavior detected", "gambling")
 
 	// Wait for cache/DB update
 	time.Sleep(100 * time.Millisecond)
@@ -114,8 +118,8 @@ func TestJA4PlusMitigationE2E(t *testing.T) {
 	assert.Contains(t, rec3.Body.String(), "Compromised Fingerprint")
 
 	// 4. Remove mitigation
-	telemetry.MarkUserUnmitigated(ja4plus)
-	telemetry.ResetReputation(ja4plus)
+	telemetry.MarkUserUnmitigated(seenKey)
+	telemetry.ResetReputation(seenKey)
 	time.Sleep(2 * time.Second)
 
 	// 5. Request after unmitigation (Should be allowed)

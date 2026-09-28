@@ -53,7 +53,6 @@ func IPMitigation() kind.Middleware {
 	}
 }
 
-// UserMitigation returns a middleware that blocks requests from mitigated JA4+ fingerprints.
 // unmitigatedPaths are fetched by browsers and crawlers without a user ever
 // asking, so a mitigated fingerprint refusing them produces phantom requests
 // that break security isolation in e2e tests and confuse production triage.
@@ -63,6 +62,15 @@ var unmitigatedPaths = map[string]bool{
 	"/sitemap.xml": true,
 }
 
+// UserMitigation returns a middleware that refuses clients whose fingerprint is
+// blocked on their network.
+//
+// The block is kept for, and read under, telemetry.GetReputationID -- the
+// fingerprint's class on the client's /24 or /64 (repid.For) -- which is the
+// key the recording path writes, and the one the reputation blocker behind
+// this reads (ADR 0026). Keyed on the whole JA4+ it refused every user of one
+// browser build on every network, while the client it was meant for shed it by
+// dropping a Referer.
 func UserMitigation() kind.Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -81,11 +89,12 @@ func serveUserMitigation(next http.Handler, w http.ResponseWriter, r *http.Reque
 	}
 
 	rs := request.GetRequestState(r)
-	var ja4plus string
-	if rs != nil {
-		ja4plus = rs.JA4Plus
+	if rs == nil || rs.JA4Plus == "" {
+		next.ServeHTTP(w, r)
+		return
 	}
-	if ja4plus == "" || !telemetry.IsUserMitigated(ja4plus) {
+	key := telemetry.GetReputationID(r)
+	if !telemetry.IsUserMitigated(key) {
 		next.ServeHTTP(w, r)
 		return
 	}
@@ -93,21 +102,15 @@ func serveUserMitigation(next http.Handler, w http.ResponseWriter, r *http.Reque
 	w.WriteHeader(http.StatusForbidden)
 	_, _ = w.Write([]byte("Forbidden: Compromised Fingerprint"))
 
-	// Use resolved client IP from RequestState if available.
-	clientIP := request.GetClientIP(r, config.EffectiveTrustCloudflare())
-	if rs != nil && rs.ClientRemoteAddr != "" {
-		clientIP = rs.ClientRemoteAddr
-	}
-
 	// Record threat for visibility in dashboard
 	telemetry.RecordSecurityThreat(telemetry.RecordSecurityThreatWithJA4(r, telemetry.SecurityThreat{
 		Type:        "user_mitigation",
-		SourceIP:    clientIP,
+		SourceIP:    telemetry.ClientIPOf(r),
 		Category:    "threat_intel",
 		Severity:    kind.SeverityHigh,
 		ActionTaken: kind.ActionBlocked,
-		Details:     "Request blocked due to mitigated user fingerprint (JA4+)",
-		Fingerprint: ja4plus,
+		Details:     "Request blocked: this client build is blocked on this network (" + key + ")",
+		Fingerprint: rs.JA4Plus,
 		RequestURI:  r.URL.RequestURI(),
 		Method:      r.Method,
 		UserAgent:   r.UserAgent(),
