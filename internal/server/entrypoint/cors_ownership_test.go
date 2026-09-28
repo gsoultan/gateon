@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -286,14 +287,26 @@ func corsGateway(t *testing.T, backend http.Handler, mws ...*gateonv1.Middleware
 	ep := &gateonv1.EntryPoint{Id: "web", Name: "web", Address: ":8080"}
 	front := middleware.Chain(entrypointChain(t.Context(), ep, &Deps{GlobalStore: global})...)(routeChain)
 	gw := &corsGW{}
-	srv := httptest.NewUnstartedServer(front)
+	// srv.Close does not wait for a hijacked connection's handler, so after a
+	// WebSocket test returns, its handler can still be unwinding through the
+	// chain -- the access log reads the global logger -- while the next test
+	// swaps that logger. Every handler this gateway starts is waited for.
+	var serving sync.WaitGroup
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		serving.Add(1)
+		defer serving.Done()
+		front.ServeHTTP(w, r)
+	}))
 	srv.Config.ConnState = func(_ net.Conn, state http.ConnState) {
 		if state == http.StateNew {
 			gw.opened.Add(1)
 		}
 	}
 	srv.Start()
-	t.Cleanup(srv.Close)
+	t.Cleanup(func() {
+		srv.Close() // no handler starts after this
+		serving.Wait()
+	})
 	gw.url = srv.URL
 	return gw
 }
