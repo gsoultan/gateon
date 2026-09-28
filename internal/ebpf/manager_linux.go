@@ -36,8 +36,6 @@ var mapNames = []string{
 	"knocking_config",
 	"lb_backends",
 	"lb_backends_count",
-	"xsk_map",
-	"phantom_ports",
 	"global_ebpf_config",
 	"ip_telemetry",
 	"shunned_prefixes6",

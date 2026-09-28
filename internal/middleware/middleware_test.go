@@ -17,6 +17,7 @@ import (
 	"golang.org/x/time/rate"
 
 	"github.com/gsoultan/gateon/internal/middleware/security"
+	"github.com/gsoultan/gateon/internal/middleware/security/challenge"
 	wafmw "github.com/gsoultan/gateon/internal/middleware/security/waf"
 	"github.com/gsoultan/gateon/internal/middleware/traffic"
 	"github.com/gsoultan/gateon/internal/middleware/transform"
@@ -538,7 +539,7 @@ func TestWAF_BlocksWithCustomDirectives(t *testing.T) {
 }
 
 func TestTurnstile_MissingTokenReturns400(t *testing.T) {
-	mw := security.Turnstile(security.TurnstileConfig{Secret: "test-secret", Methods: []string{"POST"}})
+	mw := challenge.Turnstile(challenge.TurnstileConfig{Secret: "test-secret", Methods: []string{"POST"}})
 	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -552,7 +553,7 @@ func TestTurnstile_MissingTokenReturns400(t *testing.T) {
 }
 
 func TestTurnstile_SkipsGet(t *testing.T) {
-	mw := security.Turnstile(security.TurnstileConfig{Secret: "test-secret", Methods: []string{"POST"}})
+	mw := challenge.Turnstile(challenge.TurnstileConfig{Secret: "test-secret", Methods: []string{"POST"}})
 	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))

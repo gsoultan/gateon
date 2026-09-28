@@ -35,24 +35,28 @@
 # it grows -- cors.go, cors_factory.go and cors_presets.go already sit together.
 12 internal/middleware/transform
 
-# What is left of ADR-0002's security stage after two extractions. The stage
+# What is left of ADR-0002's security stage after three extractions. The stage
 # pinned this at thirty-four and said plainly that the ADR had named one thing
 # where there were six: the WAF, the challenge middlewares, fingerprint
 # identity, network access, API-shape validation and content inspection. The
-# WAF left next (it was already named), and fingerprint identity left under
-# ADR-0013. Twenty files, four concerns.
+# WAF left next (it was already named), fingerprint identity left under
+# ADR-0013, and the challenge middlewares under ADR-0030. Fifteen files, three
+# concerns plus the two files they share: deps.go, and security_advanced.go,
+# which holds the recognition scanners, tarpit and entropy.
 #
-# The remaining seams, in the order the evidence favours them: the challenge
-# middlewares (bot_management, pow, turnstile and their factories) are seven
-# files that already share a shape -- issue a challenge, verify a solution,
-# record the outcome. API-shape validation (openapi, schema_validation,
-# graphql_firewall, graphql_factory) is four. Content inspection
-# (file_security, deception, honeypot) is three and the least cohesive of them.
-# Network access (geoip, ipfilter, policy and their factories) is six.
+# The remaining seams. A scratch-package probe on 2026-09-28 built two of
+# them against nothing else in this package. Network access (geoip, ipfilter,
+# policy and their factories) is six files, and is the next seam: it is the
+# only single cut that brings this package under the limit (fifteen to nine)
+# and retires this line. API-shape validation (openapi, schema_validation,
+# graphql_firewall, graphql_factory) is four and just as clean. Content
+# inspection (file_security, deception, honeypot) is three, the least
+# cohesive, and reaches into security_advanced.go for serveTrollResponse, so
+# it cannot leave without first deciding where that helper lives.
 #
 # None of those is urgent and none should be folded into an unrelated change.
 # The ratchet holds the ground already taken; that is its job.
-20 internal/middleware/security
+15 internal/middleware/security
 
 # The dashboard/control-plane API surface. Grows a file per RPC group, so it is
 # the package most likely to cross a pin during ordinary feature work; that is
