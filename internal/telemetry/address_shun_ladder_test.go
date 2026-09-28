@@ -145,6 +145,25 @@ func TestTheAutomaticWriteCannotOverwriteABlockOrARelease(t *testing.T) {
 	})
 }
 
+// Enforcement reads the end to lift a lapsed shun, and must not lift a block
+// because the end is unreadable: then the status decides, as it did before
+// shuns lapsed. SQLite keeps whatever text a column is given.
+func TestAnUnreadableEndDoesNotTurnABlockOff(t *testing.T) {
+	freshStore(t)
+	const ip = "198.51.100.149"
+	if _, err := ShunAutomatically(ip, "test"); err != nil {
+		t.Fatal(err)
+	}
+	s := getStore()
+	if _, err := s.db.Exec(`UPDATE ip_mitigations SET expires_at = 'not a time' WHERE ip = ?`, ip); err != nil {
+		t.Fatal(err)
+	}
+	purgeShunCache()
+	if !IsIPMitigated(ip) {
+		t.Error("a shun whose end could not be read stopped being enforced")
+	}
+}
+
 // Loopback and the allowlist are never shunned by an automatic path.
 func TestShunAutomaticallyExemptsLoopbackAndTheAllowlist(t *testing.T) {
 	freshStore(t)

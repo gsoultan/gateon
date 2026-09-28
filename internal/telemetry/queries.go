@@ -132,6 +132,11 @@ const (
 
 	QueryReadIPShun = `SELECT status, mitigated_at, expires_at, unmitigated_at FROM ip_mitigations WHERE ip = ?`
 
+	// QueryReadIPShunEnd and QueryReadIPShunStatus are what enforcement reads
+	// (readIPShunUntil): nothing it does not need.
+	QueryReadIPShunEnd    = `SELECT status, expires_at FROM ip_mitigations WHERE ip = ?`
+	QueryReadIPShunStatus = `SELECT status FROM ip_mitigations WHERE ip = ?`
+
 	// QueryMarkIPMitigated is an operator's block: no expiry, whatever the
 	// address had.
 	QueryMarkIPMitigated = `INSERT INTO ip_mitigations (ip, status, reason, mitigated_at, expires_at, updated_at)

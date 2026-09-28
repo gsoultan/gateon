@@ -2096,15 +2096,31 @@ func IsIPMitigated(ip string) bool {
 		}
 	}
 
-	row, err := s.readIPShun(ip)
-	until := shunNone
-	if err == nil {
-		until = row.until()
-	}
+	until := s.readIPShunUntil(ip)
 	if s.unmitigatedCache != nil {
 		s.unmitigatedCache.Add(ip, until)
 	}
 	return until.active()
+}
+
+// readIPShunUntil is ip's shun as enforcement needs it: the status and the
+// end, and nothing else, so a timestamp written by an older version that does
+// not scan cannot turn a block off. If the end does not scan, the status
+// decides alone, as it did before shuns lapsed: a block stays a block.
+func (s *pathStatsStore) readIPShunUntil(ip string) shunUntil {
+	var r ipShunRow
+	err := s.db.QueryRow(s.dialect.Rebind(QueryReadIPShunEnd), ip).Scan(&r.status, &r.expiresAt)
+	switch {
+	case err == nil:
+		return r.until()
+	case errors.Is(err, sql.ErrNoRows):
+		return shunNone
+	}
+	var status string
+	if s.db.QueryRow(s.dialect.Rebind(QueryReadIPShunStatus), ip).Scan(&status) == nil && status == statusMitigated {
+		return shunForever
+	}
+	return shunNone
 }
 
 // Automatic shuns lapse (ADR 0031). A shun refuses everyone behind an address
