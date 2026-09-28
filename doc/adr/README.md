@@ -46,7 +46,9 @@ ADRs follow a lightweight [MADR](https://adr.github.io/madr/)-style format:
 | [0033](./0033-middleware-secrets-are-write-only.md) | Middleware secrets are write-only | Accepted |
 | [0034](./0034-a-middleware-resolves-only-the-secret-references-the-host-allows.md) | A middleware resolves only the secret references the host allows | Accepted |
 | [0035](./0035-the-kernel-enforces-the-same-exemption-as-the-data-path.md) | The kernel shun map enforces the same exemption as the data path | Accepted |
+| [0036](./0036-a-block-reaches-open-l4-sessions-and-a-per-address-connection-cap.md) | A block reaches open L4 sessions, and every entrypoint caps connections per source address | Accepted |
 | [0037](./0037-a-manual-block-may-expire-and-a-fingerprint-is-stable.md) | A manual block may expire, and an API-key fingerprint is stable | Accepted |
+| [0038](./0038-binding-a-credential-injecting-middleware-to-a-route-needs-admin.md) | Binding a credential-injecting middleware to a route needs an administrator | Accepted |
 
 ## Conventions
 
