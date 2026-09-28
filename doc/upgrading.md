@@ -11,6 +11,68 @@ here after the fact.
 
 ## Unreleased
 
+### Middleware secrets are no longer returned by the API — **API clients and exports that read them stop getting them**
+
+Anyone who could write middlewares -- administrators and operators, or anyone
+when authentication is off -- read every middleware secret verbatim: basic-auth
+passwords, JWT, PASETO and HMAC keys, OAuth introspection and OIDC client
+secrets, turnstile, bot-management and proof-of-work secrets, canary tokens and
+API keys, over REST and gRPC, in the answer to a save, and in
+`GET /v1/config/export`. Middleware secrets are now write-only, like the global
+configuration's (ADR 0028). See ADR 0030.
+
+- A stored middleware secret reads as `__gateon_redacted__`; a secret configured
+  as a reference (`$env:…`, `$vault:…`, `$aws-sm:…`) still reads as the reference
+  to administrators and operators; an unset one reads `""`.
+- A basic-auth user list reads as `alice:__gateon_redacted__,bob:__gateon_redacted__`.
+  Each password is kept by the user's name.
+- An API key reads as `key___gateon_redacted___<fingerprint>` with its tenant label
+  as the value. Sending that entry back keeps the key under whatever label it
+  now has; leaving it out removes the key.
+- A value the headers middleware sets for a header whose name carries a
+  credential -- `Authorization`, `Proxy-Authorization`, `Cookie`, `Set-Cookie`, or
+  any name containing `token`, `secret`, `passw`, `key`, `auth`, `session`,
+  `credential`, `signature`, `bearer` or `jwt` -- and a query parameter the rewrite
+  middleware adds under such a name, are secrets too.
+- **GET → modify → PUT keeps working.** Send the placeholders back unchanged and
+  every stored secret is kept exactly as it is held. A new value replaces a
+  secret; `""` clears it, and a secret the middleware cannot run without is then
+  refused by the save, naming it.
+- The placeholder is refused, naming the field, when there is nothing to keep:
+  for a new middleware id, for a field that holds no secret, and when the same
+  save changes the middleware's type or kind of authentication, its OAuth
+  introspection URL, its OIDC issuer or its forward-auth address. Enter the
+  secret again in those cases. A renamed basic-auth user needs its password
+  again.
+- No store accepts the placeholder as a value, and a middleware whose stored
+  config holds it (a hand-written `middlewares.json`, or one seeded from an
+  export) is not built: the route refuses requests until the secret is entered.
+
+**Who is affected:** API clients and scripts that read middleware secrets from
+`GET /v1/middlewares`, `ListMiddlewares` or the config export -- they now get
+placeholders. Operators who used the config export as a backup of middleware
+credentials: it no longer carries them, and there is no export that does; back
+up the database or `middlewares.json` on the host instead. Deployments without
+`GATEON_ENCRYPTION_KEY`: API-key fingerprints change on every restart, so an
+export taken, or a dashboard form opened, before a restart cannot keep API keys
+-- the import or save names each one to enter again. Viewers: they no longer see
+any value the headers or rewrite middlewares set.
+
+### Config export carries no middleware secret; import keeps them on the same gateway
+
+`GET /v1/config/export` writes every middleware secret as the placeholder.
+`POST /v1/config/import` of such an export into the same gateway keeps the
+stored secret of each middleware with the same id, type and destination, and
+refuses -- naming the middleware and the field -- a placeholder it cannot keep,
+while importing everything else. The preview (`?dry_run=true`) lists those under
+`"refused"` before anything is written, and no longer echoes the secrets it was
+sent; neither does `POST /v1/config/validate`.
+
+**Who is affected:** anyone moving middlewares between gateways with export and
+import: middlewares with secrets need them entered on the target (an export
+into a gateway whose middleware ids happen to match keeps that gateway's own
+secrets).
+
 ### A session key changed outside the dashboard no longer locks out every 2FA account — **set `GATEON_PREVIOUS_SESSION_KEY` when you rotate the key at its source**
 
 The session key also encrypts each stored second factor, and only a rotation
