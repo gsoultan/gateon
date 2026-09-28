@@ -30,6 +30,7 @@ import (
 	"github.com/gsoultan/gateon/internal/httputil"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/request"
+	"github.com/gsoultan/gateon/internal/security/mitigation"
 	"github.com/gsoultan/gateon/internal/syncutil"
 	"github.com/gsoultan/gateon/internal/telemetry/repid"
 	lru "github.com/hashicorp/golang-lru"
@@ -1798,12 +1799,22 @@ func normalizeThreatHeaders(st *SecurityThreat) {
 // shun refuses all of it until an operator releases it.
 //
 // Mitigation threats are excluded, or acting on one would produce another.
+//
+// So is everything from an allowlisted source. Its threats are recorded,
+// listed and correlated like any other -- the allowlist exempts enforcement,
+// never observation -- but they are not evidence towards a block: a
+// fingerprint block is kept for a build on a network and would refuse the
+// source's neighbours who share its build, and evidence kept towards a shun
+// would be held against the address the day it left the allowlist (ADR 0029).
 func escalateMitigation(st *SecurityThreat) {
 	if !st.Mitigated && st.Category != "reputation" && st.Score < autoMitigateScore {
 		return
 	}
 	switch st.Type {
 	case "user_mitigation", "ip_mitigation", "ip_shunning":
+		return
+	}
+	if mitigation.IsAllowlisted(st.SourceIP) {
 		return
 	}
 

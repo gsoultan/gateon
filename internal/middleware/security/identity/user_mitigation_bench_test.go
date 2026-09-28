@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/gsoultan/gateon/internal/request"
+	"github.com/gsoultan/gateon/internal/security/mitigation"
 	"github.com/gsoultan/gateon/internal/telemetry"
 )
 
@@ -47,6 +48,25 @@ func BenchmarkUserMitigation(b *testing.B) {
 			for b.Loop() {
 				rs.ReputationID = ""
 				tc.h.ServeHTTP(w, req)
+			}
+		})
+	}
+}
+
+// BenchmarkExemptFromEnforcement is what the loopback and allowlist exemption
+// costs a request a block would refuse -- the only request that reads it.
+func BenchmarkExemptFromEnforcement(b *testing.B) {
+	for _, tc := range []struct{ name, allowlist, ip string }{
+		{"no-allowlist", "", "203.0.113.42"},
+		{"allowlist-miss", "198.51.100.0/24,192.0.2.10/32", "203.0.113.42"},
+		{"allowlist-hit", "198.51.100.0/24,203.0.113.0/24", "203.0.113.42"},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			mitigation.SetAllowlist(mitigation.ParseAllowlist(tc.allowlist))
+			b.Cleanup(func() { mitigation.SetAllowlist(nil) })
+			b.ReportAllocs()
+			for b.Loop() {
+				exemptFromEnforcement(tc.ip)
 			}
 		})
 	}

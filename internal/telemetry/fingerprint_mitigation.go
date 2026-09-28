@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/gsoultan/gateon/internal/logger"
-	"github.com/gsoultan/gateon/internal/security/mitigation"
 	"github.com/gsoultan/gateon/internal/telemetry/repid"
 )
 
@@ -308,7 +307,7 @@ func userMitigationRetention() time.Duration {
 // Only attack evidence counts (AttackEvidenceWeight), classes are what a client
 // cannot vary per request (repid.Class), a class counts for
 // mitigationEvidenceWindow after its latest evidence, and an allowlisted source
-// is never counted. ADR 0029.
+// is never counted (escalateMitigation). ADR 0029.
 const (
 	// ipShunMinClasses is how many distinct client classes must produce attack
 	// evidence from one address, within mitigationEvidenceWindow, before the
@@ -342,8 +341,7 @@ var classSeed = maphash.MakeSeed()
 // escalateAddress shuns the address a threat came from once ipShunMinClasses
 // classes have attacked from it within the window.
 func escalateAddress(st *SecurityThreat) {
-	if st.SourceIP == "" || st.Fingerprint == "" || AttackEvidenceWeight(st) == 0 ||
-		mitigation.IsAllowlisted(st.SourceIP) {
+	if st.SourceIP == "" || st.Fingerprint == "" || AttackEvidenceWeight(st) == 0 {
 		return
 	}
 	classes := recordAddressEvidence(st.SourceIP, repid.Class(st.Fingerprint), evidenceTime(st))

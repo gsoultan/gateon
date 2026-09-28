@@ -159,6 +159,61 @@ can:
   permanently, where a fingerprint release holds for a day. A lapsing shun is
   option 4 above.
 
+## Related decisions in the same change
+
+### The fingerprint block honours the allowlist and loopback
+
+`UserMitigation` refused a client whose build was blocked on its network
+whatever `GATEON_MITIGATION_ALLOWLIST` said, and whether or not it was
+loopback; the reputation blocker behind it serves both first. A fingerprint
+block is kept for a build on a /24 or /64 (ADR 0026), so it reaches clients
+that did not earn it: an allowlisted address on a network where someone
+else's attacks had blocked its build was refused with them.
+`TestAnAllowlistedClientIsNotRefusedByAFingerprintBlock` and
+`TestLoopbackIsNotRefusedByAFingerprintBlock`
+(`internal/middleware/security/identity`) failed before this change.
+
+One function, `exemptFromEnforcement`, now decides for both blockers, so the
+two cannot drift again. `UserMitigation` reads it only for a request a block
+would otherwise refuse, so a request that is not blocked -- nearly all of them
+-- pays nothing for it. Measured (benchstat, n=10, the old and new test
+binaries interleaved, Apple M5 Pro): `BenchmarkUserMitigation` alone 100.5 ns
+→ 101.2 ns (p=0.85), the three-refusal chain 261.9 ns → 260.4 ns (p=0.84),
+80 B / 3 allocations and 128 B / 6 allocations unchanged. The exemption
+itself (`BenchmarkExemptFromEnforcement`) costs 16 ns with no allowlist -- the
+loopback test -- and about 35 ns with a two-prefix list, allocating nothing.
+
+**Recording versus enforcement, for the automatic paths.** Neither the
+fingerprint escalation nor the shun counts a threat from an allowlisted
+source: `escalateMitigation` returns before either sees it. Exempting only at
+enforcement would not be enough. A block is kept for a build on a network, so
+an allowlisted scanner's evidence would block its build for the scanner's
+neighbours, whom the allowlist does not name -- enforcement landing on people
+the operator never mentioned, because of traffic the operator said not to act
+on; and evidence kept towards a shun would be held against the address the
+day it left the allowlist. The threats themselves are still recorded, listed,
+broadcast, correlated and scored: the allowlist exempts enforcement, never
+observation. `TestAnAllowlistedSourceDoesNotEarnAFingerprintBlock` failed
+before this change, and asserts that the scanner's threats are still
+recorded, so an allowlist check tidied into the recording path fails it too.
+
+**Found, not changed.**
+
+- An allowlisted source's threats still lower its class's reputation on its
+  network: the score is kept as observation (the 2026-09-05 allowlist
+  decision, pinned by a test). The reputation blocker enforces that score
+  against every client of the class on the network, so the collateral this
+  change removes from the fingerprint block is still there through
+  reputation. It needs a decision of its own.
+- `IPMitigation` enforces an IP block on an allowlisted address. After this
+  change no automatic path writes one -- this shun, the anomaly detector's,
+  playbooks and the responder all consult the allowlist -- so what is left is
+  an operator's explicit block, and shuns written before the upgrade. The
+  alerting manager's "autonomous mitigation" does not consult it, but its
+  shun needs a critical threat with no action taken, and neither of its
+  callers passes one: the store stamps an action before the hook runs, and
+  the CORS middleware files its violations as medium.
+
 ## Related
 
 - ADR 0024 (the class) and ADR 0025 (attack evidence, and releases clearing

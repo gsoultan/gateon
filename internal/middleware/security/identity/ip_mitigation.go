@@ -71,6 +71,10 @@ var unmitigatedPaths = map[string]bool{
 // this reads (ADR 0026). Keyed on the whole JA4+ it refused every user of one
 // browser build on every network, while the client it was meant for shed it by
 // dropping a Referer.
+//
+// A block covers a network, so it reaches clients that did not earn it; the
+// ones GATEON_MITIGATION_ALLOWLIST names, and loopback, are served as the
+// reputation blocker serves them (exemptFromEnforcement, ADR 0029).
 func UserMitigation() kind.Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -94,7 +98,10 @@ func serveUserMitigation(next http.Handler, w http.ResponseWriter, r *http.Reque
 		return
 	}
 	key := telemetry.GetReputationID(r)
-	if !telemetry.IsUserMitigated(key) {
+	// The exemption is read only for a request a block would refuse, so the
+	// requests that are not blocked -- nearly all of them -- pay nothing for it.
+	// The address is the one the key was scoped with, cached on the state.
+	if !telemetry.IsUserMitigated(key) || exemptFromEnforcement(telemetry.ClientIPOf(r)) {
 		next.ServeHTTP(w, r)
 		return
 	}
