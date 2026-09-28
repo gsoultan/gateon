@@ -7,6 +7,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -76,28 +77,55 @@ func TestAllowlistedSourceIsNotBannedByTheHoneypot(t *testing.T) {
 // the dashboard and it feeds correlation. An operator who allowlists their own
 // pentest team wants to see exactly what it found, and a control that hid the
 // evidence along with the block would be worse than no allowlist at all.
+//
+// The reputation score is on the enforcement side of that line. This test
+// used to assert the opposite -- that an allowlisted source's threats still
+// lowered its score, "observation" in the 2026-09-05 decision -- which was
+// right while a score belonged to one client. Since ADR 0024 it belongs to a
+// client class on a network, and the reputation blocker refuses every client
+// of the class there once it falls: an allowlisted scanner's threats lowering
+// it refused the scanner's neighbours running the same build, enforcement
+// landing on clients the operator never named, for traffic the operator said
+// not to act on. So the score is an enforcement input and the allowlist
+// exempts it (ADR 0031); the record is what stays.
 func TestAllowlistExemptsEnforcementNotObservation(t *testing.T) {
+	t.Setenv("GATEON_ENABLE_TEST_REPUTATION", "1")
+	t.Setenv("GATEON_TRACE_DIR", t.TempDir())
+	_ = telemetry.ClosePathStatsStore(context.Background())
+	if err := telemetry.InitPathStatsStore(filepath.Join(t.TempDir(), "observation.db"), 1); err != nil {
+		t.Fatalf("init telemetry store: %v", err)
+	}
+	t.Cleanup(func() { _ = telemetry.ClosePathStatsStore(context.Background()) })
 	withAllowlist(t, "203.0.113.0/24")
+	const ip, build = "203.0.113.7", "t13d1516h2_8daaf6152771_b0da82dd1658_observed"
+	id := repid.For(build, ip)
+	t.Cleanup(func() { telemetry.ResetReputation(id) })
 
-	if !mitigation.IsAllowlisted("203.0.113.7") {
+	if !mitigation.IsAllowlisted(ip) {
 		t.Fatal("the address is not allowlisted; the setup is wrong")
 	}
 
-	// The recording path takes no allowlist argument and has no way to consult
-	// one. That is the design, and this assertion is what stops someone "tidying"
-	// an allowlist check into it later.
-	before := telemetry.GetReputationScore(
-		repid.For("fp-observed", "203.0.113.7"))
-	telemetry.DecreaseReputation(
-		repid.For("fp-observed", "203.0.113.7"), 50, "test: still recorded")
-	after := telemetry.GetReputationScore(
-		repid.For("fp-observed", "203.0.113.7"))
+	telemetry.RecordSecurityThreat(telemetry.SecurityThreat{
+		Type: "waf_blocked", Category: "waf", Severity: "high", SourceIP: ip, Fingerprint: build,
+		Score: 100, Time: time.Now(), ActionTaken: telemetry.ActionBlocked,
+	})
+	telemetry.FlushThreats()
 
-	if after >= before {
-		t.Errorf("an allowlisted source's score did not move (%v → %v). The "+
-			"allowlist must exempt enforcement and never observation: an operator "+
-			"allowlists a scanner to stop it being blocked, not to stop seeing it.",
-			before, after)
+	recorded := 0
+	for _, th := range telemetry.GetSecurityThreatsLite(t.Context(), 100, 0, nil) {
+		if th.SourceIP == ip {
+			recorded++
+		}
+	}
+	if recorded != 1 {
+		t.Errorf("%d of the allowlisted source's 1 threat is recorded. The allowlist must "+
+			"never hide observation: an operator allowlists a scanner to stop it being "+
+			"blocked, not to stop seeing it.", recorded)
+	}
+	if got := telemetry.GetReputationScore(id); got < 100 {
+		t.Errorf("an allowlisted source's threat lowered the score its build holds on its "+
+			"network to %v. That score is enforced against every client of the build there "+
+			"(ADR 0024), so it is enforcement, which the allowlist exempts (ADR 0031).", got)
 	}
 }
 

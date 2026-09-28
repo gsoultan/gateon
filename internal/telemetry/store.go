@@ -2003,9 +2003,9 @@ func (s *pathStatsStore) processThreat(st *SecurityThreat) {
 	// see repid.For. The recording key and the enforcement key come from
 	// the same function on purpose: if they ever diverge, every lookup returns
 	// the neutral 100 and the control reports "clean" while checking nothing.
-	repID := repid.For(st.Fingerprint, st.SourceIP)
-	if repID != "" && !st.Unattributed {
-		DecreaseReputation(repID, st.Score/2, st.Type) // Penalty is half the threat score
+	// An allowlisted source's threats move no score (DecreaseReputationOf).
+	if !st.Unattributed {
+		DecreaseReputationOf(st.Fingerprint, st.SourceIP, st.Score/2, st.Type) // Penalty is half the threat score
 	}
 
 	// Update global telemetry structures

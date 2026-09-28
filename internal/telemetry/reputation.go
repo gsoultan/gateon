@@ -19,6 +19,7 @@ import (
 	"github.com/gsoultan/gateon/internal/httputil"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/request"
+	"github.com/gsoultan/gateon/internal/security/mitigation"
 	"github.com/gsoultan/gateon/internal/telemetry/repid"
 	lru "github.com/hashicorp/golang-lru"
 )
@@ -214,6 +215,27 @@ func GetReputationScore(fingerprint string) float64 {
 	return 100.0
 }
 
+// DecreaseReputationOf lowers the score the class of fingerprint holds on
+// sourceIP's network (repid.For) for a threat sourceIP produced, unless
+// sourceIP is on GATEON_MITIGATION_ALLOWLIST. It is how a threat moves a
+// score: the store's recording path and the incident responder both call it.
+//
+// Since ADR 0024 a score is shared by every client of one class on one
+// network, and the reputation blocker refuses all of them once it falls, so
+// the score is an enforcement input rather than a record of what one client
+// did. An allowlisted scanner's threats lowering it refused the scanner's
+// neighbours who run the same build: enforcement the allowlist exists to
+// prevent, landing on clients it does not even name. The threats themselves
+// are still recorded, listed and correlated (ADR 0031).
+func DecreaseReputationOf(fingerprint, sourceIP string, penalty float64, reason string) {
+	if mitigation.IsAllowlisted(sourceIP) {
+		return
+	}
+	DecreaseReputation(repid.For(fingerprint, sourceIP), penalty, reason)
+}
+
+// DecreaseReputation lowers the score kept under an identity: a repid.For key.
+// A threat moves one through DecreaseReputationOf, which applies the allowlist.
 func DecreaseReputation(fingerprint string, penalty float64, reason string) {
 	if fingerprint == "" || (os.Getenv("GATEON_TEST") != "" && os.Getenv("GATEON_ENABLE_TEST_REPUTATION") == "") {
 		return

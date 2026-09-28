@@ -16,7 +16,6 @@ import (
 	"github.com/gsoultan/gateon/internal/security/mitigation"
 	"github.com/gsoultan/gateon/internal/security/siem"
 	"github.com/gsoultan/gateon/internal/telemetry"
-	"github.com/gsoultan/gateon/internal/telemetry/repid"
 )
 
 // Mitigation tuning environment variables.
@@ -163,11 +162,9 @@ func initMitigator(shun mitigation.Shunner) *mitigation.Responder {
 		Shun: shun,
 		// Compose the scoped identity here rather than inside the responder, so
 		// internal/security/mitigation stays free of a telemetry dependency and
-		// remains unit-testable without it.
-		Degrade: func(fingerprint, sourceIP string, penalty float64, reason string) {
-			telemetry.DecreaseReputation(
-				repid.For(fingerprint, sourceIP), penalty, reason)
-		},
+		// remains unit-testable without it. DecreaseReputationOf builds it with
+		// repid.For and leaves an allowlisted participant's score alone (ADR 0031).
+		Degrade: telemetry.DecreaseReputationOf,
 		// Wrapped rather than passed directly, for the same reason Degrade is:
 		// the responder stays free of a telemetry dependency. A correlated
 		// incident whose shun did not persist is a block nobody applied and
