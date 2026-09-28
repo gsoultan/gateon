@@ -21,8 +21,10 @@ import (
 func escalationSubject(t *testing.T, mutate func(*SecurityThreat)) *SecurityThreat {
 	t.Helper()
 	st := &SecurityThreat{
-		Type:        "waf_block",
-		Category:    "waf",
+		// A trap sprung is attack evidence whether or not it was mitigated
+		// (AttackEvidenceWeight), so the entry guard alone decides these cases.
+		Type:        threatHoneypotTriggered,
+		Category:    "deception",
 		SourceIP:    "203.0.113.7",
 		Fingerprint: "ja4-" + t.Name(),
 		Score:       10,
@@ -31,17 +33,9 @@ func escalationSubject(t *testing.T, mutate func(*SecurityThreat)) *SecurityThre
 	return st
 }
 
-// ipFingerprintCount reports how many distinct fingerprints have been recorded
-// against ip, which is the observable side effect of escalation running.
-func ipFingerprintCount(ip string) int {
-	ipMaliciousMu.Lock()
-	defer ipMaliciousMu.Unlock()
-	val, _ := ipMaliciousFingerprints.Get(ip)
-	fps, _ := val.(map[string]struct{})
-	return len(fps)
-}
-
 func TestEscalateMitigationEntryGuard(t *testing.T) {
+	resetAddressEvidence()
+	t.Cleanup(resetAddressEvidence)
 	tests := []struct {
 		name       string
 		mutate     func(*SecurityThreat)
@@ -108,7 +102,7 @@ func TestEscalateMitigationEntryGuard(t *testing.T) {
 
 			escalateMitigation(st)
 
-			got := ipFingerprintCount(st.SourceIP) > 0
+			got := addressClassCount(st.SourceIP) > 0
 			if got != tt.wantRecord {
 				t.Errorf("escalation recorded = %v, want %v (mitigated=%v category=%q score=%v type=%q)",
 					got, tt.wantRecord, st.Mitigated, st.Category, st.Score, st.Type)
@@ -117,47 +111,42 @@ func TestEscalateMitigationEntryGuard(t *testing.T) {
 	}
 }
 
-// The IP is only shunned once enough distinct fingerprints appear behind it —
-// one address can front an entire office, and shunning on the first bad client
-// would take out everyone sharing the NAT.
-func TestEscalateMitigationAccumulatesFingerprintsPerIP(t *testing.T) {
+// The address's count is of client classes (repid.Class): distinct classes add
+// up; a class seen again does not, and neither does the same client sending a
+// different method, cookie or referer.
+func TestEscalateMitigationAccumulatesClassesPerIP(t *testing.T) {
+	resetAddressEvidence()
+	t.Cleanup(resetAddressEvidence)
 	const ip = "198.51.100.200"
-
-	for i := range ipShunUniqueUserThreshold {
+	attack := func(fp string) {
 		escalateMitigation(&SecurityThreat{
-			Type:        "waf_block",
-			Category:    "waf",
-			SourceIP:    ip,
-			Fingerprint: fmt.Sprintf("ja4-distinct-%d", i),
-			Mitigated:   true,
+			Type: "waf_block", Category: "waf", SourceIP: ip, Fingerprint: fp, Mitigated: true,
 		})
-		if got, want := ipFingerprintCount(ip), i+1; got != want {
-			t.Fatalf("after %d threats: %d fingerprints recorded, want %d", i+1, got, want)
-		}
 	}
 
-	// The same fingerprint again must not inflate the count — the threshold
-	// counts distinct actors, not requests.
-	escalateMitigation(&SecurityThreat{
-		Type:        "waf_block",
-		Category:    "waf",
-		SourceIP:    ip,
-		Fingerprint: "ja4-distinct-0",
-		Mitigated:   true,
-	})
-	if got := ipFingerprintCount(ip); got != ipShunUniqueUserThreshold {
-		t.Errorf("repeat fingerprint changed the count to %d, want %d",
-			got, ipShunUniqueUserThreshold)
+	for i := range ipShunMinClasses - 1 {
+		attack(shunBuild(i))
+		if got, want := addressClassCount(ip), i+1; got != want {
+			t.Fatalf("after %d classes: %d recorded, want %d", i+1, got, want)
+		}
+	}
+	attack(shunBuild(0))
+	attack(fmt.Sprintf("t13d1516h2_8daaf6152771_%012x_po11nn0200_5b1e5b1e5b1e", 0))
+	if got := addressClassCount(ip); got != ipShunMinClasses-1 {
+		t.Errorf("the first build again, once as it was and once with other header bits, changed the "+
+			"count to %d, want %d", got, ipShunMinClasses-1)
 	}
 }
 
-// The map stored in the LRU is an interface value; a wrong-typed entry must not
-// panic the writer goroutine. The original code used a bare type assertion.
+// The value stored in the LRU is an interface value; a wrong-typed entry must
+// not panic the writer goroutine. The original code used a bare type assertion.
 func TestEscalateMitigationSurvivesWrongTypedCacheEntry(t *testing.T) {
+	resetAddressEvidence()
+	t.Cleanup(resetAddressEvidence)
 	const ip = "198.51.100.250"
-	ipMaliciousMu.Lock()
-	ipMaliciousFingerprints.Add(ip, "not a fingerprint set")
-	ipMaliciousMu.Unlock()
+	addressEvidenceMu.Lock()
+	addressEvidence.Add(ip, "not an evidence record")
+	addressEvidenceMu.Unlock()
 
 	defer func() {
 		if r := recover(); r != nil {
@@ -173,8 +162,8 @@ func TestEscalateMitigationSurvivesWrongTypedCacheEntry(t *testing.T) {
 		Mitigated:   true,
 	})
 
-	if got := ipFingerprintCount(ip); got != 1 {
-		t.Errorf("recovered entry holds %d fingerprints, want 1", got)
+	if got := addressClassCount(ip); got != 1 {
+		t.Errorf("recovered entry holds %d classes, want 1", got)
 	}
 }
 

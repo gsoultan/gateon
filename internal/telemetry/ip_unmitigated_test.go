@@ -17,10 +17,12 @@ import (
 // alerting shunner consult to respect an operator's manual release, read that
 // same cached true as "an operator released this address". So every address
 // that had ever sent a request counted as manually released, and escalation
-// never shunned one: the three-fingerprint rule could only ever fire for an
+// never shunned one: the distinct-class rule could only ever fire for an
 // address the gateway had not seen, which in production is none of them.
 func TestAddressSeenBeforeItsThreatsIsStillShunned(t *testing.T) {
 	freshStore(t)
+	resetAddressEvidence()
+	t.Cleanup(resetAddressEvidence)
 	const ip = "198.51.100.61"
 
 	// What IPMitigation does on the attacker's first request.
@@ -31,7 +33,7 @@ func TestAddressSeenBeforeItsThreatsIsStillShunned(t *testing.T) {
 		t.Errorf("an address nobody released reads as manually released")
 	}
 
-	for i := range ipShunUniqueUserThreshold {
+	for i := range ipShunMinClasses {
 		escalateMitigation(&SecurityThreat{
 			Type:        "waf_block",
 			Category:    "waf",
@@ -41,8 +43,8 @@ func TestAddressSeenBeforeItsThreatsIsStillShunned(t *testing.T) {
 		})
 	}
 	if !IsIPMitigated(ip) {
-		t.Errorf("%d distinct malicious fingerprints behind %s did not shun it, because the "+
-			"address had made a request before its threats were processed", ipShunUniqueUserThreshold, ip)
+		t.Errorf("%d attacking client classes behind %s did not shun it, because the "+
+			"address had made a request before its threats were processed", ipShunMinClasses, ip)
 	}
 
 	// The release this exists to respect must still be respected.

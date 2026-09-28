@@ -59,9 +59,9 @@ func TestAutomaticIPShunAfterTheSourceHasBeenSeen(t *testing.T) {
 		t.Fatalf("%s was never released by anyone, and IsIPUnmitigated says it was", ip)
 	}
 
-	// Three distinct malicious fingerprints from one address is the point at
-	// which escalateMitigation shuns the address itself.
-	for i := range 3 {
+	// IPShunMinClasses client builds attacking from one address is the point at
+	// which escalateMitigation shuns the address itself (ADR 0029).
+	for i := range telemetry.IPShunMinClasses {
 		fp := fmt.Sprintf("t13d1516h2_release_cache_%d", i)
 		t.Cleanup(func() { telemetry.ResetReputation(repid.For(fp, ip)) })
 		telemetry.RecordSecurityThreat(telemetry.SecurityThreat{
@@ -72,6 +72,7 @@ func TestAutomaticIPShunAfterTheSourceHasBeenSeen(t *testing.T) {
 	telemetry.FlushThreats()
 
 	if got := serve(); got != http.StatusForbidden {
-		t.Fatalf("three malicious fingerprints from %s did not shun it: the next request got %d, want 403", ip, got)
+		t.Fatalf("%d attacking client builds from %s did not shun it: the next request got %d, want 403",
+			telemetry.IPShunMinClasses, ip, got)
 	}
 }
