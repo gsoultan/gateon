@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/gsoultan/gateon/internal/httputil"
+	"github.com/gsoultan/gateon/internal/request"
 )
 
 // maxPathStatsMapSize limits in-memory path stats to avoid unbounded growth.
@@ -212,8 +213,20 @@ func hasAuthScheme(value, scheme string) bool {
 	return len(value) > n+1 && value[n] == ' ' && strings.EqualFold(value[:n], scheme)
 }
 
-// RecordTrace records a trace for an operation.
-func RecordTrace(id, operationName, serviceName, routeID string, durationMs float64, timestamp time.Time, status, path, sourceIP, fingerprint, countryCode, userAgent, method, referer, requestURI, ja4, ja4h string, reqHeader, respHeader map[string][]string, recommendation string, reputation float64, entrypointDelay, routeDelay, middlewareDelay, serviceDelay float64) {
+// refusalOf is the trace's Refusal for a recorder's optional refusal
+// argument: why the gateway itself refused the request (request.Refusal),
+// which the recording site reads from the request state and nowhere else.
+// Absent, or more than one given, the first counts.
+func refusalOf(refusal []request.Refusal) string {
+	if len(refusal) == 0 {
+		return ""
+	}
+	return refusal[0].String()
+}
+
+// RecordTrace records a trace for an operation. refusal, optional, is why
+// the gateway itself refused the request (see refusalOf).
+func RecordTrace(id, operationName, serviceName, routeID string, durationMs float64, timestamp time.Time, status, path, sourceIP, fingerprint, countryCode, userAgent, method, referer, requestURI, ja4, ja4h string, reqHeader, respHeader map[string][]string, recommendation string, reputation float64, entrypointDelay, routeDelay, middlewareDelay, serviceDelay float64, refusal ...request.Refusal) {
 	tr := GetTraceRecord()
 	tr.ID = id
 	tr.OperationName = operationName
@@ -234,6 +247,7 @@ func RecordTrace(id, operationName, serviceName, routeID string, durationMs floa
 	tr.JA4 = ja4
 	tr.JA4H = ja4h
 	tr.PasswordAuth = presentsPassword(reqHeader)
+	tr.Refusal = refusalOf(refusal)
 	tr.rawReqHeader = CloneHeader(reqHeader)
 	tr.rawRespHeader = CloneHeader(respHeader)
 	if recommendation == "" {
@@ -248,7 +262,7 @@ func RecordTrace(id, operationName, serviceName, routeID string, durationMs floa
 	recordTraceToStore(tr)
 }
 
-func RecordTraceDetailed(id, operationName, serviceName, routeID string, durationMs float64, timestamp time.Time, status, path, sourceIP, fingerprint, countryCode, userAgent, method, referer, requestURI, ja4, ja4h string, reqHeader map[string][]string, reqBody string, respHeader map[string][]string, respBody, recommendation string, reputation float64, entrypointDelay, routeDelay, middlewareDelay, serviceDelay float64) {
+func RecordTraceDetailed(id, operationName, serviceName, routeID string, durationMs float64, timestamp time.Time, status, path, sourceIP, fingerprint, countryCode, userAgent, method, referer, requestURI, ja4, ja4h string, reqHeader map[string][]string, reqBody string, respHeader map[string][]string, respBody, recommendation string, reputation float64, entrypointDelay, routeDelay, middlewareDelay, serviceDelay float64, refusal ...request.Refusal) {
 	tr := GetTraceRecord()
 	tr.ID = id
 	tr.OperationName = operationName
@@ -269,6 +283,7 @@ func RecordTraceDetailed(id, operationName, serviceName, routeID string, duratio
 	tr.JA4 = ja4
 	tr.JA4H = ja4h
 	tr.PasswordAuth = presentsPassword(reqHeader)
+	tr.Refusal = refusalOf(refusal)
 	tr.rawReqHeader = CloneHeader(reqHeader)
 	tr.RequestBody = reqBody
 	tr.rawRespHeader = CloneHeader(respHeader)

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/gsoultan/gateon/internal/logger"
+	"github.com/gsoultan/gateon/internal/request"
 )
 
 // RunningStats implements Welford's Online Algorithm for computing running
@@ -263,10 +264,18 @@ func (a *LocalMetricsAggregator) RecordRequest(ip string, status int, r *http.Re
 // Any other refusal is not a guess: a tab polling after its session expired, a
 // client re-presenting a stale bearer token, a scanner the WAF refused (which
 // the exploit check reads from WafBlocks). Counting those shunned the expired
-// tab. Read only for a 401 or 403, from the method and the header's scheme,
-// allocating nothing.
+// tab. Nor is a refusal the gateway marked as its own (request.Refused): a POST
+// whose token the gateway's own verification refused is a Connect, gRPC-Web or
+// GraphQL poller whose session ended, not a password guess (ADR 0031). The
+// mark is written by the middleware that refused, never read off the request,
+// so a stuffing POST to a login form that adds a bearer header still counts.
+// Read only for a 401 or 403, from the method, the header's scheme and the
+// request state, allocating nothing.
 func credentialRefusal(status int, r *http.Request) bool {
 	if (status != http.StatusUnauthorized && status != http.StatusForbidden) || r == nil {
+		return false
+	}
+	if rs := request.GetRequestState(r); rs != nil && rs.Refused != request.RefusalNone {
 		return false
 	}
 	return r.Method == http.MethodPost || presentsPassword(r.Header)

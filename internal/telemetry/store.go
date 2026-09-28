@@ -442,6 +442,15 @@ type TraceRecord struct {
 	// written before the field existed reads.
 	PasswordAuth bool `json:"passwordAuth,omitempty"`
 
+	// Refusal is why the gateway itself refused the request, where it knows
+	// (request.Refusal): "token" when its own verification refused a token the
+	// request presented. The analysis reads summary traces, and this is how it
+	// tells a poller re-presenting an expired session or bearer token over
+	// POST from a password guess, which is the same POST answered 401. Set
+	// only from the mark the refusing code wrote, never from the headers.
+	// omitempty: absent is "", which is how every other trace reads.
+	Refusal string `json:"refusal,omitempty"`
+
 	// Internal fields for lazy formatting in background worker
 	rawReqHeader  map[string][]string
 	rawRespHeader map[string][]string
@@ -2972,12 +2981,14 @@ func UnmarshalTraceSummary(data []byte, tr *TraceRecord) error {
 		MiddlewareDelay float64   `json:"middlewareDelayMs"`
 		ServiceDelay    float64   `json:"serviceDelayMs"`
 		PasswordAuth    bool      `json:"passwordAuth"`
+		Refusal         string    `json:"refusal"`
 	}
 	var s summary
 	if err := json.Unmarshal(data, &s); err != nil {
 		return err
 	}
 	tr.PasswordAuth = s.PasswordAuth
+	tr.Refusal = s.Refusal
 	tr.ID = s.ID
 	tr.OperationName = s.OperationName
 	tr.ServiceName = s.ServiceName

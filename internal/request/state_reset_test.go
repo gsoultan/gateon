@@ -37,6 +37,8 @@ func setNonZero(t *testing.T, name string, f reflect.Value) {
 		f.SetBool(true)
 	case reflect.Int, reflect.Int64:
 		f.SetInt(1)
+	case reflect.Uint8:
+		f.SetUint(1)
 	case reflect.Float64:
 		f.SetFloat(1)
 	case reflect.Slice:

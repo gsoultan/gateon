@@ -71,6 +71,50 @@ type RequestState struct {
 	// request again. Set whether or not sampling kept the line, so an outer
 	// logger does not resample what an inner one already decided.
 	AccessLogged bool
+	// Refused is why the gateway itself refused the request, where the refusal
+	// is one the brute-force detectors must not read as a guessed credential
+	// (MarkRefused). Written only by the code that refused, never from
+	// anything the client sent.
+	Refused Refusal
+}
+
+// Refusal is why the gateway itself refused a request, as far as the
+// detectors that count refused credential attempts need to know.
+type Refusal uint8
+
+const (
+	// RefusalNone: nothing the gateway knows of. A 401 or 403 with no other
+	// mark came from a credential check -- a login form, Basic auth -- or
+	// from a backend, and counts as a refused attempt when it could be one.
+	RefusalNone Refusal = iota
+	// RefusalToken: the gateway's own verification refused a token the
+	// request presented -- a session, a JWT, a PASETO, an API key, an
+	// introspected OAuth2 token -- as invalid, expired or insufficient. A
+	// client re-presenting a token it was issued is a session that ended,
+	// not someone guessing a password (ADR 0031).
+	RefusalToken
+)
+
+// String names the refusal as a trace records it: "" for none.
+func (r Refusal) String() string {
+	switch r {
+	case RefusalToken:
+		return "token"
+	default:
+		return ""
+	}
+}
+
+// MarkRefused records on r's state why the gateway refused it. The refusing
+// code calls it as it writes the refusal, and nothing else may: the mark tells
+// the detectors a 401 or 403 was not a credential attempt, so inferring it
+// from what a request carries -- a header's presence -- would let a password
+// guess exempt itself by adding one. Without request state nothing is marked,
+// and the refusal counts as it did before.
+func MarkRefused(r *http.Request, why Refusal) {
+	if rs := GetRequestState(r); rs != nil {
+		rs.Refused = why
+	}
 }
 
 // DebugInfo captures request/response details for diagnostic tracing.
@@ -135,4 +179,5 @@ func (rs *RequestState) Reset() {
 	rs.ExecutedSQLI = false
 	rs.RecordedRequest = false
 	rs.AccessLogged = false
+	rs.Refused = RefusalNone
 }
