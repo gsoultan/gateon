@@ -25,6 +25,7 @@ import type { GeoIPConfig as WireGeoIPConfig } from "../../services/gen/gateon/v
 import { apiFetch } from "../../hooks/useGateon";
 import { COUNTRIES } from "../../utils/countries";
 import { getCountryFlag } from "../../utils/format";
+import { StoredSecretInput } from "./StoredSecretInput";
 
 interface GeoIPStatus {
   exists: boolean;
@@ -288,13 +289,13 @@ export function GeoIPSettingsCard({ config, onChange, onSave, saving, disabled }
             disabled={!config.enabled || disabled}
           />
 
-          <TextInput
+          <StoredSecretInput
             label="MaxMind License Key"
             placeholder="Your MaxMind license key"
             description="Required for automatic updates. Get one at maxmind.com"
-            type="password"
-            value={config.maxmindLicenseKey || ""}
-            onChange={(e) => onChange({ ...config, maxmindLicenseKey: e.currentTarget.value })}
+            clearable
+            value={config.maxmindLicenseKey}
+            onChange={(maxmindLicenseKey) => onChange({ ...config, maxmindLicenseKey })}
             disabled={!config.enabled || !config.autoUpdate || disabled}
           />
 

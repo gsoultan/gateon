@@ -25,3 +25,17 @@ export function isStoredSecret(value: string | null | undefined): boolean {
 export function hasStoredSecret(value: string | null | undefined): boolean {
   return typeof value === "string" && value.includes(STORED_SECRET_SENTINEL);
 }
+
+/** Whether a value names a secret held elsewhere ($env:, $vault:, $aws-sm:). */
+export function isSecretReference(value: string | null | undefined): boolean {
+  return typeof value === "string" && /^\$(env|vault|aws-sm):/.test(value);
+}
+
+/**
+ * The value to save for a replacement being typed over a stored secret. An
+ * empty draft keeps the stored secret: replacing never clears by accident,
+ * only the explicit Clear does.
+ */
+export function replacementValue(draft: string): string {
+  return draft === "" ? STORED_SECRET_SENTINEL : draft;
+}
