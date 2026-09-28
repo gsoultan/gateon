@@ -61,6 +61,33 @@ func TestABlockClosesAnAddressOpenL4Session(t *testing.T) {
 	_ = echoed(t, dialBounded(t, ep.Address), "clean session\n")
 }
 
+// TestAnAutomaticShunClosesAnAddressOpenL4Session: an automatic shun -- a
+// scanner or SSH brute-forcer earning its block -- reaches the shunned
+// address's open session too, not only its next connection, through the same
+// event the manual block fires.
+func TestAnAutomaticShunClosesAnAddressOpenL4Session(t *testing.T) {
+	const blocked = "198.51.100.131"
+	withTelemetryStore(t)
+	backend, _ := countingEcho(t)
+	ep, deps := tcpEntrypoint(t, "autoshun-open-tcp"), mockDepsForInspection(t)
+	deps.L4Resolver = routesResolver(t, ep.Id, backend, false)
+	tcpEntrypointFrom(t, ep, deps, nil, blocked)
+
+	session := echoSession(t, ep.Address, "hello\n")
+
+	res, err := telemetry.ShunAutomatically(blocked, "test: automatic shun")
+	if err != nil {
+		t.Fatalf("automatic shun of %s: %v", blocked, err)
+	}
+	if res.Outcome != telemetry.ShunApplied {
+		t.Fatalf("the automatic shun of %s did not apply (outcome %v); the rest proves nothing", blocked, res.Outcome)
+	}
+
+	if !closedWithin(t, session, sessionBound) {
+		t.Errorf("the open session from %s was not closed after it was shunned automatically", blocked)
+	}
+}
+
 // TestABlockDoesNotCutAnAllowlistedAddressOpenSession: the block event honours
 // the same exemption the accept-time check does (identity.AddressBlocked), so
 // an operator who blocks an address they have also allowlisted does not cut its
