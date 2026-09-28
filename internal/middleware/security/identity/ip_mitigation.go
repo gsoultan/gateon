@@ -29,7 +29,7 @@ func IPMitigation() kind.Middleware {
 				ip = rs.ClientRemoteAddr
 			}
 
-			if ip != "" && telemetry.IsIPMitigated(ip) {
+			if AddressBlocked(ip) {
 				w.WriteHeader(http.StatusForbidden)
 				_, _ = w.Write([]byte("Forbidden: IP Shunned by Security Policy"))
 
@@ -51,6 +51,24 @@ func IPMitigation() kind.Middleware {
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// AddressBlocked reports whether a client at ip is refused by the IP
+// mitigation list: the address is on it, and it is not exempt from enforcement
+// -- loopback and GATEON_MITIGATION_ALLOWLIST, the rule the fingerprint and
+// reputation blocks apply (exemptFromEnforcement). IPMitigation asks it for
+// every request and a TCP entrypoint for every connection it accepts, so what
+// one refuses the other refuses (ADR 0032). IPMitigation used to refuse an
+// allowlisted or loopback address on the list, which the allowlist -- "never
+// mitigated" -- says it must not, and which ADR 0029 left open.
+//
+// The exemption is read only for an address the list would refuse, so the
+// clients that are not on it -- nearly all of them -- pay nothing for it.
+// IsIPMitigated reads the database when its cache has no answer for ip, so a
+// caller that must not wait, such as an accept loop, asks from somewhere that
+// can.
+func AddressBlocked(ip string) bool {
+	return ip != "" && telemetry.IsIPMitigated(ip) && !exemptFromEnforcement(ip)
 }
 
 // unmitigatedPaths are fetched by browsers and crawlers without a user ever

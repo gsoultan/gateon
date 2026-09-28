@@ -13,6 +13,7 @@ import (
 
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/logger"
+	"github.com/gsoultan/gateon/internal/middleware/kind"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 	"github.com/quic-go/quic-go"
@@ -20,7 +21,8 @@ import (
 )
 
 // What an entrypoint admits is decided when a connection is accepted: no more
-// than its max_connections at once, on every kind of entrypoint (ADR 0032).
+// than its max_connections at once, on every kind of entrypoint, and on a TCP
+// entrypoint nothing from an address on the IP mitigation list (ADR 0032).
 
 // connLimit is the most connections ep holds open at once: its
 // max_connections, or the resource profile's default when that is 0. It was
@@ -189,4 +191,47 @@ func (l *cappedQUICListener) Accept(ctx context.Context) (*quic.Conn, error) {
 		_ = c.CloseWithError(quic.ApplicationErrorCode(http3.ErrCodeExcessiveLoad), "")
 		l.slots.refused()
 	}
+}
+
+// peerIP is the address c comes from, without its port -- the form the IP
+// mitigation list keeps addresses in. An IPv4 client of a dual-stack listener
+// is written as IPv4.
+func peerIP(c net.Conn) string {
+	if a, ok := c.RemoteAddr().(*net.TCPAddr); ok {
+		return a.IP.String()
+	}
+	host, _, err := net.SplitHostPort(c.RemoteAddr().String())
+	if err != nil {
+		return ""
+	}
+	return host
+}
+
+// refuseBlocked closes c, and reports true, when its client is on the IP
+// mitigation list and not exempt from it -- the rule, and the only rule, the
+// HTTP entrypoints apply (identity.AddressBlocked). It runs on the
+// connection's own goroutine, never the accept loop: the list is read from
+// the database when its cache has no answer for the address, and one slow
+// lookup must not hold up every connection behind it.
+//
+// Each refusal is recorded as the HTTP path records one, as an ip_mitigation
+// threat: it is counted on gateon_middleware_advanced_security_blocked_total
+// and listed in the Security Hub, where the operator who blocked the address
+// can see the block working. The record is dropped, never waited for, when the
+// store is behind.
+func (s *tcpServer) refuseBlocked(c net.Conn) bool {
+	ip := peerIP(c)
+	if !s.blocked(ip) {
+		return false
+	}
+	_ = c.Close()
+	telemetry.RecordSecurityThreat(telemetry.SecurityThreat{
+		Type:        "ip_mitigation",
+		SourceIP:    ip,
+		Category:    "threat_intel",
+		Severity:    kind.SeverityHigh,
+		ActionTaken: kind.ActionBlocked,
+		Details:     "Connection refused at TCP entrypoint " + s.ep.Id + ": the address is on the IP mitigation list",
+	})
+	return true
 }

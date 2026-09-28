@@ -25,8 +25,11 @@ import (
 // protocol detection, the entrypoint's HTTP server and chain, close. It is the
 // client-first path that handing silent clients to the TCP route must leave
 // as it was. It uses only fixtures older than that change, so it runs against
-// the tree before it as well.
+// the tree before it as well. The telemetry store is open, as in cmd/gateon,
+// so that the IP mitigation list is really looked up -- per request by the
+// HTTP chain, and per connection by the TCP entrypoint.
 func BenchmarkTCPEntrypointHTTPSession(b *testing.B) {
+	withTelemetryStore(b)
 	addr, stop := httpOverTCPEntrypoint(b)
 	defer stop()
 	req := []byte("GET / HTTP/1.1\r\nHost: gw.example.test\r\nConnection: close\r\n\r\n")
