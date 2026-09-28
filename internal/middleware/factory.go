@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/gsoultan/gateon/internal/config"
+	"github.com/gsoultan/gateon/internal/config/mwsecret"
 	"github.com/gsoultan/gateon/internal/ebpf"
 	"github.com/gsoultan/gateon/internal/middleware/kind"
 	"github.com/gsoultan/gateon/internal/middleware/security"
@@ -103,6 +104,26 @@ func (f *Factory) Create(m *gateonv1.Middleware, routeID string) (Middleware, er
 	}
 	cfg := make(map[string]string)
 	for k, v := range m.Config {
+		// A middleware is written by an operator, and every field resolves
+		// $env:/$vault:/$aws-sm: references, so an unconstrained reference lets
+		// an operator read any secret the process can reach -- back through a
+		// response header, or out to a URL this middleware names. Two limits,
+		// both fail closed: a reference is honoured only in a field that holds a
+		// secret (not one whose value is merely echoed), and only when the host
+		// has allow-listed it (config.MiddlewareSecretRefsEnv), which the API
+		// cannot write. A refused reference refuses the build, as an unresolved
+		// one does.
+		if config.IsSecretReference(v) {
+			if !mwsecret.IsSecretField(m.Type, k) {
+				return nil, fmt.Errorf("middleware %q config key %q: a secret reference is allowed only in a "+
+					"field that holds a secret, not %q; put the value in directly", m.Id, k, k)
+			}
+			if !mwsecret.RefAllowed(v) {
+				return nil, fmt.Errorf("middleware %q config key %q: the secret reference %q is not listed in %s, "+
+					"which the host sets to the references a middleware may resolve; add it there or put the value in directly",
+					m.Id, k, v, mwsecret.SecretRefsEnv)
+			}
+		}
 		// A value that cannot be resolved refuses the build rather than
 		// running on the reference's own text: with Vault down a JWT route
 		// used to accept tokens HMAC-signed with "$vault:...". The router
