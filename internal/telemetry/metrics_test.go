@@ -139,3 +139,16 @@ func TestStartSystemMetricsCollector(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 	close(stop)
 }
+
+// TestStartSystemMetricsCollectorIsIdempotent: the collector's gauges register
+// with the default Prometheus registry, which panics on a duplicate name.
+// Starting it twice -- a second boot in one process, or the package run at
+// -count>1 -- used to panic "duplicate metrics collector registration
+// attempted"; the registration now happens once.
+func TestStartSystemMetricsCollectorIsIdempotent(t *testing.T) {
+	for i := 0; i < 2; i++ {
+		stop := make(chan struct{})
+		StartSystemMetricsCollector(stop)
+		close(stop)
+	}
+}

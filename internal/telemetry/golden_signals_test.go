@@ -6,8 +6,20 @@ package telemetry
 import (
 	"context"
 	"math"
+	"strconv"
+	"sync/atomic"
 	"testing"
 )
+
+// gsSeq makes each service label unique per run: a static name isolates the
+// tests from each other within one run, but the counters it feeds are
+// process-global, so the same name in a second run (the package at -count>1)
+// would carry the first run's counts and fail an absolute-total assertion.
+var gsSeq atomic.Int64
+
+func gsSvc(name string) string {
+	return "gs-" + name + "-" + strconv.FormatInt(gsSeq.Add(1), 10)
+}
 
 // GetServiceGoldenSignals is what the canary controller consults at every step
 // to decide whether to keep shifting traffic or roll back, and it had no test.
@@ -19,7 +31,7 @@ import (
 // registered cannot be mistaken for this one's.
 
 func TestGoldenSignalsCountsOnlyTheServiceAsked(t *testing.T) {
-	const mine, theirs = "gs-isolation-mine", "gs-isolation-theirs"
+	mine, theirs := gsSvc("isolation-mine"), gsSvc("isolation-theirs")
 
 	RequestsTotal.WithLabelValues("r1", mine, "GET", "200").Add(10)
 	RequestsTotal.WithLabelValues("r2", theirs, "GET", "200").Add(500)
@@ -40,7 +52,7 @@ func TestGoldenSignalsCountsOnlyTheServiceAsked(t *testing.T) {
 }
 
 func TestGoldenSignalsErrorRateCountsOnly5xx(t *testing.T) {
-	const svc = "gs-errorrate"
+	svc := gsSvc("errorrate")
 
 	RequestsTotal.WithLabelValues("r", svc, "GET", "200").Add(6)
 	RequestsTotal.WithLabelValues("r", svc, "GET", "404").Add(2) // client error, not ours
@@ -151,7 +163,7 @@ func TestGoldenSignalsLatencyIsMilliseconds(t *testing.T) {
 // cardinality nobody has asked for. If either happens, this test fails and
 // tells whoever did it that the zeroes were known.
 func TestGoldenSignalsCannotAttributeBytesOrInFlightToAService(t *testing.T) {
-	const svc = "gs-unattributable"
+	svc := gsSvc("unattributable")
 
 	RequestsTotal.WithLabelValues("r-bytes", svc, "GET", "200").Add(1)
 	RequestBytesTotal.WithLabelValues("r-bytes", "in").Add(4096)
