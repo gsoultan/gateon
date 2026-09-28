@@ -1,4 +1,4 @@
-# 30. Middleware secrets are write-only
+# 33. Middleware secrets are write-only
 
 Date: 2026-09-28
 

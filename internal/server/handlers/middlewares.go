@@ -129,7 +129,7 @@ func registerMiddlewareHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Dep
 			return
 		}
 		// The service keeps every stored secret the caller sent the
-		// placeholder back for, and refuses one it cannot keep (ADR 0030).
+		// placeholder back for, and refuses one it cannot keep (ADR 0033).
 		if err := d.MwService.SaveMiddleware(r.Context(), &mw); err != nil {
 			// Validation/config errors are client errors
 			WriteHTTPError(w, http.StatusBadRequest, err.Error())
@@ -165,7 +165,7 @@ func registerMiddlewareHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Dep
 	})
 }
 
-// maskMiddlewares hides every stored secret from every caller (ADR 0030).
+// maskMiddlewares hides every stored secret from every caller (ADR 0033).
 //
 // Write permission used to be the line: a writer read every secret verbatim,
 // on the reasoning that someone who can replace a secret gains nothing by

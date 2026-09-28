@@ -3,7 +3,7 @@
 
 // Package mwsecret keeps middleware credentials on the gateway's side of the
 // management API, as storedsecret does for the global configuration. See
-// ADR 0030.
+// ADR 0033.
 //
 // Nothing the API returns carries a stored middleware secret, to anyone. A
 // caller who may write middlewares reads each secret as storedsecret.Sentinel,

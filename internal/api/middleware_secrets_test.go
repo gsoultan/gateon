@@ -84,7 +84,7 @@ func TestListMiddlewaresMasksSecretsOverConnect(t *testing.T) {
 }
 
 // TestListMiddlewaresShowsAnOperatorThePlaceholder: an operator, who may
-// replace this secret, reads the placeholder and not the secret (ADR 0030).
+// replace this secret, reads the placeholder and not the secret (ADR 0033).
 func TestListMiddlewaresShowsAnOperatorThePlaceholder(t *testing.T) {
 	const signingKey = "SUPER-SECRET-SIGNING-KEY"
 	s := &ApiService{Middlewares: &fakeMwStore{mws: []*gateonv1.Middleware{{

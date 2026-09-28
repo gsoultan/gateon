@@ -65,7 +65,7 @@ func calculateConfigDiff(ctx context.Context, d *Deps, exp *configExport) config
 
 // diffMiddlewares previews the middlewares of an import. The preview echoes
 // what was sent, masked as a read is: a payload carrying new secrets must not
-// come back with them (ADR 0030). It also runs the placeholder check the import
+// come back with them (ADR 0033). It also runs the placeholder check the import
 // will, on copies, so a placeholder that cannot be kept is named before
 // anything is written.
 func diffMiddlewares(ctx context.Context, d *Deps, mws []*gateonv1.Middleware, diff *configDiff) {
@@ -97,7 +97,7 @@ func registerConfigImportExport(mux *http.ServeMux, d *Deps) {
 		eps, _ := d.EpService.ListPaginated(r.Context(), 0, 10000, "")
 		mws, _ := d.MwService.ListPaginated(r.Context(), 0, 10000, "")
 
-		// No stored secret leaves in an export, for anyone (ADR 0030): each
+		// No stored secret leaves in an export, for anyone (ADR 0033): each
 		// reads as the placeholder, which an import into this gateway keeps.
 		// There is deliberately no export that includes them -- a secret
 		// backup is the host's database or middlewares file, not a download.

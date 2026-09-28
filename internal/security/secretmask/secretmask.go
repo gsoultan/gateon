@@ -11,7 +11,7 @@
 // holding it can mint a token the gateway will accept.
 //
 // Masking and restoring a middleware's secrets is internal/config/mwsecret's
-// (ADR 0030); this package is the vocabulary it and the stores share.
+// (ADR 0033); this package is the vocabulary it and the stores share.
 package secretmask
 
 import (
@@ -98,7 +98,7 @@ var credentialFragments = []string{
 // A name is all there is to go on, and it errs towards masking: Sec-WebSocket-Key
 // and WWW-Authenticate are caught, which costs an operator a "Stored" badge
 // where a value would have done. What it cannot catch is a credential in a
-// header whose name gives nothing away (X-Upstream: <token>); ADR 0030 records
+// header whose name gives nothing away (X-Upstream: <token>); ADR 0033 records
 // that residue.
 func IsCredentialName(name string) bool {
 	n := strings.ToLower(strings.TrimSpace(name))

@@ -453,7 +453,15 @@ message EbpfConfig {
   // 1,000,000-entry BPF hash preallocated in kernel memory to hold nothing.
   reserved 10;
   reserved "xdp_cuckoo_filter";
-  bool af_xdp_phantom = 11;
+  // 11 was af_xdp_phantom, removed 2026-09-28. Nothing read it: the only
+  // consumer was the attach-time notice that named it as a TC gap. The XDP
+  // program redirected any port found in phantom_ports to an AF_XDP socket in
+  // xsk_map, but nothing ever wrote either map and nothing ever opened a
+  // socket, so every TCP and UDP packet paid a hash lookup against an empty
+  // map. The phantom core that does run splices sessions in the kernel and has
+  // never needed XDP.
+  reserved 11;
+  reserved "af_xdp_phantom";
   // 12 was xdp_ja4_blocklist, removed 2026-09-25. Nothing read it, and the
   // blocklist could not work: the XDP program keyed its lookup on the first 32
   // bytes of the ClientHello -- the version and the per-connection random --

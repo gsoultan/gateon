@@ -4,7 +4,7 @@
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
 
 /**
- * Middleware secrets are write-only (ADR 0030). An operator -- anyone who may
+ * Middleware secrets are write-only (ADR 0033). An operator -- anyone who may
  * write middlewares -- used to read every basic-auth password, signing key,
  * client secret and API key verbatim, so one stolen session or one script in
  * the dashboard carried them off. Now the dashboard reads placeholders, shows

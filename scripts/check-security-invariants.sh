@@ -506,8 +506,8 @@ note "12/13 CORS-preflight is not a way out of a deny decision"
 #                             branch only declines to add gateway identity
 #   auth/*.go                 browsers do not send credentials on a preflight,
 #                             so requiring them breaks every browser
-#   security/bot_management,  a preflight cannot run a JavaScript challenge
-#   security/turnstile        or carry a Turnstile token
+#   security/challenge/       a preflight cannot run a JavaScript challenge
+#     bot_management,turnstile  or carry a Turnstile token
 #   traffic/compress.go       response compression, which a preflight has no
 #                             body to benefit from. Skipping it changes the
 #                             size of the caller's own response and nothing
@@ -520,7 +520,7 @@ note "12/13 CORS-preflight is not a way out of a deny decision"
 # volume is a rounding error against any cap worth setting.
 #
 # In every allowed case the real request that follows is still checked.
-cors_allowed='^(internal/middleware/kind/core\.go|internal/middleware/auth/(auth|forwardauth|hmac|oauth2_introspection)\.go|internal/middleware/security/(bot_management|turnstile)\.go|internal/middleware/traffic/compress\.go|internal/middleware/transform/(cors|cors_factory|xfcc)\.go):'
+cors_allowed='^(internal/middleware/kind/core\.go|internal/middleware/auth/(auth|forwardauth|hmac|oauth2_introspection)\.go|internal/middleware/security/challenge/(bot_management|turnstile)\.go|internal/middleware/traffic/compress\.go|internal/middleware/transform/(cors|cors_factory|xfcc)\.go):'
 cors_hits=$( (find internal cmd pkg -name '*.go' -not -name '*_test.go' -print0 |
 	xargs -0 grep -nE '\bIsCorsPreflight\(' 2>/dev/null |
 	drop_comment_hits |

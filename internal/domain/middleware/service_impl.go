@@ -58,7 +58,7 @@ func (s *serviceImpl) SaveMiddleware(ctx context.Context, mw *gateonv1.Middlewar
 		return errors.New("missing middleware")
 	}
 	// Every caller reads a stored secret as the placeholder and sends it back
-	// to keep it (ADR 0030). Restored here, on the one path REST, gRPC and
+	// to keep it (ADR 0033). Restored here, on the one path REST, gRPC and
 	// config import share, so no transport keeps a secret another would refuse.
 	var stored *gateonv1.Middleware
 	if mw.Id != "" {

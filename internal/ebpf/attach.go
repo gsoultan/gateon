@@ -81,10 +81,9 @@ func tryTC(cfg *gateonv1.EbpfConfig, xdpAttached bool) bool {
 // tcUnsupported lists configured features the TC ingress hook cannot enforce.
 //
 // The hook makes per-packet drop decisions only: port knocking mutates
-// per-source state across packets, and phantom ports and load balancing need
-// XDP_TX/redirect. Falling back from XDP to TC therefore narrows what is being
-// enforced. Naming the gap at attach time is the difference between a
-// documented trade-off and a hole.
+// per-source state across packets, and load balancing needs XDP_TX. Falling
+// back from XDP to TC therefore narrows what is being enforced. Naming the gap
+// at attach time is the difference between a documented trade-off and a hole.
 func tcUnsupported(cfg *gateonv1.EbpfConfig) []string {
 	if cfg == nil {
 		return nil
@@ -95,7 +94,6 @@ func tcUnsupported(cfg *gateonv1.EbpfConfig) []string {
 		name string
 	}{
 		{cfg.GetEnableKnocking(), "enable_knocking"},
-		{cfg.GetAfXdpPhantom(), "af_xdp_phantom"},
 		{cfg.GetXdpLoadBalancing(), "xdp_load_balancing"},
 	} {
 		if f.on {

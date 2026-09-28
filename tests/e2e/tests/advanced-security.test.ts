@@ -32,6 +32,10 @@ async function gotoSettingsLoaded(page: Page) {
   // The response has landed; give React the tick it needs to commit the state
   // derived from it before anything reads a control.
   await page.waitForTimeout(500);
+  // The WAF and the advanced protections are on the Security tab, which is not
+  // mounted until it is opened.
+  await page.getByRole('tab', { name: 'Security' }).click();
+  await expect(page.getByRole('tab', { name: 'Security' })).toHaveAttribute('aria-selected', 'true');
 }
 
 /**

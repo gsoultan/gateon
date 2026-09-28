@@ -151,7 +151,7 @@ func TestMiddlewareListDoesNotLeakApiKeysToAViewer(t *testing.T) {
 // It used to be write permission, on the reasoning that someone who can set the
 // secret gains nothing by reading it. They gain the secret: a replaced
 // credential breaks the clients holding it, which gets noticed, while a read one
-// is used quietly and outlives the session that took it. ADR 0030 moved the line:
+// is used quietly and outlives the session that took it. ADR 0033 moved the line:
 // nobody reads a stored secret, and a writer reads the placeholder, which keeps
 // the secret when sent back -- so export still round-trips.
 func TestMiddlewareListShowsAWriterThePlaceholderNotTheSecret(t *testing.T) {

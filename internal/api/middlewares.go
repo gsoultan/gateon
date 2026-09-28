@@ -22,7 +22,7 @@ func (s *ApiService) ListMiddlewares(ctx context.Context, _ *gateonv1.ListMiddle
 }
 
 // maskMiddlewares hides every stored secret from every caller, as the REST
-// handler does (ADR 0030): this is the same data behind a different transport,
+// handler does (ADR 0033): this is the same data behind a different transport,
 // and a redaction that covered one transport would be the REST-only
 // authorization defect again. The messages returned are copies of the live
 // configuration.
@@ -49,7 +49,7 @@ func (s *ApiService) UpdateMiddleware(ctx context.Context, req *gateonv1.UpdateM
 		return &gateonv1.UpdateMiddlewareResponse{Success: false}, nil
 	}
 	// Through the domain service, as the REST handler: it keeps every stored
-	// secret the caller sent the placeholder back for (ADR 0030), the factory proves the
+	// secret the caller sent the placeholder back for (ADR 0033), the factory proves the
 	// config can be built before anything is written, an id is assigned, and a
 	// WAF policy drops the WAF cache. Written to the store directly, a config
 	// the factory cannot build was persisted and never failed -- the router

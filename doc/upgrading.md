@@ -196,7 +196,7 @@ passwords, JWT, PASETO and HMAC keys, OAuth introspection and OIDC client
 secrets, turnstile, bot-management and proof-of-work secrets, canary tokens and
 API keys, over REST and gRPC, in the answer to a save, and in
 `GET /v1/config/export`. Middleware secrets are now write-only, like the global
-configuration's (ADR 0028). See ADR 0030.
+configuration's (ADR 0028). See ADR 0033.
 
 - A stored middleware secret reads as `__gateon_redacted__`; a secret configured
   as a reference (`$env:…`, `$vault:…`, `$aws-sm:…`) still reads as the reference
@@ -268,6 +268,16 @@ before they were encrypted at rest, are encrypted at the same startup.
 deployments with several instances sharing a user database -- see "Rotating
 the session key" in `doc/security-posture.md`. Remove the variable once an
 instance has logged that it re-encrypted them.
+
+### `ebpf.af_xdp_phantom` is removed
+
+Field 11 is reserved. The setting was read by nothing but the TC fallback's
+list of features it cannot enforce. The XDP program redirected packets for any
+port listed in its `phantom_ports` map to an AF_XDP socket, but nothing ever
+wrote that map or opened a socket, so the only effect was a hash lookup on
+every TCP and UDP packet. Both maps are gone. A stored config that still sets
+the key loads as before; the key is ignored. The Diagnostics Phantom Core card
+is unaffected: it reports the kernel splice path, which never used XDP.
 
 ### Stored secrets are no longer returned by the API — **API clients that read secrets stop getting them**
 

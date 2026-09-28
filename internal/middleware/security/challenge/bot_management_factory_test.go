@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
 // SPDX-License-Identifier: MIT
 
-package security
+package challenge
 
 import (
 	"net/http"
@@ -93,7 +93,7 @@ func TestForgedTokenFromThePublishedSecretIsRejected(t *testing.T) {
 	mw, err := NewBotManagement(map[string]string{
 		"enabled":             "true",
 		"enable_js_challenge": "true",
-	}, Deps{})
+	}, nil)
 	if err != nil {
 		t.Fatalf("NewBotManagement: %v", err)
 	}

@@ -30,7 +30,7 @@ const joinUsers = (users: BasicUser[]) => users.map((u) => `${u.name}:${u.passwo
 /**
  * The basic-auth user list, "name:password,...". The gateway returns each
  * stored password as the stored-secret placeholder and keeps it by the user's
- * name (ADR 0030), so every user is a row with a write-only password. A list
+ * name (ADR 0033), so every user is a row with a write-only password. A list
  * held as a reference, or returned whole as the placeholder, is one secret.
  */
 function BasicUsersEditor({ value, onChange }: { value: string; onChange: (value: string) => void }) {

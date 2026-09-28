@@ -70,7 +70,7 @@ flowchart TD
     Kind["middleware/kind<br/><small>Middleware type, Chain, Recovery,<br/>context keys, status_writer, errors</small>"]
 
     Auth["middleware/auth<br/><small>auth, forwardauth, hmac, oauth2,<br/>oidc, paseto, apikey, revocation, tls_binding</small>"]
-    Sec["middleware/security<br/><small>waf, graphql_firewall, schema/openapi,<br/>file_security, bot, deception, honeypot,<br/>pow, turnstile, tls_fingerprint, geoip, ipfilter, policy</small>"]
+    Sec["middleware/security<br/><small>graphql_firewall, schema/openapi, file_security,<br/>deception, honeypot, geoip, ipfilter, policy<br/>+ security/waf (ADR-0002), security/identity (ADR-0013),<br/>security/challenge: bot, pow, turnstile (ADR-0030)</small>"]
     Traf["middleware/traffic<br/><small>ratelimit, connlimit, maxbody, inflight,<br/>retry, cache, buffering, compress</small>"]
     Trans["middleware/transform<br/><small>headers, rewrite, transform, cors,<br/>prefix, grpcweb, wasm, xfcc</small>"]
 

@@ -120,7 +120,7 @@ describe("auth editor", () => {
 });
 
 // The gateway returns every stored middleware secret as the stored-secret
-// placeholder (ADR 0030). An editor that put it in an input as text would show
+// placeholder (ADR 0033). An editor that put it in an input as text would show
 // "__gateon_redacted__" as a password, and saving an edit to it would send a
 // value that is neither the stored secret nor a new one.
 describe("stored secrets", () => {

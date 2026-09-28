@@ -19,7 +19,7 @@ interface KeyValueListProps {
 
 /**
  * Rows of "<prefix><key>" config entries. The gateway never returns a stored
- * secret (ADR 0030): a header or query value that is a credential comes back as
+ * secret (ADR 0033): a header or query value that is a credential comes back as
  * the stored-secret placeholder and is shown as "Stored", kept unless replaced
  * or cleared. An API key is itself a key name, shown as
  * "key_<placeholder>_<fingerprint>": its row shows a stored key whose tenant

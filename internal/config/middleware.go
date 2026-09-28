@@ -164,7 +164,7 @@ func (r *MiddlewareRegistry) Update(ctx context.Context, m *gateonv1.Middleware)
 // placeholder anywhere. Every store calls it before writing, whichever path
 // the middleware came by -- the API, a config import, the seed from a file, a
 // sync: stored, the placeholder would stand in for a secret, and it is a
-// string anyone can read in the source (ADR 0030).
+// string anyone can read in the source (ADR 0033).
 func RefusePlaceholder(m *gateonv1.Middleware) error {
 	if held := secretmask.Held(m.GetConfig()); len(held) > 0 {
 		return fmt.Errorf("middleware %q: %w: %s", m.GetId(), storedsecret.ErrPlaceholderStored,

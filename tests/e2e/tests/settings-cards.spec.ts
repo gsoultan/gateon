@@ -30,6 +30,15 @@ async function openSettings(page: Page) {
   await expect(page.getByRole('button', { name: 'Save Global Configuration' })).toBeEnabled();
 }
 
+/**
+ * Opens a Settings tab. Tabs are unmounted while hidden, so a card on another
+ * tab is not on the page until its tab is opened.
+ */
+async function openTab(page: Page, name: 'General' | 'Gateway' | 'Security' | 'Network & HA') {
+  await page.getByRole('tab', { name }).click();
+  await expect(page.getByRole('tab', { name })).toHaveAttribute('aria-selected', 'true');
+}
+
 /** A settings card, found by its title. */
 function card(page: Page, title: string): Locator {
   return page.locator('.mantine-Card-root').filter({ has: page.getByRole('heading', { name: title, exact: true }) });
@@ -116,6 +125,7 @@ test.describe('Settings cards', () => {
       if (r.method() === 'PUT' && new URL(r.url()).pathname === '/v1/global') puts.push(r.url());
     });
     await openSettings(page);
+    await openTab(page, 'Gateway');
     const threats = page.getByLabel('Security threats retention (days)');
     await threats.fill('45');
 
@@ -125,7 +135,8 @@ test.describe('Settings cards', () => {
     await expect(page.getByLabel('Path metrics retention (days)')).toHaveValue('30');
     await expect(threats, 'the preset reset a retention it does not mention').toHaveValue('45');
 
-    // Presets fill the form; only Save writes it.
+    // Presets fill the form; only Save writes it. The open tab is kept in the
+    // URL, so the reload comes back to it.
     await page.reload();
     await expect(page.getByLabel('Log Level').and(page.locator('input'))).toHaveValue('Debug');
     expect(puts, 'applying a preset saved the configuration').toEqual([]);
@@ -148,6 +159,7 @@ test.describe('Settings cards', () => {
 
   test('Forensic audit logging: signing with no key gets one generated on save', async ({ page, playwright }) => {
     await openSettings(page);
+    await openTab(page, 'Security');
     const audit = card(page, 'Forensic Audit Logging');
     const enabled = audit.getByRole('switch', { name: 'Forensic audit logging' });
     // Mantine hides a switch's input behind its track; with no visible label
@@ -173,11 +185,13 @@ test.describe('Settings cards', () => {
       await api.dispose();
     }
     await openSettings(page);
+    await openTab(page, 'Security');
     await expect(card(page, 'Forensic Audit Logging').getByText('Stored', { exact: true })).toBeVisible();
   });
 
   test('Trace archive: retention and size limit are saved and read back', async ({ page }) => {
     await openSettings(page);
+    await openTab(page, 'Gateway');
     const archive = card(page, 'Trace archive');
     await archive.getByLabel('Keep archived hours for (days)').fill('3');
     await archive.getByLabel('Archive size limit (MB)').fill('64');
@@ -185,14 +199,17 @@ test.describe('Settings cards', () => {
     expect(body.log).toMatchObject({ traceArchiveRetentionDays: 3, traceArchiveMaxSizeMb: 64 });
 
     await openSettings(page);
+    await openTab(page, 'Gateway');
     await expect(card(page, 'Trace archive').getByLabel('Keep archived hours for (days)')).toHaveValue('3');
     await expect(card(page, 'Trace archive').getByLabel('Archive size limit (MB)')).toHaveValue('64');
   });
 
   test('GeoIP says whether a database is loaded, and which', async ({ page }) => {
     // The suite's gateway has no GeoIP database.
+    // The card asks for the status when it mounts, which is when its tab opens.
     const real = page.waitForResponse((r) => new URL(r.url()).pathname === '/v1/geoip/status');
     await openSettings(page);
+    await openTab(page, 'Security');
     expect(((await (await real).json()) as { exists?: boolean }).exists ?? false).toBe(false);
     const geoip = card(page, 'GeoIP Configuration');
     await expect(geoip.getByText('Not Loaded', { exact: true })).toBeVisible();
@@ -207,6 +224,7 @@ test.describe('Settings cards', () => {
       }),
     );
     await openSettings(page);
+    await openTab(page, 'Security');
     await expect(geoip.getByText('Database Loaded', { exact: true })).toBeVisible();
     await expect(geoip).toContainText('GeoLite2-City build 2026-09-20');
     await expect(geoip).toContainText('geoip/GeoLite2-City.mmdb');
