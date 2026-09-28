@@ -176,10 +176,12 @@ func (h *Holder) ChangeOwnPassword(id, current, password string) error {
 	return s.ChangeOwnPassword(id, current, password)
 }
 
-func (h *Holder) UpdateSymmetricKey(key string) {
-	if s := h.Get(); s != nil {
-		s.UpdateSymmetricKey(key)
+func (h *Holder) UpdateSymmetricKey(key string) error {
+	s := h.Get()
+	if s == nil {
+		return ErrUnavailable
 	}
+	return s.UpdateSymmetricKey(key)
 }
 
 func (h *Holder) SetUserDisabled(id string, disabled bool) error {

@@ -20,7 +20,10 @@ type Service interface {
 	// ChangeOwnPassword is ChangePassword for the account's own user, who must
 	// present the current password; a wrong one counts towards login's lockout.
 	ChangeOwnPassword(id, current, password string) error
-	UpdateSymmetricKey(key string)
+	// UpdateSymmetricKey puts a new session key in force at once: every
+	// session ends, and every stored second factor is re-encrypted under it.
+	// See Manager.UpdateSymmetricKey.
+	UpdateSymmetricKey(key string) error
 	SetUserDisabled(id string, disabled bool) error
 	SetTwoFactorPending(id string, pending bool) error
 

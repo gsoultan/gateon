@@ -5,6 +5,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -16,6 +17,7 @@ import (
 	"github.com/gsoultan/gateon/internal/auth"
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/config/storedsecret"
+	"github.com/gsoultan/gateon/internal/logger"
 	wafmw "github.com/gsoultan/gateon/internal/middleware/security/waf"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
@@ -151,6 +153,10 @@ func (s *ApiService) UpdateGlobalConfig(ctx context.Context, req *gateonv1.Updat
 	if err := storedsecret.Restore(req.Config, stored); err != nil {
 		return &gateonv1.UpdateGlobalConfigResponse{Success: false}, status.Error(codes.InvalidArgument, err.Error())
 	}
+	rotated, err := s.rotateSessionKey(req.Config, stored)
+	if err != nil {
+		return &gateonv1.UpdateGlobalConfigResponse{Success: false}, err
+	}
 
 	// If audit signing is enabled with no key -- and none was stored, or
 	// Restore would have kept it -- generate one BEFORE persisting, so it is
@@ -160,6 +166,9 @@ func (s *ApiService) UpdateGlobalConfig(ctx context.Context, req *gateonv1.Updat
 	}
 
 	if err := s.Globals.Update(ctx, req.Config); err != nil {
+		if rotated {
+			s.restoreSessionKey(stored)
+		}
 		return &gateonv1.UpdateGlobalConfigResponse{Success: false}, err
 	}
 	//nolint:contextcheck // IP reputation's Reconfigure starts a feed refresh that outlives this request, on purpose.
@@ -167,6 +176,48 @@ func (s *ApiService) UpdateGlobalConfig(ctx context.Context, req *gateonv1.Updat
 	s.logAudit(ctx, "update", "global_config", "Updated global configuration")
 
 	return &gateonv1.UpdateGlobalConfigResponse{Success: true}, nil
+}
+
+// rotateSessionKey puts a new PASETO key in force before the update carrying
+// it is stored, and reports whether it did.
+//
+// A key saved in Settings used to change nothing until the next restart, and
+// the restart then ended every session and -- because stored second factors
+// are encrypted under the same key -- every 2FA sign-in with them. It now
+// takes effect at once and consistently: every session ends, the caller's own
+// included, which is what rotating a key that may have leaked is for; and
+// auth.Manager re-encrypts the second factors first. A key the gateway could
+// not start with (under 32 bytes) is refused before anything changes. See
+// ADR 0028.
+func (s *ApiService) rotateSessionKey(update, stored *gateonv1.GlobalConfig) (bool, error) {
+	next, current := update.GetAuth().GetPasetoSecret(), stored.GetAuth().GetPasetoSecret()
+	if next == "" || next == current {
+		return false, nil
+	}
+	resolved, err := config.ResolveSecretStrict(next)
+	if err != nil {
+		return false, status.Errorf(codes.InvalidArgument, "auth.paseto_secret: %v", err)
+	}
+	if len(resolved) < 32 {
+		return false, status.Errorf(codes.InvalidArgument, "auth.paseto_secret: %v", auth.ErrSessionKeyTooShort)
+	}
+	if resolved == current || !auth.Available(s.Auth) {
+		return false, nil
+	}
+	if err := s.Auth.UpdateSymmetricKey(resolved); err != nil {
+		return false, fmt.Errorf("put the new session key in force: %w", err)
+	}
+	return true, nil
+}
+
+// restoreSessionKey puts the stored key back in force after an update that
+// rotated it could not be stored, so the key the gateway signs with stays the
+// one it will start with.
+func (s *ApiService) restoreSessionKey(stored *gateonv1.GlobalConfig) {
+	if err := s.Auth.UpdateSymmetricKey(stored.GetAuth().GetPasetoSecret()); err != nil {
+		logger.L.LogError("a new session key could not be saved, and the saved one could not be put back in "+
+			"force; restart the gateway to use the saved key", "error", err)
+	}
 }
 
 // applyGlobalConfig reconfigures the running subsystems a stored update

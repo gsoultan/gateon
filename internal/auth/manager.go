@@ -4,11 +4,13 @@
 package auth
 
 import (
+	"bytes"
 	"database/sql"
 	"encoding/base64"
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -23,13 +25,18 @@ import (
 )
 
 type Manager struct {
-	db           *sql.DB
-	dialect      db.Dialect
-	symmetricKey paseto.V4SymmetricKey
-	parser       paseto.Parser
-	encKey       []byte
-	logger       logger.Logger
-	bindings     *bindingCache
+	db      *sql.DB
+	dialect db.Dialect
+	// keys are what the PASETO secret becomes. Swapped whole, atomically, by
+	// UpdateSymmetricKey; read without a lock on every verify.
+	keys atomic.Pointer[sessionKeys]
+	// secondFactorMu orders a key rotation against the use of a stored second
+	// factor: the rotation re-encrypts every one and swaps the key, and
+	// nothing may encrypt or decrypt one in between.
+	secondFactorMu sync.RWMutex
+	parser         paseto.Parser
+	logger         logger.Logger
+	bindings       *bindingCache
 
 	// bindingPub is installed after construction (SetBindingPublisher) so the
 	// trust boundary's constructor gains no broker dependency. nil means no
@@ -49,28 +56,46 @@ func NewManager(databaseURL, symmetricKey string, l logger.Logger) (*Manager, er
 		return nil, fmt.Errorf("failed to migrate database: %w", err)
 	}
 
-	// PASETO v4 local keys must be 32 bytes
-	keyBytes := []byte(symmetricKey)
-	if len(keyBytes) < 32 {
-		// Pad or return error
-		return nil, fmt.Errorf("PASETO v4 symmetric key must be at least 32 bytes")
-	}
-	key, err := paseto.V4SymmetricKeyFromBytes(keyBytes[:32])
+	keys, err := deriveSessionKeys(symmetricKey)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create PASETO v4 key: %w", err)
+		_ = database.Close()
+		return nil, err
 	}
 
 	m := &Manager{
-		db:           database,
-		dialect:      dialect,
-		symmetricKey: key,
-		parser:       paseto.NewParser(),
-		encKey:       append([]byte(nil), keyBytes[:32]...),
-		logger:       l,
-		bindings:     newBindingCache(),
+		db:       database,
+		dialect:  dialect,
+		parser:   paseto.NewParser(),
+		logger:   l,
+		bindings: newBindingCache(),
 	}
+	m.keys.Store(keys)
 
 	return m, nil
+}
+
+// ErrSessionKeyTooShort refuses a PASETO secret shorter than a v4 local key.
+var ErrSessionKeyTooShort = errors.New("PASETO v4 symmetric key must be at least 32 bytes")
+
+// sessionKeys are what the PASETO secret becomes: the key that signs every
+// session and the key that encrypts each second factor at rest. They are the
+// same 32 bytes, and replaced together, so no request sees one from one secret
+// and the other from another.
+type sessionKeys struct {
+	sign paseto.V4SymmetricKey
+	enc  []byte
+}
+
+func deriveSessionKeys(secret string) (*sessionKeys, error) {
+	b := []byte(secret)
+	if len(b) < 32 {
+		return nil, ErrSessionKeyTooShort
+	}
+	sign, err := paseto.V4SymmetricKeyFromBytes(b[:32])
+	if err != nil {
+		return nil, fmt.Errorf("failed to create PASETO v4 key: %w", err)
+	}
+	return &sessionKeys{sign: sign, enc: append([]byte(nil), b[:32]...)}, nil
 }
 
 // IsSetupDone reports whether an administrator account exists.
@@ -186,7 +211,7 @@ func (m *Manager) issueToken(user *gateonv1.User) (string, *gateonv1.User, error
 	token.SetString("role", user.Role)
 	token.SetString(SessionBindingClaim, binding)
 
-	encrypted := token.V4Encrypt(m.symmetricKey, nil)
+	encrypted := token.V4Encrypt(m.keys.Load().sign, nil)
 
 	sanitizeUser(user)
 	return encrypted, user, nil
@@ -204,7 +229,7 @@ func sanitizeUser(user *gateonv1.User) {
 }
 
 func (m *Manager) VerifyToken(token string) (any, error) {
-	parsedToken, err := m.parser.ParseV4Local(m.symmetricKey, token, nil)
+	parsedToken, err := m.parser.ParseV4Local(m.keys.Load().sign, token, nil)
 	if err != nil {
 		return nil, fmt.Errorf("invalid token: %w", err)
 	}
@@ -433,16 +458,85 @@ func (m *Manager) DeleteUser(id string) error {
 	return nil
 }
 
-func (m *Manager) UpdateSymmetricKey(key string) {
-	keyBytes := []byte(key)
-	if len(keyBytes) < 32 {
-		return
+// UpdateSymmetricKey makes key the session key, now. Every session signed with
+// the previous key ends -- that is what rotating it is for. Every stored second
+// factor, which is encrypted at rest under the same key, is re-encrypted under
+// the new one first, in one transaction, so no account loses its enrolment; a
+// rotation that left them behind would lock every 2FA account out, the
+// administrator who rotated included. A key shorter than 32 bytes is refused,
+// and so is a rotation whose re-encryption fails; either way the previous key
+// stays in force. The same key again changes nothing.
+//
+// It used to swap the key unsynchronised against every verify, ignore a short
+// key without a word, and leave the second factors encrypted under the old one.
+// Nothing called it after setup, so a key saved in Settings changed nothing
+// until the next restart -- and the restart then ended every 2FA login.
+func (m *Manager) UpdateSymmetricKey(key string) error {
+	next, err := deriveSessionKeys(key)
+	if err != nil {
+		return err
 	}
-	k, err := paseto.V4SymmetricKeyFromBytes(keyBytes[:32])
-	if err == nil {
-		m.symmetricKey = k
-		m.encKey = append([]byte(nil), keyBytes[:32]...)
+	m.secondFactorMu.Lock()
+	defer m.secondFactorMu.Unlock()
+	current := m.keys.Load()
+	if bytes.Equal(current.enc, next.enc) {
+		return nil
 	}
+	if err := m.reencryptSecondFactors(current.enc, next.enc); err != nil {
+		return fmt.Errorf("rotate the session key: %w", err)
+	}
+	m.keys.Store(next)
+	return nil
+}
+
+// reencryptSecondFactors rewrites every stored second factor from key from to
+// key to, in one transaction.
+func (m *Manager) reencryptSecondFactors(from, to []byte) error {
+	tx, err := m.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	stored, err := secondFactorSecrets(tx, m.dialect)
+	if err != nil {
+		return err
+	}
+	update := m.dialect.Rebind(QueryUpdateTwoFactorSecret)
+	for id, secret := range stored {
+		plain, err := decryptSecret(from, secret)
+		if err != nil {
+			// It does not decrypt under the key in force either, so the account
+			// could not sign in with it before the rotation; nothing is lost.
+			m.logger.LogWarn("a stored second factor does not decrypt under the session key; the account must enrol again",
+				"user", id)
+			continue
+		}
+		enc, err := encryptSecret(to, plain)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.Exec(update, enc, id); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func secondFactorSecrets(tx *sql.Tx, d db.Dialect) (map[string]string, error) {
+	rows, err := tx.Query(d.Rebind(QueryTwoFactorSecrets))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	stored := map[string]string{}
+	for rows.Next() {
+		var id, secret string
+		if err := rows.Scan(&id, &secret); err != nil {
+			return nil, err
+		}
+		stored[id] = secret
+	}
+	return stored, rows.Err()
 }
 
 // EnrollPending2FA begins first-time TOTP enrollment for a user whom an
@@ -578,15 +672,14 @@ func (m *Manager) beginTOTPEnrolment(id string) (string, string, []string, error
 		return "", "", nil, err
 	}
 
-	// Encrypt the TOTP secret at rest.
-	encSecret, err := encryptSecret(m.encKey, key.Secret())
-	if err != nil {
-		return "", "", nil, err
+	// Encrypt the TOTP secret at rest and store it, not yet enabled, under a key
+	// a rotation cannot swap until the write is done.
+	m.secondFactorMu.RLock()
+	encSecret, err := encryptSecret(m.keys.Load().enc, key.Secret())
+	if err == nil {
+		_, err = m.db.Exec(m.dialect.Rebind(QueryUpdate2FA), false, encSecret, strings.Join(hashedCodes, ","), id)
 	}
-
-	// Update user with secret but don't enable it yet.
-	qUpdate := m.dialect.Rebind(QueryUpdate2FA)
-	_, err = m.db.Exec(qUpdate, false, encSecret, strings.Join(hashedCodes, ","), id)
+	m.secondFactorMu.RUnlock()
 	if err != nil {
 		return "", "", nil, err
 	}
@@ -602,6 +695,10 @@ func (m *Manager) beginTOTPEnrolment(id string) (string, string, []string, error
 }
 
 func (m *Manager) Verify2FA(id, code string) (bool, string, *gateonv1.User, error) {
+	// Held while the stored secret is read, decrypted and written back, so a
+	// key rotation cannot re-encrypt it in between.
+	m.secondFactorMu.RLock()
+	defer m.secondFactorMu.RUnlock()
 	var user gateonv1.User
 	var hashed, role, recoveryCodes string
 	var failedAttempts int
@@ -623,7 +720,7 @@ func (m *Manager) Verify2FA(id, code string) (bool, string, *gateonv1.User, erro
 	// The stored secret is encrypted at rest; keep the stored form for persistence
 	// and decrypt a copy for validation.
 	storedSecret := user.TwoFactorSecret
-	plainSecret, err := decryptSecret(m.encKey, storedSecret)
+	plainSecret, err := decryptSecret(m.keys.Load().enc, storedSecret)
 	if err != nil {
 		return false, "", nil, err
 	}

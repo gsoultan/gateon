@@ -79,7 +79,7 @@ func legacyToken(m *Manager, id, username, binding string) string {
 	token.SetString("username", username)
 	token.SetString("role", RoleAdmin)
 	token.SetString(SessionBindingClaim, binding)
-	return token.V4Encrypt(m.symmetricKey, nil)
+	return token.V4Encrypt(m.keys.Load().sign, nil)
 }
 
 // TestSigningOutEndsEverySessionOfTheAccount is the regression test for a
