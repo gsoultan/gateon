@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/gsoultan/gateon/internal/config"
+	"github.com/gsoultan/gateon/internal/config/storedsecret"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
@@ -46,6 +47,11 @@ func TestGeoIPUpdateUsesTheKeyTheSettingsCardSends(t *testing.T) {
 		"proto field name":      {saved: "saved-key", body: `{"maxmind_license_key":"typed-key"}`, want: "typed-key"},
 		"saved when none typed": {saved: "saved-key", body: `{}`, want: "saved-key"},
 		"saved with no body":    {saved: "saved-key", body: ``, want: "saved-key"},
+		// The card holds the placeholder while the saved key is untouched: GET
+		// /v1/global no longer returns the key (ADR 0028). Sent on as it was,
+		// the placeholder reached MaxMind as the licence key.
+		"saved for the placeholder": {saved: "saved-key",
+			body: `{"maxmindLicenseKey":"` + storedsecret.Sentinel + `"}`, want: "saved-key"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			used = nil

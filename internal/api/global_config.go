@@ -6,6 +6,8 @@ package api
 import (
 	"context"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
@@ -13,6 +15,7 @@ import (
 	"github.com/gsoultan/gateon/internal/audit"
 	"github.com/gsoultan/gateon/internal/auth"
 	"github.com/gsoultan/gateon/internal/config"
+	"github.com/gsoultan/gateon/internal/config/storedsecret"
 	wafmw "github.com/gsoultan/gateon/internal/middleware/security/waf"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
@@ -22,15 +25,42 @@ func (s *ApiService) GetGlobalConfig(ctx context.Context, _ *gateonv1.GetGlobalC
 	if s.Globals == nil {
 		return &gateonv1.GetGlobalConfigResponse{Config: &gateonv1.GlobalConfig{}}, nil
 	}
-	conf := s.Globals.Get(ctx)
-	if !callerMayWrite(ctx, auth.ResourceGlobal) {
-		conf = RedactGlobalSecrets(conf)
-	} else {
-		// A writer sees a referenced secret as its reference, so saving the
-		// settings stores the reference back rather than the secret.
-		conf = config.WithSecretReferences(s.Globals, conf)
-	}
+	conf := GlobalConfigView(s.Globals, s.Globals.Get(ctx), callerMayWrite(ctx, auth.ResourceGlobal))
 	return &gateonv1.GetGlobalConfigResponse{Config: conf}, nil
+}
+
+// GlobalConfigView is gc as the management API hands it to a caller, over
+// every transport: GET /v1/global and GetGlobalConfig over Connect and gRPC.
+//
+// No caller receives a stored credential. One who may write the configuration
+// reads each as storedsecret.Sentinel -- or as its reference, when it was
+// configured as one, so that saving stores the reference back -- and sends the
+// sentinel back to keep it; one who may not reads "". Writers used to receive
+// every value: the PASETO key that signs sessions, the audit chain's HMAC key,
+// the database and Redis passwords and every third-party token. One stolen
+// administrator session or one script in the dashboard was then a key to
+// mint sessions for any account, which outlived the session, the password
+// and a sign-out. See ADR 0028.
+//
+// gc is never modified; the registry hands out its live config.
+func GlobalConfigView(store config.GlobalConfigStore, gc *gateonv1.GlobalConfig, mayWrite bool) *gateonv1.GlobalConfig {
+	if gc == nil {
+		return nil
+	}
+	if !mayWrite {
+		return RedactGlobalSecrets(gc)
+	}
+	out := cloneGlobalConfig(config.WithSecretReferences(store, gc))
+	storedsecret.Mask(out)
+	return out
+}
+
+func cloneGlobalConfig(gc *gateonv1.GlobalConfig) *gateonv1.GlobalConfig {
+	out, ok := proto.Clone(gc).(*gateonv1.GlobalConfig)
+	if !ok || out == nil {
+		return &gateonv1.GlobalConfig{}
+	}
+	return out
 }
 
 // callerMayWrite reports whether the caller in ctx holds ActionWrite on
@@ -49,15 +79,15 @@ func callerMayWrite(ctx context.Context, resource auth.Resource) bool {
 	return auth.Allowed(ctx, claims.Role, auth.ActionWrite, resource)
 }
 
-// RedactGlobalSecrets returns a copy of gc with every credential blanked.
+// RedactGlobalSecrets returns a copy of gc with every credential blanked: what
+// a caller who may not write the global configuration reads.
 //
-// It is applied to a read by a caller who may not write the global
-// configuration. The viewer role -- read-only by definition -- holds ActionRead
-// on ResourceGlobal so the dashboard can render settings, and that read used
-// to return the PASETO session key, the audit chain's HMAC signing key, the
-// database and Redis passwords and every third-party API token verbatim. A
-// role that cannot change a credential has no use for its value, and a role
-// that can still receives it, so the settings editor round-trips unchanged.
+// The viewer role -- read-only by definition -- holds ActionRead on
+// ResourceGlobal so the dashboard can render settings, and that read used to
+// return the PASETO session key, the audit chain's HMAC signing key, the
+// database and Redis passwords and every third-party API token verbatim. The
+// fields are storedsecret's table, the one the writer's view masks and a save
+// restores, so the three cannot disagree about what a credential is.
 //
 // The copy is what makes this safe on the live config: the registry hands
 // out its stored pointer, and blanking fields on that would erase the secrets
@@ -66,65 +96,9 @@ func RedactGlobalSecrets(gc *gateonv1.GlobalConfig) *gateonv1.GlobalConfig {
 	if gc == nil {
 		return nil
 	}
-	out, ok := proto.Clone(gc).(*gateonv1.GlobalConfig)
-	if !ok {
-		return &gateonv1.GlobalConfig{}
-	}
-	redactStorageSecrets(out)
-	redactSecuritySecrets(out)
+	out := cloneGlobalConfig(gc)
+	storedsecret.Blank(out)
 	return out
-}
-
-func redactStorageSecrets(out *gateonv1.GlobalConfig) {
-	if a := out.Auth; a != nil {
-		a.PasetoSecret, a.DatabaseUrl = "", ""
-		if a.DatabaseConfig != nil {
-			a.DatabaseConfig.Password = ""
-		}
-	}
-	if a := out.Audit; a != nil {
-		a.SignatureKey, a.DatabaseUrl = "", ""
-		if a.DatabaseConfig != nil {
-			a.DatabaseConfig.Password = ""
-		}
-	}
-	if r := out.Redis; r != nil {
-		r.Password = ""
-	}
-	if h := out.Ha; h != nil {
-		h.AuthPass = ""
-	}
-	if g := out.Geoip; g != nil {
-		g.MaxmindLicenseKey = ""
-	}
-	if m := out.Management; m != nil && m.Gitops != nil {
-		m.Gitops.AuthToken = ""
-	}
-}
-
-func redactSecuritySecrets(out *gateonv1.GlobalConfig) {
-	if w := out.Waf; w != nil && w.BotManagement != nil {
-		w.BotManagement.SecretKey = ""
-	}
-	if s := out.SecurityAdvanced; s != nil {
-		if s.Deception != nil {
-			s.Deception.CanaryToken = ""
-		}
-		if s.Pow != nil {
-			s.Pow.Secret = ""
-		}
-		if s.IpReputation != nil {
-			for _, i := range s.IpReputation.Integrations {
-				i.ApiKey = ""
-			}
-		}
-	}
-	if al := out.Alerting; al != nil {
-		for _, d := range al.Dispatchers {
-			// A Slack or Discord incoming-webhook URL is the credential.
-			d.TelegramBotToken, d.WebhookUrl = "", ""
-		}
-	}
 }
 
 // KeepOmittedSections gives every top-level section an update leaves out the
@@ -169,11 +143,18 @@ func (s *ApiService) UpdateGlobalConfig(ctx context.Context, req *gateonv1.Updat
 	if s.Globals == nil || req == nil || req.Config == nil {
 		return &gateonv1.UpdateGlobalConfigResponse{Success: false}, nil
 	}
-	KeepOmittedSections(req.Config, s.Globals.Get(ctx))
+	stored := s.Globals.Get(ctx)
+	KeepOmittedSections(req.Config, stored)
+	// Every credential the caller read back as the placeholder, and sent back,
+	// is the stored one again; one it cannot be is refused, naming it. This is
+	// the save path REST, Connect and gRPC share. See ADR 0028.
+	if err := storedsecret.Restore(req.Config, stored); err != nil {
+		return &gateonv1.UpdateGlobalConfigResponse{Success: false}, status.Error(codes.InvalidArgument, err.Error())
+	}
 
-	// If audit signing is enabled with no key, generate a random one BEFORE
-	// persisting so it is saved to disk (chain stays verifiable across restarts)
-	// and returned to the UI on the next GetGlobalConfig.
+	// If audit signing is enabled with no key -- and none was stored, or
+	// Restore would have kept it -- generate one BEFORE persisting, so it is
+	// saved to disk and the chain stays verifiable across restarts.
 	if a := req.Config.Audit; a != nil && a.SignEntries && a.SignatureKey == "" {
 		a.SignatureKey = audit.GenerateSignatureKey()
 	}
@@ -181,21 +162,26 @@ func (s *ApiService) UpdateGlobalConfig(ctx context.Context, req *gateonv1.Updat
 	if err := s.Globals.Update(ctx, req.Config); err != nil {
 		return &gateonv1.UpdateGlobalConfigResponse{Success: false}, err
 	}
+	//nolint:contextcheck // IP reputation's Reconfigure starts a feed refresh that outlives this request, on purpose.
+	s.applyGlobalConfig(req.Config)
+	s.logAudit(ctx, "update", "global_config", "Updated global configuration")
 
-	// Trigger reconfigurations
-	if req.Config.Alerting != nil {
-		alerting.UpdateConfig(req.Config.Alerting, s.EbpfManager)
-	}
-	if req.Config.Audit != nil {
-		audit.UpdateConfig(req.Config.Audit)
-	}
-	if req.Config.SecurityAdvanced != nil && req.Config.SecurityAdvanced.IpReputation != nil && s.IPReputation != nil {
-		s.IPReputation.Reconfigure(req.Config.SecurityAdvanced.IpReputation)
-	}
+	return &gateonv1.UpdateGlobalConfigResponse{Success: true}, nil
+}
 
-	// Update telemetry retention if log config is present
-	if req.Config.Log != nil {
-		l := req.Config.Log
+// applyGlobalConfig reconfigures the running subsystems a stored update
+// touches.
+func (s *ApiService) applyGlobalConfig(c *gateonv1.GlobalConfig) {
+	if c.Alerting != nil {
+		alerting.UpdateConfig(c.Alerting, s.EbpfManager)
+	}
+	if c.Audit != nil {
+		audit.UpdateConfig(c.Audit)
+	}
+	if c.SecurityAdvanced != nil && c.SecurityAdvanced.IpReputation != nil && s.IPReputation != nil {
+		s.IPReputation.Reconfigure(c.SecurityAdvanced.IpReputation)
+	}
+	if l := c.Log; l != nil {
 		telemetry.ConfigureGranularRetention(
 			int(l.PathStatsRetentionDays),
 			int(l.AccessLogRetentionDays),
@@ -203,27 +189,19 @@ func (s *ApiService) UpdateGlobalConfig(ctx context.Context, req *gateonv1.Updat
 			int(l.AuditLogRetentionDays),
 		)
 	}
-
-	// Invalidate cache if needed
-	if req.Config.Waf != nil {
+	if c.Waf != nil {
 		wafmw.InvalidateWAFCache()
 	}
 	if s.Invalidator != nil {
 		s.Invalidator.InvalidateRoutes(func(r *gateonv1.Route) bool { return true })
-		if req.Config.Tls != nil {
+		if c.Tls != nil {
 			s.Invalidator.InvalidateTLS()
 		}
 	}
-	if g := req.Config.Geoip; g != nil && g.Enabled && g.DbPath != "" {
+	if g := c.Geoip; g != nil && g.Enabled && g.DbPath != "" {
 		_ = telemetry.InitGeoIP(g.DbPath)
 	}
-
-	// Update eBPF Port Knocking sequence
-	if s.EbpfManager != nil && req.Config.Ebpf != nil {
-		_ = s.EbpfManager.SetPortKnockingSequence(req.Config.Ebpf.KnockingSequence)
+	if s.EbpfManager != nil && c.Ebpf != nil {
+		_ = s.EbpfManager.SetPortKnockingSequence(c.Ebpf.KnockingSequence)
 	}
-
-	s.logAudit(ctx, "update", "global_config", "Updated global configuration")
-
-	return &gateonv1.UpdateGlobalConfigResponse{Success: true}, nil
 }

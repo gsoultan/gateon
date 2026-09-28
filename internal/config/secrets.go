@@ -22,6 +22,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/secretsmanager"
+	"github.com/gsoultan/gateon/internal/config/storedsecret"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/hashicorp/vault/api"
 )
@@ -168,18 +169,12 @@ func (r *AWSSecretResolver) Resolve(s string) (string, error) {
 	return "", fmt.Errorf("key %s not found in AWS secret %s", key, name)
 }
 
-// secretReferencePrefixes are the value prefixes that name a secret held
-// elsewhere rather than being the secret.
-var secretReferencePrefixes = []string{"$env:", "$vault:", "$aws-sm:"}
-
-// IsSecretReference reports whether s names a secret held elsewhere.
+// IsSecretReference reports whether s names a secret held elsewhere ($env:,
+// $vault:, $aws-sm:). The prefixes live in storedsecret, which decides what
+// the management API shows of a secret and must agree with this on what a
+// reference is.
 func IsSecretReference(s string) bool {
-	for _, p := range secretReferencePrefixes {
-		if strings.HasPrefix(s, p) {
-			return true
-		}
-	}
-	return false
+	return storedsecret.IsReference(s)
 }
 
 // ChainSecretResolver resolves secret references by trying multiple resolvers.
@@ -225,10 +220,8 @@ func (r *ChainSecretResolver) Resolve(s string) (string, error) {
 // referenceKind is the prefix of a reference, which is safe to log where the
 // rest of it -- a path or variable name -- may not be.
 func referenceKind(s string) string {
-	for _, p := range secretReferencePrefixes {
-		if strings.HasPrefix(s, p) {
-			return p
-		}
+	if kind := storedsecret.ReferenceKind(s); kind != "" {
+		return kind
 	}
 	return "unknown"
 }

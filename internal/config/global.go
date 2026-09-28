@@ -13,6 +13,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/gsoultan/gateon/internal/config/storedsecret"
 	"github.com/gsoultan/gateon/internal/logger"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 	"google.golang.org/protobuf/proto"
@@ -175,6 +176,7 @@ func (r *GlobalRegistry) load() {
 			return
 		}
 	}
+	storedsecret.AssignIDs(cfg)
 	refs := secretReferences(cfg)
 	if err := decryptSensitiveFields(cfg); err != nil {
 		r.loadErr = fmt.Errorf("resolve secrets in %s: %w", r.path, err)
@@ -351,6 +353,13 @@ func (r *GlobalRegistry) Subscribe(fn ConfigChangeFunc) {
 }
 
 func (r *GlobalRegistry) Update(ctx context.Context, conf *gateonv1.GlobalConfig) error {
+	// The API restores a kept secret before it gets here; anything still
+	// holding the placeholder came by a path that did not, and storing it
+	// would replace a credential with a published string. See ADR 0028.
+	if held := storedsecret.Held(conf); len(held) > 0 {
+		return fmt.Errorf("%w: %s", storedsecret.ErrPlaceholderStored, strings.Join(held, ", "))
+	}
+	storedsecret.AssignIDs(conf)
 	r.mu.Lock()
 	oldCfg := r.config.Load()
 	refs, err := r.adoptSecretsLocked(conf, oldCfg)

@@ -13,6 +13,7 @@ import (
 
 	"github.com/gsoultan/gateon/internal/auth"
 	"github.com/gsoultan/gateon/internal/config"
+	"github.com/gsoultan/gateon/internal/config/storedsecret"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
@@ -149,12 +150,18 @@ func registerGeoIPHandlers(mux *http.ServeMux, globalReg config.GlobalConfigStor
 		// "maxmindLicenseKey" never matched: the typed key was dropped, the
 		// update ran with the saved one, and with none saved it answered "not
 		// configured" to an operator looking at the key they had just entered.
+		//
+		// The form holds the placeholder while the saved key is untouched, as
+		// GET /v1/global no longer returns the key itself (ADR 0028); the
+		// placeholder means the saved key, exactly as an empty field does.
+		// Sent on as it was, it reached MaxMind as the licence key and the
+		// update failed with the key the operator had saved still unused.
 		var body gateonv1.GeoIPConfig
 		if !DecodeProtoRequest(w, r, &body) {
 			return
 		}
 		licenseKey := body.GetMaxmindLicenseKey()
-		if licenseKey == "" {
+		if licenseKey == "" || licenseKey == storedsecret.Sentinel {
 			licenseKey = globalReg.Get(r.Context()).GetGeoip().GetMaxmindLicenseKey()
 		}
 

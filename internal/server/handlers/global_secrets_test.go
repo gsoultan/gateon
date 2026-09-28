@@ -14,6 +14,7 @@ import (
 	"github.com/gsoultan/gateon/internal/api"
 	"github.com/gsoultan/gateon/internal/auth"
 	"github.com/gsoultan/gateon/internal/config"
+	"github.com/gsoultan/gateon/internal/config/storedsecret"
 	"github.com/gsoultan/gateon/internal/middleware"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
@@ -77,14 +78,47 @@ func TestGlobalConfigReadWithholdsCredentialsFromAViewer(t *testing.T) {
 	}
 }
 
-func TestGlobalConfigReadRoundTripsCredentialsForAWriter(t *testing.T) {
+// TestGlobalConfigReadGivesAWriterThePlaceholder: a role that may write the
+// config reads each stored credential as the placeholder, which a save sends
+// back to keep it -- never the value. It used to read every value, so one
+// stolen administrator session carried off the session-signing key.
+func TestGlobalConfigReadGivesAWriterThePlaceholder(t *testing.T) {
 	mux := globalMuxWithSecrets(t)
 	for _, role := range []string{auth.RoleAdmin, auth.RoleOperator} {
 		body := getGlobalAs(t, mux, role).Body.String()
 		for _, secret := range restGlobalCredentials {
-			if !strings.Contains(body, secret) {
-				t.Errorf("%s no longer receives %q from GET /v1/global; saving settings would blank it", role, secret)
+			if strings.Contains(body, secret) {
+				t.Errorf("%s received the stored credential %q from GET /v1/global", role, secret)
 			}
 		}
+		var got gateonv1.GlobalConfig
+		if err := ProtojsonUnmarshalOptions().Unmarshal([]byte(body), &got); err != nil {
+			t.Fatal(err)
+		}
+		if got.GetAuth().GetPasetoSecret() != storedsecret.Sentinel || got.GetRedis().GetPassword() != storedsecret.Sentinel {
+			t.Errorf("%s reads the session key as %q and the Redis password as %q; want the placeholder for both",
+				role, got.GetAuth().GetPasetoSecret(), got.GetRedis().GetPassword())
+		}
+	}
+}
+
+// TestGlobalConfigSaveRefusesAPlaceholderItCannotKeep: a dispatcher that asks
+// to keep a stored secret under an id no stored dispatcher has is refused with
+// 400 and its name, and nothing is stored.
+func TestGlobalConfigSaveRefusesAPlaceholderItCannotKeep(t *testing.T) {
+	mux := globalMuxWithSecrets(t)
+	body := `{"alerting": {"dispatchers": [{"id": "d-unknown", "name": "pager", "type": "telegram", "telegramBotToken": "` +
+		storedsecret.Sentinel + `"}]}}`
+	req := httptest.NewRequest(http.MethodPut, "/v1/global", strings.NewReader(body))
+	req = req.WithContext(context.WithValue(req.Context(), middleware.UserContextKey,
+		&auth.Claims{ID: "u-admin", Username: "admin", Role: auth.RoleAdmin}))
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest || !strings.Contains(rr.Body.String(), `id \"d-unknown\", name \"pager\"`) {
+		t.Fatalf("PUT answered %d %s; want 400 naming the dispatcher", rr.Code, rr.Body)
+	}
+	after := getGlobalAs(t, mux, auth.RoleAdmin).Body.String()
+	if strings.Contains(after, "d-unknown") {
+		t.Fatal("the refused save was stored")
 	}
 }

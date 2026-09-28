@@ -140,17 +140,11 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 			}
 		}
 
-		// A caller who cannot write the global config gets it without its
-		// credentials. RequirePermission admits viewers here so the dashboard
-		// can render settings; it must not admit them to the PASETO key, the
-		// audit signing key and every stored password and API token.
-		if !callerMayWrite(r, auth.ResourceGlobal) {
-			gc = api.RedactGlobalSecrets(gc)
-		} else {
-			// A writer sees a referenced secret as its reference, so saving
-			// the page stores the reference back rather than the secret.
-			gc = config.WithSecretReferences(svc.GetGlobals(), gc)
-		}
+		// No caller gets a stored credential back: a writer reads each as the
+		// placeholder (or its reference) and sends it back to keep it, a
+		// viewer reads "". The same view GetGlobalConfig serves over Connect
+		// and gRPC. See ADR 0028.
+		gc = api.GlobalConfigView(svc.GetGlobals(), gc, callerMayWrite(r, auth.ResourceGlobal))
 		data, _ := ProtojsonOptions().Marshal(gc)
 		_, _ = w.Write(data)
 	})
@@ -267,6 +261,13 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 		// those itself, so an ACME switch, a certificate or a client authority
 		// saved from the dashboard did nothing until a restart.
 		if _, err := svc.UpdateGlobalConfig(r.Context(), &gateonv1.UpdateGlobalConfigRequest{Config: &conf}); err != nil {
+			// A refusal -- a kept secret that cannot be kept -- names the
+			// field, and the caller needs that to fix the request.
+			if status.Code(err) == codes.InvalidArgument {
+				WriteHTTPError(w, http.StatusBadRequest, status.Convert(err).Message())
+				return
+			}
+			logger.L.LogError("global config update failed", "error", err)
 			WriteHTTPError(w, http.StatusInternalServerError, "failed to update global config")
 			return
 		}

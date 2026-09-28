@@ -61,7 +61,10 @@ func TestIntegration_Alerting(t *testing.T) {
 			},
 		},
 	}
-	alerting.Init(cfg, nil)
+	// UpdateConfig, not Init: Init runs once per process, so after any other
+	// test in this package has configured alerting (a global-config save
+	// does) it would be a no-op and this test's dispatcher never installed.
+	alerting.UpdateConfig(cfg, nil)
 	defer alerting.UpdateConfig(&gateonv1.AlertingConfig{Enabled: false}, nil)
 
 	t.Run("Positive - Alert Sent", func(t *testing.T) {
