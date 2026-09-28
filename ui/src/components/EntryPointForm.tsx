@@ -4,6 +4,7 @@
 import { useEffect } from "react";
 import {
   TextInput,
+  NumberInput,
   Stack,
   Group,
   Button,
@@ -21,6 +22,7 @@ import {
   IconHash,
   IconLock,
   IconInfoCircle,
+  IconPlugConnected,
 } from "@tabler/icons-react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "@tanstack/react-form";
@@ -30,6 +32,24 @@ import type { EntryPoint } from "../types/gateon";
 import { apiFetch, getApiErrorMessage } from "../hooks/useGateon";
 
 const DEFAULT_TIMEOUT_MS = 15000;
+
+// What 0 means for max_connections: the resource profile's default, the
+// server's config.DefaultsFor(...).EntryPointMaxConnections (ADR 0032).
+export const PROFILE_MAX_CONNECTIONS = "1,000 on the minimal profile, 10,000 on standard, 50,000 on enterprise";
+
+// maxConnectionsDescription explains the limit for the entrypoint being
+// edited. A raw UDP entrypoint has no connections to hold, so it says that
+// instead of offering a limit nothing reads.
+export function maxConnectionsDescription(rawUDP: boolean): string {
+  if (rawUDP) {
+    return "A UDP entrypoint without TLS has no connections to limit. HTTP/3 (UDP with TLS), TCP and HTTP entrypoints do.";
+  }
+  return (
+    "Most connections held open at once; one past it is closed as it arrives. Idle keep-alive connections " +
+    "count, and an HTTP/2 or HTTP/3 connection counts once however many requests it carries. " +
+    `0 uses the resource profile's default: ${PROFILE_MAX_CONNECTIONS}.`
+  );
+}
 
 export function EntryPointForm({
   onSuccess,
@@ -159,8 +179,8 @@ export function EntryPointForm({
         >
           <Text size="sm" c="dimmed">
             The gateway opens its listeners when it starts, so adding or removing an entrypoint, or changing its
-            address, type, protocols, TLS or access logging, takes effect after a restart. Read and write timeouts
-            apply as soon as you save.
+            address, type, protocols, TLS, maximum connections or access logging, takes effect after a restart. Read
+            and write timeouts apply as soon as you save.
           </Text>
         </Alert>
 
@@ -306,6 +326,28 @@ export function EntryPointForm({
             )}
           />
         </Group>
+
+        <form.Field
+          name="maxConnections"
+          children={(field: any) => (
+            <NumberInput
+              label="Max Connections"
+              description={maxConnectionsDescription(isL4UDP)}
+              placeholder="0"
+              min={0}
+              allowDecimal={false}
+              allowNegative={false}
+              thousandSeparator=","
+              disabled={isL4UDP}
+              leftSection={<IconPlugConnected size={16} />}
+              value={field.state.value ?? 0}
+              onBlur={field.handleBlur}
+              onChange={(v) => field.handleChange(typeof v === "number" ? v : 0)}
+              size="md"
+              radius="md"
+            />
+          )}
+        />
 
         <form.Field
           name="accessLogEnabled"

@@ -51,13 +51,17 @@ test.describe('EntryPoints', () => {
     await expect(create.getByText('Listener changes apply after a restart')).toBeVisible();
     await create.getByLabel('EntryPoint Name').fill(NAME);
     await create.getByLabel('Listening Address').fill(ADDRESS);
+    // max_connections was in the form's state with no input for it (ADR 0032):
+    // the limit every entrypoint now holds could be neither seen nor set.
+    await expect(create.getByText(/0 uses the resource profile's default: 1,000 on the minimal profile/)).toBeVisible();
+    await create.getByLabel('Max Connections').fill('250');
     const created = waitForSave(page);
     await create.getByRole('button', { name: 'Create EntryPoint' }).click();
     const createdRes = await created;
     expect(createdRes.status(), `PUT /v1/entryPoints: ${await createdRes.text()}`).toBe(200);
     const saved = (await createdRes.json()) as { id: string; name: string; address: string; accessLogEnabled?: boolean };
     entryPointId = saved.id;
-    expect(saved).toMatchObject({ name: NAME, address: ADDRESS, accessLogEnabled: true });
+    expect(saved).toMatchObject({ name: NAME, address: ADDRESS, accessLogEnabled: true, maxConnections: 250 });
     await expect(page.getByText(`EntryPoint ${entryPointId} has been successfully created/updated.`)).toBeVisible();
     await expect(create).toBeHidden();
 
@@ -74,6 +78,7 @@ test.describe('EntryPoints', () => {
     await page.getByRole('menuitem', { name: 'Edit' }).click();
     const edit = page.getByRole('dialog', { name: 'Edit EntryPoint' });
     await expect(edit.getByLabel('Listening Address')).toHaveValue(ADDRESS);
+    await expect(edit.getByLabel('Max Connections')).toHaveValue('250');
     await edit.getByLabel('EntryPoint Name').fill(RENAMED);
     const edited = waitForSave(page);
     await edit.getByRole('button', { name: 'Update EntryPoint' }).click();

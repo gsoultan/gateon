@@ -258,7 +258,7 @@ func startTCPServer(addr string, ep *gateonv1.EntryPoint, deps *Deps, wg *syncut
 		logger.L.LogError("TCP listen failed", "error", err, "addr", addr)
 		return
 	}
-	s := &tcpServer{ep: ep, deps: deps, wg: wg, conns: newOpenConns(tcpConnLimit(ep)), plaintext: !terminatesTLS}
+	s := &tcpServer{ep: ep, deps: deps, wg: wg, conns: newOpenConns(connLimit(ep)), plaintext: !terminatesTLS}
 	if shutdownReg != nil {
 		shutdownReg.Register(func(ctx context.Context) error {
 			err := l.Close()
@@ -276,16 +276,6 @@ type tcpServer struct {
 	wg        *syncutil.WaitGroup
 	conns     *openConns
 	plaintext bool
-}
-
-// tcpConnLimit is the most connections ep holds open at once: its
-// max_connections, or the resource profile's default when that is 0. It was
-// stored and shown and read by nothing, so a TCP entrypoint had no cap at all.
-func tcpConnLimit(ep *gateonv1.EntryPoint) int {
-	if n := int(ep.GetMaxConnections()); n > 0 {
-		return n
-	}
-	return config.CurrentTierDefaults().TCPMaxConnections
 }
 
 // serve accepts until l is closed. A connection past the limit is closed at
@@ -336,7 +326,7 @@ func (s *tcpServer) handle(c net.Conn) {
 func (s *tcpServer) refuseOverLimit(c net.Conn) {
 	_ = c.Close()
 	telemetry.IncInflightRejected("tcp_max_connections")
-	if s.conns.warnDue(time.Now()) {
+	if s.conns.warn.due(time.Now()) {
 		logger.L.LogWarn("TCP entrypoint at its connection limit, refusing new connections",
 			"ep", s.ep.Id, "max_connections", s.conns.limit)
 	}
