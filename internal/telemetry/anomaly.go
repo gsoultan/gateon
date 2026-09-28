@@ -204,19 +204,21 @@ func (ad *AnomalyDetector) checkExploitScanning(ctx context.Context, now time.Ti
 // program is not loaded. Either way the threat was counted as mitigated and
 // shown as blocked while nothing refused the source.
 //
-// MarkIPMitigated is the block the request path reads on every entrypoint and
-// route; it survives a restart, appears on the mitigation list where an
-// operator can release it, and pushes the address to the kernel as well when
-// eBPF is running. An address the operator allowlisted or has released is
-// flagged instead of blocked, as escalateMitigation and the responder already
-// treat them.
+// ShunAutomatically is the block the request path reads on every entrypoint
+// and route; it survives a restart, appears on the mitigation list with when
+// it lifts, and is leased in the kernel as well when eBPF is running. It
+// lapses (ADR 0031): fifteen minutes the first time, doubling up to a day for
+// an address that comes back soon after. An address the operator allowlisted
+// or released within the hold is flagged instead of blocked, as the other
+// automatic paths treat them.
 func (ad *AnomalyDetector) shun(ip, reason string) string {
-	if mitigation.IsAllowlisted(ip) || IsIPUnmitigated(ip) {
-		return ActionFlagged
-	}
-	if err := MarkIPMitigated(ip, "Anomaly detection: "+reason); err != nil {
+	res, err := ShunAutomatically(ip, "Anomaly detection: "+reason)
+	if err != nil {
 		logger.L.LogError("anomaly shun did not persist; the source is not blocked", "ip", ip, "error", err)
 		return ActionDetected
+	}
+	if !res.Shunned() {
+		return ActionFlagged
 	}
 	return ActionShunned
 }

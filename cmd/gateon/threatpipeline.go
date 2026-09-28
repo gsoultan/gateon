@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -38,7 +39,7 @@ const envShipRawThreats = "GATEON_SIEM_RAW_THREATS"
 // always runs and logs incidents; SIEM export is enabled only when configured
 // via GATEON_SIEM_* environment variables. All goroutines exit when ctx is
 // cancelled.
-func startThreatPipeline(ctx context.Context, version string, shun mitigation.Shunner) {
+func startThreatPipeline(ctx context.Context, version string) {
 	// First, and whatever the tier decides about correlation below: the
 	// allowlist governs the request path's enforcement, not only the responder.
 	publishMitigationAllowlist()
@@ -55,7 +56,7 @@ func startThreatPipeline(ctx context.Context, version string, shun mitigation.Sh
 
 	var signals chan correlation.Signal
 	if correlate {
-		mitigator := initMitigator(shun)
+		mitigator := initMitigator()
 		engine := correlation.New(correlation.Config{
 			MaxSources:          td.CorrelationMaxSources,
 			MaxSignalsPerSource: td.CorrelationMaxPerSource,
@@ -143,9 +144,9 @@ func initSIEMShipper(ctx context.Context, version string) *siem.Shipper {
 
 // initMitigator builds the graduated incident-mitigation responder from
 // environment configuration. Reputation-based mitigation is on by default
-// (reversible, self-healing); hard eBPF shunning is opt-in via
+// (reversible, self-healing); the hard shun is opt-in via
 // GATEON_MITIGATION_AUTO_SHUN.
-func initMitigator(shun mitigation.Shunner) *mitigation.Responder {
+func initMitigator() *mitigation.Responder {
 	enabled := true
 	if raw := strings.TrimSpace(os.Getenv(envMitigationEnabled)); raw != "" {
 		enabled = boolEnvTrue(envMitigationEnabled)
@@ -155,26 +156,16 @@ func initMitigator(shun mitigation.Shunner) *mitigation.Responder {
 		AutoShun:  boolEnvTrue(envMitigationAutoShun),
 		Allowlist: mitigation.ParseAllowlist(os.Getenv(envMitigationAllowlist)),
 	}
-	if cfg.AutoShun && shun != nil {
-		logger.L.LogInfo("incident auto-shun enabled (hard eBPF block for critical multi-signal incidents)")
+	if cfg.AutoShun {
+		logger.L.LogInfo("incident auto-shun enabled (a lapsing address shun for critical multi-signal incidents)")
 	}
 	return mitigation.New(cfg, mitigation.Deps{
-		Shun: shun,
+		Shun: automaticShun{},
 		// Compose the scoped identity here rather than inside the responder, so
 		// internal/security/mitigation stays free of a telemetry dependency and
 		// remains unit-testable without it. DecreaseReputationOf builds it with
 		// repid.For and leaves an allowlisted participant's score alone (ADR 0031).
 		Degrade: telemetry.DecreaseReputationOf,
-		// Wrapped rather than passed directly, for the same reason Degrade is:
-		// the responder stays free of a telemetry dependency. A correlated
-		// incident whose shun did not persist is a block nobody applied and
-		// nobody is waiting on, so the log is the only place it can surface.
-		Mark: func(ip, reason string) {
-			if err := telemetry.MarkIPMitigated(ip, reason); err != nil {
-				logger.L.LogError("correlated-incident shun did not persist; the source is not blocked",
-					"ip", ip, "reason", reason, "error", err)
-			}
-		},
 		Log: func(action mitigation.Action, inc correlation.Incident, reason string) {
 			if action == mitigation.ActionNone || action == mitigation.ActionFlag {
 				return // avoid log spam for no-op/flag-only outcomes
@@ -188,6 +179,30 @@ func initMitigator(shun mitigation.Shunner) *mitigation.Responder {
 			)
 		},
 	})
+}
+
+// errShunNotApplied is automaticShun's answer for an address it did not shun:
+// loopback, allowlisted, or released by an operator within the hold. The
+// responder then restricts the incident instead of reporting a shun.
+var errShunNotApplied = errors.New("the address is exempt from automatic shuns")
+
+// automaticShun is the responder's hard shun: the automatic shun every other
+// path takes, which is recorded, listed with when it lifts, enforced by the
+// request path, leased in the kernel, and lapses (ADR 0031). It used to shun
+// the address in the kernel directly and then record it, which left a kernel
+// entry nothing would lift -- even when the record was refused.
+type automaticShun struct{}
+
+func (automaticShun) ShunIP(ip string) error {
+	res, err := telemetry.ShunAutomatically(ip, "correlated critical incident (incident responder)")
+	if err != nil {
+		logger.L.LogError("correlated-incident shun did not persist; the source is not blocked", "ip", ip, "error", err)
+		return err
+	}
+	if !res.Shunned() {
+		return errShunNotApplied
+	}
+	return nil
 }
 
 // consumeThreats subscribes to the threat broadcaster and feeds the correlation

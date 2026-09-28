@@ -522,6 +522,9 @@ type IPMitigation struct {
 	MitigatedAt   time.Time  `json:"mitigatedAt"`
 	UnmitigatedAt *time.Time `json:"unmitigatedAt,omitempty"`
 	UpdatedAt     time.Time  `json:"updatedAt"`
+	// ExpiresAt is when an automatic shun lifts (ShunAutomatically); nil for
+	// an operator's block, which holds until released.
+	ExpiresAt *time.Time `json:"expiresAt,omitempty"`
 }
 
 type CombinedMitigation struct {
@@ -535,6 +538,8 @@ type CombinedMitigation struct {
 	MitigatedAt   time.Time  `json:"mitigatedAt"`
 	UnmitigatedAt *time.Time `json:"unmitigatedAt,omitempty"`
 	UpdatedAt     time.Time  `json:"updatedAt"`
+	// ExpiresAt is when an automatic address shun lifts; nil otherwise.
+	ExpiresAt *time.Time `json:"expiresAt,omitempty"`
 }
 
 type ThreatFilter struct {
@@ -1805,7 +1810,7 @@ func normalizeThreatHeaders(st *SecurityThreat) {
 // itself is shunned only once more client classes have attacked from it than
 // an office's few infected machines or misjudged browser builds produce
 // (escalateAddress, ADR 0029): one address can front an entire office, and a
-// shun refuses all of it until an operator releases it.
+// shun refuses all of it until it lapses or an operator releases it.
 //
 // Mitigation threats are excluded, or acting on one would produce another.
 //
@@ -2045,42 +2050,36 @@ func GetIPThreatScore(ip string) float64 {
 	return 0
 }
 
-// IsIPUnmitigated checks if an IP has been manually unmitigated by the user.
+// IsIPUnmitigated reports whether an operator released ip within the release
+// hold (ipReleaseHold): what every automatic shun path respects before it
+// shuns. A release used to exempt an address from them for good; now that an
+// automatic shun lapses on its own, a release is a ruling on the shun in
+// front of the operator, held for a day as a fingerprint release is (ADR
+// 0031). Off the request path.
 func IsIPUnmitigated(ip string) bool {
 	s := getStore()
 	if s == nil {
 		return false
 	}
-	// Only a cached "mitigated" answers without the database. The cache is
-	// shared with IsIPMitigated, which stores true for every address it looked
-	// up and found no row for -- and IPMitigation looks up every request -- so a
-	// cached true means "not blocked", not "an operator released it". Read as
-	// the second, it told escalateMitigation and the alerting shunner that every
-	// address that had ever sent a request had been released by hand, and
-	// neither ever shunned one. Both callers are off the request path.
+	// Only a cached shun in force answers without the database: the cache
+	// holds "not shunned" for every address IPMitigation looked up and found
+	// no row for, which says nothing about a release.
 	if s.unmitigatedCache != nil {
 		if val, ok := s.unmitigatedCache.Get(ip); ok {
-			if unmitigated, isBool := val.(bool); isBool && !unmitigated {
+			if until, isUntil := val.(shunUntil); isUntil && until.active() {
 				return false
 			}
 		}
 	}
-
-	var status string
-	query := s.dialect.Rebind("SELECT status FROM ip_mitigations WHERE ip = ?")
-	err := s.db.QueryRow(query, ip).Scan(&status)
-	if err != nil {
-		return false
-	}
-
-	unmitigated := status == statusUnmitigated
-	if s.unmitigatedCache != nil {
-		s.unmitigatedCache.Add(ip, unmitigated)
-	}
-	return unmitigated
+	row, err := s.readIPShun(ip)
+	return err == nil && row.held(time.Now())
 }
 
-// IsIPMitigated returns true if the IP is currently marked as mitigated in the store.
+// IsIPMitigated reports whether ip is shunned now: an operator's block, or an
+// automatic shun that has not lapsed. A lapsed shun is lifted from the moment
+// it lapses, with no sweeper involved: the cache keeps when the shun ends, not
+// that there is one. It runs for every request IPMitigation sees, and the
+// answer for an address with no shun -- nearly all of them -- reads no clock.
 func IsIPMitigated(ip string) bool {
 	s := getStore()
 	if s == nil {
@@ -2091,21 +2090,241 @@ func IsIPMitigated(ip string) bool {
 			// Comma-ok: a bare assertion here panics on the request path if
 			// the cache ever holds anything else, and falling through to the
 			// database is the safe answer rather than the fast one.
-			if unmitigated, isBool := val.(bool); isBool {
-				return !unmitigated
+			if until, isUntil := val.(shunUntil); isUntil {
+				return until.active()
 			}
 		}
 	}
 
-	var status string
-	query := s.dialect.Rebind("SELECT status FROM ip_mitigations WHERE ip = ?")
-	err := s.db.QueryRow(query, ip).Scan(&status)
-	mitigated := err == nil && status == statusMitigated
-
-	if s.unmitigatedCache != nil {
-		s.unmitigatedCache.Add(ip, !mitigated)
+	row, err := s.readIPShun(ip)
+	until := shunNone
+	if err == nil {
+		until = row.until()
 	}
-	return mitigated
+	if s.unmitigatedCache != nil {
+		s.unmitigatedCache.Add(ip, until)
+	}
+	return until.active()
+}
+
+// Automatic shuns lapse (ADR 0031). A shun refuses everyone behind an address
+// -- an office, a campus, a carrier's NAT pool -- on every route, so a
+// mistaken one must cost minutes, not however long an operator takes to find
+// it. A shunned address cannot be watched while it is shunned: the kernel or
+// IPMitigation refuses its traffic before any detector sees it, and the
+// refusals are marked so no detector counts them (request.RefusalMitigation).
+// So a shun is not renewed from inside. It lapses, and an address that
+// attacks again soon after is shunned again for twice as long, up to a day.
+const (
+	// autoShunBase is the first shun. Longer than mitigationEvidenceWindow,
+	// so the evidence that earned it has aged out when it lapses and another
+	// needs new evidence; the honeypot's first rung.
+	autoShunBase = 15 * time.Minute
+	// autoShunCap is the longest. Past a day an address is about as likely to
+	// have been handed to someone else as to be the same client; the
+	// honeypot's top rung and the fingerprint release's hold.
+	autoShunCap = 24 * time.Hour
+	// autoShunMemory is how long after a shun lapsed another counts as a
+	// repeat; after a clean day the ladder starts again at autoShunBase.
+	autoShunMemory = 24 * time.Hour
+	// ipReleaseHold is how long an operator's release keeps every automatic
+	// path off an address: the fingerprint release's hold.
+	ipReleaseHold = unmitigationHoldWindow
+)
+
+// shunUntil is an address's shun as the enforcement cache keeps it: shunNone,
+// shunForever (an operator's block), or when an automatic shun lapses, in Unix
+// nanoseconds.
+type shunUntil int64
+
+const (
+	shunNone    shunUntil = 0
+	shunForever shunUntil = -1
+)
+
+// active reports whether the shun is in force, reading the clock only for one
+// that lapses: an address with no shun costs a comparison.
+func (u shunUntil) active() bool {
+	switch u {
+	case shunNone:
+		return false
+	case shunForever:
+		return true
+	}
+	return time.Now().UnixNano() < int64(u)
+}
+
+// ipShunRow is an address's ip_mitigations row as the shun decisions read it.
+type ipShunRow struct {
+	status                                string
+	mitigatedAt, expiresAt, unmitigatedAt sql.NullTime
+}
+
+// readIPShun reads ip's row: sql.ErrNoRows when it has none.
+func (s *pathStatsStore) readIPShun(ip string) (ipShunRow, error) {
+	var r ipShunRow
+	err := s.db.QueryRow(s.dialect.Rebind(QueryReadIPShun), ip).Scan(&r.status, &r.mitigatedAt, &r.expiresAt, &r.unmitigatedAt)
+	return r, err
+}
+
+// until is the row's shun as the cache keeps it. A lapsed shun keeps its
+// (past) end, which reads as not in force.
+func (r ipShunRow) until() shunUntil {
+	switch {
+	case r.status != statusMitigated:
+		return shunNone
+	case !r.expiresAt.Valid:
+		return shunForever
+	}
+	return shunUntil(max(1, r.expiresAt.Time.UnixNano()))
+}
+
+// inForceAt reports whether the row's shun is in force at now.
+func (r ipShunRow) inForceAt(now time.Time) bool {
+	return r.status == statusMitigated && (!r.expiresAt.Valid || r.expiresAt.Time.After(now))
+}
+
+// held reports whether the row is an operator's release inside ipReleaseHold.
+func (r ipShunRow) held(now time.Time) bool {
+	return r.status == statusUnmitigated && r.unmitigatedAt.Valid && now.Sub(r.unmitigatedAt.Time) < ipReleaseHold
+}
+
+// nextShunDuration is how long an automatic shun written now lasts:
+// autoShunBase, or twice as long as the last automatic shun lasted, up to
+// autoShunCap, when that one lapsed less than autoShunMemory ago. A release
+// resets the ladder, since the row then reads unmitigated.
+func (r ipShunRow) nextShunDuration(now time.Time) time.Duration {
+	if r.status != statusMitigated || !r.expiresAt.Valid || !r.mitigatedAt.Valid ||
+		now.Sub(r.expiresAt.Time) >= autoShunMemory {
+		return autoShunBase
+	}
+	last := r.expiresAt.Time.Sub(r.mitigatedAt.Time)
+	return min(autoShunCap, max(autoShunBase, 2*last))
+}
+
+// ShunOutcome is what ShunAutomatically did.
+type ShunOutcome int
+
+const (
+	// ShunApplied: the address is shunned until ShunResult.Until.
+	ShunApplied ShunOutcome = iota + 1
+	// ShunAlreadyInForce: an operator's block, or an automatic shun that has
+	// not lapsed, already refuses the address; nothing changed.
+	ShunAlreadyInForce
+	// ShunExempt: loopback, on GATEON_MITIGATION_ALLOWLIST, or released by an
+	// operator within ipReleaseHold. Not shunned.
+	ShunExempt
+)
+
+// ShunResult is ShunAutomatically's answer.
+type ShunResult struct {
+	Outcome ShunOutcome
+	Until   time.Time // when a ShunApplied shun lapses
+}
+
+// Shunned reports whether the address is refused after the call.
+func (r ShunResult) Shunned() bool {
+	return r.Outcome == ShunApplied || r.Outcome == ShunAlreadyInForce
+}
+
+// ShunAutomatically is how every automatic path shuns an address -- the
+// address shun of ADR 0029, the anomaly detector, alert playbooks, the
+// incident responder: for autoShunBase, or twice the last shun's length up to
+// autoShunCap when the address comes back within autoShunMemory of its last
+// shun lapsing (nextShunDuration). The shun is written with its expiry,
+// enforced by IsIPMitigated until then and not after, and leased in the kernel
+// to lapse with it.
+//
+// An address already shunned is left alone: a repeat while a shun is in force
+// does not extend or escalate it, since nothing the address does while
+// shunned can be observed. Loopback, the allowlist and an operator's release
+// inside ipReleaseHold are exempt; an operator's own block (MarkIPMitigated)
+// holds until released and is never shortened by this.
+func ShunAutomatically(ip, reason string) (ShunResult, error) {
+	s := getStore()
+	if s == nil {
+		return ShunResult{}, errNoTelemetryStore
+	}
+	if ip == "" || httputil.IsLoopback(ip) || mitigation.IsAllowlisted(ip) {
+		return ShunResult{Outcome: ShunExempt}, nil
+	}
+	now := time.Now().UTC().Truncate(time.Second)
+	prev, err := s.readIPShun(ip)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return ShunResult{}, err
+	}
+	switch {
+	case prev.inForceAt(now):
+		return ShunResult{Outcome: ShunAlreadyInForce}, nil
+	case prev.held(now):
+		return ShunResult{Outcome: ShunExempt}, nil
+	}
+	return s.applyAutoShun(ip, reason, now, now.Add(prev.nextShunDuration(now)))
+}
+
+// applyAutoShun writes ip's automatic shun until then and makes it take
+// effect: the cache the request path reads, and a leased kernel entry.
+func (s *pathStatsStore) applyAutoShun(ip, reason string, now, until time.Time) (ShunResult, error) {
+	written, err := s.writeAutoShun(ip, reason, now, until)
+	if err != nil {
+		logger.Default().LogError("failed to record an automatic shun", "ip", ip, "error", err)
+		return ShunResult{}, err
+	}
+	if !written {
+		// Another writer shunned or released it between the read and the
+		// write; the row says which.
+		if IsIPMitigated(ip) {
+			return ShunResult{Outcome: ShunAlreadyInForce}, nil
+		}
+		return ShunResult{Outcome: ShunExempt}, nil
+	}
+	if s.unmitigatedCache != nil {
+		s.unmitigatedCache.Add(ip, shunUntil(until.UnixNano()))
+	}
+	shunInKernelUntil(ip, until)
+	return ShunResult{Outcome: ShunApplied, Until: until}, nil
+}
+
+// writeAutoShun writes an automatic shun of ip from now until then, unless by
+// the time it lands the row holds a shun in force or a release inside the
+// hold. The condition is in the statement, so a check-then-write race cannot
+// shorten an operator's block or override a release. Reports whether it wrote.
+func (s *pathStatsStore) writeAutoShun(ip, reason string, now, until time.Time) (bool, error) {
+	at := sqlUTC(now)
+	res, err := s.db.Exec(s.dialect.Rebind(QueryWriteAutoShun),
+		ip, reason, at, sqlUTC(until), at, sqlUTC(now.Add(-ipReleaseHold)))
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n > 0, err
+}
+
+// timedShunner is an eBPF provider that can lease a kernel shun (ebpf.Holder).
+type timedShunner interface {
+	ShunIPUntil(ip string, until time.Time) error
+}
+
+// shunInKernelUntil puts an automatic shun in the kernel, leased to lapse with
+// it. A provider that cannot lease one is left out: a kernel entry nothing
+// lifts is the never-ending shun this replaced, and IPMitigation enforces the
+// shun above the kernel either way.
+func shunInKernelUntil(ip string, until time.Time) {
+	container, ok := globalEbpfManager.Load().(*ebpfProviderContainer)
+	if !ok || container == nil || container.p == nil {
+		return
+	}
+	if timed, isTimed := container.p.(timedShunner); isTimed {
+		_ = timed.ShunIPUntil(ip, until)
+	}
+}
+
+// sqlUTC formats t as ip_mitigations times are written and compared: UTC, to
+// the second, in the layout CURRENT_TIMESTAMP writes on SQLite, so a plain
+// comparison orders them on both engines. Bound rather than left to the
+// database, whose CURRENT_TIMESTAMP is the server's zone on Postgres.
+func sqlUTC(t time.Time) string {
+	return t.UTC().Format(threatTimestampLayout)
 }
 
 // MarkIPMitigated records that an IP has been mitigated.
@@ -2114,7 +2333,9 @@ func IsIPMitigated(ip string) bool {
 // written -- and was previously indistinguishable from success.
 var errNoTelemetryStore = errors.New("telemetry: store is not initialised")
 
-// MarkIPMitigated records that an IP is blocked.
+// MarkIPMitigated records an operator's block of an address: it holds until
+// released, whatever shun the address had. Automatic paths shun through
+// ShunAutomatically, whose shuns lapse (ADR 0031).
 //
 // It returns the write error rather than only logging it. MitigateThreat does
 // a read-back afterwards -- which exists, as the note below says, precisely
@@ -2127,9 +2348,8 @@ func MarkIPMitigated(ip string, reason string) error {
 	if s == nil {
 		return errNoTelemetryStore
 	}
-	query := s.dialect.Rebind("INSERT INTO ip_mitigations (ip, status, reason, mitigated_at, updated_at) VALUES (?, 'mitigated', ?, ?, CURRENT_TIMESTAMP) ON CONFLICT(ip) DO UPDATE SET status = 'mitigated', reason = ?, mitigated_at = ?, updated_at = CURRENT_TIMESTAMP")
-	now := time.Now()
-	_, err := s.db.Exec(query, ip, reason, now, reason, now)
+	now := sqlUTC(time.Now())
+	_, err := s.db.Exec(s.dialect.Rebind(QueryMarkIPMitigated), ip, reason, now)
 	if err != nil {
 		logger.Default().LogError("failed to mark IP as mitigated", "ip", ip, "error", err)
 	}
@@ -2144,7 +2364,7 @@ func MarkIPMitigated(ip string, reason string) error {
 	// On failure the cache is left alone, so IsIPMitigated falls through to
 	// the database, finds nothing, and the verification reports the truth.
 	if err == nil && s.unmitigatedCache != nil {
-		s.unmitigatedCache.Add(ip, false)
+		s.unmitigatedCache.Add(ip, shunForever)
 	}
 
 	// Real-time eBPF synchronization for immediate effect at XDP layer
@@ -2156,7 +2376,8 @@ func MarkIPMitigated(ip string, reason string) error {
 	return err
 }
 
-// MarkIPUnmitigated records that an IP has been manually unmitigated.
+// MarkIPUnmitigated records an operator's release of an address: its shun
+// ends now, and no automatic path shuns it again for ipReleaseHold.
 //
 // Returns the write error for the same reason MarkIPMitigated does: the two
 // callers both answered "removed successfully" whatever happened, and the note
@@ -2166,8 +2387,10 @@ func MarkIPUnmitigated(ip string) error {
 	if s == nil {
 		return errNoTelemetryStore
 	}
-	query := s.dialect.Rebind("UPDATE ip_mitigations SET status = 'unmitigated', unmitigated_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE ip = ?")
-	_, err := s.db.Exec(query, ip)
+	// The release time is bound in UTC rather than taken from the database's
+	// CURRENT_TIMESTAMP, which Postgres writes in the server's zone into a
+	// column without one: the hold is measured from it.
+	_, err := s.db.Exec(s.dialect.Rebind(QueryReleaseIPMitigation), sqlUTC(time.Now()), ip)
 	if err != nil {
 		logger.Default().LogError("failed to mark IP as unmitigated", "ip", ip, "error", err)
 	}
@@ -2177,7 +2400,7 @@ func MarkIPUnmitigated(ip string) error {
 	// successfully" while the row still said mitigated -- and once the cache
 	// entry was evicted the block came back on its own.
 	if err == nil && s.unmitigatedCache != nil {
-		s.unmitigatedCache.Add(ip, true)
+		s.unmitigatedCache.Add(ip, shunNone)
 	}
 	// A release is a ruling on the evidence that earned the shun, so none of
 	// it may count towards another (ADR 0029).
@@ -2197,14 +2420,14 @@ func MarkIPUnmitigated(ip string) error {
 	return err
 }
 
-// GetMitigatedIPs returns a list of currently mitigated IPs (plain strings).
+// GetMitigatedIPs returns the addresses shunned now (plain strings).
 func GetMitigatedIPs(ctx context.Context) []string {
 	s := getStore()
 	if s == nil {
 		return nil
 	}
-	query := s.dialect.Rebind("SELECT ip FROM ip_mitigations WHERE status = 'mitigated'")
-	rows, err := s.db.QueryContext(ctx, query)
+	query := s.dialect.Rebind(`SELECT ip FROM ip_mitigations WHERE ` + inForceIPMitigation)
+	rows, err := s.db.QueryContext(ctx, query, sqlUTC(time.Now()))
 	if err != nil {
 		return nil
 	}
@@ -2219,7 +2442,9 @@ func GetMitigatedIPs(ctx context.Context) []string {
 	return ips
 }
 
-// GetIPMitigations returns a list of currently mitigated IPs with details.
+// GetIPMitigations returns the address shuns in force, with when each
+// automatic one lifts. A lapsed shun blocks nobody and is not listed or
+// counted, from the moment it lapses.
 func GetIPMitigations(ctx context.Context, limit, offset int) ([]IPMitigation, int) {
 	s := getStore()
 	if s == nil {
@@ -2229,17 +2454,16 @@ func GetIPMitigations(ctx context.Context, limit, offset int) ([]IPMitigation, i
 		limit = 50
 	}
 
-	countQuery := s.dialect.Rebind("SELECT COUNT(*) FROM ip_mitigations WHERE status = 'mitigated'")
+	now := sqlUTC(time.Now())
 	var total int
-	if err := s.db.QueryRowContext(ctx, countQuery).Scan(&total); err != nil {
+	if err := s.db.QueryRowContext(ctx, s.dialect.Rebind(QueryCountInForceIPMitigations), now).Scan(&total); err != nil {
 		return nil, 0
 	}
 
-	query := s.dialect.Rebind("SELECT ip, status, reason, mitigated_at, unmitigated_at, updated_at FROM ip_mitigations WHERE status = 'mitigated' ORDER BY mitigated_at DESC LIMIT ? OFFSET ?")
 	ex, cleanup := s.getExecutor(ctx)
 	defer cleanup()
 
-	rows, err := ex.QueryContext(ctx, query, limit, offset)
+	rows, err := ex.QueryContext(ctx, s.dialect.Rebind(QueryListInForceIPMitigations), now, limit, offset)
 	if err != nil {
 		return nil, 0
 	}
@@ -2249,12 +2473,15 @@ func GetIPMitigations(ctx context.Context, limit, offset int) ([]IPMitigation, i
 	for rows.Next() {
 		var m IPMitigation
 		var mitigatedAt, updatedAt time.Time
-		var unmitigatedAt sql.NullTime
-		if err := rows.Scan(&m.IP, &m.Status, &m.Reason, &mitigatedAt, &unmitigatedAt, &updatedAt); err == nil {
+		var unmitigatedAt, expiresAt sql.NullTime
+		if err := rows.Scan(&m.IP, &m.Status, &m.Reason, &mitigatedAt, &unmitigatedAt, &updatedAt, &expiresAt); err == nil {
 			m.MitigatedAt = mitigatedAt
 			m.UpdatedAt = updatedAt
 			if unmitigatedAt.Valid {
 				m.UnmitigatedAt = &unmitigatedAt.Time
+			}
+			if expiresAt.Valid {
+				m.ExpiresAt = &expiresAt.Time
 			}
 			res = append(res, m)
 		}
@@ -2401,24 +2628,24 @@ func GetCombinedMitigations(ctx context.Context, limit, offset int) ([]CombinedM
 		limit = 50
 	}
 
-	totalIPQuery := s.dialect.Rebind("SELECT COUNT(*) FROM ip_mitigations WHERE status = 'mitigated'")
-
-	// The user half is the fingerprint blocks in force, as GetUserMitigations
-	// lists them.
+	// Both halves are what is in force: the address shuns that have not
+	// lapsed, as GetIPMitigations lists them, and the fingerprint blocks, as
+	// GetUserMitigations does.
+	now := sqlUTC(time.Now())
 	cutoff := mitigationCutoff()
 	var totalIP, totalUser int
-	_ = s.db.QueryRowContext(ctx, totalIPQuery).Scan(&totalIP)
+	_ = s.db.QueryRowContext(ctx, s.dialect.Rebind(QueryCountInForceIPMitigations), now).Scan(&totalIP)
 	_ = s.db.QueryRowContext(ctx, s.dialect.Rebind(QueryCountInForceUserMitigations), cutoff).Scan(&totalUser)
 	total := totalIP + totalUser
 
 	// Use UNION ALL for consistent paging across both types.
 	// Cast nulls to empty strings for consistency in scans.
 	query := `
-		SELECT 'ip' as source_type, ip as source, '' as ja4h, 'ip_shunning' as type, 'threat_intel' as category, status, reason, mitigated_at, unmitigated_at, updated_at
+		SELECT 'ip' as source_type, ip as source, '' as ja4h, 'ip_shunning' as type, 'threat_intel' as category, status, reason, mitigated_at, unmitigated_at, updated_at, expires_at
 		FROM ip_mitigations
-		WHERE status = 'mitigated'
+		WHERE ` + inForceIPMitigation + `
 		UNION ALL
-		SELECT 'user' as source_type, fingerprint as source, ja4h, fp_type as type, category, status, reason, mitigated_at, unmitigated_at, updated_at
+		SELECT 'user' as source_type, fingerprint as source, ja4h, fp_type as type, category, status, reason, mitigated_at, unmitigated_at, updated_at, NULL
 		FROM user_mitigations
 		WHERE ` + inForceUserMitigation + `
 		ORDER BY mitigated_at DESC
@@ -2429,7 +2656,7 @@ func GetCombinedMitigations(ctx context.Context, limit, offset int) ([]CombinedM
 	ex, cleanup := s.getExecutor(ctx)
 	defer cleanup()
 
-	rows, err := ex.QueryContext(ctx, query, cutoff, limit, offset)
+	rows, err := ex.QueryContext(ctx, query, now, cutoff, limit, offset)
 	if err != nil {
 		logger.Default().LogError("failed to get combined mitigations", "error", err)
 		return nil, 0
@@ -2440,14 +2667,17 @@ func GetCombinedMitigations(ctx context.Context, limit, offset int) ([]CombinedM
 	for rows.Next() {
 		var m CombinedMitigation
 		var mitigatedAt, updatedAt time.Time
-		var unmitigatedAt sql.NullTime
+		var unmitigatedAt, expiresAt sql.NullTime
 		var category sql.NullString
-		if err := rows.Scan(&m.SourceType, &m.Source, &m.JA4H, &m.Type, &category, &m.Status, &m.Reason, &mitigatedAt, &unmitigatedAt, &updatedAt); err == nil {
+		if err := rows.Scan(&m.SourceType, &m.Source, &m.JA4H, &m.Type, &category, &m.Status, &m.Reason, &mitigatedAt, &unmitigatedAt, &updatedAt, &expiresAt); err == nil {
 			m.MitigatedAt = mitigatedAt
 			m.UpdatedAt = updatedAt
 			m.Category = category.String
 			if unmitigatedAt.Valid {
 				m.UnmitigatedAt = &unmitigatedAt.Time
+			}
+			if expiresAt.Valid {
+				m.ExpiresAt = &expiresAt.Time
 			}
 			res = append(res, m)
 		}

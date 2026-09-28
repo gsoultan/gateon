@@ -284,20 +284,14 @@ func DecreaseReputation(fingerprint string, penalty float64, reason string) {
 		delete(shard.dirty, fingerprint)
 	}
 
-	// Automated eBPF Shunning: If reputation is very low, push to XDP layer.
-	if r.Score < 20.0 {
-		if val := globalEbpfManager.Load(); val != nil {
-			if container, ok := val.(*ebpfProviderContainer); ok && container.p != nil {
-				// Only IPs are shunned in the kernel. A JA4+ fingerprint is left
-				// to ReputationBlocker at L7: XDP has no ShunJA4, and L7 is the
-				// more precise place to act on a fingerprint anyway, since one
-				// shared IP can carry many clients.
-				if net.ParseIP(fingerprint) != nil {
-					_ = container.p.ShunIP(fingerprint)
-				}
-			}
-		}
-	}
+	// A score below 20 under a bare address -- what repid.For keys a threat
+	// with no fingerprint under, the anomaly detector's findings among them --
+	// used to shun that address in the kernel here. That shun was recorded
+	// nowhere, so it was not listed, could not be released from the list, and
+	// never lapsed; it ignored the allowlist and an operator's release; and it
+	// escalated findings whose detector had already chosen to throttle rather
+	// than shun. Every automatic shun now goes through ShunAutomatically, and
+	// the detectors that shun call it themselves (ADR 0031).
 
 	// Broadcast the update to the cluster via Gossip.
 	BroadcastReputation(fingerprint, r.Score, r.ViolationCount, r.History)

@@ -273,3 +273,4 @@ once. Credentials guessed through a GET query string are not counted.
   history), which this applies to the address.
 - ADR 0026, whose "found, not changed" note this settles, and whose
   fingerprint block is what contains the builds this declines to shun.
+- ADR 0031, which settles three things this one found and did not change: automatic shuns now lapse (15 minutes, doubling to a day) and a release holds a day; allowlisted sources no longer move the shared reputation score; and a refusal of a presented token by the gateway's own verification is not a credential attempt.

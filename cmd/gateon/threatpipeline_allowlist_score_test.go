@@ -28,7 +28,7 @@ func TestTheResponderDoesNotPenaliseAnAllowlistedParticipant(t *testing.T) {
 		t.Cleanup(func() { telemetry.ResetReputation(id) })
 	}
 
-	initMitigator(nil).Handle(correlation.Incident{
+	initMitigator().Handle(correlation.Incident{
 		SourceIP: attacker, SourceIPs: []string{allowlisted, other}, Fingerprint: build,
 		Severity: "high", SignalTypes: []string{"waf_blocked", "honeypot_triggered"},
 	})

@@ -38,7 +38,7 @@ func TestMitigationAllowlistReachesTheRequestPath(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	startThreatPipeline(ctx, "test", nil)
+	startThreatPipeline(ctx, "test")
 
 	const browser = "t13d1516h2_allowlist_reaches_request_path"
 	allowlisted, stranger := "203.0.113.7", "198.51.100.7"

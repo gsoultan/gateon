@@ -1338,6 +1338,7 @@ func storedMitigations(ctx context.Context, kind mitigationList, limit, offset i
 			page = append(page, telemetry.CombinedMitigation{
 				SourceType: "ip", Source: m.IP, Type: "ip_shunning", Category: "threat_intel",
 				Status: m.Status, Reason: m.Reason, MitigatedAt: m.MitigatedAt, UnmitigatedAt: m.UnmitigatedAt, UpdatedAt: m.UpdatedAt,
+				ExpiresAt: m.ExpiresAt,
 			})
 		}
 	default:
@@ -1371,6 +1372,14 @@ func storedMitigationAnomaly(ctx context.Context, m telemetry.CombinedMitigation
 		a.Recommendation = "IP address is mitigated/shunned at the network layer."
 		a.Ja4 = ""
 		a.Ja4Plus = ""
+		// An automatic shun lapses (ADR 0031): the row counts down to it, as a
+		// kernel throttle's does. An operator's block has no end to show.
+		if m.ExpiresAt != nil {
+			a.ExpiresAt = rfc3339OrEmpty(*m.ExpiresAt)
+			a.Recommendation = "Shunned automatically; it lifts on its own at the time shown, and a shun " +
+				"earned again soon after lasts twice as long, up to a day. Allow lifts it now and keeps " +
+				"automatic shuns off the address for a day."
+		}
 	}
 	populateAnomalyGeo(ctx, a, m.Source)
 	return a

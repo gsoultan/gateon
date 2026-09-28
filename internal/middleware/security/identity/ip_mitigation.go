@@ -30,6 +30,10 @@ func IPMitigation() kind.Middleware {
 			}
 
 			if AddressBlocked(ip) {
+				// The shun refused this, not a credential check. Counted as a
+				// refused attempt, a shunned address's own POSTs would renew
+				// its shun from the shun's refusals once it lapsed (ADR 0031).
+				request.MarkRefused(r, request.RefusalMitigation)
 				w.WriteHeader(http.StatusForbidden)
 				_, _ = w.Write([]byte("Forbidden: IP Shunned by Security Policy"))
 
@@ -124,6 +128,7 @@ func serveUserMitigation(next http.Handler, w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	request.MarkRefused(r, request.RefusalMitigation) // not a credential check (ADR 0031)
 	w.WriteHeader(http.StatusForbidden)
 	_, _ = w.Write([]byte("Forbidden: Compromised Fingerprint"))
 

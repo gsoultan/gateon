@@ -93,6 +93,12 @@ const (
 	// client re-presenting a token it was issued is a session that ended,
 	// not someone guessing a password (ADR 0031).
 	RefusalToken
+	// RefusalMitigation: the gateway refused the request because its address
+	// is shunned, or its client build is blocked or out of reputation on its
+	// network. No credential was checked. Counted as an attempt, a shunned
+	// address's own refused POSTs renewed its shun from the shun's refusals
+	// the moment it lapsed (ADR 0031).
+	RefusalMitigation
 )
 
 // String names the refusal as a trace records it: "" for none.
@@ -100,6 +106,8 @@ func (r Refusal) String() string {
 	switch r {
 	case RefusalToken:
 		return "token"
+	case RefusalMitigation:
+		return "mitigation"
 	default:
 		return ""
 	}
