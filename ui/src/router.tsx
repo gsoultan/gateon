@@ -194,6 +194,11 @@ const tlsOptionsRoute = createRoute({
 const settingsRoute = createRoute({
   getParentRoute: () => authenticatedRoute,
   path: "/settings",
+  // The open tab, so a link can land on the card it names and a reload keeps
+  // it; SettingsPage treats anything it does not know as General.
+  validateSearch: (search: Record<string, unknown>): { tab?: string } => ({
+    tab: asSearchString(search.tab),
+  }),
   component: () => <SettingsPage />,
 });
 
