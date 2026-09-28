@@ -107,6 +107,69 @@ func setName(mwType, key string) (string, bool) {
 	return "", false
 }
 
+// upstreamRequestPrefixes are the headers-middleware settings that add a header
+// to the request the gateway forwards to the backend. The response-direction
+// settings (add_response_/set_response_) are deliberately excluded: their value
+// travels to the downstream client, not to the route's backend, so they are not
+// a credential injected "toward the backend" and blocking them would refuse an
+// operator legitimately setting a Set-Cookie on a response. ADR 0038 records
+// that as residue.
+var upstreamRequestPrefixes = []string{"add_request_", "set_request_"}
+
+// upstreamSetName is the header or query-parameter name a headers or rewrite
+// middleware setting sends toward the backend, and whether key is such a
+// setting. It is setName restricted to the request/upstream direction.
+func upstreamSetName(mwType, key string) (string, bool) {
+	switch mwType {
+	case "headers":
+		for _, p := range upstreamRequestPrefixes {
+			if name, ok := strings.CutPrefix(key, p); ok && name != "" {
+				return name, true
+			}
+		}
+	case "rewrite":
+		if name, ok := strings.CutPrefix(key, "query_"); ok && name != "" {
+			return name, true
+		}
+	}
+	return "", false
+}
+
+// InjectsCredentialUpstream reports whether mw, as it is configured now, sends a
+// credential to the backend a route using it points at: a headers middleware
+// that sets or adds a request header under a credential name, or a rewrite
+// middleware that adds a query parameter under one, with a non-empty value.
+//
+// This is the shape ADR 0033 left as residue -- a stored Authorization or
+// X-Api-Key value the middleware delivers upstream -- and it is what ADR 0038
+// uses to decide that binding such a middleware to a route needs an
+// administrator, because an operator could otherwise point the route at a
+// backend they run and read the value. It classifies by the resolved config
+// shape only; the value's origin (a literal, an enc: value or a reference) does
+// not matter, because all three reach the backend the same way. Its residue is
+// the same name-based blind spot secretmask.IsCredentialName has: a credential
+// under a header name that gives nothing away (X-Upstream: <token>) is not
+// recognised, and a credential set on a response header is out of scope because
+// it does not travel to the backend.
+func InjectsCredentialUpstream(mw *gateonv1.Middleware) bool {
+	if mw == nil {
+		return false
+	}
+	mwType := strings.ToLower(strings.TrimSpace(mw.GetType()))
+	if mwType != "headers" && mwType != "rewrite" {
+		return false
+	}
+	for k, v := range mw.GetConfig() {
+		if strings.TrimSpace(v) == "" {
+			continue
+		}
+		if name, ok := upstreamSetName(mwType, k); ok && secretmask.IsCredentialName(name) {
+			return true
+		}
+	}
+	return false
+}
+
 // identity is what a kept secret is bound to besides the middleware's id: its
 // type, and for the auth middleware the kind of authentication, since that
 // decides what the secret is used for.

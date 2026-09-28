@@ -27,7 +27,7 @@ func (s *ApiService) UpdateRoute(ctx context.Context, req *gateonv1.UpdateRouteR
 	// "" -- which neither transport will delete -- and one with no service was
 	// matched and had no backend to reach. See domain_services.go.
 	if err := s.routeService().SaveRoute(ctx, req.Route); err != nil {
-		return &gateonv1.UpdateRouteResponse{Success: false}, err
+		return &gateonv1.UpdateRouteResponse{Success: false}, mapBindingRefusal(err)
 	}
 	s.logAudit(ctx, "update", "route", fmt.Sprintf("Updated route %s", req.Route.Id))
 	return &gateonv1.UpdateRouteResponse{Success: true}, nil

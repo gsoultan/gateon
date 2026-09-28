@@ -5,10 +5,12 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 
 	"github.com/gsoultan/gateon/internal/audit"
 	"github.com/gsoultan/gateon/internal/auth"
+	"github.com/gsoultan/gateon/internal/authz/routebind"
 	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/pkg/proxy"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
@@ -91,6 +93,10 @@ func registerRouteHandlers(mux *http.ServeMux, d *Deps) {
 			return
 		}
 		if err := d.RouteService.SaveRoute(r.Context(), &rt); err != nil {
+			if errors.Is(err, routebind.ErrRequiresAdmin) {
+				WriteHTTPError(w, http.StatusForbidden, err.Error())
+				return
+			}
 			WriteHTTPError(w, http.StatusBadRequest, err.Error())
 			return
 		}
