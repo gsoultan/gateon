@@ -110,7 +110,11 @@ The placeholder is refused when the same save changes the middleware's type or,
 for the auth middleware, its kind of authentication (`jwt`, `basic`, `oauth2`,
 …), and when it changes where the middleware sends its secret: the OAuth
 introspection URL (`auth`/`oauth2`), the OpenID issuer (`oidc`, whose token
-endpoint is discovered from it) and the forward-auth address. The comparison is
+endpoint is discovered from it) and the forward-auth address. (The forward-auth
+middleware stores no secret of its own today -- it forwards the client's
+credentials -- so its binding covers any secret-named value its config
+acquires; turnstile's secret goes to Cloudflare's fixed address and every other
+stored secret stays in the gateway.) The comparison is
 of the whole trimmed value, not a parsed host, so no difference between two URL
 parsers can slip a new destination past it. Without the binding, write-only is
 one request from read-back: point the introspection URL at a server you run,
