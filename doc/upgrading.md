@@ -11,6 +11,62 @@ here after the fact.
 
 ## Unreleased
 
+### The kernel shun map now honours GATEON_MITIGATION_ALLOWLIST and loopback
+
+The eBPF shun map (where XDP/TC drops a blocked address's packets) now applies
+the same exemption every HTTP and TCP entrypoint already applies: an address in
+`GATEON_MITIGATION_ALLOWLIST`, or a loopback address, is never pushed to the
+kernel shun map, even when an operator has explicitly blocked it. Before, the
+kernel dropped such an address even though every other path served it (the gap
+ADR 0032 left open under "still not uniform: the kernel").
+
+The block itself is still recorded and still appears in the mitigation list --
+the allowlist exempts *enforcement*, not the record of the operator's decision.
+Automatic shuns already honoured the allowlist and are unaffected.
+
+**Who is affected:** deployments running the eBPF data plane (`ebpf.enabled`)
+that also configure `GATEON_MITIGATION_ALLOWLIST` **and** hand-block an address
+they have allowlisted. On those, such an address is now served in the kernel as
+it already was in user space. No configuration change is required.
+
+**One residual to know:** if you hand-blocked an address *before* adding it to
+the allowlist, the kernel entry placed at block time is not swept out
+automatically. Release that block (or restart) to clear the kernel entry;
+automatic shuns clear themselves as their lease lapses. This affects only a
+manual block of an address later allowlisted.
+
+### A manual IP block may carry an optional duration
+
+The mitigate API (`MitigateThreatRequest`) gains an optional `duration_seconds`
+field, and the Security Center's Add Mitigation control gains a Duration choice
+for an IP block (until released, 1 hour, 6 hours, 24 hours, 7 days). A block
+given a positive duration lapses on its own that many seconds after it is
+applied -- it is listed with a countdown to when it lifts and needs no operator
+to release it. A block with no duration (or `duration_seconds = 0`) holds until
+released, exactly as every manual block did before. The duration applies only
+to an IP block; a fingerprint block keeps its own hour-long TTL.
+
+**Who is affected:** anyone scripting the mitigate API who wants a time-boxed
+block can now set `duration_seconds`; existing callers that omit it are
+unchanged. No configuration or migration is required -- the change reuses the
+`ip_mitigations.expires_at` column added in the previous release.
+
+### The API-key fingerprint is stable across a restart without an encryption key
+
+The dashboard shows a stored apikey-middleware API key as a placeholder marker
+that carries a fingerprint, and saving the form sends the marker back to keep
+the stored key. When `GATEON_ENCRYPTION_KEY` was unset, that fingerprint was
+random per process, so a form opened or a config exported before a restart
+could no longer be saved afterward -- every API key in it was refused ("no
+stored API key has this fingerprint"). The fingerprint is now stable across a
+restart when no encryption key is set, so such a save succeeds.
+
+**Who is affected:** deployments that run the apikey middleware **without**
+setting `GATEON_ENCRYPTION_KEY`. Setting `GATEON_ENCRYPTION_KEY` was, and
+remains, the way to get per-install fingerprints that a leaked masked config
+cannot be tested against offline; its behaviour is unchanged. Deployments that
+already set it see no difference.
+
 ### A middleware resolves a secret reference only where the host allows — **set `GATEON_MIDDLEWARE_SECRET_REFS` if a middleware uses one**
 
 A middleware's fields resolve `$env:`, `$vault:` and `$aws-sm:` references, and a

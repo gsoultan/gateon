@@ -45,6 +45,8 @@ ADRs follow a lightweight [MADR](https://adr.github.io/madr/)-style format:
 | [0032](./0032-every-entrypoint-is-capped-and-refuses-blocked-addresses.md) | Every entrypoint is capped, and every entrypoint refuses a blocked address | Accepted |
 | [0033](./0033-middleware-secrets-are-write-only.md) | Middleware secrets are write-only | Accepted |
 | [0034](./0034-a-middleware-resolves-only-the-secret-references-the-host-allows.md) | A middleware resolves only the secret references the host allows | Accepted |
+| [0035](./0035-the-kernel-enforces-the-same-exemption-as-the-data-path.md) | The kernel shun map enforces the same exemption as the data path | Accepted |
+| [0037](./0037-a-manual-block-may-expire-and-a-fingerprint-is-stable.md) | A manual block may expire, and an API-key fingerprint is stable | Accepted |
 
 ## Conventions
 
