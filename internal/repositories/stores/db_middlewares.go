@@ -68,6 +68,9 @@ func (r *DBMiddlewareRegistry) loadFromDB() {
 }
 
 func (r *DBMiddlewareRegistry) Update(ctx context.Context, m *gateonv1.Middleware) error {
+	if err := config.RefusePlaceholder(m); err != nil {
+		return err
+	}
 	r.Mu().Lock()
 	defer r.Mu().Unlock()
 

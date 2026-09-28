@@ -13,7 +13,9 @@ import (
 	"strconv"
 
 	"github.com/gsoultan/gateon/internal/auth"
+	"github.com/gsoultan/gateon/internal/config/mwsecret"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
+	"google.golang.org/protobuf/proto"
 )
 
 // MaxConfigImportBodySize limits config import/validate request body to prevent large-body DoS.
@@ -29,6 +31,9 @@ type configExport struct {
 type configDiff struct {
 	Created configExport `json:"created"`
 	Updated configExport `json:"updated"`
+	// Refused names each middleware the import would refuse because it sends
+	// the stored-secret placeholder where no stored secret can be kept.
+	Refused []string `json:"refused,omitempty"`
 }
 
 func calculateConfigDiff(ctx context.Context, d *Deps, exp *configExport) configDiff {
@@ -54,14 +59,32 @@ func calculateConfigDiff(ctx context.Context, d *Deps, exp *configExport) config
 			diff.Created.EntryPoints = append(diff.Created.EntryPoints, ep)
 		}
 	}
-	for _, mw := range exp.Middlewares {
-		if _, ok := d.MwService.GetMiddleware(ctx, mw.Id); ok {
-			diff.Updated.Middlewares = append(diff.Updated.Middlewares, mw)
+	diffMiddlewares(ctx, d, exp.Middlewares, &diff)
+	return diff
+}
+
+// diffMiddlewares previews the middlewares of an import. The preview echoes
+// what was sent, masked as a read is: a payload carrying new secrets must not
+// come back with them (ADR 0030). It also runs the placeholder check the import
+// will, on copies, so a placeholder that cannot be kept is named before
+// anything is written.
+func diffMiddlewares(ctx context.Context, d *Deps, mws []*gateonv1.Middleware, diff *configDiff) {
+	for _, mw := range mws {
+		stored, ok := d.MwService.GetMiddleware(ctx, mw.GetId())
+		if ok {
+			diff.Updated.Middlewares = append(diff.Updated.Middlewares, mwsecret.Mask(mw))
 		} else {
-			diff.Created.Middlewares = append(diff.Created.Middlewares, mw)
+			stored = nil
+			diff.Created.Middlewares = append(diff.Created.Middlewares, mwsecret.Mask(mw))
+		}
+		probe, cloned := proto.Clone(mw).(*gateonv1.Middleware)
+		if !cloned {
+			continue
+		}
+		if err := mwsecret.Restore(probe, stored); err != nil {
+			diff.Refused = append(diff.Refused, "middleware "+mw.GetId()+": "+err.Error())
 		}
 	}
-	return diff
 }
 
 func registerConfigImportExport(mux *http.ServeMux, d *Deps) {
@@ -74,11 +97,15 @@ func registerConfigImportExport(mux *http.ServeMux, d *Deps) {
 		eps, _ := d.EpService.ListPaginated(r.Context(), 0, 10000, "")
 		mws, _ := d.MwService.ListPaginated(r.Context(), 0, 10000, "")
 
+		// No stored secret leaves in an export, for anyone (ADR 0030): each
+		// reads as the placeholder, which an import into this gateway keeps.
+		// There is deliberately no export that includes them -- a secret
+		// backup is the host's database or middlewares file, not a download.
 		exp := configExport{
 			Routes:      routes,
 			Services:    services,
 			EntryPoints: eps,
-			Middlewares: mws,
+			Middlewares: mwsecret.MaskAll(mws, hasPermission(r, auth.ActionWrite, auth.ResourceMiddlewares)),
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Content-Disposition", "attachment; filename=gateon-config.json")

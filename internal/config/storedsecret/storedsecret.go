@@ -23,8 +23,8 @@ import (
 // Sentinel is what the management API returns in place of a stored secret,
 // and what a client sends back to keep it.
 //
-// It is the placeholder the middleware API already uses for the same purpose
-// (secretmask.Placeholder, restored by secretmask.Preserve), so a client learns
+// It is the placeholder the middleware API uses for the same purpose
+// (secretmask.Placeholder, restored by mwsecret.Restore), so a client learns
 // one convention for the whole API. It is reserved rather than merely
 // unlikely: the registry refuses to store it as a secret (Held), so no stored
 // secret can equal it, and a value that does can only mean "the one already

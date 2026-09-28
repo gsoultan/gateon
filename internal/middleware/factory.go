@@ -22,6 +22,7 @@ import (
 	"github.com/gsoultan/gateon/internal/middleware/transform"
 	"github.com/gsoultan/gateon/internal/redis"
 	"github.com/gsoultan/gateon/internal/security/reputation"
+	"github.com/gsoultan/gateon/internal/security/secretmask"
 	"github.com/gsoultan/gateon/internal/security/yara"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
@@ -89,6 +90,16 @@ func (f *Factory) Validate(m *gateonv1.Middleware) error {
 }
 
 func (f *Factory) Create(m *gateonv1.Middleware, routeID string) (Middleware, error) {
+	// The stores refuse the stored-secret placeholder, but a config can reach
+	// here without passing one: a middlewares file written by hand, or seeded
+	// from an export, which carries placeholders by design. Built, a jwt or
+	// hmac middleware would accept anything signed with that published string;
+	// refused, the router serves the refusal it serves for any security
+	// middleware it cannot build (ADR 0030).
+	if held := secretmask.Held(m.GetConfig()); len(held) > 0 {
+		return nil, fmt.Errorf("middleware %q config key(s) %s hold the stored-secret placeholder, which stands "+
+			"for a stored secret and is not one; enter the secret", m.GetId(), strings.Join(held, ", "))
+	}
 	cfg := make(map[string]string)
 	for k, v := range m.Config {
 		// A value that cannot be resolved refuses the build rather than

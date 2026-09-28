@@ -8,9 +8,8 @@ import (
 	"fmt"
 
 	"github.com/gsoultan/gateon/internal/auth"
-	"github.com/gsoultan/gateon/internal/security/secretmask"
+	"github.com/gsoultan/gateon/internal/config/mwsecret"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
-	"google.golang.org/protobuf/proto"
 )
 
 func (s *ApiService) ListMiddlewares(ctx context.Context, _ *gateonv1.ListMiddlewaresRequest) (*gateonv1.ListMiddlewaresResponse, error) {
@@ -22,43 +21,18 @@ func (s *ApiService) ListMiddlewares(ctx context.Context, _ *gateonv1.ListMiddle
 	}, nil
 }
 
-// maskMiddlewares hides credentials from a caller who could not change them.
-//
-// The same rule as the REST handler, applied here because this is the same data
-// behind a different transport. Authorization was once enforced on the REST
-// routes only while Connect and gRPC served the same methods unguarded; a
-// redaction that covered one transport would be that defect again, and the RBAC
-// table already lets a viewer call this procedure.
-//
-// The returned messages are copies: the originals are the live configuration,
-// and masking in place would delete the credentials from the running gateway on
-// a read.
+// maskMiddlewares hides every stored secret from every caller, as the REST
+// handler does (ADR 0030): this is the same data behind a different transport,
+// and a redaction that covered one transport would be the REST-only
+// authorization defect again. The messages returned are copies of the live
+// configuration.
 func maskMiddlewares(ctx context.Context, mws []*gateonv1.Middleware) []*gateonv1.Middleware {
-	if canWriteMiddlewares(ctx) {
-		return mws
-	}
-	out := make([]*gateonv1.Middleware, 0, len(mws))
-	for _, mw := range mws {
-		if mw == nil {
-			continue
-		}
-		// proto.Clone rather than a struct copy: a generated message carries
-		// internal state that must not be copied by value, and listing the
-		// fields by hand would silently drop any field added to Middleware
-		// later -- from the masked response only, which is the half nobody
-		// would be looking at.
-		clone, ok := proto.Clone(mw).(*gateonv1.Middleware)
-		if !ok {
-			continue
-		}
-		clone.Config = secretmask.Config(mw.Config)
-		out = append(out, clone)
-	}
-	return out
+	return mwsecret.MaskAll(mws, canWriteMiddlewares(ctx))
 }
 
-// canWriteMiddlewares reports whether the caller could set these values anyway,
-// in which case showing them reveals nothing they do not already control.
+// canWriteMiddlewares reports whether the caller may write middlewares, and so
+// reads the values of headers and query parameters whose names give no
+// credential away; no caller reads a stored secret.
 func canWriteMiddlewares(ctx context.Context) bool {
 	claims, present := callerClaims(ctx)
 	if !present {
@@ -74,15 +48,8 @@ func (s *ApiService) UpdateMiddleware(ctx context.Context, req *gateonv1.UpdateM
 	if s.Middlewares == nil || req == nil || req.Middleware == nil {
 		return &gateonv1.UpdateMiddlewareResponse{Success: false}, nil
 	}
-	// A caller who was shown placeholders instead of credentials sends them back
-	// on any save that did not touch them. Writing the placeholder literally
-	// would destroy the secret through an unrelated edit.
-	if req.Middleware.Id != "" {
-		if prev, ok := s.Middlewares.Get(ctx, req.Middleware.Id); ok && prev != nil {
-			req.Middleware.Config = secretmask.Preserve(req.Middleware.Config, prev.Config)
-		}
-	}
-	// Through the domain service, as the REST handler: the factory proves the
+	// Through the domain service, as the REST handler: it keeps every stored
+	// secret the caller sent the placeholder back for (ADR 0030), the factory proves the
 	// config can be built before anything is written, an id is assigned, and a
 	// WAF policy drops the WAF cache. Written to the store directly, a config
 	// the factory cannot build was persisted and never failed -- the router
