@@ -1,12 +1,77 @@
 // Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
 // SPDX-License-Identifier: MIT
 
-import { Stack, Select, TextInput, Group, Switch, Divider, Title, Text } from "@mantine/core";
+import { Stack, Select, TextInput, Group, Switch, Divider, Text, ActionIcon, Button } from "@mantine/core";
+import { IconPlus, IconTrash } from "@tabler/icons-react";
 import { KeyValueList } from "./KeyValueList";
+import { StoredSecretInput } from "../settings/StoredSecretInput";
+import { isSecretReference, isStoredSecret } from "../../utils/storedSecret";
 
 interface AuthConfigEditorProps {
   config: Record<string, string>;
   onChange: (config: Record<string, string>) => void;
+}
+
+type BasicUser = { name: string; password: string };
+
+function parseUsers(value: string): BasicUser[] {
+  return value
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((part) => {
+      const at = part.indexOf(":");
+      return at < 0 ? { name: part, password: "" } : { name: part.slice(0, at), password: part.slice(at + 1) };
+    });
+}
+
+const joinUsers = (users: BasicUser[]) => users.map((u) => `${u.name}:${u.password}`).join(",");
+
+/**
+ * The basic-auth user list, "name:password,...". The gateway returns each
+ * stored password as the stored-secret placeholder and keeps it by the user's
+ * name (ADR 0030), so every user is a row with a write-only password. A list
+ * held as a reference, or returned whole as the placeholder, is one secret.
+ */
+function BasicUsersEditor({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  if (isStoredSecret(value) || isSecretReference(value)) {
+    return <StoredSecretInput label="Users" value={value} onChange={onChange} clearable />;
+  }
+  const users = parseUsers(value);
+  const update = (i: number, next: Partial<BasicUser>) =>
+    onChange(joinUsers(users.map((u, j) => (i === j ? { ...u, ...next } : u))));
+  return (
+    <Stack gap="xs">
+      <Text size="sm" fw={500}>Users</Text>
+      <Text size="xs" c="dimmed">
+        Passwords are kept by user name: a renamed user needs its password entered again.
+      </Text>
+      {users.map((u, i) => (
+        <Group key={i} grow align="flex-start">
+          <TextInput label="Username" value={u.name} onChange={(e) => update(i, { name: e.currentTarget.value })} />
+          <StoredSecretInput label="Password" value={u.password} onChange={(password) => update(i, { password })} />
+          <ActionIcon
+            color="red"
+            variant="light"
+            mt={24}
+            aria-label={`Remove the user ${u.name}`}
+            onClick={() => onChange(joinUsers(users.filter((_, j) => j !== i)))}
+          >
+            <IconTrash size={16} />
+          </ActionIcon>
+        </Group>
+      ))}
+      <Button
+        variant="light"
+        size="xs"
+        leftSection={<IconPlus size={14} />}
+        style={{ alignSelf: "flex-start" }}
+        onClick={() => onChange(joinUsers([...users, { name: `user${users.length + 1}`, password: "" }]))}
+      >
+        Add user
+      </Button>
+    </Stack>
+  );
 }
 
 export function AuthConfigEditor({ config, onChange }: AuthConfigEditorProps) {
@@ -119,26 +184,21 @@ export function AuthConfigEditor({ config, onChange }: AuthConfigEditorProps) {
       )}
       {config.type === "basic" && (
         <>
-          <TextInput
-            label="Users"
-            description="Single: use Username + Password below. Multiple: user1:pass1,user2:pass2"
-            placeholder="admin:secret,user:pass"
-            value={config.users || ""}
-            onChange={(e) => updateConfig("users", e.currentTarget.value)}
-          />
-          <Group grow>
+          <BasicUsersEditor value={config.users || ""} onChange={(v) => updateConfig("users", v)} />
+          <Group grow align="flex-start">
             <TextInput
               label="Username (single user)"
+              description="Used when the list above is empty"
               placeholder="admin"
               value={config.username || ""}
               onChange={(e) => updateConfig("username", e.currentTarget.value)}
             />
-            <TextInput
+            <StoredSecretInput
               label="Password (single user)"
-              type="password"
               placeholder="••••••••"
               value={config.password || ""}
-              onChange={(e) => updateConfig("password", e.currentTarget.value)}
+              onChange={(v) => updateConfig("password", v)}
+              clearable={!!config.users}
             />
           </Group>
           <TextInput
@@ -171,13 +231,13 @@ export function AuthConfigEditor({ config, onChange }: AuthConfigEditorProps) {
             value={config.jwks_url || ""}
             onChange={(e) => updateConfig("jwks_url", e.currentTarget.value)}
           />
-          <TextInput
+          <StoredSecretInput
             label="Secret (required if not using JWKS)"
             description="HS256 shared secret, or GATEON_JWT_SECRET env"
             placeholder="HS256 Secret"
-            type="password"
             value={config.secret || ""}
-            onChange={(e) => updateConfig("secret", e.currentTarget.value)}
+            onChange={(v) => updateConfig("secret", v)}
+            clearable={!!config.jwks_url}
           />
         </>
       )}
@@ -215,15 +275,12 @@ export function AuthConfigEditor({ config, onChange }: AuthConfigEditorProps) {
             value={config.client_id || ""}
             onChange={(e) => updateConfig("client_id", e.currentTarget.value)}
           />
-          <TextInput
+          <StoredSecretInput
             label="Client Secret"
-            description="Or GATEON_OAUTH2_CLIENT_SECRET env"
-            type="password"
+            description="Or GATEON_OAUTH2_CLIENT_SECRET env. Kept only while the introspection URL stays the same."
             placeholder="••••••••"
             value={config.client_secret || ""}
-            onChange={(e) =>
-              updateConfig("client_secret", e.currentTarget.value)
-            }
+            onChange={(v) => updateConfig("client_secret", v)}
           />
           <TextInput
             label="Token Type Hint (optional)"
@@ -237,13 +294,12 @@ export function AuthConfigEditor({ config, onChange }: AuthConfigEditorProps) {
         </>
       )}
       {config.type === "paseto" && (
-        <TextInput
+        <StoredSecretInput
           label="PASETO Secret (32+ bytes)"
           description="Symmetric key. Or GATEON_PASETO_SECRET env."
-          type="password"
           placeholder="32+ character secret"
           value={config.secret || ""}
-          onChange={(e) => updateConfig("secret", e.currentTarget.value)}
+          onChange={(v) => updateConfig("secret", v)}
         />
       )}
       {renderCommonAuthFields()}
