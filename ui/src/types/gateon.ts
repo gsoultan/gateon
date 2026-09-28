@@ -514,7 +514,6 @@ export type EbpfConfig = {
   enableKnocking?: boolean;
   mgmtPort?: number;
   knockingSequence?: number[];
-  afXdpPhantom?: boolean;
   enableMgmtWhitelist?: boolean;
   mgmtWhitelistIps?: string[];
 };

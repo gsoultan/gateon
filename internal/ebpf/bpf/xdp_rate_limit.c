@@ -60,20 +60,6 @@ struct {
 } mgmt_whitelist SEC(".maps");
 
 struct {
-    __uint(type, BPF_MAP_TYPE_XSKMAP);
-    __uint(max_entries, 64);
-    __type(key, __u32);
-    __type(value, __u32);
-} xsk_map SEC(".maps");
-
-struct {
-    __uint(type, BPF_MAP_TYPE_HASH);
-    __uint(max_entries, 128);
-    __type(key, __u32);   // Port
-    __type(value, __u32); // Flag
-} phantom_ports SEC(".maps");
-
-struct {
     __uint(type, BPF_MAP_TYPE_LRU_HASH);
     __uint(max_entries, 10240);
     __type(key, __u32);   // IPv4 address
@@ -539,17 +525,6 @@ static __always_inline int handle_ip_packet(struct xdp_md *ctx, struct ethhdr *e
         }
     }
 
-    // TITAN: Phantom Redirection (AF_XDP)
-    if (iph->protocol == IPPROTO_TCP || iph->protocol == IPPROTO_UDP) {
-        __u16 dport = l4.dport;
-        if (dport > 0) {
-            __u32 port_key = (__u32)dport;
-            if (bpf_map_lookup_elem(&phantom_ports, &port_key)) {
-                return bpf_redirect_map(&xsk_map, ctx->rx_queue_index, XDP_PASS);
-            }
-        }
-    }
-
     // 3. Rate Limiting (Adaptive)
     if (rate_limit_exceeded(src_ip, cfg && cfg->enable_rate_limit)) {
         count_drop(DROP_REASON_RATE_LIMITED);
@@ -663,7 +638,7 @@ static __always_inline int mgmt_gate6(struct ebpf_config *cfg, const struct in6_
 
 // handle_ipv6_packet is handle_ip_packet for IPv6, in the same order: count the
 // source, the blocklist, the SYN-burst guard, the management gate, the rate
-// limiter. Phantom ports and load balancing stay IPv4-only.
+// limiter. Load balancing stays IPv4-only.
 static __always_inline int handle_ipv6_packet(struct xdp_md *ctx, struct ethhdr *eth) {
     void *data_end = (void *)(long)ctx->data_end;
     struct ipv6hdr *ip6 = (void *)(eth + 1);

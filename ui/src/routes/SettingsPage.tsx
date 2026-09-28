@@ -2196,8 +2196,8 @@ export default function SettingsPage() {
                   <Text size="xs" c="teal">
                     <IconCheck size={12} style={{ verticalAlign: "middle" }} /> Attached to{" "}
                     {netInfo.ebpf.interface} at the TC ingress hook ({netInfo.ebpf.attachMode}): packets are
-                    dropped in the kernel before Gateon sees them, though after the NIC driver. Port knocking,
-                    phantom ports and load balancing need native XDP and are not in force. Drop metrics are live.
+                    dropped in the kernel before Gateon sees them, though after the NIC driver. Port knocking
+                    and load balancing need native XDP and are not in force. Drop metrics are live.
                   </Text>
                 ) : (
                   <Text size="xs" c="teal">

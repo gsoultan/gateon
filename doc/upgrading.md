@@ -11,6 +11,16 @@ here after the fact.
 
 ## Unreleased
 
+### `ebpf.af_xdp_phantom` is removed
+
+Field 11 is reserved. The setting was read by nothing but the TC fallback's
+list of features it cannot enforce. The XDP program redirected packets for any
+port listed in its `phantom_ports` map to an AF_XDP socket, but nothing ever
+wrote that map or opened a socket, so the only effect was a hash lookup on
+every TCP and UDP packet. Both maps are gone. A stored config that still sets
+the key loads as before; the key is ignored. The Diagnostics Phantom Core card
+is unaffected: it reports the kernel splice path, which never used XDP.
+
 ### Stored secrets are no longer returned by the API — **API clients that read secrets stop getting them**
 
 `GET /v1/global` and `GetGlobalConfig` returned every stored credential to any

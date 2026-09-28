@@ -286,10 +286,9 @@ func TestTCUnsupportedNamesTheGaps(t *testing.T) {
 	}
 
 	full := &gateonv1.EbpfConfig{
-		EnableKnocking: true,
-		AfXdpPhantom:   true, XdpLoadBalancing: true,
+		EnableKnocking: true, XdpLoadBalancing: true,
 	}
-	want := []string{"enable_knocking", "af_xdp_phantom", "xdp_load_balancing"}
+	want := []string{"enable_knocking", "xdp_load_balancing"}
 	gaps := tcUnsupported(full)
 	if len(gaps) != len(want) {
 		t.Fatalf("tcUnsupported() = %v, want %v", gaps, want)
