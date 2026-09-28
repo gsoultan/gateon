@@ -11,6 +11,87 @@ here after the fact.
 
 ## Unreleased
 
+### Every HTTP entrypoint holds at most max_connections at once — a new default cap
+
+`max_connections` was read by TCP entrypoints only. An HTTP entrypoint held as
+many connections as clients cared to open -- an idle keep-alive connection for
+a minute, a silent one for ten seconds before its first header -- so a flood of
+connections, which cost the client one packet each, cost the gateway a
+goroutine, buffers and a descriptor each without bound.
+
+Every HTTP entrypoint -- plaintext and TLS, HTTP/1, HTTP/2 and HTTP/3 -- now
+holds at most `max_connections` connections at once, or, with `max_connections`
+at 0 (the default, and what every existing entrypoint has), the resource
+profile's limit: **1000** (`minimal`), **10000** (`standard`), **50000**
+(`enterprise`), selected by `GATEON_PROFILE` as for every other profile
+default. What counts is a connection, not a request:
+
+- an idle keep-alive connection counts for as long as it stays open (up to the
+  one-minute idle timeout);
+- an HTTP/2 connection counts once, however many requests it carries at once
+  (up to 250 streams per connection, as before);
+- on an HTTP/3 entrypoint, a QUIC connection counts once, and QUIC and TCP
+  connections share the entrypoint's one limit.
+
+A connection past the limit is closed as soon as it is accepted -- on a TLS
+entrypoint before its handshake -- and a QUIC connection past it is closed
+with `H3_EXCESSIVE_LOAD`. Refusals are counted with the other connection-limit
+rejections on the Diagnostics limit card (`max_connections`), and logged at
+WARN at most once a minute per entrypoint (`HTTP entrypoint at its connection
+limit, refusing new connections`). The limit is read when the entrypoint
+starts, so a change takes effect after a restart.
+
+The dedicated management listener is not capped and takes no slot from any
+entrypoint: a flood that fills a data-plane entrypoint leaves the dashboard and
+the management API reachable.
+
+The dashboard's entrypoint form now shows **Max Connections** for every
+entrypoint (it kept the value but had no input for it) and says what 0 means.
+On a UDP entrypoint without TLS, which has no connections, the field is
+disabled and says so.
+
+**Who is affected:** an HTTP entrypoint that holds more concurrent connections
+-- idle keep-alive ones included -- than its profile's default: more than 10000
+on the standard profile, 1000 on minimal. Clients past it see their
+connection closed. Set `max_connections` on the entrypoint (dashboard, config
+file or API). Behind a load balancer that pools connections to the gateway,
+count the pool's connections, not its clients.
+
+### A TCP entrypoint refuses addresses on the IP mitigation list
+
+A shunned or manually blocked address was refused by every HTTP entrypoint and,
+where eBPF ran, dropped in the kernel -- and without eBPF connected to a TCP
+entrypoint as freely as any other: to an SSH, database or mail backend, and on
+a tcp-only entrypoint straight to its backend.
+
+Every TCP entrypoint -- plaintext or TLS-terminating, inspected or tcp-only --
+now closes a connection from an address on the list as soon as it is
+accepted, before reading from it or starting TLS. The client sees the
+connection closed; the backend never sees it. Each refusal is recorded like
+an HTTP one, as an `ip_mitigation` threat in the Security Hub (and on
+`gateon_middleware_advanced_security_blocked_total`), with details naming the
+TCP entrypoint. Releasing the address lets its next connection through. A
+block reaches connections accepted after it: an L4 session already open when
+its address is blocked runs until it ends (eBPF, where it runs, also drops
+that session's packets).
+
+Addresses exempt from enforcement are served on TCP entrypoints as on HTTP
+ones: loopback and those `GATEON_MITIGATION_ALLOWLIST` names. **This also
+changes HTTP entrypoints:** they used to refuse an allowlisted or loopback
+address that was on the list; they now serve it, as the fingerprint and
+reputation blocks already did. No automatic path shuns such an address, so this
+affects only an operator's explicit block of an address that is also on the
+allowlist, and blocks made before the upgrade. Where eBPF runs, the kernel
+still drops such an address.
+
+**Who is affected:** anyone with addresses on the IP mitigation list and TCP
+entrypoints: those addresses can no longer reach L4 backends. A TCP
+entrypoint behind a proxy or load balancer sees the proxy's address, not the
+client's (there is no PROXY-protocol input), so blocking the proxy's address
+blocks everyone behind it -- as it always did on HTTP without trusted proxies.
+And anyone who blocked an address they had also allowlisted: HTTP entrypoints
+now serve it.
+
 ### Middleware secrets are no longer returned by the API — **API clients and exports that read them stop getting them**
 
 Anyone who could write middlewares -- administrators and operators, or anyone
@@ -498,8 +579,9 @@ starts.
 
 **Who is affected:** a TCP entrypoint that holds more concurrent connections
 than its profile's default -- more than 10000 on the standard profile. Set
-`max_connections` on it (config file or API; the dashboard does not show the
-field yet). HTTP entrypoints still do not read `max_connections`.
+`max_connections` on it (dashboard, config file or API). HTTP entrypoints read
+it too now: see "Every HTTP entrypoint holds at most max_connections at once"
+above.
 
 ### The PROXY protocol header names the address the client connected to
 
