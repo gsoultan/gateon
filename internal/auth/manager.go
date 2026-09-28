@@ -363,7 +363,7 @@ func hashPassword(password string) (string, error) {
 	if password == "" {
 		return "", nil
 	}
-	hashed, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	hashed, err := bcrypt.GenerateFromPassword([]byte(password), bcryptCost)
 	if err != nil {
 		return "", fmt.Errorf("failed to hash password: %w", err)
 	}
@@ -416,7 +416,7 @@ func userWriteError(err error) error {
 }
 
 func (m *Manager) ChangePassword(id, password string) error {
-	hashed, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	hashed, err := bcrypt.GenerateFromPassword([]byte(password), bcryptCost)
 	if err != nil {
 		return fmt.Errorf("failed to hash password: %w", err)
 	}

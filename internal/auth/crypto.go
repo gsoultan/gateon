@@ -26,6 +26,16 @@ const recoveryCodeBytes = 10
 // recoveryCodeCount is the number of recovery codes generated during 2FA setup.
 const recoveryCodeCount = 10
 
+// productionBcryptCost is the bcrypt work factor of every password and
+// recovery-code hash the gateway stores.
+const productionBcryptCost = bcrypt.DefaultCost
+
+// bcryptCost is productionBcryptCost everywhere but this package's tests, whose
+// TestMain lowers it: they check hashes they made themselves, and at the
+// production cost -- a dozen hashes per enrolment, under the race detector --
+// the package's tests outran CI's ten-minute test timeout.
+var bcryptCost = productionBcryptCost
+
 // recoveryCodeEncoding produces uppercase, padding-free, human-friendly codes.
 var recoveryCodeEncoding = base32.StdEncoding.WithPadding(base32.NoPadding)
 
@@ -98,7 +108,7 @@ func generateRecoveryCodes() (plain []string, hashed []string, err error) {
 		}
 		code := recoveryCodeEncoding.EncodeToString(buf)
 		plain[i] = code
-		hash, hErr := bcrypt.GenerateFromPassword([]byte(code), bcrypt.DefaultCost)
+		hash, hErr := bcrypt.GenerateFromPassword([]byte(code), bcryptCost)
 		if hErr != nil {
 			return nil, nil, fmt.Errorf("failed to hash recovery code: %w", hErr)
 		}
