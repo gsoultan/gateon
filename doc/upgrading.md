@@ -11,6 +11,81 @@ here after the fact.
 
 ## Unreleased
 
+### Stored secrets are no longer returned by the API — **API clients that read secrets stop getting them**
+
+`GET /v1/global` and `GetGlobalConfig` returned every stored credential to any
+caller who may write the global configuration: the PASETO key that signs
+sessions, the audit chain's HMAC key, the database, Redis and HA passwords, the
+MaxMind key, the GitOps token, the bot-management and proof-of-work secrets, the
+canary token, the IP-reputation API keys and the alert webhook URLs and Telegram
+bot tokens. One stolen administrator session was enough to mint a session for
+any account. Secrets are now write-only. See ADR 0028.
+
+- A stored secret now reads as `__gateon_redacted__` (the placeholder the
+  middleware API already uses); a secret configured as a reference (`$env:…`,
+  `$vault:…`, `$aws-sm:…`) still reads as the reference; an unset one reads `""`.
+  A database or repository URL shows everything but its password:
+  `postgres://gateon:__gateon_redacted__@db/gateon`.
+- **GET → modify → PUT keeps working.** Send the placeholders back unchanged and
+  every stored secret is kept exactly as it is held.
+- **To rotate a secret, send the new value.** `""` clears an optional credential;
+  the session key, the audit signing key and the proof-of-work key cannot be
+  cleared, and `""` keeps them.
+- A kept secret is refused, with `400` and the field's name, when the same save
+  changes where it is sent: the Redis address, a database's driver, host or port,
+  the GitOps repository's host, an IP-reputation integration's provider. Send
+  the secret again with the new destination.
+- Secrets in alert dispatchers and IP-reputation integrations are matched to the
+  stored element by `id`. A placeholder in an element whose `id` is missing or
+  unknown is refused with `400` naming the element. Elements stored without an
+  `id` get one when the configuration is loaded; read it before you save.
+- The placeholder is never stored as a secret: a save that would store it is
+  refused, whatever path it comes by.
+- Viewers still read every secret as `""`.
+
+**Who is affected:** scripts and tools that read credentials out of
+`GET /v1/global` or `GetGlobalConfig` (they now get the placeholder), and anyone
+who relied on the dashboard to show a stored key. Keep your own copy of any key
+you need to see again; the gateway will not show it.
+
+### A new session key takes effect when it is saved — **saving a new key signs everyone out at once**
+
+A PASETO key changed in Settings (or through the API) used to take effect only at
+the next restart, and that restart also broke every two-factor sign-in, because
+stored second factors are encrypted under the same key: 2FA accounts, the
+administrator who rotated included, could no longer sign in. The new key now
+takes effect as soon as it is saved: every session ends immediately, yours
+included, and every two-factor enrolment is re-encrypted under the new key and
+keeps working. A key shorter than 32 bytes is refused (`400`) instead of being
+saved and failing the next start. The dashboard asks before it lets you replace
+the key, and says what will happen.
+
+**Who is affected:** anyone who rotates the session key. If several gateway
+instances share one user database, give every instance the new key and restart
+them; until then the others keep accepting sessions signed with the old key,
+and their two-factor sign-ins fail.
+
+### Rotating the audit signing key — **older entries verify only with the old key**
+
+The dashboard now asks before replacing the audit signing key, because entries
+written before the change verify only with the old key, which the gateway no
+longer shows. If you will need to verify them, copy the key from `global.json`
+on the gateway host before you save the new one.
+
+**Who is affected:** installs with audit signing on that rotate its key.
+
+### Alert and startup logs no longer carry credentials
+
+A failed alert send logged the webhook URL or Telegram bot URL, which is the
+credential; the startup log line for a path-stats store that could not open
+carried the auth database URL with its password. Both are now logged without
+the secret. The log stream is readable by viewers, so a credential that reached
+it was readable by them.
+
+**Who is affected:** nobody needs to change anything. If your logs are shipped
+somewhere, rotate any webhook, bot token or database password that may be in
+older log lines.
+
 ### An address is shunned automatically only when five client builds behind it attack — **fewer automatic IP shuns**
 
 Besides blocking a fingerprint, every recorded threat could shun its source
