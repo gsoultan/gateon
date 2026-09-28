@@ -54,7 +54,7 @@ func admittedWithin(t *testing.T, addr string) net.Conn {
 // the connection past the limit is refused, one that ends frees its slot for
 // the next, and once shutdown has begun nothing is admitted at all.
 func TestOpenConnsHoldsNoMoreThanItsLimit(t *testing.T) {
-	o := newOpenConns(2)
+	o := newOpenConns(2, nil)
 	a, b, c := pipeEnd(t), pipeEnd(t), pipeEnd(t)
 	if o.add(a) != admitted || o.add(b) != admitted {
 		t.Fatal("the first two connections were not admitted under a limit of 2")

@@ -62,4 +62,16 @@ func TestDefaultsFor_ConservativeMinimal(t *testing.T) {
 		std.EntryPointMaxConnections > ent.EntryPointMaxConnections {
 		t.Error("EntryPointMaxConnections must be positive and non-decreasing minimal<=standard<=enterprise")
 	}
+	// The per-address cap must be positive (0 would be no per-address cap),
+	// non-decreasing across tiers, and never looser than the entrypoint-wide
+	// cap it complements -- one address may not be allowed more than the whole
+	// entrypoint holds.
+	if min.EntryPointMaxConnPerAddr <= 0 || min.EntryPointMaxConnPerAddr > std.EntryPointMaxConnPerAddr ||
+		std.EntryPointMaxConnPerAddr > ent.EntryPointMaxConnPerAddr {
+		t.Error("EntryPointMaxConnPerAddr must be positive and non-decreasing minimal<=standard<=enterprise")
+	}
+	if min.EntryPointMaxConnPerAddr > min.EntryPointMaxConnections ||
+		ent.EntryPointMaxConnPerAddr > ent.EntryPointMaxConnections {
+		t.Error("EntryPointMaxConnPerAddr must not exceed EntryPointMaxConnections")
+	}
 }

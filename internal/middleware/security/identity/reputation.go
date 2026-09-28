@@ -108,6 +108,16 @@ func exemptFromEnforcement(clientIP string) bool {
 	return mitigation.ExemptFromEnforcement(clientIP)
 }
 
+// ExemptFromEnforcement is exemptFromEnforcement for callers outside this
+// package -- the TCP entrypoints, which apply the same exemption to their
+// per-address connection cap and to closing an address's open L4 sessions when
+// it is blocked (ADR 0036), so that loopback and GATEON_MITIGATION_ALLOWLIST
+// mean one thing on every path. It exists so those callers do not re-derive the
+// rule and drift from it.
+func ExemptFromEnforcement(clientIP string) bool {
+	return exemptFromEnforcement(clientIP)
+}
+
 // ReputationBlocker returns a middleware that blocks clients with extremely low reputation.
 func ReputationBlocker(routeID string) kind.Middleware {
 	return func(next http.Handler) http.Handler {

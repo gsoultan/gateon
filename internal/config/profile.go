@@ -95,6 +95,18 @@ type TierDefaults struct {
 	// for a spliced L4 session -- so without a ceiling a flood of them is paid
 	// for by the gateway alone.
 	EntryPointMaxConnections int
+
+	// EntryPointMaxConnPerAddr is how many concurrent connections one source
+	// address may hold on a single entrypoint (ADR 0036). EntryPointMaxConnections
+	// bounds what a flood costs the gateway; it does not bound who pays, so one
+	// client could fill an entrypoint by itself. This is the tighter, per-client
+	// bound: a connection past it is refused at accept. Loopback and
+	// GATEON_MITIGATION_ALLOWLIST are exempt, so a local proxy -- behind which
+	// every client is loopback -- is never capped by the address it shares.
+	// The map that counts holds an entry only while an address has a connection
+	// open, so it is bounded by EntryPointMaxConnections, not by the address
+	// space. GATEON_ENTRYPOINT_MAX_CONN_PER_ADDR overrides it; 0 disables it.
+	EntryPointMaxConnPerAddr int
 }
 
 // NormalizeTier coerces an arbitrary string to a known tier, defaulting to
@@ -152,6 +164,7 @@ func DefaultsFor(tier Tier) TierDefaults {
 			WAFTier:                   TierMinimal,
 			RLLimiterStates:           2000,
 			EntryPointMaxConnections:  1000,
+			EntryPointMaxConnPerAddr:  128,
 		}
 	case TierEnterprise:
 		return TierDefaults{
@@ -177,6 +190,7 @@ func DefaultsFor(tier Tier) TierDefaults {
 			WAFTier:                   TierEnterprise,
 			RLLimiterStates:           100000,
 			EntryPointMaxConnections:  50000,
+			EntryPointMaxConnPerAddr:  1024,
 		}
 	default: // TierStandard
 		return TierDefaults{
@@ -202,6 +216,7 @@ func DefaultsFor(tier Tier) TierDefaults {
 			WAFTier:                   TierStandard,
 			RLLimiterStates:           20000,
 			EntryPointMaxConnections:  10000,
+			EntryPointMaxConnPerAddr:  256,
 		}
 	}
 }
