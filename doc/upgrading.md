@@ -11,6 +11,102 @@ here after the fact.
 
 ## Unreleased
 
+### Automatic IP shuns lapse, and a released address can be shunned again after a day
+
+Every address the gateway shunned on its own -- the address shun (five
+attacking client builds within ten minutes), the anomaly detector's brute-force
+and exploit-scanning shuns, an alert playbook's "block", the alerting
+manager's autonomous mitigation, and the incident responder's opt-in hard
+shun (`GATEON_MITIGATION_AUTO_SHUN`) -- used to hold until an operator released
+it. It now lapses: the first shun of an address lasts **15 minutes**; an
+address shunned again within 24 hours of its last shun lapsing is shunned for
+twice as long as last time, up to **24 hours** (15m, 30m, 1h ... 16h, 24h).
+After a day with no shun the next one starts at 15 minutes again. A lapsed shun
+stops refusing the address at once, and leaves the kernel's shun map (with
+eBPF) within 30 seconds. The IP mitigation list shows when each automatic shun
+lifts ("lifts in 42m"), as it does for kernel throttles, and stops listing it
+once it has.
+
+A shun you place yourself -- Mitigate on a threat, or an applied
+recommendation -- is unchanged: it holds until you release it, and no
+automatic shun shortens it.
+
+**Releasing an address (Allow) now holds for a day, not forever.** For 24
+hours no automatic path shuns it again; after that, fresh attack evidence can
+shun it again, starting at 15 minutes. To exempt an address permanently, put
+it on `GATEON_MITIGATION_ALLOWLIST`. Releases made before the upgrade are
+measured from when they were made, so an address released more than a day
+before upgrading can be shunned again by new evidence.
+
+**At the upgrade** (migration 66, `ip_mitigations.expires_at`), a shun written
+before it by an automatic path is given the expiry it would have had -- 15
+minutes after it was written -- so nearly all of them lift when the upgraded
+gateway starts. They were earned under rules the gateway no longer uses (three
+JA4+ strings, with rate-limit refusals counted); an address still attacking is
+shunned again within minutes. Automatic shuns are recognised by the reason they
+were written with ("IP shunning triggered", "Anomaly detection:", "Alert
+playbook:", "Autonomous mitigation", "correlated critical incident:"); every
+other shun -- yours -- keeps no expiry.
+
+A shunned address's refused requests no longer count as refused login
+attempts. Without eBPF, a shunned address is refused with a 403 by the gateway
+itself, and a POST refused 403 used to count as a refused credential attempt,
+so an office shunned by mistake whose users kept submitting forms looked like
+it was still guessing passwords. The same applies to requests refused because
+their client build is blocked, or out of reputation, on their network.
+
+The gateway no longer shuns an address in the kernel when the reputation kept
+under the bare address (threats with no client fingerprint, such as the anomaly
+detector's) falls below 20. That shun was never listed, could not be released
+from the list, ignored the allowlist and never lapsed; the detectors behind
+those threats shun or throttle an address themselves.
+
+**Who is affected:** anyone with addresses on the IP mitigation list that an
+automatic path put there (they lift at the upgrade unless re-earned), anyone
+who released an address and relied on the release being permanent (use
+`GATEON_MITIGATION_ALLOWLIST`), and eBPF deployments whose kernel shun map held
+addresses from low reputation (they are no longer added).
+
+### An allowlisted source's threats no longer lower its network's reputation
+
+A threat from an address on `GATEON_MITIGATION_ALLOWLIST` used to lower the
+reputation score its client build holds on its /24 (or /64) -- kept as
+"observation" -- and the reputation blocker refuses every client of that build
+on that network once the score falls. An allowlisted scanner therefore got its
+neighbours running the same browser or TLS stack refused. Its threats now move
+no score, from the recording path or from the incident responder's penalty for
+every address in an incident. They are still recorded, listed, correlated and
+alerted on.
+
+**Who is affected:** deployments with `GATEON_MITIGATION_ALLOWLIST` set whose
+allowlisted sources produce threats (scanners, pentest teams, monitoring):
+clients sharing their network and client build are no longer refused for them.
+
+### Expired sessions and tokens polled over POST are no longer read as password guessing
+
+Both brute-force detectors (the opt-in anomaly detection's brute-force check,
+which can shun, and the analysis engine's per-address findings) counted every
+POST refused 401 or 403 as a refused credential attempt. GraphQL, gRPC-Web and
+Connect clients poll with POST -- the dashboard's own calls are Connect -- so a
+dashboard tab left open after its session expired, or an API client
+re-presenting an expired token, looked like someone guessing passwords, and
+with brute-force detection on it could be shunned.
+
+When the gateway's own verification refuses a token a request presented -- the
+dashboard/management session, or a route's PASETO, JWT, API key or OAuth2
+introspection middleware finding it invalid, expired, revoked or short of the
+route's scopes -- the refusal is no longer counted as a credential attempt.
+Traces record it (`refusal: "token"` in the stored trace). A request that
+presented no token, a middleware in dry run, and a refusal made by the backend
+itself are counted as before; so are logins refused by a password check, even
+if the request also carries an `Authorization: Bearer` header, and HTTP Basic
+or Digest guesses.
+
+**Who is affected:** deployments with anomaly brute-force detection on, whose
+API clients or dashboard tabs poll with expired tokens: they are no longer
+reported or shunned for it. Guessing API keys over POST is no longer counted by
+the brute-force detectors; each guess is still refused by the key check.
+
 ### Every HTTP entrypoint holds at most max_connections at once — a new default cap
 
 `max_connections` was read by TCP entrypoints only. An HTTP entrypoint held as
