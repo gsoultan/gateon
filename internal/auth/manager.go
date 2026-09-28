@@ -482,44 +482,98 @@ func (m *Manager) UpdateSymmetricKey(key string) error {
 	if bytes.Equal(current.enc, next.enc) {
 		return nil
 	}
-	if err := m.reencryptSecondFactors(current.enc, next.enc); err != nil {
+	if _, err := m.moveSecondFactors(current.enc, next.enc); err != nil {
 		return fmt.Errorf("rotate the session key: %w", err)
 	}
 	m.keys.Store(next)
 	return nil
 }
 
-// reencryptSecondFactors rewrites every stored second factor from key from to
-// key to, in one transaction.
-func (m *Manager) reencryptSecondFactors(from, to []byte) error {
+// SecondFactorKeyReport says what a pass over the stored second factors did.
+type SecondFactorKeyReport struct {
+	// Moved were re-encrypted under the session key in force: from the other
+	// key, or from a plaintext secret stored before encryption at rest.
+	Moved int
+	// Unreadable decrypt under neither key. Those accounts cannot complete a
+	// 2FA sign-in until they enrol again.
+	Unreadable int
+}
+
+// ReconcileSecondFactors moves under the session key in force every stored
+// second factor encrypted under previousKey, and reports those that decrypt
+// under neither. previousKey only ever decrypts second factors: it never
+// verifies a session, so a key that was rotated away stays rotated away.
+//
+// Only a rotation through UpdateSymmetricKey re-encrypts them. A key changed any
+// other way -- global.json edited, the $env or vault reference it names rotated
+// at the source, one node of a cluster restarted with its peers' new key -- left
+// every enrolment unreadable, and each 2FA account unable to sign in, with
+// nothing to say why. The gateway runs this at startup, with the previous key
+// from GATEON_PREVIOUS_SESSION_KEY when the operator sets it. A factor already
+// under the key in force is left alone, so every node of a cluster can run it:
+// the first to start moves them, the others find nothing to do.
+func (m *Manager) ReconcileSecondFactors(previousKey string) (SecondFactorKeyReport, error) {
+	var previous []byte
+	if previousKey != "" {
+		keys, err := deriveSessionKeys(previousKey)
+		if err != nil {
+			return SecondFactorKeyReport{}, fmt.Errorf("the previous session key: %w", err)
+		}
+		previous = keys.enc
+	}
+	m.secondFactorMu.Lock()
+	defer m.secondFactorMu.Unlock()
+	return m.moveSecondFactors(previous, m.keys.Load().enc)
+}
+
+// moveSecondFactors re-encrypts under to, in one transaction, every stored
+// second factor that is not already encrypted under it: one encrypted under
+// from, or a plaintext one. The caller holds secondFactorMu.
+func (m *Manager) moveSecondFactors(from, to []byte) (SecondFactorKeyReport, error) {
+	var report SecondFactorKeyReport
 	tx, err := m.db.Begin()
 	if err != nil {
-		return err
+		return report, err
 	}
 	defer func() { _ = tx.Rollback() }()
 	stored, err := secondFactorSecrets(tx, m.dialect)
 	if err != nil {
-		return err
+		return report, err
 	}
 	update := m.dialect.Rebind(QueryUpdateTwoFactorSecret)
 	for id, secret := range stored {
+		if encryptedUnder(to, secret) {
+			continue
+		}
 		plain, err := decryptSecret(from, secret)
 		if err != nil {
-			// It does not decrypt under the key in force either, so the account
-			// could not sign in with it before the rotation; nothing is lost.
+			// Under neither key: the account could not complete a 2FA sign-in
+			// before this pass either, and must enrol again.
 			m.logger.LogWarn("a stored second factor does not decrypt under the session key; the account must enrol again",
 				"user", id)
+			report.Unreadable++
 			continue
 		}
 		enc, err := encryptSecret(to, plain)
 		if err != nil {
-			return err
+			return report, err
 		}
 		if _, err := tx.Exec(update, enc, id); err != nil {
-			return err
+			return report, err
 		}
+		report.Moved++
 	}
-	return tx.Commit()
+	return report, tx.Commit()
+}
+
+// encryptedUnder reports whether stored is encrypted, and under key. A
+// plaintext secret is not: decryptSecret hands it back under any key.
+func encryptedUnder(key []byte, stored string) bool {
+	if !strings.HasPrefix(stored, encPrefix) {
+		return false
+	}
+	_, err := decryptSecret(key, stored)
+	return err == nil
 }
 
 func secondFactorSecrets(tx *sql.Tx, d db.Dialect) (map[string]string, error) {

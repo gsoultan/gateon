@@ -60,10 +60,37 @@ func InitGlobalConfig(globalFile string, globalReg *config.GlobalRegistry) *auth
 			if err != nil {
 				logger.Fatal("failed to initialize auth manager", "error", err)
 			}
+			reconcileSecondFactors(authManager)
 		}
 		applyGlobalEnv(gc)
 	}
 	return authManager
+}
+
+// previousSessionKeyEnv names the session key that a key change replaced, so
+// the second factors still encrypted under it can be moved to the new one. It
+// only ever decrypts second factors: see auth.Manager.ReconcileSecondFactors.
+const previousSessionKeyEnv = "GATEON_PREVIOUS_SESSION_KEY"
+
+// reconcileSecondFactors checks at startup that every stored second factor
+// decrypts under the session key in force, and moves those encrypted under the
+// previous key when previousSessionKeyEnv names it. A key changed without the
+// dashboard's rotation used to lock every 2FA account out, and said nothing.
+func reconcileSecondFactors(m *auth.Manager) {
+	report, err := m.ReconcileSecondFactors(os.Getenv(previousSessionKeyEnv))
+	if err != nil {
+		logger.L.LogError("could not check the stored second factors against the session key", "error", err)
+		return
+	}
+	if report.Moved > 0 {
+		logger.L.LogInfo("stored second factors re-encrypted under the session key", "count", report.Moved)
+	}
+	if report.Unreadable > 0 {
+		logger.L.LogError("stored second factors do not decrypt under the session key, so those accounts cannot "+
+			"complete a 2FA sign-in: the key was changed without the dashboard's rotation. Set "+
+			previousSessionKeyEnv+" to the previous key and restart, or have those accounts enrol again",
+			"count", report.Unreadable)
+	}
 }
 
 // applyGlobalEnv publishes the parts of the global config that downstream

@@ -99,7 +99,8 @@ const SESSION_KEY_ROTATION: SecretReplaceConfirm = {
   consequences:
     "When you save, every session ends at once -- everyone, you included, signs in again. " +
     "Two-factor enrolments are kept. Other gateway instances that share this user database " +
-    "keep the old key until they are given the new one and restarted.",
+    "keep the old key until they are given the new one and restarted, and until then " +
+    "sessions and two-factor sign-ins through them fail.",
   confirmLabel: "Replace the key and sign everyone out on save",
 };
 

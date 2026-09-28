@@ -11,6 +11,25 @@ here after the fact.
 
 ## Unreleased
 
+### A session key changed outside the dashboard no longer locks out every 2FA account — **set `GATEON_PREVIOUS_SESSION_KEY` when you rotate the key at its source**
+
+The session key also encrypts each stored second factor, and only a rotation
+from Settings re-encrypted them. A key changed any other way -- `global.json`
+edited, the secret a `$vault:`, `$aws-sm:` or `$env:` reference names rotated
+at the source, a cluster instance restarted with its peers' new key -- left
+every two-factor account unable to complete a sign-in, and nothing in the log
+said why. At startup the gateway now checks every stored second factor against
+its key and logs an error with the number it cannot decrypt; with
+`GATEON_PREVIOUS_SESSION_KEY` set to the previous key, it re-encrypts them
+under the new one in one transaction. The previous key only decrypts second
+factors: it never verifies a session. Second factors stored in plaintext, from
+before they were encrypted at rest, are encrypted at the same startup.
+
+**Who is affected:** anyone who rotates the session key outside Settings, and
+deployments with several instances sharing a user database -- see "Rotating
+the session key" in `doc/security-posture.md`. Remove the variable once an
+instance has logged that it re-encrypted them.
+
 ### Stored secrets are no longer returned by the API — **API clients that read secrets stop getting them**
 
 `GET /v1/global` and `GetGlobalConfig` returned every stored credential to any
