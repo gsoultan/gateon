@@ -8,6 +8,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"runtime"
 	"runtime/debug"
 	"runtime/metrics"
 	"strings"
@@ -160,9 +161,16 @@ func runtimeInUse() uint64 {
 func TestTheLiveGaugeMeasuresTheGoMemoryLimit(t *testing.T) {
 	prev := debug.SetMemoryLimit(-1)
 	t.Cleanup(func() { debug.SetMemoryLimit(prev) })
+	// The limit is set from one reading and the gauge takes another, so nothing
+	// may allocate between them: the governor is built first, and the garbage
+	// earlier tests left is collected. Built after the limit, with an earlier
+	// test's heap still settling, the gauge read 109-116% under one shuffle
+	// order.
+	g := NewGovernor()
+	runtime.GC()
 	debug.SetMemoryLimit(int64(float64(runtimeInUse()) / 0.92)) // about 92% in use
 
-	used, yardstick, err := NewGovernor().memUsage(context.Background())
+	used, yardstick, err := g.memUsage(context.Background())
 	if err != nil {
 		t.Fatalf("memUsage: %v", err)
 	}
