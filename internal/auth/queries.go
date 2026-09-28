@@ -25,7 +25,9 @@ const (
 
 	// QueryUpdateUser and QueryUpdateUserWithPassword edit the account an id
 	// names. A rename onto a taken username is refused the same way.
-	QueryUpdateUser             = "UPDATE users SET username = ?, role = ? WHERE id = ?"
+	QueryUpdateUser = "UPDATE users SET username = ?, role = ? WHERE id = ?"
+	// #nosec G101 -- a parameterised statement, not a credential. Every value
+	// is bound.
 	QueryUpdateUserWithPassword = "UPDATE users SET username = ?, password = ?, role = ? WHERE id = ?"
 
 	// QuerySessionBindingByID reads only the columns that make up a session
