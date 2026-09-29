@@ -477,8 +477,9 @@ var SQLiteWALSize = promauto.NewGaugeVec(prometheus.GaugeOpts{
 }, []string{"database"})
 
 var (
-	startTime     time.Time
-	startTimeOnce sync.Once
+	startTime        time.Time
+	startTimeOnce    sync.Once
+	systemGaugesOnce sync.Once
 
 	// System metrics gauges (global so they can be accessed by GetSystemStats)
 	goroutinesGauge      prometheus.Gauge
@@ -591,6 +592,20 @@ func GetSystemStats() SystemStats {
 // StartSystemMetricsCollector starts a background goroutine that periodically updates
 // system-level gauges (uptime, goroutines, memory). It stops when ctx is cancelled.
 func StartSystemMetricsCollector(stop <-chan struct{}) {
+	// The gauges register with the default Prometheus registry, which panics on
+	// a duplicate name, so they are created once per process. The collector is
+	// started once at boot in production; registering unconditionally meant a
+	// second call -- a test running the package at -count>1 -- panicked
+	// "duplicate metrics collector registration attempted", so the package
+	// could not be run repeatedly under the race detector.
+	systemGaugesOnce.Do(registerSystemGauges)
+
+	collectAndServe(stop)
+}
+
+// registerSystemGauges creates the system gauges and registers them with the
+// default registry. Called once, through systemGaugesOnce.
+func registerSystemGauges() {
 	goroutinesGauge = promauto.NewGauge(prometheus.GaugeOpts{
 		Name: "gateon_goroutines",
 		Help: "Current number of goroutines.",
@@ -627,64 +642,13 @@ func StartSystemMetricsCollector(stop <-chan struct{}) {
 		Name: "gateon_storage_usage_percent",
 		Help: "Current system storage usage percentage.",
 	})
+}
 
+// collectAndServe collects the system metrics once, then on a ticker until
+// stop is closed. The gauges it sets are registered by registerSystemGauges.
+func collectAndServe(stop <-chan struct{}) {
 	proc, _ := process.NewProcess(int32(os.Getpid()))
-
-	collect := func() {
-		if !startTime.IsZero() {
-			UptimeSeconds.Set(time.Since(startTime).Seconds())
-		}
-		goroutines := runtime.NumGoroutine()
-		goroutinesGauge.Set(float64(goroutines))
-		var m runtime.MemStats
-		runtime.ReadMemStats(&m)
-		memoryAllocGauge.Set(float64(m.Alloc))
-		memoryTotalGauge.Set(float64(m.TotalAlloc))
-		memorySysGauge.Set(float64(m.Sys))
-
-		// Publish the same sample the gauges just took, so the REST endpoints
-		// answer from it instead of stopping the world again for their own.
-		lastGoroutines.Store(int64(goroutines))
-		lastMemAlloc.Store(m.Alloc)
-		lastMemSys.Store(m.Sys)
-		lastMemTotalAlloc.Store(m.TotalAlloc)
-
-		// System-wide metrics
-		if v, err := mem.VirtualMemory(); err == nil {
-			memoryUsageGauge.Set(v.UsedPercent)
-			lastMemoryUsage.Store(new(v.UsedPercent))
-		}
-		if c, err := cpu.Percent(0, false); err == nil && len(c) > 0 {
-			cpuUsageGauge.Set(c[0])
-			lastCPUUsage.Store(new(c[0]))
-		}
-		if d, err := disk.Usage("/"); err == nil {
-			storageUsageGauge.Set(float64(d.Used))
-			storageTotalGauge.Set(float64(d.Total))
-			storageUsagePctGauge.Set(d.UsedPercent)
-			lastStorageUsage.Store(new(float64(d.Used)))
-			lastStorageTotal.Store(new(float64(d.Total)))
-			lastStoragePct.Store(new(d.UsedPercent))
-		}
-
-		// Process-specific metrics
-		if proc != nil {
-			if n, err := proc.NumFDs(); err == nil {
-				OpenFileDescriptors.Set(float64(n))
-			}
-		}
-
-		// SQLite WAL metrics - optimized to check only specific files
-		for _, dbFile := range []string{"gateon.db"} {
-			walPath := dbFile + "-wal"
-			if info, err := os.Stat(walPath); err == nil && !info.IsDir() {
-				SQLiteWALSize.WithLabelValues(dbFile).Set(float64(info.Size()))
-			}
-		}
-
-		// Reputation metrics
-		UpdateReputationMetrics()
-	}
+	collect := func() { collectSystemMetrics(proc) }
 
 	// Initial collection
 	collect()
@@ -701,6 +665,65 @@ func StartSystemMetricsCollector(stop <-chan struct{}) {
 			}
 		}
 	}()
+}
+
+// collectSystemMetrics takes one sample of the process and system gauges. proc
+// may be nil when the process could not be opened; its file-descriptor count is
+// then skipped.
+func collectSystemMetrics(proc *process.Process) {
+	if !startTime.IsZero() {
+		UptimeSeconds.Set(time.Since(startTime).Seconds())
+	}
+	goroutines := runtime.NumGoroutine()
+	goroutinesGauge.Set(float64(goroutines))
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	memoryAllocGauge.Set(float64(m.Alloc))
+	memoryTotalGauge.Set(float64(m.TotalAlloc))
+	memorySysGauge.Set(float64(m.Sys))
+
+	// Publish the same sample the gauges just took, so the REST endpoints
+	// answer from it instead of stopping the world again for their own.
+	lastGoroutines.Store(int64(goroutines))
+	lastMemAlloc.Store(m.Alloc)
+	lastMemSys.Store(m.Sys)
+	lastMemTotalAlloc.Store(m.TotalAlloc)
+
+	// System-wide metrics
+	if v, err := mem.VirtualMemory(); err == nil {
+		memoryUsageGauge.Set(v.UsedPercent)
+		lastMemoryUsage.Store(new(v.UsedPercent))
+	}
+	if c, err := cpu.Percent(0, false); err == nil && len(c) > 0 {
+		cpuUsageGauge.Set(c[0])
+		lastCPUUsage.Store(new(c[0]))
+	}
+	if d, err := disk.Usage("/"); err == nil {
+		storageUsageGauge.Set(float64(d.Used))
+		storageTotalGauge.Set(float64(d.Total))
+		storageUsagePctGauge.Set(d.UsedPercent)
+		lastStorageUsage.Store(new(float64(d.Used)))
+		lastStorageTotal.Store(new(float64(d.Total)))
+		lastStoragePct.Store(new(d.UsedPercent))
+	}
+
+	// Process-specific metrics
+	if proc != nil {
+		if n, err := proc.NumFDs(); err == nil {
+			OpenFileDescriptors.Set(float64(n))
+		}
+	}
+
+	// SQLite WAL metrics - optimized to check only specific files
+	for _, dbFile := range []string{"gateon.db"} {
+		walPath := dbFile + "-wal"
+		if info, err := os.Stat(walPath); err == nil && !info.IsDir() {
+			SQLiteWALSize.WithLabelValues(dbFile).Set(float64(info.Size()))
+		}
+	}
+
+	// Reputation metrics
+	UpdateReputationMetrics()
 }
 
 // A Prometheus label value taken from a request is a map key an attacker
