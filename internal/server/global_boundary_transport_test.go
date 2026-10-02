@@ -6,14 +6,21 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
+	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/gsoultan/gateon/internal/api"
 	"github.com/gsoultan/gateon/internal/auth"
+	"github.com/gsoultan/gateon/internal/config"
+	domainentrypoint "github.com/gsoultan/gateon/internal/domain/entrypoint"
+	"github.com/gsoultan/gateon/internal/server/handlers"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
@@ -170,6 +177,47 @@ func TestOperatorCannotSwitchAuthenticationOffOverGRPC(t *testing.T) {
 	conf.Waf.ParanoiaLevel = 2
 	if _, err := a.grpc.UpdateGlobalConfig(context.Background(), &gateonv1.UpdateGlobalConfigRequest{Config: conf}); err != nil {
 		t.Fatalf("an operator's operational save over gRPC: %v", err)
+	}
+}
+
+// TestOperatorImportCannotWidenTheManagementPlane: config import is the third
+// writer, and an operator holds its permission. It carries no global section --
+// one sent is ignored, never stored -- and the entrypoints it carries are saved
+// through the domain, which refuses the management listener's id. That id used
+// to put the dashboard and the management API on the imported entrypoint's
+// public address with allow_public_management off.
+func TestOperatorImportCannotWidenTheManagementPlane(t *testing.T) {
+	t.Setenv("GATEON_ENCRYPTION_KEY", "")
+	reg := config.NewGlobalRegistry(filepath.Join(t.TempDir(), "global.json"))
+	if err := reg.Update(context.Background(), &gateonv1.GlobalConfig{
+		Auth: &gateonv1.AuthConfig{Enabled: true, PasetoSecret: "0123456789abcdef0123456789abcdef"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	eps := config.NewEntryPointRegistry(filepath.Join(t.TempDir(), "entrypoints.json"))
+	mux := http.NewServeMux()
+	handlers.RegisterRESTHandlers(mux, &api.ApiService{Globals: reg},
+		&handlers.Deps{EpService: domainentrypoint.NewService(eps, nil, nil)})
+	srv := httptest.NewServer(withClaims(mux, operatorClaims))
+	t.Cleanup(srv.Close)
+
+	body := `{"global":{"auth":{"enabled":false},"management":{"allowPublicManagement":true}},` +
+		`"entry_points":[{"id":"management","address":"0.0.0.0:80"}]}`
+	resp, err := srv.Client().Post(srv.URL+"/v1/config/import", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+
+	if _, ok := eps.Get(context.Background(), "management"); ok {
+		t.Fatalf("an operator's import stored an entrypoint under the management listener's id (%d %s)", resp.StatusCode, out)
+	}
+	if !strings.Contains(string(out), "reserved") {
+		t.Errorf("the import did not say why the entrypoint was refused: %s", out)
+	}
+	if gc := reg.Get(context.Background()); !gc.GetAuth().GetEnabled() || gc.GetManagement().GetAllowPublicManagement() {
+		t.Fatalf("an import changed the global configuration: %v", gc)
 	}
 }
 

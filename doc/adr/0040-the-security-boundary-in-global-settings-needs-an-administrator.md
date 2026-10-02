@@ -140,6 +140,17 @@ longer reachable. At run time an unclassified field is enforced as Boundary.
 So a field added to the proto cannot default to operator-writable: the build
 fails until someone decides, and production refuses operators in the meantime.
 
+### The management listener's entrypoint id is reserved
+
+The same widening was reachable without the global configuration. The
+management plane recognises a request as arriving on its dedicated listener by
+the entrypoint id `management` alone (`isPublicManagementAllowed`, the base
+handler's management branch), and an operator may write entrypoints. A
+data-plane entrypoint saved with that id therefore served the dashboard and
+the management API on its own address with `allow_public_management` off. The
+domain `SaveEntryPoint` -- which REST, gRPC and config import all use -- now
+refuses the id for every caller; no data-plane entrypoint needs it.
+
 ### A change to the audit settings is itself audited, first
 
 `UpdateGlobalConfig` writes an audit entry -- `update` on `audit_config`,

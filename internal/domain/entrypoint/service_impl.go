@@ -15,6 +15,19 @@ import (
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
+// ReservedManagementID is the entrypoint id of the dedicated management
+// listener. The management plane recognises a request as arriving on that
+// listener by this id alone (internal/server: isPublicManagementAllowed, and
+// the base handler's management branch), so a data-plane entrypoint given it
+// would serve the dashboard and the management API on its own address, with
+// allow_public_management off. Choosing where the management plane is
+// reachable is administrator-only (ADR 0040), and nobody needs a data-plane
+// entrypoint by this name, so it is refused for every caller.
+const ReservedManagementID = "management"
+
+// ErrReservedID refuses an entrypoint saved under ReservedManagementID.
+var ErrReservedID = errors.New(`entrypoint id "management" is reserved for the dedicated management listener`)
+
 // serviceImpl implements Service.
 type serviceImpl struct {
 	store       config.EntryPointStore
@@ -41,6 +54,9 @@ func (s *serviceImpl) GetEntryPoint(ctx context.Context, id string) (*gateonv1.E
 func (s *serviceImpl) SaveEntryPoint(ctx context.Context, ep *gateonv1.EntryPoint) error {
 	if ep.Address == "" {
 		return errors.New("missing address")
+	}
+	if ep.Id == ReservedManagementID {
+		return ErrReservedID
 	}
 	if ep.Id == "" {
 		ep.Id = uuid.NewString()
