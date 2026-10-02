@@ -748,6 +748,21 @@ func (m *Manager) beginTOTPEnrolment(id string) (string, string, []string, error
 	return key.Secret(), qrBase64, plainCodes, nil
 }
 
+// completeSecondFactor issues the session for a correct second factor. A
+// disabled account is refused here, after the code was accepted, for the same
+// reason Login refuses it only after a correct password: so the refusal does not
+// tell a caller without the code which accounts are disabled. Verify2FA is
+// reachable on its own with an account id, so without this a disabled user who
+// still held their authenticator or a recovery code signed straight back in.
+func (m *Manager) completeSecondFactor(user *gateonv1.User) (bool, string, *gateonv1.User, error) {
+	if user.Disabled {
+		return false, "", nil, ErrAccountDisabled
+	}
+	m.resetFailedAttempts(user.Username)
+	token, u, err := m.issueToken(user)
+	return err == nil, token, u, err
+}
+
 func (m *Manager) Verify2FA(id, code string) (bool, string, *gateonv1.User, error) {
 	// Held while the stored secret is read, decrypted and written back, so a
 	// key rotation cannot re-encrypt it in between.
@@ -764,6 +779,10 @@ func (m *Manager) Verify2FA(id, code string) (bool, string, *gateonv1.User, erro
 	if err != nil {
 		return false, "", nil, err
 	}
+	// The session issued below reads its role claim from user.Role. Leaving it
+	// in the local variable signed every 2FA account in with role "", which
+	// every permission check refuses.
+	user.Role = role
 
 	// Enforce the same lockout used for password login to throttle brute-force
 	// attempts against the 6-digit TOTP and recovery codes.
@@ -800,9 +819,7 @@ func (m *Manager) Verify2FA(id, code string) (bool, string, *gateonv1.User, erro
 			if _, err = m.db.Exec(qUpdate, true, storedSecret, strings.Join(newCodes, ","), id); err != nil {
 				return false, "", nil, err
 			}
-			m.resetFailedAttempts(user.Username)
-			token, u, err := m.issueToken(&user)
-			return true, token, u, err
+			return m.completeSecondFactor(&user)
 		}
 	}
 
@@ -821,9 +838,7 @@ func (m *Manager) Verify2FA(id, code string) (bool, string, *gateonv1.User, erro
 				}
 			}
 		}
-		m.resetFailedAttempts(user.Username)
-		token, u, err := m.issueToken(&user)
-		return true, token, u, err
+		return m.completeSecondFactor(&user)
 	}
 
 	// Invalid code: count it towards the lockout threshold.
