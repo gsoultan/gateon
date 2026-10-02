@@ -88,6 +88,8 @@ func TestIsLogsRequestAuthorized(t *testing.T) {
 	t.Run("allows with valid token", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/v1/logs?auth=expected", nil)
 		req.Header.Set("Upgrade", "websocket")
+		req.Header.Set("Connection", "Upgrade")
+		req.Header.Set("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==")
 		claims := &auth.Claims{Role: auth.RoleAdmin}
 
 		if !isLogsRequestAuthorized(req, testTokenVerifier{token: "expected", claims: claims}) {

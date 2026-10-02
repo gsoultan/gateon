@@ -325,9 +325,54 @@ type TokenVerifier interface {
 	VerifyToken(token string) (any, error)
 }
 
+// sessionCookieName is the management session cookie's name on a plain-HTTP
+// request, and was its name everywhere before ADR 0041.
 const sessionCookieName = "gateon_session"
 
-// SetSessionCookie sets an HttpOnly, SameSite=Lax session cookie. Secure=true when isTLS.
+// hostSessionCookieName is its name on a secure request. A browser accepts a
+// __Host- cookie only from a secure origin, with Path=/ and no Domain, so
+// neither a sibling subdomain nor a plaintext response on the same host can
+// plant or overwrite one. A plain-HTTP dashboard cannot have that guarantee:
+// the browser refuses the prefix without Secure, so there the name stays.
+const hostSessionCookieName = "__Host-" + sessionCookieName
+
+// sessionCookieNameFor names the session cookie for r.
+func sessionCookieNameFor(r *http.Request) string {
+	if request.IsSecure(r) {
+		return hostSessionCookieName
+	}
+	return sessionCookieName
+}
+
+// newSessionCookie builds the session cookie under name. SameSite is Strict:
+// the dashboard is a single-page app whose HTML needs no cookie, and every
+// call it makes is same-origin, so Strict costs it nothing, while Lax would
+// still send the cookie on a top-level navigation another site starts (ADR
+// 0041). Neither stops a same-site sender; that is the CSRF guard's job.
+//
+// Every Set-Cookie for the session goes through here, so the clear always
+// carries the attributes the set did: a browser will not clear a Secure cookie
+// with a non-Secure Set-Cookie.
+func newSessionCookie(r *http.Request, name, token string, maxAge int) *http.Cookie {
+	// #nosec G124 -- Secure is conditional by design, not missing. gosec wants
+	// a literal true and cannot evaluate request.IsSecure, which is the whole
+	// point: the gateway serves both TLS and plain-HTTP entrypoints, and a
+	// hardcoded Secure would make the cookie undeliverable on the second
+	// without protecting anything on the first. HttpOnly and SameSite are
+	// literals because they have no such tradeoff.
+	return &http.Cookie{
+		Name:     name,
+		Value:    token,
+		Path:     "/",
+		MaxAge:   maxAge,
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+		Secure:   request.IsSecure(r),
+	}
+}
+
+// SetSessionCookie sets the HttpOnly, SameSite=Strict session cookie, named
+// with the __Host- prefix and Secure when the request is secure.
 // It takes the request rather than a bool because the bool was being computed
 // wrongly at all three call sites, as `r.TLS != nil`. That answers "did this
 // process terminate the TLS", which is the wrong question: behind a load
@@ -341,83 +386,168 @@ const sessionCookieName = "gateon_session"
 // attribute every caller has to recompute is an attribute some caller will get
 // wrong.
 func SetSessionCookie(w http.ResponseWriter, r *http.Request, token string, maxAge int) {
-	// #nosec G124 -- Secure is conditional by design, not missing. gosec wants
-	// a literal true and cannot evaluate request.IsSecure, which is the whole
-	// point: the gateway serves both TLS and plain-HTTP entrypoints, and a
-	// hardcoded Secure would make the cookie undeliverable on the second
-	// without protecting anything on the first. HttpOnly and SameSite are
-	// literals here precisely because they have no such tradeoff. Building the
-	// header by hand hid this from gosec entirely; being visible and explained
-	// is the better state.
-	http.SetCookie(w, &http.Cookie{
-		Name:     sessionCookieName,
-		Value:    token,
-		Path:     "/",
-		MaxAge:   maxAge,
-		HttpOnly: true,
-		SameSite: http.SameSiteLaxMode,
-		Secure:   request.IsSecure(r),
-	})
+	name := sessionCookieNameFor(r)
+	http.SetCookie(w, newSessionCookie(r, name, token, maxAge))
+	if name != sessionCookieName {
+		// A session from before the rename may still be in the browser under
+		// the old name. Expire it, so the next sign-in leaves one session
+		// cookie rather than two.
+		http.SetCookie(w, newSessionCookie(r, sessionCookieName, "", -1))
+	}
 }
 
 // ClearSessionCookie instructs the client to clear the session cookie.
 // The attributes must match the ones the cookie was set with. A browser matches
 // an expiring cookie on name, path and domain, and a Secure cookie cannot be
 // cleared by a non-Secure Set-Cookie on an HTTPS origin -- so this has to make
-// the same Secure decision as SetSessionCookie, from the same input.
+// the same Secure decision as SetSessionCookie, from the same input. On a
+// secure request both names are cleared: a session signed in before the
+// rename is still under the old one.
 func ClearSessionCookie(w http.ResponseWriter, r *http.Request) {
-	// #nosec G124 -- same as SetSessionCookie, and it must stay the same: a
-	// browser will not clear a Secure cookie with a non-Secure Set-Cookie.
-	http.SetCookie(w, &http.Cookie{
-		Name:     sessionCookieName,
-		Value:    "",
-		Path:     "/",
-		MaxAge:   -1,
-		HttpOnly: true,
-		SameSite: http.SameSiteLaxMode,
-		Secure:   request.IsSecure(r),
-	})
+	name := sessionCookieNameFor(r)
+	http.SetCookie(w, newSessionCookie(r, name, "", -1))
+	if name != sessionCookieName {
+		http.SetCookie(w, newSessionCookie(r, sessionCookieName, "", -1))
+	}
 }
 
-// ExtractToken returns the token from Cookie (gateon_session), Authorization Bearer,
-// or query params (token, access_token, auth) to support WebSocket, SSE, and CLI clients.
-func ExtractToken(r *http.Request) string {
+// sessionCookieValue returns the session cookie, preferring the __Host- name.
+//
+// The old name is still read on a secure request, for one release (the one
+// after v2.7.0), so that sessions signed in before the upgrade survive it.
+// Remove that half in the release after: until then a cookie planted under
+// the old name by a sibling subdomain is read when no __Host- cookie is
+// present, which is the weakness the prefix exists to close.
+func sessionCookieValue(r *http.Request) string {
+	if c, err := r.Cookie(hostSessionCookieName); err == nil && c.Value != "" {
+		return c.Value
+	}
 	if c, err := r.Cookie(sessionCookieName); err == nil && c.Value != "" {
 		return c.Value
+	}
+	return ""
+}
+
+// ExtractToken returns the token from the session cookie, Authorization
+// Bearer, or -- on a WebSocket handshake only -- the query parameters token,
+// access_token and auth.
+func ExtractToken(r *http.Request) string {
+	if t := sessionCookieValue(r); t != "" {
+		return t
 	}
 	if t := bearerToken(r); t != "" {
 		return t
 	}
 
-	// Query parameters are only accepted for WebSocket/SSE to prevent token leakage in browser history
-	// for standard web requests, while still allowing auth for protocols that don't support headers well.
-	if !isWebSocketOrSSE(r) {
+	// A token in a query string is written into access logs, browser history
+	// and any Referer the page later sends, so it is accepted only where there
+	// is no other way to send one: a browser's WebSocket API cannot set a
+	// header. Server-sent events used to be included, on nothing more than an
+	// Accept header any request can carry; the dashboard's own event stream
+	// authenticates with its cookie, and a non-browser SSE client can send
+	// Authorization like any other request (ADR 0041).
+	if !isWebSocketHandshake(r) {
 		return ""
 	}
-
-	if t := r.URL.Query().Get("token"); t != "" {
-		return t
-	}
-	if t := r.URL.Query().Get("access_token"); t != "" {
-		return t
-	}
-	if t := r.URL.Query().Get("auth"); t != "" {
-		return t
+	q := r.URL.Query()
+	for _, name := range [...]string{"token", "access_token", "auth"} {
+		if t := q.Get(name); t != "" {
+			return t
+		}
 	}
 	return ""
 }
 
-func isWebSocketOrSSE(r *http.Request) bool {
-	if strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
-		return true
-	}
-	if strings.Contains(strings.ToLower(r.Header.Get("Accept")), "text/event-stream") {
-		return true
-	}
-	if strings.Contains(strings.ToLower(r.Header.Get("Content-Type")), "text/event-stream") {
-		return true
+// isWebSocketHandshake reports whether r is a WebSocket opening handshake as
+// RFC 6455 section 4.1 defines one: a GET carrying Upgrade: websocket,
+// Connection: Upgrade and a Sec-WebSocket-Key. An Upgrade header alone is not
+// one, and a server that upgrades would refuse it.
+func isWebSocketHandshake(r *http.Request) bool {
+	return r.Method == http.MethodGet &&
+		headerHasToken(r.Header, "Upgrade", "websocket") &&
+		headerHasToken(r.Header, "Connection", "upgrade") &&
+		r.Header.Get("Sec-WebSocket-Key") != ""
+}
+
+// headerHasToken reports whether any comma-separated element of the named
+// header equals token, case-insensitively.
+func headerHasToken(h http.Header, name, token string) bool {
+	for _, v := range h.Values(name) {
+		for part := range strings.SplitSeq(v, ",") {
+			if strings.EqualFold(strings.TrimSpace(part), token) {
+				return true
+			}
+		}
 	}
 	return false
+}
+
+// StripSessionCookie removes the management session cookie, under either of
+// its names, from every Cookie line in h, and drops a line it leaves empty.
+// Every other cookie is kept as it was sent.
+//
+// The proxy calls it on every request, so the common case -- no session
+// cookie -- is one substring scan per Cookie line and allocates nothing.
+func StripSessionCookie(h http.Header) {
+	lines := h["Cookie"]
+	kept := lines[:0]
+	changed := false
+	for _, line := range lines {
+		if !strings.Contains(line, sessionCookieName) {
+			kept = append(kept, line)
+			continue
+		}
+		rest, removed := withoutSessionCookie(line)
+		changed = changed || removed
+		if rest != "" {
+			kept = append(kept, rest)
+		}
+	}
+	if !changed {
+		return
+	}
+	if len(kept) == 0 {
+		delete(h, "Cookie")
+		return
+	}
+	h["Cookie"] = kept
+}
+
+// withoutSessionCookie returns line minus any session cookie, and whether it
+// had one. A line without one is returned as it was, unallocated.
+func withoutSessionCookie(line string) (string, bool) {
+	found := false
+	for part := range strings.SplitSeq(line, ";") {
+		if isSessionCookiePart(part) {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return line, false
+	}
+	var b strings.Builder
+	b.Grow(len(line))
+	for part := range strings.SplitSeq(line, ";") {
+		part = strings.TrimSpace(part)
+		if part == "" || isSessionCookiePart(part) {
+			continue
+		}
+		if b.Len() > 0 {
+			b.WriteString("; ")
+		}
+		b.WriteString(part)
+	}
+	return b.String(), true
+}
+
+// isSessionCookiePart reports whether one name=value pair of a Cookie line is
+// the session cookie. The name is matched exactly: a route's OIDC cookie is
+// gateon_session_<route>, which is the app's own and must pass.
+func isSessionCookiePart(part string) bool {
+	name, _, _ := strings.Cut(part, "=")
+	name = strings.TrimSpace(name)
+	return name == sessionCookieName || name == hostSessionCookieName
 }
 
 // bearerToken returns the Bearer token from the Authorization header.

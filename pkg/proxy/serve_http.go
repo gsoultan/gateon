@@ -6,10 +6,12 @@ package proxy
 import (
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync/atomic"
 	"time"
 
 	"github.com/gsoultan/gateon/internal/logger"
+	mwauth "github.com/gsoultan/gateon/internal/middleware/auth"
 	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/pkg/httputil"
 )
@@ -37,6 +39,8 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.withholdManagementCredentials(r)
+
 	if isUpgradeRequest(r) {
 		h.proxyUpgrade(w, r, targetURL, state, start)
 		return
@@ -56,6 +60,43 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	proxy.ServeHTTP(sw, r)
 
 	h.recordMetrics(state, start, sw.Status)
+}
+
+// withholdManagementCredentials removes from r what would let the backend act
+// as a signed-in dashboard user (ADR 0041). A browser sends the session cookie
+// to every port on the dashboard's host, so without this every app behind the
+// gateway on that host received the admin's session. It is done here, the one
+// place every protocol's request passes on its way to a backend -- HTTP/1, h2,
+// gRPC and the WebSocket upgrade alike -- and after the route's middlewares,
+// which still see the request as the client sent it.
+//
+// Without a session cookie or a PASETO bearer token this allocates nothing.
+func (h *ProxyHandler) withholdManagementCredentials(r *http.Request) {
+	mwauth.StripSessionCookie(r.Header)
+	if h.sessions == nil {
+		return
+	}
+	token, ok := pasetoLocalBearer(r.Header.Get("Authorization"))
+	if !ok {
+		return
+	}
+	// Only a token this gateway's management plane accepts is withheld: an app
+	// may use PASETO v4.local tokens of its own, under its own key, and those
+	// are its business.
+	if _, err := h.sessions.VerifyToken(token); err == nil {
+		r.Header.Del("Authorization")
+	}
+}
+
+// pasetoLocalBearer returns the token of a "Bearer v4.local." credential, the
+// only form a management session token takes.
+func pasetoLocalBearer(header string) (string, bool) {
+	const scheme, prefix = "bearer ", "v4.local."
+	if len(header) <= len(scheme)+len(prefix) || !strings.EqualFold(header[:len(scheme)], scheme) {
+		return "", false
+	}
+	token := header[len(scheme):]
+	return token, strings.HasPrefix(token, prefix)
 }
 
 func (h *ProxyHandler) logRequest(r *http.Request, targetURL string) {

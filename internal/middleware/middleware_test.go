@@ -239,9 +239,12 @@ func TestExtractToken_QueryAuth(t *testing.T) {
 		t.Errorf("expected empty token from auth query on regular GET, got %q", got)
 	}
 
-	// WebSocket Upgrade: query token accepted
+	// WebSocket handshake: query token accepted. A handshake is the whole RFC
+	// 6455 header set, not an Upgrade header alone (ADR 0041).
 	req = httptest.NewRequest("GET", "/v1/logs?auth=test-token", nil)
 	req.Header.Set("Upgrade", "websocket")
+	req.Header.Set("Connection", "Upgrade")
+	req.Header.Set("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==")
 	got = ExtractToken(req)
 	if got != "test-token" {
 		t.Errorf("expected token from auth query on websocket upgrade, got %q", got)

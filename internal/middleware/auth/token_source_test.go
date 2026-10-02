@@ -78,17 +78,28 @@ func TestBearerSchemeIsRequired(t *testing.T) {
 	}
 }
 
-// TestQueryTokensAreOnlyAcceptedForWebSocketAndSSE is the narrowing.
+// wsHandshake is the header set of a WebSocket opening handshake (RFC 6455
+// section 4.1), which is what a browser's WebSocket API sends.
+func wsHandshake() map[string]string {
+	return map[string]string{
+		"Upgrade": "websocket", "Connection": "Upgrade",
+		"Sec-WebSocket-Key": "dGhlIHNhbXBsZSBub25jZQ==", "Sec-WebSocket-Version": "13",
+	}
+}
+
+// TestQueryTokensAreOnlyAcceptedForAWebSocketHandshake is the narrowing.
 //
 // A token in a query string is written into access logs, browser history and any
 // Referer the page later sends. That is why it is not a general-purpose place to
-// put a credential, and it is accepted only for the two protocols that cannot
-// carry a header: a WebSocket handshake and an EventSource subscription, neither
-// of which lets the client set Authorization.
+// put a credential, and it is accepted only where a browser has no other way to
+// send one: the WebSocket handshake, which page script cannot add a header to.
 //
-// The narrowing is what has to hold. If it stops holding, every ordinary request
-// gains a way to pass a credential through a channel that gets logged.
-func TestQueryTokensAreOnlyAcceptedForWebSocketAndSSE(t *testing.T) {
+// Server-sent events were accepted too, on nothing more than an Accept header
+// any request can carry, which made the narrowing optional for whoever wanted
+// to opt out of it (review M15, ADR 0041). The dashboard's event stream
+// authenticates with its cookie; a non-browser SSE client can send
+// Authorization like any other request.
+func TestQueryTokensAreOnlyAcceptedForAWebSocketHandshake(t *testing.T) {
 	const path = "/stream?token=qs-token"
 
 	t.Run("refused for an ordinary request", func(t *testing.T) {
@@ -100,30 +111,51 @@ func TestQueryTokensAreOnlyAcceptedForWebSocketAndSSE(t *testing.T) {
 	})
 
 	t.Run("accepted for a websocket handshake", func(t *testing.T) {
-		r := reqWith(path, map[string]string{"Upgrade": "websocket"}, "")
-		if got := ExtractToken(r); got != "qs-token" {
+		if got := ExtractToken(reqWith(path, wsHandshake(), "")); got != "qs-token" {
 			t.Errorf("got %q, want the query token; a WebSocket client cannot set "+
 				"Authorization, so refusing it here makes the protocol unusable", got)
 		}
 	})
 
-	t.Run("accepted for an EventSource subscription", func(t *testing.T) {
-		r := reqWith(path, map[string]string{"Accept": "text/event-stream"}, "")
-		if got := ExtractToken(r); got != "qs-token" {
-			t.Errorf("got %q, want the query token for SSE", got)
+	t.Run("refused for a GET that only claims to want an event stream", func(t *testing.T) {
+		for _, h := range []map[string]string{
+			{"Accept": "text/event-stream"},
+			{"Accept": "text/html, text/event-stream;q=0.9"},
+			{"Content-Type": "text/event-stream"},
+		} {
+			if got := ExtractToken(reqWith(path, h, "")); got != "" {
+				t.Errorf("with headers %v the query token %q was accepted; any request can send "+
+					"that header, so it narrows nothing", h, got)
+			}
+		}
+	})
+
+	t.Run("refused for an Upgrade header that is not a handshake", func(t *testing.T) {
+		for name, h := range map[string]map[string]string{
+			"Upgrade alone":          {"Upgrade": "websocket"},
+			"no Sec-WebSocket-Key":   {"Upgrade": "websocket", "Connection": "Upgrade"},
+			"no Connection: Upgrade": {"Upgrade": "websocket", "Sec-WebSocket-Key": "k"},
+			"another protocol":       {"Upgrade": "h2c", "Connection": "Upgrade", "Sec-WebSocket-Key": "k"},
+		} {
+			if got := ExtractToken(reqWith(path, h, "")); got != "" {
+				t.Errorf("%s: the query token %q was accepted", name, got)
+			}
+		}
+		post := httptest.NewRequest(http.MethodPost, path, nil)
+		for k, v := range wsHandshake() {
+			post.Header.Set(k, v)
+		}
+		if got := ExtractToken(post); got != "" {
+			t.Errorf("a POST with handshake headers yielded the query token %q; a handshake is a GET", got)
 		}
 	})
 
 	t.Run("header matching is case insensitive", func(t *testing.T) {
 		// Browsers and proxies do not agree on casing, and a check that only
 		// matched one spelling would refuse real clients.
-		for _, h := range []map[string]string{
-			{"Upgrade": "WebSocket"},
-			{"Upgrade": "WEBSOCKET"},
-			{"Accept": "TEXT/EVENT-STREAM"},
-			{"Accept": "text/html, text/event-stream;q=0.9"},
-			{"Content-Type": "text/event-stream"},
-		} {
+		for _, v := range [][2]string{{"WebSocket", "upgrade"}, {"WEBSOCKET", "keep-alive, Upgrade"}} {
+			h := wsHandshake()
+			h["Upgrade"], h["Connection"] = v[0], v[1]
 			if got := ExtractToken(reqWith(path, h, "")); got != "qs-token" {
 				t.Errorf("with headers %v the query token was refused", h)
 			}
@@ -132,7 +164,7 @@ func TestQueryTokensAreOnlyAcceptedForWebSocketAndSSE(t *testing.T) {
 
 	t.Run("all three parameter names", func(t *testing.T) {
 		for _, p := range []string{"token", "access_token", "auth"} {
-			r := reqWith("/s?"+p+"=v", map[string]string{"Upgrade": "websocket"}, "")
+			r := reqWith("/s?"+p+"=v", wsHandshake(), "")
 			if got := ExtractToken(r); got != "v" {
 				t.Errorf("query parameter %q gave %q, want \"v\"", p, got)
 			}

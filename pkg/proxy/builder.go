@@ -39,6 +39,7 @@ type ProxyHandlerBuilder struct {
 	transportConfig     *TransportConfig
 	tlsClientConfig     *gateonv1.TlsClientConfig
 	stripCORS           bool
+	sessions            SessionVerifier
 }
 
 // NewProxyHandlerBuilder creates a builder for the given route.
@@ -129,6 +130,13 @@ func (b *ProxyHandlerBuilder) SetStripCORS(strip bool) *ProxyHandlerBuilder {
 	return b
 }
 
+// SetSessionVerifier lets the handler recognise a management session token in
+// Authorization and withhold it from the backend (ADR 0041).
+func (b *ProxyHandlerBuilder) SetSessionVerifier(v SessionVerifier) *ProxyHandlerBuilder {
+	b.sessions = v
+	return b
+}
+
 // Build constructs the ProxyHandler.
 func (b *ProxyHandlerBuilder) Build() *ProxyHandler {
 	if b.lb == nil {
@@ -177,6 +185,7 @@ func (b *ProxyHandlerBuilder) Build() *ProxyHandler {
 		healthCheckClient:   b.healthCheckClient,
 		tlsConfig:           b.tlsConfig,
 		StripCORS:           b.stripCORS,
+		sessions:            b.sessions,
 	}
 	if h.discoveryURL != "" {
 		go h.runDiscovery()
