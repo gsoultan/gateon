@@ -172,22 +172,25 @@ func (s *ApiService) InstallClamav(ctx context.Context, req *gateonv1.InstallCla
 	}
 
 	// Update global config with the new installation mode
-	gc := s.Globals.Get(ctx)
-	if gc.Waf == nil {
-		gc.Waf = &gateonv1.WafConfig{}
-	}
-	if gc.Waf.Clamav == nil {
-		gc.Waf.Clamav = &gateonv1.ClamavConfig{}
-	}
-	gc.Waf.Clamav.InstallationMode = req.Mode
-	if err := s.Globals.Update(ctx, gc); err != nil {
+	var clamav *gateonv1.ClamavConfig
+	err := s.editGlobal(ctx, func(gc *gateonv1.GlobalConfig) {
+		if gc.Waf == nil {
+			gc.Waf = &gateonv1.WafConfig{}
+		}
+		if gc.Waf.Clamav == nil {
+			gc.Waf.Clamav = &gateonv1.ClamavConfig{}
+		}
+		gc.Waf.Clamav.InstallationMode = req.Mode
+		clamav = gc.Waf.Clamav
+	})
+	if err != nil {
 		return &gateonv1.InstallClamavResponse{Success: false, Message: "Failed to update configuration: " + err.Error()}, nil
 	}
 
 	// Apply the requested mode to the manager directly so it does not depend on
 	// the config-change supervisor wiring being present (e.g. in tests). This is
 	// idempotent with the supervisor's own reconcile.
-	s.ClamAVManager.Reconfigure(ctx, gc.Waf.Clamav)
+	s.ClamAVManager.Reconfigure(ctx, clamav)
 
 	// Validate prerequisites synchronously so the operator gets an immediate,
 	// actionable error (missing Docker, no package manager, insufficient

@@ -268,10 +268,15 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 		// those itself, so an ACME switch, a certificate or a client authority
 		// saved from the dashboard did nothing until a restart.
 		if _, err := svc.UpdateGlobalConfig(r.Context(), &gateonv1.UpdateGlobalConfigRequest{Config: &conf}); err != nil {
-			// A refusal -- a kept secret that cannot be kept -- names the
-			// field, and the caller needs that to fix the request.
-			if status.Code(err) == codes.InvalidArgument {
+			// A refusal -- a kept secret that cannot be kept, or a setting
+			// only an administrator may change (ADR 0040) -- names the field,
+			// and the caller needs that to fix the request.
+			switch status.Code(err) {
+			case codes.InvalidArgument:
 				WriteHTTPError(w, http.StatusBadRequest, status.Convert(err).Message())
+				return
+			case codes.PermissionDenied:
+				WriteHTTPError(w, http.StatusForbidden, status.Convert(err).Message())
 				return
 			}
 			logger.L.LogError("global config update failed", "error", err)

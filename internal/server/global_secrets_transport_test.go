@@ -89,6 +89,12 @@ type adminAPI struct {
 
 func newAdminAPI(t *testing.T) (*adminAPI, []string) {
 	t.Helper()
+	return newAPIAs(t, &auth.Claims{ID: "admin-1", Username: "admin", Role: auth.RoleAdmin})
+}
+
+// newAPIAs is newAdminAPI for a caller PasetoAuth identified as claims.
+func newAPIAs(t *testing.T, claims *auth.Claims) (*adminAPI, []string) {
+	t.Helper()
 	t.Setenv("GATEON_ENCRYPTION_KEY", "")
 	path := filepath.Join(t.TempDir(), "global.json")
 	reg := config.NewGlobalRegistry(path)
@@ -111,8 +117,7 @@ func newAdminAPI(t *testing.T) (*adminAPI, []string) {
 		}
 		mux.ServeHTTP(w, r)
 	})
-	admin := &auth.Claims{ID: "admin-1", Username: "admin", Role: auth.RoleAdmin}
-	srv := httptest.NewUnstartedServer(withClaims(dispatch, admin))
+	srv := httptest.NewUnstartedServer(withClaims(dispatch, claims))
 	srv.EnableHTTP2 = true
 	srv.StartTLS()
 	t.Cleanup(srv.Close)

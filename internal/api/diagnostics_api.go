@@ -866,17 +866,21 @@ func (s *ApiService) applyDisablePublicManagementRecommendation(ctx context.Cont
 	if s.Globals == nil {
 		return &gateonv1.ApplyRecommendationResponse{Success: false, Message: "Global config store not available"}, nil
 	}
-	cfg := s.Globals.Get(ctx)
-	if cfg.Management == nil {
-		cfg.Management = &gateonv1.ManagementConfig{}
-	}
-	if !cfg.Management.AllowPublicManagement {
+	if !s.Globals.Get(ctx).GetManagement().GetAllowPublicManagement() {
 		return &gateonv1.ApplyRecommendationResponse{Success: true, Message: "Public management access is already disabled."}, nil
 	}
 
-	cfg.Management.AllowPublicManagement = false
-	if err := s.Globals.Update(ctx, cfg); err != nil {
-		return &gateonv1.ApplyRecommendationResponse{Success: false, Message: "Failed to update global config: " + err.Error()}, nil
+	// Management exposure is administrator-only (ADR 0040), narrowing it
+	// included: an administrator may be reaching the dashboard through the
+	// public entrypoint this switches off.
+	err := s.editGlobal(ctx, func(cfg *gateonv1.GlobalConfig) {
+		if cfg.Management == nil {
+			cfg.Management = &gateonv1.ManagementConfig{}
+		}
+		cfg.Management.AllowPublicManagement = false
+	})
+	if err != nil {
+		return &gateonv1.ApplyRecommendationResponse{Success: false, Message: "Failed to update global config: " + errorMessage(err)}, nil
 	}
 
 	if s.Invalidator != nil {
@@ -1513,21 +1517,17 @@ func (s *ApiService) applyBlockCountryRecommendation(ctx context.Context, countr
 		return &gateonv1.ApplyRecommendationResponse{Success: false, Message: "Global config service not available"}, nil
 	}
 
-	globalCfg := s.Globals.Get(ctx)
-	if globalCfg.Geoip == nil {
-		globalCfg.Geoip = &gateonv1.GeoIPConfig{}
+	if slices.Contains(s.Globals.Get(ctx).GetGeoip().GetBlockedCountries(), countryCode) {
+		return &gateonv1.ApplyRecommendationResponse{Success: true, Message: fmt.Sprintf("Country %s is already blocked.", countryCode)}, nil
 	}
-
-	// Add to blocked countries
-	for _, c := range globalCfg.Geoip.BlockedCountries {
-		if c == countryCode {
-			return &gateonv1.ApplyRecommendationResponse{Success: true, Message: fmt.Sprintf("Country %s is already blocked.", countryCode)}, nil
+	err := s.editGlobal(ctx, func(globalCfg *gateonv1.GlobalConfig) {
+		if globalCfg.Geoip == nil {
+			globalCfg.Geoip = &gateonv1.GeoIPConfig{}
 		}
-	}
-	globalCfg.Geoip.BlockedCountries = append(globalCfg.Geoip.BlockedCountries, countryCode)
-
-	if err := s.Globals.Update(ctx, globalCfg); err != nil {
-		return &gateonv1.ApplyRecommendationResponse{Success: false, Message: fmt.Sprintf("Failed to update config: %v", err)}, nil
+		globalCfg.Geoip.BlockedCountries = append(globalCfg.Geoip.BlockedCountries, countryCode)
+	})
+	if err != nil {
+		return &gateonv1.ApplyRecommendationResponse{Success: false, Message: "Failed to update config: " + errorMessage(err)}, nil
 	}
 
 	return &gateonv1.ApplyRecommendationResponse{
@@ -1668,23 +1668,21 @@ func (s *ApiService) applyWafHardeningRecommendation(ctx context.Context, reason
 		return &gateonv1.ApplyRecommendationResponse{Success: false, Message: "Global config service not available"}, nil
 	}
 
-	globalCfg := s.Globals.Get(ctx)
-	if globalCfg.Waf == nil {
-		globalCfg.Waf = &gateonv1.WafConfig{Enabled: true, UseCrs: true}
-	} else {
+	err := s.editGlobal(ctx, func(globalCfg *gateonv1.GlobalConfig) {
+		if globalCfg.Waf == nil {
+			globalCfg.Waf = &gateonv1.WafConfig{}
+		}
 		globalCfg.Waf.Enabled = true
 		globalCfg.Waf.UseCrs = true
-	}
-
-	// Enable core protections if they are off
-	globalCfg.Waf.Sqli = true
-	globalCfg.Waf.Xss = true
-	globalCfg.Waf.Lfi = true
-	globalCfg.Waf.Rce = true
-	globalCfg.Waf.Scanner = true
-
-	if err := s.Globals.Update(ctx, globalCfg); err != nil {
-		return &gateonv1.ApplyRecommendationResponse{Success: false, Message: fmt.Sprintf("Failed to update config: %v", err)}, nil
+		// Enable core protections if they are off
+		globalCfg.Waf.Sqli = true
+		globalCfg.Waf.Xss = true
+		globalCfg.Waf.Lfi = true
+		globalCfg.Waf.Rce = true
+		globalCfg.Waf.Scanner = true
+	})
+	if err != nil {
+		return &gateonv1.ApplyRecommendationResponse{Success: false, Message: "Failed to update config: " + errorMessage(err)}, nil
 	}
 
 	return &gateonv1.ApplyRecommendationResponse{
