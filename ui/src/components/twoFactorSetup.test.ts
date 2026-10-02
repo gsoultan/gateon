@@ -18,6 +18,12 @@ let answer: () => Promise<Response> = async () => new Response("{}", { status: 2
 // is no window under bun:test, and the client is not what is under test.
 mock.module("../services/client", () => ({ api: {} }));
 
+// Counts sign-outs: a refused code must not cause one.
+let logouts = 0;
+mock.module("../store/useAuthStore", () => ({
+  useAuthStore: { getState: () => ({ token: "__cookie__", logout: () => { logouts++; } }) },
+}));
+
 const realFetch = globalThis.fetch;
 globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   sent.push({ path: new URL(String(input), "http://gateway.test").pathname, body: JSON.parse(String(init?.body)) });
@@ -40,7 +46,7 @@ beforeEach(() => {
 describe("startTwoFactorSetup", () => {
   test("proves the account with its current password", async () => {
     answer = async () =>
-      new Response(JSON.stringify({ secret: "S", qrCodeUrl: "data:image/png;base64,QR", recoveryCodes: ["r1"] }), {
+      new Response(JSON.stringify({ secret: "S", qrCodeUrl: "data:image/png;base64,QR", recoveryCodes: ["r1"], challenge: "C" }), {
         status: 200,
       });
     const outcome = await startTwoFactorSetup("user-1", "hunter2");
@@ -48,7 +54,7 @@ describe("startTwoFactorSetup", () => {
     expect(sent).toEqual([{ path: "/v1/auth/2fa/setup", body: { id: "user-1", password: "hunter2" } }]);
     expect(outcome).toEqual({
       ok: true,
-      data: { secret: "S", qrCodeUrl: "data:image/png;base64,QR", recoveryCodes: ["r1"] },
+      data: { secret: "S", qrCodeUrl: "data:image/png;base64,QR", recoveryCodes: ["r1"], challenge: "C" },
     });
   });
 
@@ -79,12 +85,39 @@ describe("startTwoFactorSetup", () => {
 });
 
 describe("verifyTwoFactorCode", () => {
-  test("a verified code completes enrolment", async () => {
+  test("a verified code completes enrolment, carrying setup's challenge", async () => {
     answer = async () => new Response(JSON.stringify({ success: true }), { status: 200 });
-    const outcome = await verifyTwoFactorCode("user-1", "123456");
+    const outcome = await verifyTwoFactorCode("user-1", "123456", "v4.local.CHALLENGE");
 
-    expect(sent).toEqual([{ path: "/v1/auth/2fa/verify", body: { id: "user-1", code: "123456" } }]);
+    expect(sent).toEqual([
+      { path: "/v1/auth/2fa/verify", body: { id: "user-1", code: "123456", challenge: "v4.local.CHALLENGE" } },
+    ]);
     expect(outcome).toEqual({ ok: true, data: null });
+  });
+
+  test("an expired challenge says to start again, not that the code is wrong", async () => {
+    answer = async () =>
+      new Response(JSON.stringify({ error: "internal detail", code: "two_factor_challenge_invalid" }), {
+        status: 401,
+      });
+    const outcome = await verifyTwoFactorCode("user-1", "123456", "v4.local.OLD");
+
+    expect(outcome).toEqual({
+      ok: false,
+      message: "Setup took too long and has expired. Close this window and start again.",
+    });
+  });
+
+  // The endpoint is served before authentication, so its 401 is about the code
+  // or the challenge. Through apiFetch it read as "signed out" and ended the
+  // session of the user who was adding a factor to it.
+  test("a refused code does not sign the user out", async () => {
+    logouts = 0;
+    answer = refusal(401);
+    const outcome = await verifyTwoFactorCode("user-1", "000000", "v4.local.C");
+
+    expect(outcome.ok).toBe(false);
+    expect(logouts).toBe(0);
   });
 
   test.each([
@@ -92,7 +125,7 @@ describe("verifyTwoFactorCode", () => {
     ["a 403", refusal(403)],
   ])("%s reads as a wrong code", async (_name, reply) => {
     answer = reply;
-    const outcome = await verifyTwoFactorCode("user-1", "000000");
+    const outcome = await verifyTwoFactorCode("user-1", "000000", "v4.local.C");
 
     expect(outcome).toEqual({
       ok: false,
@@ -102,7 +135,7 @@ describe("verifyTwoFactorCode", () => {
 
   test("a lockout is reported as one, not as a wrong code", async () => {
     answer = refusal(429);
-    const outcome = await verifyTwoFactorCode("user-1", "000000");
+    const outcome = await verifyTwoFactorCode("user-1", "000000", "v4.local.C");
 
     expect(outcome).toEqual({
       ok: false,

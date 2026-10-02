@@ -4,7 +4,12 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 
-import { enrolmentRefusalMessage, signInCodeRefusalMessage, signInRefusalMessage } from "./signInMessages";
+import {
+  enrolmentRefusalMessage,
+  isChallengeRefusal,
+  signInCodeRefusalMessage,
+  signInRefusalMessage,
+} from "./signInMessages";
 
 const LOCKED = "Too many failed attempts. The account is locked for a while; try again later.";
 
@@ -47,4 +52,29 @@ test("the sign-in page shows none of the gateway's text", () => {
   expect(page).toContain("signInRefusalMessage(res.status)");
   expect(page).toContain("enrolmentRefusalMessage(res.status)");
   expect(page).toContain("signInCodeRefusalMessage(res.status)");
+});
+
+// The second step is refused for its challenge with 401 and a fixed code; the
+// page keys on the code alone and sends the user back to the password.
+describe("isChallengeRefusal", () => {
+  const reply = (status: number, body: unknown) => new Response(JSON.stringify(body), { status });
+
+  test.each([
+    ["the challenge code on a 401", () => reply(401, { code: "two_factor_challenge_invalid" }), true],
+    ["a wrong code's 401", () => reply(401, { error: "invalid two-factor authentication code" }), false],
+    ["the challenge code on another status", () => reply(403, { code: "two_factor_challenge_invalid" }), false],
+    ["a body that is not JSON", () => new Response("<html>", { status: 401 }), false],
+  ])("%s", async (_name, res, want) => {
+    expect(await isChallengeRefusal(res())).toBe(want);
+  });
+});
+
+// ADR 0039: the code step carries the password step's challenge, which lives in
+// component state and nowhere a script could find it later.
+test("the sign-in page carries the challenge and keeps it out of storage", () => {
+  const page = readFileSync(new URL("../routes/LoginPage.tsx", import.meta.url), "utf8");
+
+  expect(page).toContain("code: tfaCode, challenge }");
+  expect(page).toContain("setChallenge(data.twoFactorChallenge");
+  expect(page).not.toMatch(/(localStorage|sessionStorage)[^\n]*challenge/i);
 });

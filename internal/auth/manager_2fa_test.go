@@ -42,15 +42,16 @@ func createUser(t *testing.T, m *Manager, username, password string) string {
 // It returns the plaintext secret and recovery codes.
 func enroll(t *testing.T, m *Manager, id, password string) (secret string, codes []string) {
 	t.Helper()
-	secret, _, codes, err := m.Setup2FA(id, password)
+	e, err := m.Setup2FA(id, password)
 	if err != nil {
 		t.Fatalf("Setup2FA: %v", err)
 	}
+	secret, codes = e.Secret, e.RecoveryCodes
 	code, err := totp.GenerateCode(secret, time.Now())
 	if err != nil {
 		t.Fatalf("GenerateCode: %v", err)
 	}
-	ok, token, _, err := m.Verify2FA(id, code)
+	ok, token, _, err := m.Verify2FA(e.Challenge, id, code)
 	if err != nil {
 		t.Fatalf("Verify2FA(enable): %v", err)
 	}
@@ -89,10 +90,11 @@ func TestAuthenticateDoesNotLeakSecretWhen2FARequired(t *testing.T) {
 func TestSetup2FAStoresEncryptedSecret(t *testing.T) {
 	m := newTestManager(t)
 	id := createUser(t, m, "carol", "pw")
-	secret, _, _, err := m.Setup2FA(id, "pw")
+	e, err := m.Setup2FA(id, "pw")
 	if err != nil {
 		t.Fatalf("Setup2FA: %v", err)
 	}
+	secret := e.Secret
 
 	var stored string
 	q := m.dialect.Rebind("SELECT two_factor_secret FROM users WHERE id = ?")
@@ -115,12 +117,13 @@ func TestVerify2FARecoveryCodeOnlyAfterEnabled(t *testing.T) {
 	m := newTestManager(t)
 	id := createUser(t, m, "dave", "pw")
 	// Setup but do NOT enable.
-	_, _, codes, err := m.Setup2FA(id, "pw")
+	e, err := m.Setup2FA(id, "pw")
 	if err != nil {
 		t.Fatalf("Setup2FA: %v", err)
 	}
+	codes := e.RecoveryCodes
 
-	ok, _, _, err := m.Verify2FA(id, codes[0])
+	ok, _, _, err := m.Verify2FA(challengeFor(t, m, id), id, codes[0])
 	if ok {
 		t.Fatal("recovery code must not be accepted before 2FA is enabled")
 	}
@@ -135,13 +138,13 @@ func TestVerify2FARecoveryCodeConsumed(t *testing.T) {
 	_, codes := enroll(t, m, id, "pw")
 
 	// First use of a recovery code succeeds.
-	ok, token, _, err := m.Verify2FA(id, codes[0])
+	ok, token, _, err := m.Verify2FA(challengeFor(t, m, id), id, codes[0])
 	if err != nil || !ok || token == "" {
 		t.Fatalf("recovery login failed: ok=%v token=%q err=%v", ok, token, err)
 	}
 
 	// The same recovery code must not work twice.
-	ok, _, _, err = m.Verify2FA(id, codes[0])
+	ok, _, _, err = m.Verify2FA(challengeFor(t, m, id), id, codes[0])
 	if ok {
 		t.Fatal("recovery code was accepted twice")
 	}
@@ -157,14 +160,14 @@ func TestVerify2FALockoutAfterRepeatedFailures(t *testing.T) {
 
 	var lastErr error
 	for range MaxFailedAttempts {
-		_, _, _, lastErr = m.Verify2FA(id, "000000")
+		_, _, _, lastErr = m.Verify2FA(challengeFor(t, m, id), id, "000000")
 	}
 	if !errors.Is(lastErr, ErrInvalidTwoFactorCode) {
 		t.Fatalf("expected ErrInvalidTwoFactorCode during failures, got %v", lastErr)
 	}
 
 	// The account should now be locked.
-	if _, _, _, err := m.Verify2FA(id, "000000"); !errors.Is(err, ErrAccountLocked) {
+	if _, _, _, err := m.Verify2FA(challengeFor(t, m, id), id, "000000"); !errors.Is(err, ErrAccountLocked) {
 		t.Fatalf("expected ErrAccountLocked after %d failures, got %v", MaxFailedAttempts, err)
 	}
 }

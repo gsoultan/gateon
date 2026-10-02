@@ -132,6 +132,7 @@ func (f stepUpFixture) enrol(t *testing.T) string {
 		Secret        string   `json:"secret"`
 		QRCodeURL     string   `json:"qrCodeUrl"`
 		RecoveryCodes []string `json:"recoveryCodes"`
+		Challenge     string   `json:"challenge"`
 	}
 	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
 		t.Fatalf("decode: %v", err)
@@ -143,7 +144,7 @@ func (f stepUpFixture) enrol(t *testing.T) string {
 	if err != nil {
 		t.Fatalf("GenerateCode: %v", err)
 	}
-	if ok, _, _, err := f.m.Verify2FA(f.id, code); !ok || err != nil {
+	if ok, _, _, err := f.m.Verify2FA(got.Challenge, f.id, code); !ok || err != nil {
 		t.Fatalf("Verify2FA: ok=%v err=%v", ok, err)
 	}
 	return got.Secret
@@ -166,7 +167,8 @@ func TestTwoFactorSetupRefusedKeepsTheOwnersFactor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GenerateCode: %v", err)
 	}
-	if ok, _, _, err := f.m.Verify2FA(f.id, code); !ok || err != nil {
+	_, _, signIn := f.m.Authenticate("alice", stepUpPassword)
+	if ok, _, _, err := f.m.Verify2FA(auth.ChallengeFrom(signIn), f.id, code); !ok || err != nil {
 		t.Errorf("the owner's authenticator stopped verifying: ok=%v err=%v", ok, err)
 	}
 	if _, _, err := f.m.Authenticate("alice", stepUpPassword); !errors.Is(err, auth.ErrTwoFactorRequired) {

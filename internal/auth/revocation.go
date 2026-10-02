@@ -213,6 +213,15 @@ func (m *Manager) currentBinding(id string) (string, error) {
 	if st.role == "" {
 		st.role = RoleViewer
 	}
+	// A disabled account holds no session, whatever minted it. The binding
+	// already changes when an account is disabled, which ends the sessions it
+	// held, but a token issued while the account was disabled carries the
+	// disabled binding and would match it. Refusing here, where every session
+	// is both issued and verified, closes that for every issuing path at once.
+	// Not cached, so re-enabling the account takes effect on the next request.
+	if st.disabled {
+		return "", ErrAccountDisabled
+	}
 
 	b := st.binding()
 	m.bindings.put(id, b)
@@ -262,6 +271,12 @@ func (m *Manager) checkSessionBinding(id, presented string) error {
 		return ErrSessionRevoked
 	}
 	current, err := m.currentBinding(id)
+	if errors.Is(err, ErrAccountDisabled) {
+		// A presented session of a disabled account is a revoked session, as
+		// for any other change to the account's state; ErrAccountDisabled is
+		// for the issuing side, which is telling a sign-in why it failed.
+		return ErrSessionRevoked
+	}
 	if err != nil {
 		return err
 	}

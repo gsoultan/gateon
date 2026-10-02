@@ -54,13 +54,8 @@ func SetupTestEnv(t *testing.T) *TestEnv {
 		Ports:      make(map[string]int),
 	}
 
-	// Allocate unique ports
-	env.Ports["mgmt"] = getFreePort(t)
-	env.Ports["http_plain"] = getFreePort(t)
-	env.Ports["http_tls"] = getFreePort(t)
-	env.Ports["grpc"] = getFreePort(t)
-	env.Ports["tcp"] = getFreePort(t)
-	env.Ports["mock_backend"] = getFreePort(t)
+	// pprof is in the set for the soak specs, so it cannot collide with the rest.
+	env.Ports = getFreePorts(t, "mgmt", "http_plain", "http_tls", "grpc", "tcp", "mock_backend", "pprof")
 
 	// Create config dir
 	configDir := filepath.Join(tmpDir, "config")
@@ -119,14 +114,35 @@ func exeSuffix() string {
 	return ""
 }
 
-func getFreePort(t *testing.T) int {
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("Failed to get free port: %v", err)
+// getFreePorts returns one free port per name, all distinct.
+//
+// Every listener stays open until the last port is chosen. Allocating them one
+// at a time -- open :0, read the port, close, repeat -- let the kernel hand the
+// same number out twice, and on CI it did: management and the TLS entrypoint
+// both got 43453, the plain-HTTP management listener won the bind, the TLS
+// entrypoint's failure to bind was only logged, and TestAppsProxying spoke TLS
+// to an HTTP server ("server gave HTTP response to HTTPS client"). Holding them
+// together makes a duplicate impossible within a set; it cannot stop another
+// process taking a port after release, which only a listener handed to the
+// gateway itself could.
+func getFreePorts(t *testing.T, names ...string) map[string]int {
+	t.Helper()
+	ports := make(map[string]int, len(names))
+	listeners := make([]net.Listener, 0, len(names))
+	defer func() {
+		for _, l := range listeners {
+			_ = l.Close()
+		}
+	}()
+	for _, name := range names {
+		l, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatalf("Failed to get free port for %s: %v", name, err)
+		}
+		listeners = append(listeners, l)
+		ports[name] = l.Addr().(*net.TCPAddr).Port
 	}
-	port := l.Addr().(*net.TCPAddr).Port
-	l.Close()
-	return port
+	return ports
 }
 
 func copyAndPatchConfig(t *testing.T, srcDir, dstDir string, ports map[string]int, certPath, keyPath, dbPath string) {

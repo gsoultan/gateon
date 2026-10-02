@@ -62,15 +62,10 @@ func TestTCRateLimitOnAllowsABurstThenDrops(t *testing.T) {
 	tc := coll.Programs[tcProgName]
 	pkt := ipv4TCP(net.IPv4(198, 51, 100, 22), 443, tcpACK)
 
-	if v := verdict(t, tc, pkt, 64); v != tcActOK {
+	if v := verdictEach(t, tc, pkt, 64); v != tcActOK {
 		t.Fatalf("the 64th packet of a client's first burst got verdict %d, want TC_ACT_OK %d: "+
 			"a limiter with no burst allowance drops the second segment of every window", v, tcActOK)
 	}
-	if v := verdict(t, tc, pkt, 4096); v != tcActShot {
-		t.Fatalf("4096 further packets in well under a millisecond were all passed by TC (last verdict %d); "+
-			"the limiter is not enforcing on this hook", v)
-	}
-	if n := dropped(t, m, "rate_limited"); n == 0 {
-		t.Error("TC dropped packets but the rate_limited counter did not move")
-	}
+	verdict(t, tc, pkt, floodPackets)
+	assertFloodLimited(t, m, "TC")
 }

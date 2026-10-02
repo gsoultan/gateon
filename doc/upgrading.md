@@ -11,6 +11,58 @@ here after the fact.
 
 ## Unreleased
 
+### The second 2FA sign-in step now requires the challenge from the password step
+
+`POST /v1/auth/2fa/verify` used to take `{id, code}` and nothing else, so an
+account id and one TOTP or recovery code signed in with no password. It now also
+requires a `challenge`: proof, issued by the gateway, that the account's password
+was presented within the last five minutes.
+
+- A correct password on an account with 2FA answers, as before, with no session
+  and `twoFactorRequired: true` (or `twoFactorSetupRequired: true` when an
+  administrator required 2FA and the account has not enrolled), and now also
+  `twoFactorChallenge: "v4.local...."`. Send it back as `challenge` with the
+  code: `{"id": "<user id>", "code": "123456", "challenge": "<twoFactorChallenge>"}`.
+  The Login RPC answers with the same field.
+- Self-service enrolment (`POST /v1/auth/2fa/setup`, signed in, with the current
+  password) now answers with a `challenge` as well; send it to
+  `/v1/auth/2fa/verify` with the first code. A required enrolment
+  (`/v1/auth/2fa/enroll`) uses the challenge from the sign-in that answered
+  `twoFactorSetupRequired`.
+- A missing, expired (older than five minutes), malformed or other-account
+  challenge, or one voided since by a password, role or disabled change or a
+  sign-out, is refused with `401` and `"code": "two_factor_challenge_invalid"`:
+  sign in again. These refusals do not count towards the account's lockout, so
+  the endpoint can no longer be used to lock an account out by its id.
+- A challenge is not a session. It is refused as a bearer token everywhere,
+  including by a route's PASETO middleware configured with the session key.
+
+The dashboard does all of this itself; nothing changes for people signing in
+through it, except that a sign-in left at the code prompt for more than five
+minutes goes back to the password. A mistyped code in the Settings enrolment
+dialog also no longer signs the user out.
+
+**Who is affected:** scripts and API clients that sign in to an account with 2FA,
+or enrol one, through `/v1/login` and `/v1/auth/2fa/verify`. They must read
+`twoFactorChallenge` from the sign-in answer (or `challenge` from the setup
+answer) and send it as `challenge` with the code; until they do, their verify
+calls are refused with 401. Accounts without 2FA are not affected. See ADR 0039.
+
+### A 2FA sign-in gets the account's role, and a disabled account cannot sign in through the second step
+
+A sign-in completed with a TOTP or recovery code issued a session with no role,
+which every permission check refuses: an account with 2FA, administrators
+included, could sign in to the dashboard but do nothing, and no API turned 2FA
+off again. Such a session now carries the account's role.
+
+The second step also never checked whether the account was disabled, so a user
+who was disabled while still holding an authenticator or a recovery code could
+sign straight back in. A disabled account is now refused there, and no session
+is issued or accepted for a disabled account by any path.
+
+**Who is affected:** anyone who enrolled 2FA and found the dashboard refusing
+everything after signing in: sign in again after upgrading. Nothing to configure.
+
 ### Binding a credential-injecting middleware to a route now needs an administrator
 
 A route that binds a middleware which injects a credential toward the backend --

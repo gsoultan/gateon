@@ -10,6 +10,7 @@ import (
 	"net"
 	"slices"
 	"testing"
+	"time"
 
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
@@ -215,15 +216,25 @@ func TestIPv6ShunCoversTheSlash64(t *testing.T) {
 
 // TestIPv6RateLimitSharesABucketPerSlash64: a flood spread across a /64 is one
 // flood.
+//
+// The two /64s under test refill one token an hour rather than one a
+// millisecond. The assertion is about which bucket a packet lands in, and at a
+// millisecond a slow or preempted run refilled the shared bucket mid-burst and
+// let the second address's 64th packet through (2 runs in 1000, in a Linux VM).
 func TestIPv6RateLimitSharesABucketPerSlash64(t *testing.T) {
-	_, coll := loadedManager(t, &gateonv1.EbpfConfig{Enabled: true, XdpRateLimit: true})
+	m, coll := loadedManager(t, &gateonv1.EbpfConfig{Enabled: true, XdpRateLimit: true})
+	for _, prefix := range []string{"2001:db8:5::1", "2001:db8:7::1"} {
+		if err := m.SetAdaptiveRateLimit(prefix, time.Hour); err != nil {
+			t.Fatalf("SetAdaptiveRateLimit(%s): %v", prefix, err)
+		}
+	}
 	first, second := net.ParseIP("2001:db8:5::1"), net.ParseIP("2001:db8:5::2")
 	other := net.ParseIP("2001:db8:6::1")
 	for _, g := range []struct {
 		prog       string
 		drop, pass uint32
 	}{{xdpProgName, xdpDrop, xdpPass}, {tcProgName, tcActShot, tcActOK}} {
-		if v := verdict(t, coll.Programs[g.prog], ipv6TCP(first, 443, tcpACK), 64); v != g.pass {
+		if v := verdictEach(t, coll.Programs[g.prog], ipv6TCP(first, 443, tcpACK), 64); v != g.pass {
 			t.Fatalf("%s: the 64th packet of a first burst got verdict %d, want %d", g.prog, v, g.pass)
 		}
 		if v := verdict(t, coll.Programs[g.prog], ipv6TCP(second, 443, tcpACK), 64); v != g.drop {

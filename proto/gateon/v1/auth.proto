@@ -74,6 +74,13 @@ message LoginResponse {
   // this account but the user has not yet enrolled. The client must walk the user
   // through first-time TOTP enrollment before a session is issued.
   bool two_factor_setup_required = 4;
+  // two_factor_challenge proves the password step, and is set whenever
+  // two_factor_required or two_factor_setup_required is. The second step
+  // (POST /v1/auth/2fa/verify) requires it: without it an account id and one
+  // code were a whole sign-in. It is not a session -- nothing but that step
+  // accepts it -- it names one account, it lasts five minutes, and a password,
+  // role or disabled change or a sign-out voids it. See ADR 0039.
+  string two_factor_challenge = 5;
 }
 
 message ListUsersRequest {
@@ -152,6 +159,10 @@ message Setup2FAResponse {
   string secret = 1;
   string qr_code_url = 2;
   repeated string recovery_codes = 3;
+  // challenge proves the password setup was given, and completes enrolment
+  // through POST /v1/auth/2fa/verify, as LoginResponse.two_factor_challenge
+  // completes a sign-in. See ADR 0039.
+  string challenge = 4;
 }
 
 // Enroll2FAResponse answers POST /v1/auth/2fa/enroll, the first-time enrollment
@@ -169,6 +180,11 @@ message Enroll2FAResponse {
 message Verify2FARequest {
   string id = 1;
   string code = 2;
+  // challenge is LoginResponse.two_factor_challenge, or
+  // Setup2FAResponse.challenge, for the account id names. A missing, expired
+  // or stale one, or one for another account, is refused before the code is
+  // looked at, and does not count towards the account's lockout. See ADR 0039.
+  string challenge = 3;
 }
 
 message Verify2FAResponse {

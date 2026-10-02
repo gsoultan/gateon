@@ -55,7 +55,7 @@ func signInWithSecondFactor(t *testing.T, m *Manager, id, secret string) error {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ok, token, _, err := m.Verify2FA(id, code)
+	ok, token, _, err := m.Verify2FA(challengeFor(t, m, id), id, code)
 	if err != nil {
 		return err
 	}

@@ -19,10 +19,14 @@ func (s *ApiService) Login(ctx context.Context, req *gateonv1.LoginRequest) (*ga
 	}
 	token, user, err := s.Auth.Authenticate(req.Username, req.Password)
 	if err != nil {
+		// The password was right and a second factor is owed. No session: the
+		// answer carries the challenge the second step requires, which is not
+		// one (see auth.Manager.Verify2FA and ADR 0039).
 		if errors.Is(err, auth.ErrTwoFactorRequired) {
 			return &gateonv1.LoginResponse{
-				User:              user,
-				TwoFactorRequired: true,
+				User:               user,
+				TwoFactorRequired:  true,
+				TwoFactorChallenge: auth.ChallengeFrom(err),
 			}, nil
 		}
 		// Administrator mandated 2FA but the user hasn't enrolled: signal the client
@@ -31,6 +35,7 @@ func (s *ApiService) Login(ctx context.Context, req *gateonv1.LoginRequest) (*ga
 			return &gateonv1.LoginResponse{
 				User:                   user,
 				TwoFactorSetupRequired: true,
+				TwoFactorChallenge:     auth.ChallengeFrom(err),
 			}, nil
 		}
 		s.logAudit(ctx, "login_failed", "auth", fmt.Sprintf("Failed login attempt for user: %s", req.Username))
@@ -71,7 +76,7 @@ func (s *ApiService) Setup2FA(ctx context.Context, req *gateonv1.Setup2FARequest
 	if !auth.Available(s.Auth) {
 		return nil, errors.New("auth service not initialized")
 	}
-	secret, qr, recovery, err := s.Auth.Setup2FA(req.Id, req.Password)
+	enrolment, err := s.Auth.Setup2FA(req.Id, req.Password)
 	if err != nil {
 		if errors.Is(err, auth.ErrInvalidCredentials) || errors.Is(err, auth.ErrAccountLocked) {
 			s.logAudit(ctx, "setup_2fa_refused", "user",
@@ -81,9 +86,10 @@ func (s *ApiService) Setup2FA(ctx context.Context, req *gateonv1.Setup2FARequest
 	}
 	s.logAudit(ctx, "setup_2fa", "user", fmt.Sprintf("User initiated 2FA setup: %s", req.Id))
 	return &gateonv1.Setup2FAResponse{
-		Secret:        secret,
-		QrCodeUrl:     qr,
-		RecoveryCodes: recovery,
+		Secret:        enrolment.Secret,
+		QrCodeUrl:     enrolment.QRCodeURL,
+		RecoveryCodes: enrolment.RecoveryCodes,
+		Challenge:     enrolment.Challenge,
 	}, nil
 }
 
@@ -91,8 +97,17 @@ func (s *ApiService) Verify2FA(ctx context.Context, req *gateonv1.Verify2FAReque
 	if !auth.Available(s.Auth) {
 		return nil, errors.New("auth service not initialized")
 	}
-	success, token, user, err := s.Auth.Verify2FA(req.Id, req.Code)
+	// The challenge goes to the service, which checks it before the code, for
+	// every caller and every transport: this is the only way in to a session
+	// for a 2FA account, and the decision does not depend on who is asking.
+	success, token, user, err := s.Auth.Verify2FA(req.Challenge, req.Id, req.Code)
 	if err != nil {
+		if errors.Is(err, auth.ErrInvalidChallenge) {
+			// Not a guess at the code, and not logged as one.
+			s.logAudit(ctx, "verify_2fa_refused", "user",
+				fmt.Sprintf("2FA step without a valid sign-in challenge for user: %s", req.Id))
+			return nil, err
+		}
 		s.logAudit(ctx, "verify_2fa_failed", "user", fmt.Sprintf("Failed 2FA verification for user: %s", req.Id))
 		return nil, err
 	}
