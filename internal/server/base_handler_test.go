@@ -434,6 +434,10 @@ func TestBaseHandler_PublicEndpointBodyLimit(t *testing.T) {
 	}, nil, nil)
 	post := func(path string, n int) int {
 		req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(bytes.Repeat([]byte("a"), n)))
+		// JSON, as every real client of these endpoints sends: a write of any
+		// other type is refused with 415 before its body is read (ADR 0041),
+		// which would hide whether the body cap holds.
+		req.Header.Set("Content-Type", "application/json")
 		req = req.WithContext(context.WithValue(req.Context(), middleware.EntryPointIDContextKey, "management"))
 		rr := httptest.NewRecorder()
 		handler.ServeHTTP(rr, req)
