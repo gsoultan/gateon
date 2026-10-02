@@ -53,7 +53,7 @@ func startGateon(t *testing.T, projectRoot string, env *TestEnv, extraEnv ...str
 		t.Fatalf("failed to build gateon: %v\n%s", err, out)
 	}
 
-	pprofPort = getFreePort(t)
+	pprofPort = env.Ports["pprof"]
 	cmd = exec.Command(binary)
 	cmd.Dir = projectRoot
 	cmd.Env = env.GatewayEnv(
