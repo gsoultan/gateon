@@ -40,7 +40,7 @@ func TestVerify2FASessionCarriesTheAccountRole(t *testing.T) {
 
 func assertSessionRole(t *testing.T, m *Manager, id, code, want, via string) {
 	t.Helper()
-	ok, token, user, err := m.Verify2FA(id, code)
+	ok, token, user, err := m.Verify2FA(challengeFor(t, m, id), id, code)
 	if err != nil || !ok {
 		t.Fatalf("Verify2FA with %s: ok=%v err=%v", via, ok, err)
 	}
@@ -69,6 +69,8 @@ func TestVerify2FARefusesADisabledAccount(t *testing.T) {
 	m := newTestManager(t)
 	id := createUser(t, m, "leaver", "correct-horse-battery")
 	secret, codes := enroll(t, m, id, "correct-horse-battery")
+	// Taken before the account is disabled: a sign-in already past its password.
+	challenge := challengeFor(t, m, id)
 
 	if err := m.SetUserDisabled(id, true); err != nil {
 		t.Fatalf("SetUserDisabled: %v", err)
@@ -79,7 +81,7 @@ func TestVerify2FARefusesADisabledAccount(t *testing.T) {
 		t.Fatal(err)
 	}
 	for via, c := range map[string]string{"a TOTP code": code, "a recovery code": codes[0]} {
-		ok, token, _, err := m.Verify2FA(id, c)
+		ok, token, _, err := m.Verify2FA(challenge, id, c)
 		if ok || token != "" {
 			t.Errorf("a disabled account signed in with %s (ok=%v, token issued=%v, err=%v)", via, ok, token != "", err)
 		}

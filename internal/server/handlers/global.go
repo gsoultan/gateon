@@ -18,6 +18,7 @@ import (
 	"github.com/gsoultan/gateon/internal/auth"
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/db"
+	"github.com/gsoultan/gateon/internal/httputil"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware"
 	"github.com/gsoultan/gateon/internal/request"
@@ -50,6 +51,12 @@ func decodeGlobalConfig(body []byte, conf *gateonv1.GlobalConfig) error {
 func sentByBrowser(r *http.Request) bool {
 	return r.Header.Get("Sec-Fetch-Mode") != ""
 }
+
+// TwoFactorChallengeInvalidCode is the error code POST /v1/auth/2fa/verify
+// answers when the request does not carry a valid challenge from the password
+// step (ADR 0039). The dashboard reads it to send the user back to sign in
+// again; it is not a wrong code.
+const TwoFactorChallengeInvalidCode = "two_factor_challenge_invalid"
 
 // wrongCodeStatus is the status for a second factor that did not verify.
 //
@@ -652,6 +659,11 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 		resp, err := svc.Verify2FA(r.Context(), &req)
 		if err != nil {
 			switch {
+			case errors.Is(err, auth.ErrInvalidChallenge):
+				// No proof of the password step. 401 with a code the dashboard
+				// keys on to send the user back to the password, never the text.
+				logger.SecurityEvent("auth_2fa_challenge_refused", r, "invalid_challenge")
+				httputil.WriteJSONError(w, http.StatusUnauthorized, err.Error(), TwoFactorChallengeInvalidCode)
 			case errors.Is(err, auth.ErrAccountLocked):
 				logger.SecurityEvent("auth_2fa_locked", r, "account_locked")
 				audit.Log(r.Context(), req.Id, "2fa_locked", "auth", "Account locked during 2FA", request.ClientAddr(r))
@@ -694,7 +706,8 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 	// 2FA for an account that has not enrolled yet. It re-verifies the password (no
 	// session exists at this point), so the TOTP secret is only disclosed to
 	// someone who already passed the first factor. The client then completes
-	// enrollment via POST /v1/auth/2fa/verify with the user id and the TOTP code.
+	// enrollment via POST /v1/auth/2fa/verify with the user id, the TOTP code and
+	// the challenge the sign-in answered with.
 	mux.HandleFunc("POST /v1/auth/2fa/enroll", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if !auth.Available(d.AuthManager) {

@@ -13,6 +13,31 @@
 
 const LOCKED = "Too many failed attempts. The account is locked for a while; try again later.";
 
+/**
+ * The error code the gateway answers the second step with when it does not
+ * carry a valid challenge from the password step: missing, expired (five
+ * minutes), or voided by a change to the account. See ADR 0039.
+ */
+export const CHALLENGE_INVALID = "two_factor_challenge_invalid";
+
+/**
+ * Whether a refused second step was refused for its challenge rather than its
+ * code. Only the machine-readable code is compared; the server's text is never
+ * read or shown.
+ */
+export async function isChallengeRefusal(res: Response): Promise<boolean> {
+  if (res.status !== 401) return false;
+  try {
+    const body = (await res.json()) as { code?: unknown };
+    return body.code === CHALLENGE_INVALID;
+  } catch {
+    return false;
+  }
+}
+
+/** A second step refused for its challenge: start the sign-in again. */
+export const SIGN_IN_EXPIRED = "Your sign-in took too long and has expired. Enter your password again.";
+
 /** A refused username and password. */
 export function signInRefusalMessage(status: number): string {
   switch (status) {

@@ -24,7 +24,7 @@ func TestVerify2FARefusesAccountWithNoEnrolledSecret(t *testing.T) {
 		t.Fatalf("GenerateCode: %v", err)
 	}
 
-	ok, token, _, err := m.Verify2FA(id, code)
+	ok, token, _, err := m.Verify2FA(challengeFor(t, m, id), id, code)
 	if ok || token != "" {
 		t.Fatalf("Verify2FA issued a session for an account with no enrolled secret: ok=%v token=%q", ok, token)
 	}

@@ -332,6 +332,9 @@ export type LoginResponse = {
   user: User;
   twoFactorRequired?: boolean;
   twoFactorSetupRequired?: boolean;
+  // Proof of the password step, which the second step requires. Component
+  // state only: never stored (see ADR 0039).
+  twoFactorChallenge?: string;
 };
 
 export type Setup2FARequest = {
@@ -344,11 +347,14 @@ export type Setup2FAResponse = {
   secret: string;
   qrCodeUrl: string;
   recoveryCodes: string[];
+  // Completes the enrolment through /v1/auth/2fa/verify; see ADR 0039.
+  challenge: string;
 };
 
 export type Verify2FARequest = {
   id: string;
   code: string;
+  challenge: string;
 };
 
 export type Verify2FAResponse = {

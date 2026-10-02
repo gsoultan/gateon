@@ -116,7 +116,7 @@ export const TwoFactorModal: React.FC<TwoFactorModalProps> = ({
   const verifyCode = async () => {
     setLoading(true);
     setError(null);
-    const outcome = await verifyTwoFactorCode(user.id, code);
+    const outcome = await verifyTwoFactorCode(user.id, code, setupData?.challenge ?? "");
     setLoading(false);
     if (outcome.ok) {
       setPage("success");

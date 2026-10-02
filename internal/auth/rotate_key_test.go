@@ -30,7 +30,7 @@ func TestUpdateSymmetricKeyKeepsEverySecondFactor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ok, token, _, err := m.Verify2FA(id, code)
+	ok, token, _, err := m.Verify2FA(challengeFor(t, m, id), id, code)
 	if err != nil || !ok || token == "" {
 		t.Fatalf("after a key rotation the enrolled second factor no longer verifies: ok=%v err=%v", ok, err)
 	}

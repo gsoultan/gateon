@@ -208,10 +208,10 @@ func (h *Holder) EndSessions(id string) error {
 	return s.EndSessions(id)
 }
 
-func (h *Holder) Setup2FA(id, password string) (string, string, []string, error) {
+func (h *Holder) Setup2FA(id, password string) (Enrolment, error) {
 	s := h.Get()
 	if s == nil {
-		return "", "", nil, ErrUnavailable
+		return Enrolment{}, ErrUnavailable
 	}
 	return s.Setup2FA(id, password)
 }
@@ -224,12 +224,12 @@ func (h *Holder) EnrollPending2FA(username, password string) (string, string, []
 	return s.EnrollPending2FA(username, password)
 }
 
-func (h *Holder) Verify2FA(id, code string) (bool, string, *gateonv1.User, error) {
+func (h *Holder) Verify2FA(challenge, id, code string) (bool, string, *gateonv1.User, error) {
 	s := h.Get()
 	if s == nil {
 		return false, "", nil, ErrUnavailable
 	}
-	return s.Verify2FA(id, code)
+	return s.Verify2FA(challenge, id, code)
 }
 
 func (h *Holder) Disable2FA(id string) error {

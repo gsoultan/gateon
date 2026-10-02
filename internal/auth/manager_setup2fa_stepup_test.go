@@ -30,7 +30,8 @@ func TestSetup2FARefusesAWrongPassword(t *testing.T) {
 	m := newTestManager(t)
 	id := createUser(t, m, "grace", "right-pass")
 
-	secret, qr, codes, err := m.Setup2FA(id, "wrong-pass")
+	e, err := m.Setup2FA(id, "wrong-pass")
+	secret, qr, codes := e.Secret, e.QRCodeURL, e.RecoveryCodes
 	if !errors.Is(err, ErrInvalidCredentials) {
 		t.Fatalf("err = %v, want ErrInvalidCredentials", err)
 	}
@@ -50,14 +51,14 @@ func TestSetup2FAWrongPasswordsLockTheAccountLikeSignIn(t *testing.T) {
 	id := createUser(t, m, "heidi", "right-pass")
 
 	for i := range MaxFailedAttempts {
-		if _, _, _, err := m.Setup2FA(id, "wrong-pass"); !errors.Is(err, ErrInvalidCredentials) {
+		if _, err := m.Setup2FA(id, "wrong-pass"); !errors.Is(err, ErrInvalidCredentials) {
 			t.Fatalf("attempt %d: err = %v, want ErrInvalidCredentials", i+1, err)
 		}
 	}
 	if _, _, err := m.Authenticate("heidi", "right-pass"); !errors.Is(err, ErrAccountLocked) {
 		t.Errorf("sign-in after %d wrong step-up passwords: err = %v, want ErrAccountLocked", MaxFailedAttempts, err)
 	}
-	if _, _, _, err := m.Setup2FA(id, "right-pass"); !errors.Is(err, ErrAccountLocked) {
+	if _, err := m.Setup2FA(id, "right-pass"); !errors.Is(err, ErrAccountLocked) {
 		t.Errorf("step-up with the right password on a locked account: err = %v, want ErrAccountLocked", err)
 	}
 }
@@ -73,10 +74,10 @@ func TestSetup2FAAndSignInShareOneFailureCount(t *testing.T) {
 			t.Fatalf("wrong sign-in: err = %v", err)
 		}
 	}
-	if _, _, _, err := m.Setup2FA(id, "wrong-pass"); !errors.Is(err, ErrInvalidCredentials) {
+	if _, err := m.Setup2FA(id, "wrong-pass"); !errors.Is(err, ErrInvalidCredentials) {
 		t.Fatalf("wrong step-up: err = %v", err)
 	}
-	if _, _, _, err := m.Setup2FA(id, "right-pass"); !errors.Is(err, ErrAccountLocked) {
+	if _, err := m.Setup2FA(id, "right-pass"); !errors.Is(err, ErrAccountLocked) {
 		t.Errorf("after %d wrong sign-ins and one wrong step-up: err = %v, want ErrAccountLocked", MaxFailedAttempts-1, err)
 	}
 }
@@ -88,15 +89,15 @@ func TestSetup2FAWithThePasswordClearsTheFailureCount(t *testing.T) {
 	id := createUser(t, m, "judy", "right-pass")
 
 	for range MaxFailedAttempts - 1 {
-		_, _, _, _ = m.Setup2FA(id, "wrong-pass")
+		_, _ = m.Setup2FA(id, "wrong-pass")
 	}
-	if _, _, _, err := m.Setup2FA(id, "right-pass"); err != nil {
+	if _, err := m.Setup2FA(id, "right-pass"); err != nil {
 		t.Fatalf("step-up with the right password: %v", err)
 	}
 	for range MaxFailedAttempts - 1 {
-		_, _, _, _ = m.Setup2FA(id, "wrong-pass")
+		_, _ = m.Setup2FA(id, "wrong-pass")
 	}
-	if _, _, _, err := m.Setup2FA(id, "right-pass"); err != nil {
+	if _, err := m.Setup2FA(id, "right-pass"); err != nil {
 		t.Errorf("the count was not cleared by the correct password: %v", err)
 	}
 }
@@ -109,10 +110,10 @@ func TestSetup2FAOnADisabledAccount(t *testing.T) {
 	if err := m.SetUserDisabled(id, true); err != nil {
 		t.Fatalf("SetUserDisabled: %v", err)
 	}
-	if _, _, _, err := m.Setup2FA(id, "wrong-pass"); !errors.Is(err, ErrInvalidCredentials) {
+	if _, err := m.Setup2FA(id, "wrong-pass"); !errors.Is(err, ErrInvalidCredentials) {
 		t.Errorf("wrong password on a disabled account: err = %v, want ErrInvalidCredentials", err)
 	}
-	if _, _, _, err := m.Setup2FA(id, "right-pass"); !errors.Is(err, ErrAccountDisabled) {
+	if _, err := m.Setup2FA(id, "right-pass"); !errors.Is(err, ErrAccountDisabled) {
 		t.Errorf("right password on a disabled account: err = %v, want ErrAccountDisabled", err)
 	}
 }
@@ -127,7 +128,7 @@ func TestRefusedSetup2FALeavesAnEnrolledAccountsFactorAlone(t *testing.T) {
 	secret, _ := enroll(t, m, id, "right-pass")
 	before := storedTOTPSecret(t, m, id)
 
-	if _, _, _, err := m.Setup2FA(id, "wrong-pass"); !errors.Is(err, ErrInvalidCredentials) {
+	if _, err := m.Setup2FA(id, "wrong-pass"); !errors.Is(err, ErrInvalidCredentials) {
 		t.Fatalf("err = %v, want ErrInvalidCredentials", err)
 	}
 	if after := storedTOTPSecret(t, m, id); after != before {
@@ -137,7 +138,7 @@ func TestRefusedSetup2FALeavesAnEnrolledAccountsFactorAlone(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GenerateCode: %v", err)
 	}
-	if ok, _, _, err := m.Verify2FA(id, code); !ok || err != nil {
+	if ok, _, _, err := m.Verify2FA(challengeFor(t, m, id), id, code); !ok || err != nil {
 		t.Fatalf("the owner's authenticator no longer verifies: ok=%v err=%v", ok, err)
 	}
 	if _, _, err := m.Authenticate("leo", "right-pass"); !errors.Is(err, ErrTwoFactorRequired) {

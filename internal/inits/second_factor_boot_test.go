@@ -30,15 +30,16 @@ func enrolUnder(t *testing.T, dbPath, key string) (id, secret string) {
 	if err := m.UpsertUser(u); err != nil {
 		t.Fatalf("UpsertUser: %v", err)
 	}
-	secret, _, _, err = m.Setup2FA(u.Id, "correct-horse-battery")
+	enrolment, err := m.Setup2FA(u.Id, "correct-horse-battery")
 	if err != nil {
 		t.Fatalf("Setup2FA: %v", err)
 	}
+	secret = enrolment.Secret
 	code, err := totp.GenerateCode(secret, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ok, _, _, err := m.Verify2FA(u.Id, code); err != nil || !ok {
+	if ok, _, _, err := m.Verify2FA(enrolment.Challenge, u.Id, code); err != nil || !ok {
 		t.Fatalf("enrolling: ok=%v err=%v", ok, err)
 	}
 	return u.Id, secret
@@ -73,7 +74,8 @@ func TestBootMovesSecondFactorsFromThePreviousSessionKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ok, token, _, err := m.Verify2FA(id, code)
+	_, _, signIn := m.Authenticate("gina", "correct-horse-battery")
+	ok, token, _, err := m.Verify2FA(auth.ChallengeFrom(signIn), id, code)
 	if err != nil || !ok || token == "" {
 		t.Fatalf("after a restart with a changed key, and the previous key given, the second factor does not verify: ok=%v err=%v",
 			ok, err)

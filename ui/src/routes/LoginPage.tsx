@@ -35,6 +35,8 @@ import { getApiBaseUrl } from "../store/useApiConfigStore";
 import type { Enroll2FAResponse } from "../services/gen/gateon/v1/auth_pb";
 import {
   enrolmentRefusalMessage,
+  isChallengeRefusal,
+  SIGN_IN_EXPIRED,
   signInCodeRefusalMessage,
   signInRefusalMessage,
 } from "../components/signInMessages";
@@ -51,6 +53,10 @@ export default function LoginPage() {
   // the page read qrCodeUrl and recoveryCodes that never arrived.
   const [enrollData, setEnrollData] = useState<Omit<Enroll2FAResponse, "$typeName" | "$unknown"> | null>(null);
   const [tfaCode, setTfaCode] = useState("");
+  // The password step's proof, which the code step must carry (ADR 0039).
+  // Component state only -- never the auth store and never web storage: it
+  // is a credential for the next five minutes.
+  const [challenge, setChallenge] = useState("");
   const tfaInputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
   const setAuth = useAuthStore((state) => state.setAuth);
@@ -116,8 +122,10 @@ export default function LoginPage() {
         const data = await res.json();
         if (data.twoFactorRequired) {
           setTempUser(data.user);
+          setChallenge(data.twoFactorChallenge ?? "");
           setStep("2fa");
         } else if (data.twoFactorSetupRequired) {
+          setChallenge(data.twoFactorChallenge ?? "");
           // Administrator mandated 2FA but the user hasn't enrolled. Begin
           // first-time enrollment (re-uses the just-entered password).
           await startEnrollment(values.username, values.password);
@@ -148,7 +156,7 @@ export default function LoginPage() {
       const res = await fetch(`${getApiBaseUrl()}/v1/auth/2fa/verify`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: tempUser.id, code: tfaCode }),
+        body: JSON.stringify({ id: tempUser.id, code: tfaCode, challenge }),
         credentials: "include",
       });
 
@@ -159,11 +167,16 @@ export default function LoginPage() {
           // Deliberately not storing data.token: keeping the bearer token in
           // reachable client state is what made a single XSS bug in this
           // dashboard equivalent to full administrator compromise.
+          setChallenge("");
           setAuth(COOKIE_SESSION, data.user);
           navigate({ to: "/" });
         } else {
           setError(signInCodeRefusalMessage(401));
         }
+      } else if (await isChallengeRefusal(res)) {
+        // The password step is no longer proven: back to it.
+        restartSignIn();
+        setError(SIGN_IN_EXPIRED);
       } else {
         setError(signInCodeRefusalMessage(res.status));
       }
@@ -172,6 +185,14 @@ export default function LoginPage() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const restartSignIn = () => {
+    setChallenge("");
+    setTfaCode("");
+    setEnrollData(null);
+    setTempUser(null);
+    setStep("login");
   };
 
   const startEnrollment = async (username: string, password: string) => {
@@ -491,11 +512,7 @@ export default function LoginPage() {
                   variant="subtle"
                   color="gray"
                   fullWidth
-                  onClick={() => {
-                    setStep("login");
-                    setEnrollData(null);
-                    setTfaCode("");
-                  }}
+                  onClick={restartSignIn}
                   radius="lg"
                 >
                   Back to login
@@ -537,7 +554,7 @@ export default function LoginPage() {
                 >
                   Verify & Sign in
                 </Button>
-                <Button variant="subtle" color="gray" fullWidth onClick={() => setStep("login")} radius="lg">
+                <Button variant="subtle" color="gray" fullWidth onClick={restartSignIn} radius="lg">
                   Back to login
                 </Button>
               </Stack>

@@ -94,7 +94,7 @@ func TestEnrollPending2FACompletesAndClearsPending(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GenerateCode: %v", err)
 	}
-	ok, token, _, err := m.Verify2FA(id, code)
+	ok, token, _, err := m.Verify2FA(challengeFor(t, m, id), id, code)
 	if err != nil || !ok || token == "" {
 		t.Fatalf("Verify2FA(enroll): ok=%v token=%q err=%v", ok, token, err)
 	}

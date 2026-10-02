@@ -48,9 +48,14 @@ type Service interface {
 	// the account's current password and applies login's lockout to it, so a
 	// session alone -- which script in the dashboard can ride without reading
 	// -- is not enough to put the second factor in someone else's hands.
-	Setup2FA(id, password string) (string, string, []string, error)
+	//
+	// The Enrolment carries the challenge Verify2FA requires to finish it.
+	Setup2FA(id, password string) (Enrolment, error)
 	EnrollPending2FA(username, password string) (string, string, []string, string, error)
-	Verify2FA(id, code string) (bool, string, *gateonv1.User, error)
+	// Verify2FA checks a code for account id, given the challenge that proves
+	// the password step -- from Authenticate's SecondStepError or Setup2FA --
+	// and issues a session. See ADR 0039.
+	Verify2FA(challenge, id, code string) (bool, string, *gateonv1.User, error)
 	Disable2FA(id string) error
 
 	Close() error
