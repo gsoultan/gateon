@@ -53,34 +53,37 @@ function nextId() {
   return `cond-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
-function escapeForRule(s: string): string {
-  return s.replace(/\\/g, "\\\\").replace(/`/g, "\\`");
-}
-
+/**
+ * Values are written literally: the gateway reads everything between the
+ * quotes as written, with no escapes (ADR 0043). Escaping a backslash here
+ * doubled it in every regex on every save, and an escaped backtick wrote a
+ * rule the gateway refuses, since the backtick ends the value. A value cannot
+ * hold a backtick; the gateway's refusal names the character.
+ */
 function serializeCondition(c: RuleCondition): string {
   const v = c.value.trim();
   if (!v) return "";
   switch (c.type) {
     case "Host":
-      return `Host(\`${escapeForRule(v)}\`)`;
+      return `Host(\`${v}\`)`;
     case "Path":
-      return `Path(\`${escapeForRule(v)}\`)`;
+      return `Path(\`${v}\`)`;
     case "PathPrefix":
-      return `PathPrefix(\`${escapeForRule(v)}\`)`;
+      return `PathPrefix(\`${v}\`)`;
     case "PathRegex":
-      return `PathRegex(\`${escapeForRule(v)}\`)`;
+      return `PathRegex(\`${v}\`)`;
     case "Methods": {
       const methods = v
         .split(/[,\s]+/)
         .map((m) => m.trim().toUpperCase())
         .filter(Boolean);
       if (methods.length === 0) return "";
-      return `Methods(\`${methods.map(escapeForRule).join("`, `")}\`)`;
+      return `Methods(\`${methods.join("`, `")}\`)`;
     }
     case "Headers": {
       const v2 = (c.value2 || "").trim();
       if (!v2) return "";
-      return `Headers(\`${escapeForRule(v)}\`, \`${escapeForRule(v2)}\`)`;
+      return `Headers(\`${v}\`, \`${v2}\`)`;
     }
     default:
       return "";

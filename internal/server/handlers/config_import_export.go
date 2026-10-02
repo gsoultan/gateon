@@ -14,6 +14,7 @@ import (
 
 	"github.com/gsoultan/gateon/internal/auth"
 	"github.com/gsoultan/gateon/internal/config/mwsecret"
+	"github.com/gsoultan/gateon/internal/domain/route"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 	"google.golang.org/protobuf/proto"
 )
@@ -260,6 +261,10 @@ func validateConfigExport(exp *configExport) []string {
 		}
 		if rt.Rule == "" {
 			errs = append(errs, "route "+rt.Id+": missing rule")
+		} else if err := route.ValidateRule(rt); err != nil {
+			// The same check the import's save makes (ADR 0043), so the
+			// preflight refuses what the import would.
+			errs = append(errs, "route "+rt.Id+": "+err.Error())
 		}
 		if rt.ServiceId == "" {
 			errs = append(errs, "route "+rt.Id+": missing service_id")
