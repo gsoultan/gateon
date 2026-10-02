@@ -11,6 +11,362 @@ here after the fact.
 
 ## Unreleased
 
+### OIDC and JWKS-verified JWT auth now require an audience; existing ones without one stop serving
+
+**Read this before upgrading if any `auth` middleware is `type: oidc`, or `type: jwt`
+with a `jwks_url`.**
+
+An identity provider's published keys sign the tokens of every application it
+serves. With the audience left blank (the dashboard labelled it "Audience
+(optional)"), these middlewares accepted a token the provider issued to *any other
+application* -- for a public provider such as Google, any application at all.
+
+- Saving an `oidc` auth middleware, or a `jwt` one with `jwks_url`, without
+  `audience` is now refused (REST `400`, gRPC error, config import error) with:
+  "an audience is required: an identity provider's published keys sign tokens for
+  every application it serves, so without one this route accepts a token issued to
+  any of them; set audience to this API's identifier at the provider, or set
+  allow_any_audience=true if the provider issues tokens to this gateway alone".
+- **An existing middleware without an audience fails closed after the upgrade:** it
+  no longer builds, and every route using it answers `503` until it is fixed, as any
+  security middleware that cannot be built does. Nothing is silently accepted.
+- Fix: set `audience` to the value your API's tokens carry in `aud` (the API
+  identifier at Auth0/Okta/Keycloak, the client ID for Google ID tokens). A token
+  whose `aud` does not include it is refused with `401`.
+- If the provider issues tokens to this gateway alone and they carry no useful
+  `aud`, set the named opt-out `allow_any_audience: "true"` (the dashboard's red
+  "Accept a token issued for any audience" switch). A blank audience is never read
+  as that choice.
+- A `jwt` middleware verified with a shared `secret` (HS256) is not affected; the
+  audience stays optional there.
+
+**Who is affected:** every `oidc` auth middleware, and every `jwt` one with
+`jwks_url`, saved without an audience. Before upgrading, list them
+(`GET /v1/middlewares`, or the Middlewares page) and add an audience, or plan for
+their routes to answer 503 until you do. The `oidc` login middleware (type `oidc`,
+not `auth`) already checks its `client_id` and is not affected. See ADR 0043.
+
+### A basic-auth user with no password is refused, and no longer lets anyone in
+
+A basic-auth `users` entry with an empty password -- `alice:pw,user2:`, which is
+exactly what the dashboard's "Add user" row saved when the password was left
+blank -- authenticated anyone who sent that user name and no password.
+
+- Saving such a list is refused with `basic auth users: user "user2" has no
+  password; ...` (a user with no name is refused too). The dashboard flags the row
+  and keeps Save disabled until a password is entered; users whose passwords are
+  already stored keep them, as before.
+- A stored list with such a user no longer builds: routes using it answer `503`
+  until the user is given a password or removed.
+- A request with an empty user name or password is never accepted.
+- The parse errors for this list no longer quote the entry they refuse (it may be
+  a password typed without its name).
+
+**Who is affected:** basic-auth middlewares with a passwordless user. They were
+open under that name; after the upgrade their routes refuse until fixed.
+
+### A route rule that does not parse is refused instead of matching every request
+
+A rule the router could not read in full -- an unclosed quote or parenthesis,
+`Hots(...)` for `Host(...)`, `PathPrefx(...)`, a regex that does not compile, an
+empty value such as `Host(``)` -- used to be saved with `200` and matched **every**
+request on its entrypoints, taking traffic (and skipping the auth and WAF) of the
+routes that described it.
+
+- Saving such a rule is refused: REST `400`, gRPC `InvalidArgument`, config import
+  and `/v1/config/validate` list it as an error. The message names the character
+  and the reason, for example `invalid route rule at character 1: unknown condition
+  "Hots" (did you mean Host?)` or `invalid route rule at character 28: expected )
+  to close Host(, but the rule ends here`.
+- A rule already stored that does not parse **matches no request** (it no longer
+  matches every request) and is logged once:
+  `route rule does not parse; every route with this rule matches no request until
+  it is fixed`. Requests it used to capture now reach the route they describe, or
+  404.
+- The rule is now read in full, which changes the meaning of rules the old reader
+  got wrong: a leading `!` negates only the condition it precedes
+  (`!Path(`/a`) && Host(`x`)` used to mean "not (path /a and host x)"); a second
+  condition of the same kind is honoured (`PathPrefix(`/api`) &&
+  !PathPrefix(`/api/admin`)` now excludes admin); parentheses group; `Host` takes
+  exactly one value (write `Host(`a`) || Host(`b`)`); `Methods` takes one method
+  per value (`Methods(`GET`, `POST`)`); values are literal, with no backslash
+  escapes.
+- TCP/UDP routes may still have no rule, and the dashboard's `L4()` is accepted.
+- The dashboard's rule builder no longer doubles backslashes in values (it did so
+  on every save, which broke `PathRegex` patterns).
+
+**Who is affected:** anyone with a mistyped rule (check the log for the line above
+after upgrading), and API clients or imports that write such rules. Rules written
+by the dashboard's builder, the Kubernetes controller and the unlisted-route
+detector all parse. See ADR 0043.
+
+### Block lookups no longer remember a database error as "not blocked"
+
+When the database could not answer whether an address (or a client fingerprint) was
+blocked -- a Postgres restart or failover, an exhausted pool, SQLite busy past its
+timeout -- the answer "not blocked" was cached with no expiry, so a blocked address
+was served during the error **and after the database recovered**, until the cache
+entry happened to be evicted.
+
+- A failed lookup is never cached; the next lookup after recovery enforces the
+  block. Errors are counted in the new metric
+  `gateon_mitigation_lookup_errors_total{kind="ip"|"user"}` and logged at most once
+  a minute ("block lookup failed; deciding requests from the cache until the
+  database answers").
+- During a database outage, requests are still served (fail open), except from
+  addresses or fingerprints this node already holds a block for, which stay
+  refused. Refusing everything the cache cannot vouch for would turn a database
+  outage into a full outage.
+- A "not blocked" answer is now re-read after one to two minutes, so a block made
+  on another node (or written straight to the database) is enforced within that
+  time; it used to wait for cache eviction.
+- A fingerprint an operator released and then blocked again is blocked; the
+  release used to outlive the new block on the node that made it.
+
+**Who is affected:** nobody needs to change anything. Multi-node installs will see
+blocks made on other nodes take effect within two minutes, and a little more
+database read traffic from the re-reads (one indexed read per active client per
+one to two minutes). Alert on `gateon_mitigation_lookup_errors_total` if you want
+to know when the block list was decided without the database. See ADR 0043.
+
+### A request no longer turns off its own timeouts; WebSockets and event streams get an idle timeout and a maximum lifetime
+
+Every request on an HTTP entrypoint now gets the entrypoint's read and write
+deadlines (`read_timeout_ms` / `write_timeout_ms`, 15 s by default), whatever
+headers it carries. Any `Upgrade` header, or an `Accept` naming
+`text/event-stream`, used to remove both, on any route -- so a client could hold
+a connection open indefinitely with a slow body or a slow read by adding one
+header. A response is now lifted off the deadlines only when the server made it
+a stream:
+
+- a **WebSocket** once its backend has answered `101`. Until then the upgrade is
+  an ordinary request, and the backend has the HTTP transport's 1-minute
+  response-header timeout to answer it;
+- an **event stream** once the server has answered `200` with
+  `Content-Type: text/event-stream` -- whether or not the client sent
+  `Accept: text/event-stream`. A real event stream fetched without that header
+  used to be cut at the write deadline; it no longer is.
+
+A lifted stream is then bounded by two new values instead of none:
+
+| | minimal | standard | enterprise | environment variable |
+| :--- | :--- | :--- | :--- | :--- |
+| Idle timeout (nothing moved in either direction) | 2 min | 5 min | 10 min | `GATEON_STREAM_IDLE_TIMEOUT` |
+| Maximum lifetime | 1 h | 4 h | 12 h | `GATEON_STREAM_MAX_LIFETIME` |
+
+Both take a Go duration (`90s`, `30m`, `24h`); `0` disables that bound. A byte in
+either direction keeps a WebSocket open, so a server pushing to a quiet client is
+not idle.
+
+HTTP/3 requests now get the entrypoint's deadlines too. They had none.
+
+**Who is affected:** WebSocket applications that stay silent for longer than the
+idle timeout without pinging, or that expect one socket to live longer than the
+maximum lifetime -- they are closed and must reconnect (browser `EventSource`
+reconnects on its own); raise or disable the bound with the variables above.
+Clients that sent `Upgrade` or `Accept: text/event-stream` on ordinary requests
+-- long uploads, slow downloads -- now get the entrypoint's timeouts like any
+other request; raise `read_timeout_ms` / `write_timeout_ms` on the entrypoint if
+they need longer. See ADR 0042.
+
+### Request headers are capped at 32 KiB (64 KiB on enterprise) and refused with 431 past it
+
+Every HTTP listener -- each entrypoint over HTTP/1, HTTP/2 and HTTP/3, and the
+management listener -- used to buffer up to 1 MiB of request header per
+connection. A connection still sending its header is held before any request
+limit sees it, so 1000 of them (the minimal profile's connection cap) could hold
+more than a 2 GB host has. The cap is now the profile's `MaxHeaderBytes`:
+**32 KiB** on minimal and standard, **64 KiB** on enterprise. A request whose
+header is larger is answered **`431 Request Header Fields Too Large`** (over
+HTTP/2, a header list far past the cap closes the connection instead).
+`GATEON_MAX_HEADER_BYTES` (bytes, a positive integer) overrides it for every
+listener.
+
+**Who is affected:** clients that send very large headers -- many or large
+cookies, long bearer tokens or JWTs in headers. If they start getting 431, set
+`GATEON_MAX_HEADER_BYTES` (for example `65536`); the arithmetic for what each
+profile can afford is in ADR 0042.
+
+### The management listener bounds every request and caps connections per address
+
+One address holding slow request bodies to an unauthenticated endpoint
+(`/v1/auth/2fa/verify`) could make the whole management port -- `/healthz`
+included -- answer 503 for as long as it liked. The management listener now has:
+
+- **Per-request timeouts.** A request body has 30 s to start arriving and must
+  then keep up at least 32 KiB/s (a GeoIP database upload over a slow link still
+  finishes; a body sent a byte at a time is cut at 30 s). Once the request is in,
+  the handler has 5 minutes to answer. The dashboard's event streams are not
+  bound by these; they get the stream idle timeout and lifetime above, and
+  reconnect on their own.
+- **A per-source-address connection cap**, the same one the entrypoints have
+  (`GATEON_ENTRYPOINT_MAX_CONN_PER_ADDR`, default 128 / 256 / 1024 by profile;
+  `0` disables it). Loopback and `GATEON_MITIGATION_ALLOWLIST` are exempt, so an
+  operator on the host is never locked out.
+- **A 64 KiB body cap on the endpoints served before sign-in**: `/v1/login`,
+  `/v1/setup`, `/v1/setup/test-db`, `/v1/auth/2fa/enroll`,
+  `/v1/auth/2fa/verify` (and the gRPC Login and Setup methods). A larger body is
+  refused with 413. Authenticated endpoints keep their existing limits.
+
+**Who is affected:** many dashboard users or scripts behind one NAT address
+holding more than the per-address cap of management connections at once -- add
+the address to `GATEON_MITIGATION_ALLOWLIST` or raise the cap. Management
+requests that took longer than 5 minutes to answer once received are now cut.
+See ADR 0042.
+
+### Proxied apps no longer receive the dashboard session
+
+The proxy used to forward the `gateon_session` cookie to backends. Browsers do
+not scope cookies by port, so with the dashboard on `host:8080` and apps on
+`host`, every app received the administrator's eight-hour session. The proxy now
+removes the session cookie (under either of its names) from every request it
+forwards, on HTTP/1, HTTP/2, gRPC and WebSocket alike, and leaves every other
+cookie as the client sent it. A `Bearer` token the management plane accepts is
+withheld from backends too; an application's own tokens, PASETO ones included,
+pass as before.
+
+**Who is affected:** nobody who was not relying on a backend seeing the
+dashboard's credential, which no backend should. Route middlewares still see the
+request as the client sent it. See ADR 0041.
+
+### The session cookie is `__Host-gateon_session` over TLS, and SameSite=Strict
+
+Over TLS (directly, or behind a trusted proxy that sets `X-Forwarded-Proto:
+https`) the session cookie is now named `__Host-gateon_session`, which a sibling
+subdomain or a plaintext response on the same host cannot set or overwrite. On
+plain HTTP it keeps the name `gateon_session`, because browsers refuse the prefix
+without `Secure`. The cookie is now `SameSite=Strict` instead of `Lax`; the
+dashboard is a single-page app whose API calls are all same-origin, so following
+a link into it still lands signed in.
+
+Sessions signed in before the upgrade keep working: the old name is still
+accepted on TLS for this release, and the next sign-in or sign-out over TLS
+expires it. **The old name will stop being read over TLS in the release after
+this one**; anyone still signed in under it then signs in again.
+
+**Who is affected:** dashboard users over TLS (nothing to do; sessions survive).
+Tooling that reads the cookie by name over TLS must read
+`__Host-gateon_session`; API clients should use `Authorization: Bearer`, which
+is unchanged.
+
+### The management API refuses writes another page asked for
+
+Every state-changing management request -- `POST`, `PUT`, `PATCH`, `DELETE`,
+REST and Connect, sign-in and setup included -- and the `/v1/logs` WebSocket
+handshake are now refused with `403` when the browser reports that another page
+made them: `Sec-Fetch-Site: same-site` or `cross-site`, or (from an older
+browser) an `Origin` whose host is not the one the request was sent to. Before
+this, a page on any other port of the dashboard's address, or on a sibling
+subdomain, could change the configuration with an administrator's cookie --
+including granting its own origin credentialed CORS access.
+
+REST writes under `/v1/` must also send their body as `application/json`
+(Connect and gRPC types are accepted; `multipart/form-data` only on
+`/v1/certs/upload` and `/v1/geoip/upload`). A write with a body that is
+`text/plain`, a form, or has no `Content-Type` gets `415`. A write without a
+body needs no type.
+
+**Who is affected:**
+- Scripts and API clients are unaffected if they send no `Origin` and no
+  `Sec-Fetch-Site` header -- curl, Python `requests`, Go's `net/http` and
+  Prometheus send neither -- and send JSON. A script that posts a JSON body
+  without `Content-Type: application/json` (curl's `-d` alone sends
+  `application/x-www-form-urlencoded`) now gets `415`: add the header.
+- Scripts driven through a browser or a browser-like client (headless Chrome,
+  Playwright's page context, a tool that adds `Origin`) get `403` unless the
+  origin they send is the dashboard's own or is listed in
+  `management.cors.allowedOrigins` (or `GATEON_CORS_ORIGINS`).
+- A dashboard served from a different origin than the management API must list
+  that origin in `management.cors.allowedOrigins`; that is now what lets it
+  write, as well as read.
+
+### Management CORS is off unless configured
+
+With no `management.cors.allowedOrigins` and no `GATEON_CORS_ORIGINS`, the
+management API now sends no CORS headers at all. It used to answer every origin
+with `Access-Control-Allow-Origin: *`. The dashboard is served from the
+management origin and never needed it. Every `/v1/*` and Connect response to
+a GET, HEAD or POST (the methods a cache may store) now also carries
+`Cache-Control: no-store`.
+
+**Who is affected:** a page on another origin that read the management API's
+unauthenticated endpoints (`/v1/setup/required`, health) cross-origin. Name its
+origin in `management.cors.allowedOrigins`.
+
+### A query-string token is accepted only on a WebSocket handshake
+
+`?token=`, `?access_token=` and `?auth=` used to authenticate any request that
+sent `Accept: text/event-stream`, a header any client can send. They are now
+read only on a WebSocket handshake (a `GET` with `Upgrade: websocket`,
+`Connection: Upgrade` and `Sec-WebSocket-Key`), the one place a browser cannot
+send a header. This applies to the management API and to the JWT, PASETO and
+OAuth2-introspection route middlewares, which share the rule.
+
+**Who is affected:** server-sent-event clients that put a token in the URL --
+of the management API (the dashboard does not; its event stream uses the
+cookie) or of an app behind a route with JWT/PASETO/OAuth2 auth. Send the token
+in `Authorization: Bearer` (an EventSource polyfill or a fetch-based SSE client
+can) or in a cookie.
+
+### Only an administrator may change the global settings that guard the management plane (ADR 0040)
+
+An operator could write the whole global configuration, and the global
+configuration holds the security boundary itself. An operator could switch
+authentication off and expose the management API on every entrypoint -- after
+which an anonymous request reset the administrator's password -- grant
+themselves any permission through `rbac`, replace the session key, narrow the
+management allowlist to lock administrators out, or switch audit off with no
+record that they had.
+
+A save of the global configuration (`PUT`/`POST /v1/global`, `PUT /v1/config`,
+gRPC `UpdateGlobalConfig`) by anyone who is not an administrator is now refused
+with **403 / `PermissionDenied`, naming the fields**, when it changes any of:
+
+- `auth` (all of it), `rbac` (all), `audit` (all), `management` (all, GitOps
+  included), and `log.audit_log_retention_days`;
+- `tls.client_auth_type` and `tls.client_authorities` (mTLS trust);
+- `waf.trust_cloudflare_headers` (which header names the client address) and
+  `waf.audit_log_path` (a file the gateway writes to);
+- `redis.addr`, `redis.password`, `redis.db` (switching Redis on or off stays
+  an operator's);
+- `ebpf.enabled`, `ebpf.interface`, and the eBPF management allowlist and port
+  knocking (`enable_mgmt_whitelist`, `mgmt_whitelist_ips`, `enable_knocking`,
+  `mgmt_port`, `knocking_sequence`);
+- `debugger.enabled` (it captures raw headers and bodies, credentials included).
+
+Everything else stays an operator's. A save that sends these settings back
+unchanged -- which is what the dashboard does, secrets as the stored-secret
+placeholder or as their `$env:`/`$file:` reference -- is not a change and is
+accepted. The "disable public management" AI-advisory fix is
+administrator-only for the same reason. Administrators are unaffected.
+
+The check fails closed: a request whose caller cannot be read is not an
+administrator, and a request that reaches the save with no identity while
+authentication is on is refused for these fields too. With authentication off
+the management plane is open by configuration and nothing is restricted.
+
+**Changing the audit settings is now itself audited**, before the change takes
+effect: an entry `update` on `audit_config` names each changed audit field (old
+and new values for switches and numbers; keys and URLs by name only). Switching
+audit off is therefore the last thing the audit log records.
+
+The dashboard shows these settings to operators read-only, with a one-line
+reason; the Client Authorities page is read-only for them.
+
+**An entrypoint may no longer be saved with the id `management`.** That id is
+how the management plane recognises its dedicated listener, so a data-plane
+entrypoint saved under it served the dashboard and the management API on its
+own address even with `allowPublicManagement` off. Saving one is refused for
+every role (400 over REST). An entrypoint already stored under that id keeps
+loading; rename it, or use `management.allowPublicManagement` /
+`management.allowedHosts` if exposing the management plane there was intended.
+
+**Who is affected:** deployments where operator accounts changed any of the
+settings above -- those changes now need an administrator. Automation that
+`PUT`s the global configuration with an operator's credentials must send these
+fields back unchanged (or leave their sections out). Nothing changes for
+administrators, viewers, or deployments with authentication off.
+
 ### The second 2FA sign-in step now requires the challenge from the password step
 
 `POST /v1/auth/2fa/verify` used to take `{id, code}` and nothing else, so an

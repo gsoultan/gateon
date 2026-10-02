@@ -50,6 +50,10 @@ ADRs follow a lightweight [MADR](https://adr.github.io/madr/)-style format:
 | [0037](./0037-a-manual-block-may-expire-and-a-fingerprint-is-stable.md) | A manual block may expire, and an API-key fingerprint is stable | Accepted |
 | [0038](./0038-binding-a-credential-injecting-middleware-to-a-route-needs-admin.md) | Binding a credential-injecting middleware to a route needs an administrator | Accepted |
 | [0039](./0039-the-second-sign-in-step-proves-the-first.md) | The second sign-in step proves the first | Accepted |
+| [0040](./0040-the-security-boundary-in-global-settings-needs-an-administrator.md) | The security boundary in the global settings needs an administrator | Accepted |
+| [0041](./0041-the-dashboard-session-stays-with-the-dashboard.md) | The dashboard session stays with the dashboard | Accepted |
+| [0042](./0042-a-stream-is-what-the-server-answered-and-every-listener-bounds-what-a-client-holds.md) | A stream is what the server answered, and every listener bounds what one client can hold | Accepted |
+| [0043](./0043-a-setting-that-saves-does-what-it-says-or-is-refused.md) | A setting that saves does what it says, or is refused | Accepted |
 
 ## Conventions
 

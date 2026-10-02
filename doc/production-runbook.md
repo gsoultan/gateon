@@ -12,28 +12,36 @@ been shown to fall. So this runbook is built around a **soak**: a period on
 traffic you can afford to lose, with a rollback you have already tried, before
 gateon becomes the only thing between the internet and something that matters.
 
-## Known blockers in v1.0.0
+## Known issues
 
-A production-readiness review on 2026-10-02 found defects that this runbook
-cannot work around by configuration alone. Until a release fixes them, do not
-put gateon in front of internet traffic. If you run it on internal or
-already-filtered traffic in the meantime:
+A production-readiness review on 2026-10-02 found defects that no setting
+avoids. They fall in two groups.
+
+**Fixed after v1.0.0.** Run a release that includes these fixes before putting
+gateon in front of internet traffic. On v1.0.0 itself, and only on internal or
+already-filtered traffic:
 
 - **Front it.** An anonymous client can switch off per-request timeouts with an
   `Upgrade` or `Accept: text/event-stream` header, and can exhaust a 2 GB host
-  with large unterminated headers. A proxy in front that enforces its own header
-  size and timeouts contains both.
+  with large unterminated headers (fixed: ADR 0042).
 - **Create no operator accounts.** An operator can rewrite authentication
-  settings in the global configuration and make themselves an administrator.
-- **Do not enrol 2FA yet.** A 2FA sign-in in v1.0.0 gets a session no API call
-  accepts, and no API turns 2FA off again.
+  settings in the global configuration and make themselves an administrator
+  (fixed: ADR 0040).
+- **Do not enrol 2FA.** A 2FA sign-in gets a session no API call accepts, and
+  the second step needs no password (fixed: ADR 0039).
 - **Serve the dashboard on a hostname no proxied application shares.** The
   admin's session cookie reaches backends on the same host, and the management
-  API has no CSRF defence against a same-site page.
+  API has no CSRF defence (fixed: ADR 0041).
+- **Do not use** basic-auth users without a password, OIDC/JWKS without an
+  audience, or rely on a block during a database outage (fixed: ADR 0043; on
+  upgrade an OIDC/JWKS middleware without an audience stops serving until you
+  set one, see [upgrading.md](upgrading.md)).
+
+**Still open in every release so far.** Work around these:
+
 - **Do not rely on**, without first proving it on your own traffic: blocked
-  countries without a MaxMind database, basic-auth users without a password,
-  OIDC/JWT without an audience, the IP reputation feed, a per-route WAF on top
-  of the global WAF, the JavaScript challenge and proof-of-work, or the
+  countries without a MaxMind database, the IP reputation feed, a per-route WAF
+  on top of the global WAF, the JavaScript challenge and proof-of-work, or the
   dashboard's posture percentage and mitigation funnel.
 - **Give every health check an explicit path**; the default "Auto" with no path
   never ejects a dead backend.
@@ -41,8 +49,10 @@ already-filtered traffic in the meantime:
   retention or sampling on a small disk, and alert on free space.
 - **Use the package or tarball, not the container image or Helm chart**, whose
   read-only configuration directory stops first-run setup completing.
+- **Turn audit logging on** (it is off by default) and keep the off-host copy
+  section 5 describes.
 
-This section will shrink as fixes ship; [upgrading.md](upgrading.md) records each.
+This section shrinks as fixes ship; [upgrading.md](upgrading.md) records each.
 
 ## 0. Decide before you install
 
@@ -136,8 +146,8 @@ Open a tunnel (`ssh -L 8080:127.0.0.1:8080 host`) and browse to
 `/var/lib/gateon/setup-token`, which is deleted once setup completes. (If you
 set `GATEON_SETUP_TOKEN`, the log names that variable instead of printing it.)
 
-- Use a long, unique administrator password, and enrol 2FA as soon as you run a
-  release that fixes 2FA sign-in (see Known blockers).
+- Use a long, unique administrator password and enrol 2FA (on v1.0.0, see
+  Known issues first).
 - Create day-to-day accounts as **operator** or **viewer**. Keep administrators
   to the people who would also hold root on the host: an administrator can bind
   credential-carrying middlewares to routes (ADR 0038) and read audit logs.
