@@ -38,6 +38,16 @@ type BaseHandlerDeps struct {
 	MgmtCORS     *cors.Cors
 }
 
+// publicBodyLimit caps the body of a request to an endpoint served before
+// authentication -- login, setup, the 2FA steps (ADR 0042). Every other
+// management endpoint authenticates before it reads a byte of its body, so
+// these are the only ones whose body anyone can make the gateway buffer, and
+// each was allowed the 10 MiB every authenticated endpoint is: one address at
+// the per-address connection cap could have it holding gigabytes. Their real
+// bodies are credentials, a code, and setup's names, addresses and database
+// settings -- a few hundred bytes.
+const publicBodyLimit = 64 << 10
+
 // CreateBaseHandler builds the main HTTP handler that routes to proxy or local API/UI.
 func CreateBaseHandler(
 	uiHandler http.Handler,
@@ -147,8 +157,11 @@ func CreateBaseHandler(
 		// Limit request body size to prevent DoS via large payloads.
 		// Default is 10MB, but GeoIP database uploads can be much larger.
 		limit := int64(10 * 1024 * 1024)
-		if r.URL.Path == "/v1/geoip/upload" {
+		switch {
+		case r.URL.Path == "/v1/geoip/upload":
 			limit = 512 * 1024 * 1024 // 512MB for GeoIP database
+		case isLoginPath(r.URL.Path) || isPublicAuthPath(r.URL.Path):
+			limit = publicBodyLimit
 		}
 		r.Body = http.MaxBytesReader(w, r.Body, limit)
 

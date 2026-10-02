@@ -75,3 +75,37 @@ func TestDefaultsFor_ConservativeMinimal(t *testing.T) {
 		t.Error("EntryPointMaxConnPerAddr must not exceed EntryPointMaxConnections")
 	}
 }
+
+// TestHeaderBufferingFitsEachTiersMemory is ADR 0042's arithmetic: every
+// connection an entrypoint admits may be one still sending its header, and
+// the Go memory such a connection holds was measured at up to 1.7 times the
+// header cap plus 4 KiB (52.6 KiB at 32 KiB). A tier's connection cap filled
+// that way has to fit in half of the memory the tier is sized for -- minimal
+// a 512 MiB host, standard the 2 GB target's 1536 MiB runtime limit,
+// enterprise a 16 GiB host. The cap was 1 MiB: 10 GiB on standard.
+func TestHeaderBufferingFitsEachTiersMemory(t *testing.T) {
+	budgets := map[Tier]int64{TierMinimal: 256 << 20, TierStandard: 768 << 20, TierEnterprise: 8 << 30}
+	for tier, budget := range budgets {
+		d := DefaultsFor(tier)
+		if d.MaxHeaderBytes < 16<<10 {
+			t.Errorf("%s: MaxHeaderBytes %d is under 16 KiB, which ordinary browsers' cookies exceed", tier, d.MaxHeaderBytes)
+		}
+		perConn := int64(d.MaxHeaderBytes)*17/10 + 4<<10
+		if worst := int64(d.EntryPointMaxConnections) * perConn; worst > budget {
+			t.Errorf("%s: %d connections x %d bytes = %d MiB of header buffering, over its %d MiB budget",
+				tier, d.EntryPointMaxConnections, perConn, worst>>20, budget>>20)
+		}
+	}
+}
+
+// TestStreamBoundsAreSetOnEveryTier: a stream lifted off its request's
+// deadlines must still have both bounds, and its lifetime must be longer than
+// its idle timeout or the idle timeout would never be what ends it.
+func TestStreamBoundsAreSetOnEveryTier(t *testing.T) {
+	for _, tier := range []Tier{TierMinimal, TierStandard, TierEnterprise} {
+		d := DefaultsFor(tier)
+		if d.StreamIdleTimeout <= 0 || d.StreamMaxLifetime <= d.StreamIdleTimeout {
+			t.Errorf("%s: idle %v, lifetime %v; want both set, lifetime the longer", tier, d.StreamIdleTimeout, d.StreamMaxLifetime)
+		}
+	}
+}

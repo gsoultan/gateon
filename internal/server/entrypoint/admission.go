@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"math"
 	"net"
 	"os"
 	"strconv"
@@ -53,6 +54,27 @@ func perAddrConnLimit() int {
 		}
 	}
 	return config.CurrentTierDefaults().EntryPointMaxConnPerAddr
+}
+
+// maxHeaderBytesEnv overrides the tier's request-header cap, in bytes.
+const maxHeaderBytesEnv = "GATEON_MAX_HEADER_BYTES"
+
+// maxHeaderBytes is the most request-header bytes any HTTP listener buffers
+// for one request -- the entrypoints over HTTP/1, HTTP/2 and HTTP/3, and the
+// management listener: GATEON_MAX_HEADER_BYTES when it is a positive integer,
+// else the resource profile's default (config.TierDefaults). A request past it
+// is refused with 431 (ADR 0042). It was 1 MiB, and a connection still sending
+// its header holds what it has sent, so 1000 such connections -- the minimal
+// tier's cap -- took the 2 GB host's process from 508 MiB to 1265 MiB.
+func maxHeaderBytes() int {
+	if v := strings.TrimSpace(os.Getenv(maxHeaderBytesEnv)); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+		logger.L.LogWarn("ignoring an invalid header cap; using the profile default",
+			"env", maxHeaderBytesEnv, "value", v)
+	}
+	return config.CurrentTierDefaults().MaxHeaderBytes
 }
 
 // tcpPerAddrReason and httpPerAddrReason are the fixed labels a per-address
@@ -164,6 +186,12 @@ type connSlots struct {
 
 func newConnSlots(ep *gateonv1.EntryPoint) *connSlots {
 	return &connSlots{epID: ep.Id, limit: int64(connLimit(ep))}
+}
+
+// unlimitedSlots is a connSlots no connection count reaches: for a listener
+// that has a per-address cap and, on purpose, no listener-wide one.
+func unlimitedSlots(id string) *connSlots {
+	return &connSlots{epID: id, limit: math.MaxInt64}
 }
 
 // take claims a slot, and reports false when every one is held.

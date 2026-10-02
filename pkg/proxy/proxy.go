@@ -50,6 +50,9 @@ type ProxyHandler struct {
 	healthCheckClient   *http.Client
 	tlsConfig           *tls.Config
 	StripCORS           bool
+	// upgradeHeaderTimeout is how long a backend has to answer an upgrade;
+	// 0 is backendResponseHeaderTimeout, which production runs.
+	upgradeHeaderTimeout time.Duration
 }
 
 // NewProxyHandler creates a ProxyHandler from route and ServiceStore (DIP).

@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/gsoultan/gateon/internal/config"
+	"github.com/gsoultan/gateon/internal/deadline"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware"
 	"github.com/gsoultan/gateon/internal/middleware/security"
@@ -156,7 +157,8 @@ func startSecureManagementServer(port string, deps *Deps, wg *syncutil.WaitGroup
 		traffic.MaxConnections(500),
 	)(deps.BaseHandler)
 
-	server := newManagementHTTPServer(addr, handler)
+	timeouts := managementTimeouts(deps)
+	server := newManagementHTTPServer(addr, timeouts.Handler(handler, deadline.CurrentStreamLimits()), timeouts)
 
 	if deps.ShutdownRegistry != nil {
 		deps.ShutdownRegistry.Register(func(ctx context.Context) error {
@@ -166,6 +168,35 @@ func startSecureManagementServer(port string, deps *Deps, wg *syncutil.WaitGroup
 
 	logger.L.LogInfo("Secure Management Entrypoint started", "addr", addr)
 	wg.Go(func() { serveManagement(server, addr, deps.Phantom) })
+}
+
+// defaultManagementTimeouts bound each request on the management listener
+// (ADR 0042, review finding M7). It had a header timeout and nothing else, so
+// a body sent one byte at a time was held for as long as the client liked:
+// 510 of them, from one address, to the unauthenticated 2FA endpoint, filled
+// its 500 in-flight slots and the port -- /healthz included -- answered 503.
+//
+//   - Read: a request body has 30 s to start arriving, and must then keep up
+//     32 KiB/s. A body is bounded by progress, not by a total, because this
+//     port takes 2FA codes and 128 MiB GeoIP databases alike: the database
+//     finishes over a 256 kbit/s link, the one-byte-at-a-time body is cut at
+//     30 s.
+//   - Write: once the request is in, the handler has 5 minutes to answer. A
+//     few operations here (a WAF ruleset or GeoIP update, an AI analysis) run
+//     inside the request, and a dashboard event stream is lifted to the stream
+//     bounds instead.
+var defaultManagementTimeouts = deadline.RequestTimeouts{
+	Read:        30 * time.Second,
+	Write:       5 * time.Minute,
+	MinBodyRate: 32 << 10,
+}
+
+// managementTimeouts is deps' override, else the defaults.
+func managementTimeouts(deps *Deps) deadline.RequestTimeouts {
+	if deps.ManagementTimeouts != nil {
+		return *deps.ManagementTimeouts
+	}
+	return defaultManagementTimeouts
 }
 
 // managementPort is GATEON_MANAGEMENT_PORT, else the configured port, else the
@@ -205,14 +236,35 @@ func serveManagement(server *http.Server, addr string, phantom PhantomCore) {
 	if phantom != nil {
 		l = phantom.OptimizeListener(l)
 	}
+	l = managementListener(l)
 
 	if err := server.Serve(l); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		logger.L.LogError("Management server failed", "error", err)
 	}
 }
 
-// newManagementHTTPServer builds the management listener's HTTP server.
-func newManagementHTTPServer(addr string, handler http.Handler) *http.Server {
+// managementListener caps the connections one source address may hold on the
+// management listener, with ADR 0036's limiter and limit
+// (GATEON_ENTRYPOINT_MAX_CONN_PER_ADDR, else the profile default): a connection
+// past it is closed at accept. Loopback and GATEON_MITIGATION_ALLOWLIST are
+// exempt, so an operator on the host is never the one locked out, and there is
+// deliberately no listener-wide cap for the same reason -- it would refuse the
+// loopback operator along with everyone else.
+func managementListener(l net.Listener) net.Listener {
+	perAddr := newPerAddrLimiter(perAddrConnLimit())
+	if perAddr == nil {
+		return l
+	}
+	return &cappedListener{Listener: l, slots: unlimitedSlots("management"), perAddr: perAddr}
+}
+
+// newManagementHTTPServer builds the management listener's HTTP server. Every
+// timeout is set explicitly; the per-request ones in t are applied by the
+// handler too (deadline.RequestTimeouts.Handler), which is what lets a
+// dashboard event stream, an upload that keeps moving and an operation that
+// runs long each get the bound that fits them -- these are what a request that
+// somehow skipped that handler would get.
+func newManagementHTTPServer(addr string, handler http.Handler, t deadline.RequestTimeouts) *http.Server {
 	// Enable H2C (HTTP/2 Cleartext) support for gRPC and modern HTTP clients.
 	// In Go 1.26+, this is handled natively via the Protocols field.
 	protocols := new(http.Protocols)
@@ -228,8 +280,10 @@ func newManagementHTTPServer(addr string, handler http.Handler) *http.Server {
 			telemetry.GlobalDiagnostics.RecordTLSError("management", addr, err)
 		}),
 		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       t.Read,
+		WriteTimeout:      t.Write,
 		IdleTimeout:       1 * time.Minute,
-		MaxHeaderBytes:    1 << 20, // 1MB
+		MaxHeaderBytes:    maxHeaderBytes(),
 		ConnState: func(conn net.Conn, state http.ConnState) {
 			switch state {
 			case http.StateNew:

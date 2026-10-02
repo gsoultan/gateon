@@ -415,6 +415,40 @@ func TestBaseHandler_BodyLimit(t *testing.T) {
 	})
 }
 
+// TestBaseHandler_PublicEndpointBodyLimit: an endpoint served before
+// authentication reads at most publicBodyLimit of body. They were allowed the
+// 10 MiB every authenticated endpoint is, so anyone could make the management
+// port buffer that much per connection (ADR 0042).
+func TestBaseHandler_PublicEndpointBodyLimit(t *testing.T) {
+	read := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, err := io.ReadAll(r.Body); err != nil {
+			w.WriteHeader(http.StatusRequestEntityTooLarge)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	})
+	handler := CreateBaseHandler(read, BaseHandlerDeps{
+		ProxyHandler: read,
+		RouteStore:   &mockRouteStore{},
+		GlobalReg:    &mockGlobalReg{config: &gateonv1.GlobalConfig{}},
+	}, nil, nil)
+	post := func(path string, n int) int {
+		req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(bytes.Repeat([]byte("a"), n)))
+		req = req.WithContext(context.WithValue(req.Context(), middleware.EntryPointIDContextKey, "management"))
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+		return rr.Code
+	}
+	for _, path := range []string{"/v1/login", "/v1/auth/2fa/verify", "/v1/setup", "/v1/setup/test-db"} {
+		if code := post(path, publicBodyLimit+1); code != http.StatusRequestEntityTooLarge {
+			t.Errorf("POST %s with a %d-byte body: %d, want 413", path, publicBodyLimit+1, code)
+		}
+		if code := post(path, 4<<10); code == http.StatusRequestEntityTooLarge {
+			t.Errorf("POST %s with a 4 KiB body was refused as too large", path)
+		}
+	}
+}
+
 func TestBaseHandler_ManagementAPIPriority(t *testing.T) {
 	uiHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)

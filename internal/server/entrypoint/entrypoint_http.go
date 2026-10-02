@@ -12,9 +12,9 @@ import (
 	"net/http"
 	"os"
 	"strconv"
-	"strings"
 	"time"
 
+	"github.com/gsoultan/gateon/internal/deadline"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware"
 	"github.com/gsoultan/gateon/internal/middleware/security"
@@ -77,25 +77,27 @@ func resolveEPTimeouts(epID string, ep *gateonv1.EntryPoint, deps *Deps) (readTi
 // http.ResponseController (instead of baked into http.Server at startup),
 // updates to ReadTimeoutMs/WriteTimeoutMs take effect on the next request
 // without requiring a gateon restart.
+//
+// Every request gets both deadlines, whatever it carries. Any Upgrade header,
+// or an Accept naming text/event-stream, used to skip them -- a header the
+// client writes, on any route -- so a client could hold a connection, a
+// goroutine and, through the WebSocket path, a backend connection for as long
+// as it liked with a slow body or a slow read (ADR 0042). A response is
+// lifted only once it is one: a WebSocket when its backend has answered 101
+// (the tunnel then bounds itself), an event stream when the server has
+// answered text/event-stream (deadline.StreamWriter). Either is then bounded
+// by the stream idle timeout and maximum lifetime instead.
 func dynamicTimeouts(ep *gateonv1.EntryPoint, deps *Deps, next http.Handler) http.Handler {
+	limits := deadline.CurrentStreamLimits()
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Skip deadlines for long-lived connections (WebSocket and SSE)
-		if r.Header.Get("Upgrade") != "" ||
-			strings.Contains(strings.ToLower(r.Header.Get("Accept")), "text/event-stream") {
-			next.ServeHTTP(w, r)
-			return
-		}
-
 		readTimeout, writeTimeout := resolveEPTimeouts(ep.Id, ep, deps)
 		rc := http.NewResponseController(w)
 		now := time.Now()
-		if readTimeout > 0 {
-			_ = rc.SetReadDeadline(now.Add(readTimeout))
-		}
-		if writeTimeout > 0 {
-			_ = rc.SetWriteDeadline(now.Add(writeTimeout))
-		}
-		next.ServeHTTP(w, r)
+		_ = rc.SetReadDeadline(now.Add(readTimeout))
+		_ = rc.SetWriteDeadline(now.Add(writeTimeout))
+		sw := deadline.NewStreamWriter(w, limits)
+		defer deadline.Release(sw)
+		next.ServeHTTP(sw, r)
 	})
 }
 
@@ -199,7 +201,10 @@ func (e *httpEntrypoint) startHTTP3(h http.Handler) http.Handler {
 		return h
 	}
 	addr := e.ep.Address
-	h3Server := newHTTP3Server(addr, h, e.tlsConfig)
+	// The same per-request deadlines as the TCP server: HTTP/3 had none at
+	// all, so a slow body or a slow read over QUIC was bounded only by the
+	// connection's idle timeout, which one byte now and then resets.
+	h3Server := newHTTP3Server(addr, dynamicTimeouts(e.ep, e.deps, h), e.tlsConfig)
 	// Listened on here rather than by ListenAndServe, so that the listener
 	// the server accepts from is the one that holds the entrypoint's limit.
 	ln, err := quic.ListenAddrEarly(addr, http3.ConfigureTLSConfig(e.tlsConfig), h3Server.QUICConfig.Clone())
@@ -254,7 +259,9 @@ func (e *httpEntrypoint) newServer(h http.Handler) *http.Server {
 		}),
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       1 * time.Minute,
-		MaxHeaderBytes:    1 << 20, // 1MB
+		// Also HTTP/2's SETTINGS_MAX_HEADER_LIST_SIZE, which net/http derives
+		// from it, so both protocols refuse the same header with 431.
+		MaxHeaderBytes: maxHeaderBytes(),
 		ConnContext: func(ctx context.Context, c net.Conn) context.Context {
 			return context.WithValue(ctx, identity.ConnContextKey, c)
 		},
@@ -318,9 +325,10 @@ func (e *httpEntrypoint) serveTCP(server *http.Server) {
 
 func newHTTP3Server(addr string, handler http.Handler, tlsConfig *tls.Config) *http3.Server {
 	return &http3.Server{
-		Addr:      addr,
-		Handler:   handler,
-		TLSConfig: tlsConfig,
+		Addr:           addr,
+		Handler:        handler,
+		TLSConfig:      tlsConfig,
+		MaxHeaderBytes: maxHeaderBytes(), // it defaulted to 1 MiB, as HTTP/1 did
 		QUICConfig: &quic.Config{
 			MaxIdleTimeout:        quicMaxIdleTimeout,
 			KeepAlivePeriod:       quicKeepAlivePeriod,
