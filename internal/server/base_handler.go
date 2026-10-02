@@ -16,6 +16,7 @@ import (
 	"github.com/gsoultan/gateon/internal/middleware/traffic"
 	"github.com/gsoultan/gateon/internal/router"
 	"github.com/gsoultan/gateon/internal/server/entrypoint"
+	"github.com/gsoultan/gateon/internal/server/mgmtorigin"
 	"github.com/rs/cors"
 )
 
@@ -36,6 +37,10 @@ type BaseHandlerDeps struct {
 	Auth         auth.Service
 	LoginLimiter traffic.RateLimiter // stricter rate limit for /v1/login (e.g. 5/min per IP)
 	MgmtCORS     *cors.Cors
+	// MgmtOrigins names the origins, besides the management origin itself,
+	// that may write with the session cookie. Nil trusts none; the guard runs
+	// either way.
+	MgmtOrigins *mgmtorigin.Policy
 }
 
 // publicBodyLimit caps the body of a request to an endpoint served before
@@ -98,6 +103,11 @@ func CreateBaseHandler(
 	// mgmtLogic defines the internal handler for management API, UI, and auth.
 	// It is separated so that MgmtCORS can be applied only to this path.
 	mgmtLogic := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if isCacheableManagementAnswer(r) {
+			// An answer holds configuration, users and audit entries. Set
+			// before any handler runs so an error answer carries it too.
+			w.Header().Set("Cache-Control", "no-store")
+		}
 		gc := deps.GlobalReg.Get(r.Context())
 		epID := ""
 		if rs := middleware.GetRequestState(r); rs != nil {
@@ -152,6 +162,12 @@ func CreateBaseHandler(
 	if deps.MgmtCORS != nil {
 		mgmtHandler = deps.MgmtCORS.Handler(mgmtLogic)
 	}
+	// Outside CORS, so a refused request is answered with no CORS headers,
+	// and around everything the management plane serves -- sign-in and setup
+	// included, which are writes too. Not conditional: it is the only thing
+	// that tells a write the dashboard asked for from one another page on the
+	// same site did with the dashboard's cookie (ADR 0041).
+	mgmtHandler = deps.MgmtOrigins.Guard(mgmtHandler)
 
 	mainHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Limit request body size to prevent DoS via large payloads.

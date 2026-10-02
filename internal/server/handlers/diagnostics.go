@@ -24,12 +24,21 @@ import (
 	"github.com/gsoultan/gateon/internal/ebpf"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware"
+	"github.com/gsoultan/gateon/internal/server/mgmtorigin"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	"github.com/gsoultan/gateon/pkg/proxy"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
-var upgrader = websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+// logsUpgrader is the /v1/logs handshake. It accepted every Origin, so any
+// page on the dashboard's site -- another port on its address, a sibling
+// subdomain -- could open the system log with the admin's cookie and read it,
+// which a cross-site WebSocket is free to do (review M9). The handshake is
+// checked the way the management plane checks a write: the management origin,
+// a configured CORS origin, or a client that is not a browser (ADR 0041).
+func logsUpgrader(origins *mgmtorigin.Policy) *websocket.Upgrader {
+	return &websocket.Upgrader{CheckOrigin: origins.Allows}
+}
 
 // aggRateEstimator derives a system-wide requests/second figure from the
 // monotonically-increasing cumulative request total across successive agg-stats
@@ -460,6 +469,7 @@ func registerDiagnosticHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Dep
 		data, _ := ProtojsonOptions().Marshal(res)
 		_, _ = w.Write(data)
 	})
+	upgrader := logsUpgrader(d.MgmtOrigins)
 	mux.HandleFunc("GET /v1/logs", func(w http.ResponseWriter, r *http.Request) {
 		if !isLogsRequestAuthorized(r, d.AuthManager) {
 			w.Header().Set("Content-Type", "application/json")

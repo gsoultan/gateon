@@ -27,6 +27,14 @@ import (
 // exercised against the actual authentication boundary.
 func buildManagementHandler(t *testing.T, extraRoutes ...*gateonv1.Route) (http.Handler, *auth.Manager, string) {
 	t.Helper()
+	h, _, mgr, adminID := buildManagementStack(t, nil, extraRoutes...)
+	return h, mgr, adminID
+}
+
+// buildManagementStack is buildManagementHandler that also returns the Server,
+// with origins as the management plane's trusted CORS origins.
+func buildManagementStack(t *testing.T, origins []string, extraRoutes ...*gateonv1.Route) (http.Handler, *Server, *auth.Manager, string) {
+	t.Helper()
 	tmp := t.TempDir()
 	mgr, err := auth.NewManager(filepath.Join(tmp, "auth.db"), "0123456789abcdef0123456789abcdef", logger.Default())
 	if err != nil {
@@ -74,15 +82,18 @@ func buildManagementHandler(t *testing.T, extraRoutes ...*gateonv1.Route) (http.
 	internalAPI := transform.NewDefaultGRPCWebDetector(grpcServer)
 	mux := http.NewServeMux()
 	mux.Handle(apiConnectHandler(apiSvc)) // as Run mounts it, interceptors and all
-	handlers.RegisterRESTHandlers(mux, apiSvc, handlerDeps(s))
+	mgmtCfg := &gateonv1.ManagementConfig{Cors: &gateonv1.CorsConfig{AllowedOrigins: origins}}
+	deps := handlerDeps(s)
+	deps.MgmtOrigins = BuildManagementOrigins(mgmtCfg)
+	handlers.RegisterRESTHandlers(mux, apiSvc, deps)
 	proxyHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		s.HandleProxyOrLocal(w, r, grpcServer, internalAPI, mux)
 	})
 	base := CreateBaseHandler(http.NotFoundHandler(), BaseHandlerDeps{
 		ProxyHandler: proxyHandler, RouteStore: s.RouteStore, GlobalReg: s.GlobalStore,
-		Auth: s.AuthManager, MgmtCORS: BuildManagementCORS(nil),
+		Auth: s.AuthManager, MgmtCORS: BuildManagementCORS(mgmtCfg), MgmtOrigins: deps.MgmtOrigins,
 	}, internalAPI, mux)
-	return middleware.EntryPoint("management", "management", true)(base), mgr, adminID
+	return middleware.EntryPoint("management", "management", true)(base), s, mgr, adminID
 }
 
 // A Host() proxy route matches every path on its host, including the management

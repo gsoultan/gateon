@@ -70,6 +70,23 @@ func isAPIMetricsPath(path string) bool {
 	return strings.HasPrefix(path, "/v1/") || strings.HasPrefix(path, "/gateon.v1.") || path == "/metrics"
 }
 
+// isCacheableManagementAnswer reports whether r is answered by the management
+// API, REST or Connect, with a method whose answer a cache may keep: GET, HEAD
+// and POST are the only ones RFC 9111 allows. Connect calls are POSTs (or GETs).
+//
+// PUT, PATCH and DELETE answers are never stored, so they get no header to say
+// so. Saying it anyway is not harmless: Chromium then keeps no copy of a PUT
+// answer's body for its inspector, which every Playwright spec that reads the
+// answer to the dashboard's PUT /v1/global waits on until it times out.
+func isCacheableManagementAnswer(r *http.Request) bool {
+	switch r.Method {
+	case http.MethodGet, http.MethodHead, http.MethodPost:
+	default:
+		return false
+	}
+	return strings.HasPrefix(r.URL.Path, "/v1/") || strings.HasPrefix(r.URL.Path, "/gateon.v1.")
+}
+
 // isGateonManagementAPIPath returns true for Gateon internal management API and ConnectRPC endpoints.
 func isGateonManagementAPIPath(path string) bool {
 	if path == "/metrics" || path == "/healthz" || path == "/readyz" || path == "/grpc.health.v1.Health/Check" {

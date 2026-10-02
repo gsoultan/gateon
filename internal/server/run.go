@@ -212,7 +212,14 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 	// api_rbac.go.
 	mux.Handle(apiConnectHandler(apiService))
 
+	var mgmtConfig *gateonv1.ManagementConfig
+	if gc := s.GlobalStore.Get(ctx); gc != nil {
+		mgmtConfig = gc.Management
+	}
+	mgmtOrigins := BuildManagementOrigins(mgmtConfig)
+
 	handlers.RegisterRESTHandlers(mux, apiService, &handlers.Deps{
+		MgmtOrigins:        mgmtOrigins,
 		RouteService:       routeService,
 		ServiceService:     serviceService,
 		EpService:          epService,
@@ -236,10 +243,6 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 	// Login rate limit: 5 attempts per minute per IP to mitigate brute force.
 	loginLimiter := traffic.NewRateLimiter(rate.Every(time.Minute/5), 5)
 
-	var mgmtConfig *gateonv1.ManagementConfig
-	if gc := s.GlobalStore.Get(ctx); gc != nil {
-		mgmtConfig = gc.Management
-	}
 	mgmtCors := BuildManagementCORS(mgmtConfig)
 	s.MgmtCORS = mgmtCors
 
@@ -250,6 +253,7 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 		Auth:         s.AuthManager,
 		LoginLimiter: loginLimiter,
 		MgmtCORS:     mgmtCors,
+		MgmtOrigins:  mgmtOrigins,
 	}, internalAPI, mux)
 	tlsConfig, err := s.TLSManager.GetTLSConfig()
 	if err != nil {

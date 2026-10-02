@@ -68,12 +68,27 @@ export function getApiUrl(path: string): string {
   return url.toString();
 }
 
+/**
+ * Whether a request body needs a Content-Type the caller did not give. A
+ * string body is JSON everywhere this client sends one, but fetch labels a
+ * string text/plain -- the type a page on any other site can also send, which
+ * the gateway refuses on a write (ADR 0041). FormData and Blob bodies carry
+ * their own type, and a request with no body needs none.
+ */
+function needsJsonContentType(options: RequestInit, headers: Record<string, string>): boolean {
+  if (typeof options.body !== "string") return false;
+  return !Object.keys(headers).some((h) => h.toLowerCase() === "content-type");
+}
+
 export async function apiFetch(path: string, options: RequestInit = {}) {
   const base = getApiBaseUrl();
   const token = useAuthStore.getState().token;
   const headers: Record<string, string> = {
     ...(options.headers as Record<string, string>),
   };
+  if (needsJsonContentType(options, headers)) {
+    headers["Content-Type"] = "application/json";
+  }
   if (token && token !== "__cookie__") {
     headers.Authorization = `Bearer ${token}`;
   }
