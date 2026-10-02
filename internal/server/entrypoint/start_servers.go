@@ -413,8 +413,8 @@ func (s *tcpServer) handle(c net.Conn) {
 // rejections; the log says so at most once a minute, so that a flood of them
 // is not also a flood of log lines.
 func (s *tcpServer) refuseOverLimit(c net.Conn) {
+	telemetry.IncInflightRejected("tcp_max_connections") // before the close: see cappedListener.Accept
 	_ = c.Close()
-	telemetry.IncInflightRejected("tcp_max_connections")
 	if s.conns.warn.due(time.Now()) {
 		logger.L.LogWarn("TCP entrypoint at its connection limit, refusing new connections",
 			"ep", s.ep.Id, "max_connections", s.conns.limit)
@@ -427,8 +427,8 @@ func (s *tcpServer) refuseOverLimit(c net.Conn) {
 // most once a minute. The entrypoint-wide limit and this both apply -- this is
 // the tighter for one client (ADR 0036).
 func (s *tcpServer) refusePerAddr(c net.Conn) {
-	_ = c.Close()
 	telemetry.IncInflightRejected(tcpPerAddrReason)
+	_ = c.Close()
 	if s.conns.perAddr.warn.due(time.Now()) {
 		logger.L.LogWarn("TCP entrypoint refusing a connection: source address at its per-address connection limit",
 			"ep", s.ep.Id, "max_conn_per_addr", s.conns.perAddr.limit)

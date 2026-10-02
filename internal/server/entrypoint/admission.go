@@ -236,8 +236,11 @@ func (l *cappedListener) Accept() (net.Conn, error) {
 			return nil, err
 		}
 		if !l.slots.take() {
-			_ = c.Close()
+			// Counted before the close, so a client that sees the close
+			// can already read the count: the other order let a reader
+			// look between the two and find the refusal uncounted.
 			l.slots.refused()
+			_ = c.Close()
 			continue
 		}
 		// The per-address cap is the tighter of the two, so it is checked
@@ -249,8 +252,8 @@ func (l *cappedListener) Accept() (net.Conn, error) {
 			ip = peerIP(c)
 			if !l.perAddr.acquire(ip) {
 				l.slots.release()
-				_ = c.Close()
 				l.refusedPerAddr()
+				_ = c.Close()
 				continue
 			}
 		}
@@ -337,8 +340,8 @@ func (l *cappedQUICListener) Accept(ctx context.Context) (*quic.Conn, error) {
 			return nil, err
 		}
 		if !l.slots.take() {
-			_ = c.CloseWithError(quic.ApplicationErrorCode(http3.ErrCodeExcessiveLoad), "")
 			l.slots.refused()
+			_ = c.CloseWithError(quic.ApplicationErrorCode(http3.ErrCodeExcessiveLoad), "")
 			continue
 		}
 		ip := ""
@@ -346,8 +349,8 @@ func (l *cappedQUICListener) Accept(ctx context.Context) (*quic.Conn, error) {
 			ip = addrIP(c.RemoteAddr())
 			if !l.perAddr.acquire(ip) {
 				l.slots.release()
-				_ = c.CloseWithError(quic.ApplicationErrorCode(http3.ErrCodeExcessiveLoad), "")
 				l.refusedPerAddr()
+				_ = c.CloseWithError(quic.ApplicationErrorCode(http3.ErrCodeExcessiveLoad), "")
 				continue
 			}
 		}
