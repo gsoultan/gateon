@@ -107,6 +107,43 @@ func verdict(t *testing.T, prog *ebpf.Program, pkt []byte, repeat uint32) uint32
 	return ret
 }
 
+// verdictEach runs prog on pkt n times, one BPF_PROG_TEST_RUN per packet, and
+// returns the last verdict. Use it, not verdict with a repeat count, wherever a
+// test asserts that the Nth packet of a budget still passes. The kernel stops a
+// repeated run when a signal is pending, and cilium/ebpf answers that EINTR by
+// starting the whole repeat count again: the iterations that already ran have
+// spent their tokens, the replay spends them twice, and the burst runs dry
+// early. Go's runtime signals its threads to preempt them, so on CI that
+// happened often enough to fail "the 64th packet of a first burst" now and then.
+// A single run is never replayed: cilium/ebpf treats EINTR on repeat 1 as done.
+func verdictEach(t *testing.T, prog *ebpf.Program, pkt []byte, n int) uint32 {
+	t.Helper()
+	var v uint32
+	for range n {
+		v = verdict(t, prog, pkt, 1)
+	}
+	return v
+}
+
+// floodPackets is the flood a rate-limit test sends once its burst is spent.
+const floodPackets = 4096
+
+// assertFloodLimited checks that the limiter refused nearly all of a flood sent
+// after the burst ran dry. It counts the drops instead of reading the last
+// packet's verdict: the bucket refills one token a millisecond, so a run that
+// takes a few milliseconds legitimately lets a few packets through, and the
+// last one was among them about once in a thousand runs. A limiter that is not
+// enforcing drops none; one that is, at most a token per elapsed millisecond
+// short of all of them.
+func assertFloodLimited(t *testing.T, m *EbpfManager, hook string) {
+	t.Helper()
+	const atLeast = floodPackets - 256 // 256 ms of refill: far slower than any run
+	if n := dropped(t, m, "rate_limited"); n < atLeast {
+		t.Fatalf("%s: the limiter dropped %d of %d packets sent after the burst was spent, want at least %d",
+			hook, n, floodPackets, atLeast)
+	}
+}
+
 func dropped(t *testing.T, m *EbpfManager, reason string) uint64 {
 	t.Helper()
 	stats, err := m.GetMapStats()
@@ -188,17 +225,12 @@ func TestXDPRateLimitOnAllowsABurstThenDrops(t *testing.T) {
 	prog := coll.Programs[xdpProgName]
 	pkt := ipv4TCP(net.IPv4(198, 51, 100, 21), 443, tcpACK)
 
-	if v := verdict(t, prog, pkt, 64); v != xdpPass {
+	if v := verdictEach(t, prog, pkt, 64); v != xdpPass {
 		t.Fatalf("the 64th packet of a client's first burst got verdict %d, want XDP_PASS: "+
 			"a limiter with no burst allowance drops the second segment of every window", v)
 	}
-	if v := verdict(t, prog, pkt, 4096); v != xdpDrop {
-		t.Fatalf("4096 further packets in well under a millisecond were all passed (last verdict %d); "+
-			"the limiter is not enforcing", v)
-	}
-	if n := dropped(t, m, "rate_limited"); n == 0 {
-		t.Error("packets were dropped but the rate_limited counter did not move")
-	}
+	verdict(t, prog, pkt, floodPackets)
+	assertFloodLimited(t, m, "XDP")
 }
 
 // TestXDPParallelSYNsFromOneClientAreNotDropped: a browser opens several
