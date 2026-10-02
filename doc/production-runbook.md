@@ -12,6 +12,38 @@ been shown to fall. So this runbook is built around a **soak**: a period on
 traffic you can afford to lose, with a rollback you have already tried, before
 gateon becomes the only thing between the internet and something that matters.
 
+## Known blockers in v1.0.0
+
+A production-readiness review on 2026-10-02 found defects that this runbook
+cannot work around by configuration alone. Until a release fixes them, do not
+put gateon in front of internet traffic. If you run it on internal or
+already-filtered traffic in the meantime:
+
+- **Front it.** An anonymous client can switch off per-request timeouts with an
+  `Upgrade` or `Accept: text/event-stream` header, and can exhaust a 2 GB host
+  with large unterminated headers. A proxy in front that enforces its own header
+  size and timeouts contains both.
+- **Create no operator accounts.** An operator can rewrite authentication
+  settings in the global configuration and make themselves an administrator.
+- **Do not enrol 2FA yet.** A 2FA sign-in in v1.0.0 gets a session no API call
+  accepts, and no API turns 2FA off again.
+- **Serve the dashboard on a hostname no proxied application shares.** The
+  admin's session cookie reaches backends on the same host, and the management
+  API has no CSRF defence against a same-site page.
+- **Do not rely on**, without first proving it on your own traffic: blocked
+  countries without a MaxMind database, basic-auth users without a password,
+  OIDC/JWT without an audience, the IP reputation feed, a per-route WAF on top
+  of the global WAF, the JavaScript challenge and proof-of-work, or the
+  dashboard's posture percentage and mitigation funnel.
+- **Give every health check an explicit path**; the default "Auto" with no path
+  never ejects a dead backend.
+- **Watch the disk.** Trace storage is bounded by age, not size. Lower trace
+  retention or sampling on a small disk, and alert on free space.
+- **Use the package or tarball, not the container image or Helm chart**, whose
+  read-only configuration directory stops first-run setup completing.
+
+This section will shrink as fixes ship; [upgrading.md](upgrading.md) records each.
+
 ## 0. Decide before you install
 
 Write these down. Each later step refers back to them.
@@ -104,7 +136,8 @@ Open a tunnel (`ssh -L 8080:127.0.0.1:8080 host`) and browse to
 `/var/lib/gateon/setup-token`, which is deleted once setup completes. (If you
 set `GATEON_SETUP_TOKEN`, the log names that variable instead of printing it.)
 
-- Use a long, unique administrator password and **enrol 2FA immediately**.
+- Use a long, unique administrator password, and enrol 2FA as soon as you run a
+  release that fixes 2FA sign-in (see Known blockers).
 - Create day-to-day accounts as **operator** or **viewer**. Keep administrators
   to the people who would also hold root on the host: an administrator can bind
   credential-carrying middlewares to routes (ADR 0038) and read audit logs.
@@ -119,8 +152,8 @@ the longest test history:
    `max_connections` and the per-address cap at their tier defaults unless you
    have measured otherwise (ADRs 0032, 0036). Clients behind one large NAT may
    need `GATEON_ENTRYPOINT_MAX_CONN_PER_ADDR` raised.
-2. **Health checks** with both a failure and a recovery threshold, so one bad
-   probe does not drain a pool.
+2. **Health checks** with an explicit path and both a failure and a recovery
+   threshold, so one bad probe does not drain a pool.
 3. **Rate limiting** per route, sized from real traffic, not guessed.
 4. **The WAF in audit-only**, following [waf-rollout.md](waf-rollout.md) step by
    step. Do not enforce until step 3 of that guide says the cost is acceptable.
@@ -142,9 +175,45 @@ through the dashboard over references unless you need rotation.
 
 ## 5. Monitoring and alerts
 
-Scrape `/metrics` on the management entrypoint from an address in its allowlist.
-Probe `/healthz` (the process is alive) and `/readyz` (it should receive
-traffic; `503` while its telemetry store is not open) on the same port.
+`/metrics` is on the management entrypoint and requires a signed-in session, so
+the scraper needs both an address in the management allowlist and a credential.
+Gateon has no long-lived service credential yet, and a session lasts eight
+hours, so until it does, give the scraper its own **viewer** account and refresh
+its token on a timer:
+
+```sh
+# /usr/local/bin/gateon-metrics-token  (run every 4 hours by a systemd timer)
+#!/bin/sh
+set -eu
+umask 077
+jq -n --arg u metrics --rawfile p /etc/gateon-metrics.pw \
+   '{username:$u, password:($p|rtrimstr("\n"))}' |
+curl -fsS -H 'Content-Type: application/json' --data-binary @- \
+   http://127.0.0.1:8080/v1/login |
+jq -er .token > /var/lib/prometheus/gateon.token.new
+chown prometheus /var/lib/prometheus/gateon.token.new
+mv /var/lib/prometheus/gateon.token.new /var/lib/prometheus/gateon.token
+```
+
+```yaml
+# prometheus.yml
+- job_name: gateon
+  authorization:
+    credentials_file: /var/lib/prometheus/gateon.token
+  static_configs:
+    - targets: ["127.0.0.1:8080"]
+```
+
+The viewer account cannot change anything, but it can read what any viewer can
+in the dashboard, so give it a long random password, keep that file root-only,
+and do not enrol it in 2FA (the script cannot answer a code). Expect a scrape
+gap if the timer stops: the `GateonDown` alert below will say so.
+
+Probe `/healthz` (the process is alive) and `/readyz` on the same port; neither
+needs a credential. Know what `/readyz` does **not** cover: it reports `503`
+only while the telemetry store is not open. A listener that failed to bind, or
+a configuration database that is down, still answers `200`, so alert on traffic
+and errors as well, not on readiness alone.
 
 Minimum alert set, as Prometheus rules. Tune the thresholds to your baseline
 after the first week; these are starting points.
