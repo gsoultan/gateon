@@ -681,8 +681,11 @@ func (b basicAuthenticator) serve(next http.Handler, w http.ResponseWriter, r *h
 	}
 	activeRouteID := GetRouteName(r)
 
+	// An empty name or password is never a login, whatever the configured
+	// check would say of it: the build refuses a configured empty one, and
+	// this holds the line for any verifier that might not (ADR 0043).
 	u, p, ok := r.BasicAuth()
-	if !ok || !b.verify(u, p) {
+	if !ok || u == "" || p == "" || !b.verify(u, p) {
 		telemetry.MiddlewareAuthFailuresTotal.WithLabelValues(activeRouteID, "basic").Inc()
 		w.Header().Set("WWW-Authenticate", `Basic realm="`+b.realm+`"`)
 		b.cfg.HandleFailure(w, r, next, errors.New("Unauthorized"))
@@ -700,6 +703,45 @@ func (b basicAuthenticator) serve(next http.Handler, w http.ResponseWriter, r *h
 	next.ServeHTTP(w, r)
 }
 
+// parseBasicUsers reads "user1:pass1,user2:pass2" into a map by user name.
+//
+// A user with no password is refused (ADR 0043). It is what the dashboard's
+// "Add user" row saved when the password was left blank, and the verifier
+// then compared "" with "" -- anyone who sent that name and no password was
+// let in. Refusing it here refuses the save that would store it (the save
+// builds the middleware) and the build of one already stored, which the
+// router serves as the refusal of an unbuildable security middleware. A user
+// with no name is refused for the same reason.
+//
+// No message quotes an entry: one without a colon may be a password typed
+// without its name, and these errors reach the API response and the log.
+func parseBasicUsers(users string) (map[string]string, error) {
+	pairs := make(map[string]string)
+	n := 0
+	for part := range strings.SplitSeq(users, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		n++
+		u, p, ok := strings.Cut(part, ":")
+		switch {
+		case !ok:
+			return nil, fmt.Errorf("basic auth users: entry %d is not user:password", n)
+		case u == "":
+			return nil, fmt.Errorf("basic auth users: entry %d has no user name", n)
+		case p == "":
+			return nil, fmt.Errorf("basic auth users: user %q has no password; a user with an empty password "+
+				"would let anyone in under that name, so enter one or remove the user", u)
+		}
+		pairs[u] = p
+	}
+	if len(pairs) == 0 {
+		return nil, fmt.Errorf("basic auth requires at least one user")
+	}
+	return pairs, nil
+}
+
 // BasicAuthUsers validates against multiple users. users is "user1:pass1,user2:pass2".
 func BasicAuthUsers(users string, realm string) (Middleware, error) {
 	return BasicAuthUsersWithConfig(users, realm, AuthBaseConfig{})
@@ -713,21 +755,9 @@ func BasicAuthUsersWithConfig(users string, realm string, cfg AuthBaseConfig) (M
 	if realm == "" {
 		realm = "Gateon"
 	}
-	pairs := make(map[string]string)
-	for _, part := range strings.Split(users, ",") {
-		part = strings.TrimSpace(part)
-		if part == "" {
-			continue
-		}
-		idx := strings.Index(part, ":")
-		if idx < 0 {
-			return nil, fmt.Errorf("invalid user format: %q (expected user:password)", part)
-		}
-		u, p := part[:idx], part[idx+1:]
-		pairs[u] = p
-	}
-	if len(pairs) == 0 {
-		return nil, fmt.Errorf("basic auth requires at least one user")
+	pairs, err := parseBasicUsers(users)
+	if err != nil {
+		return nil, err
 	}
 	return basicAuthenticator{realm: realm, cfg: cfg, verify: func(u, p string) bool {
 		expected, found := pairs[u]
