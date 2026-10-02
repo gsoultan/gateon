@@ -454,47 +454,58 @@ type oidcDiscoveryResponse struct {
 
 const oidcDiscoveryTimeout = 15 * time.Second
 
-// NewOIDCValidator creates a JWT validator by fetching OIDC discovery from the issuer.
-// Config: issuer (required), audience (optional), baseCfg.
-func NewOIDCValidator(issuer, audience string, baseCfg AuthBaseConfig) (*JWTValidator, error) {
-	issuer = strings.TrimSpace(issuer)
+// NewOIDCValidator creates a JWT validator whose issuer and key set come from
+// the discovery document of cfg.Issuer. cfg.JWKSURL is ignored; the rest of
+// cfg -- the audience, its opt-out and the base config -- applies as it does
+// to NewJWTValidator.
+//
+// An audience is required (ADR 0043), and checked before discovery so a
+// refused config makes no request. The provider's keys sign the ID tokens of
+// every client it serves: with no audience, a token issued to any other
+// application of the same provider -- for a public provider, any application
+// at all -- was accepted.
+func NewOIDCValidator(cfg JWTConfig) (*JWTValidator, error) {
+	issuer := strings.TrimSpace(cfg.Issuer)
 	if issuer == "" {
 		return nil, fmt.Errorf("oidc auth requires issuer URL")
 	}
-	discoveryURL := strings.TrimSuffix(issuer, "/") + "/.well-known/openid-configuration"
-
-	client := &http.Client{Timeout: oidcDiscoveryTimeout}
-	resp, err := client.Get(discoveryURL)
+	if strings.TrimSpace(cfg.Audience) == "" && !cfg.AllowAnyAudience {
+		return nil, ErrAudienceRequired
+	}
+	disc, err := discoverOIDC(issuer)
 	if err != nil {
-		return nil, fmt.Errorf("oidc discovery failed: %w", err)
+		return nil, err
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("oidc discovery returned %d", resp.StatusCode)
-	}
-
-	var disc oidcDiscoveryResponse
-	if err := json.NewDecoder(resp.Body).Decode(&disc); err != nil {
-		return nil, fmt.Errorf("oidc discovery invalid JSON: %w", err)
-	}
-	if disc.JWKSURI == "" {
-		return nil, fmt.Errorf("oidc discovery missing jwks_uri")
-	}
-
 	// Compared exactly, as discovery states it: a token's iss must match the
 	// issuer string character for character (OpenID Connect Core 3.1.3.7).
 	// Trimming a trailing slash here refused every token from providers whose
 	// issuer ends in one, Auth0 among them.
-	effectiveIssuer := disc.Issuer
-	if effectiveIssuer == "" {
-		effectiveIssuer = issuer
+	cfg.Issuer = disc.Issuer
+	if cfg.Issuer == "" {
+		cfg.Issuer = issuer
 	}
+	cfg.JWKSURL = disc.JWKSURI
+	return NewJWTValidator(cfg)
+}
 
-	jwtCfg := JWTConfig{
-		AuthBaseConfig: baseCfg,
-		Issuer:         effectiveIssuer,
-		Audience:       strings.TrimSpace(audience),
-		JWKSURL:        disc.JWKSURI,
+// discoverOIDC fetches the issuer's discovery document.
+func discoverOIDC(issuer string) (oidcDiscoveryResponse, error) {
+	var disc oidcDiscoveryResponse
+	discoveryURL := strings.TrimSuffix(issuer, "/") + "/.well-known/openid-configuration"
+	client := &http.Client{Timeout: oidcDiscoveryTimeout}
+	resp, err := client.Get(discoveryURL)
+	if err != nil {
+		return disc, fmt.Errorf("oidc discovery failed: %w", err)
 	}
-	return NewJWTValidator(jwtCfg)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return disc, fmt.Errorf("oidc discovery returned %d", resp.StatusCode)
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&disc); err != nil {
+		return disc, fmt.Errorf("oidc discovery invalid JSON: %w", err)
+	}
+	if disc.JWKSURI == "" {
+		return disc, fmt.Errorf("oidc discovery missing jwks_uri")
+	}
+	return disc, nil
 }

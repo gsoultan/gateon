@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/gsoultan/gateon/internal/auth"
+	"github.com/gsoultan/gateon/internal/testutil"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
@@ -41,16 +42,61 @@ func TestABasicAuthUserWithNoPasswordIsRefusedAtSave(t *testing.T) {
 		a.requireUnchanged(t, "a refused empty password", live, file)
 	})
 	t.Run("a new user with a password, beside kept ones, saves", func(t *testing.T) {
-		a, _ := newMwAPI(t, auth.RoleOperator)
-		before := usersOf(a.stored(t, "auth-basic-users")["users"])
-		m := a.shown(t, "auth-basic-users")
-		m.Config["users"] += ",user4:s3cret-four"
-		if code, body := a.put(t, m); code != http.StatusOK {
-			t.Fatalf("PUT: %d %s", code, body)
-		}
-		got := usersOf(a.stored(t, "auth-basic-users")["users"])
-		if got["user4"] != "s3cret-four" || got["alice"] != before["alice"] || got["bob"] != before["bob"] {
-			t.Errorf("stored users %v; want user4's new password and every other user's kept one", got)
+		testNewUserWithPasswordSaves(t)
+	})
+}
+
+// OIDC, and JWT verified with a JWKS URL, with "Audience (optional)" blank
+// accepted a token the provider issued to any other application (2026-10-02
+// truth T5). The save refuses it on REST and gRPC and says why; the provider
+// is a live fake, so nothing but the missing audience can be the reason
+// (ADR 0043).
+func TestAKeySetAuthMiddlewareWithNoAudienceIsRefusedAtSave(t *testing.T) {
+	idp := testutil.NewFakeOIDCProvider(t, "some-other-app")
+	for name, cfg := range map[string]map[string]string{
+		"oidc": {"type": "oidc", "issuer": idp.Issuer()},
+		"jwks": {"type": "jwt", "jwks_url": idp.Server.URL + "/jwks"},
+	} {
+		mw := &gateonv1.Middleware{Id: "authn-" + name, Name: "authn-" + name, Type: "auth", Config: cfg}
+		t.Run("REST/"+name, func(t *testing.T) {
+			a, _ := newMwAPI(t, auth.RoleAdmin)
+			code, body := a.put(t, mw)
+			requireRefused(t, name+" with no audience", code, body, "audience is required", "allow_any_audience")
+			if _, ok := a.reg.Get(context.Background(), mw.Id); ok {
+				t.Fatal("the middleware was stored")
+			}
+		})
+		t.Run("gRPC/"+name, func(t *testing.T) {
+			a, _ := newMwAPI(t, auth.RoleAdmin)
+			_, err := a.grpc.UpdateMiddleware(context.Background(), &gateonv1.UpdateMiddlewareRequest{Middleware: mw})
+			if err == nil || !strings.Contains(err.Error(), "audience is required") {
+				t.Fatalf("gRPC UpdateMiddleware: %v, want the audience refusal", err)
+			}
+		})
+	}
+	t.Run("the named opt-out saves", func(t *testing.T) {
+		a, _ := newMwAPI(t, auth.RoleAdmin)
+		mw := &gateonv1.Middleware{Id: "authn-any", Name: "authn-any", Type: "auth",
+			Config: map[string]string{"type": "oidc", "issuer": idp.Issuer(), "allow_any_audience": "true"}}
+		if code, body := a.put(t, mw); code != http.StatusOK {
+			t.Fatalf("PUT with allow_any_audience=true: %d %s", code, body)
 		}
 	})
+}
+
+// testNewUserWithPasswordSaves: a new user with a password, beside users whose
+// passwords are kept through the placeholder, saves with each password intact.
+func testNewUserWithPasswordSaves(t *testing.T) {
+	t.Helper()
+	a, _ := newMwAPI(t, auth.RoleOperator)
+	before := usersOf(a.stored(t, "auth-basic-users")["users"])
+	m := a.shown(t, "auth-basic-users")
+	m.Config["users"] += ",user4:s3cret-four"
+	if code, body := a.put(t, m); code != http.StatusOK {
+		t.Fatalf("PUT: %d %s", code, body)
+	}
+	got := usersOf(a.stored(t, "auth-basic-users")["users"])
+	if got["user4"] != "s3cret-four" || got["alice"] != before["alice"] || got["bob"] != before["bob"] {
+		t.Errorf("stored users %v; want user4's new password and every other user's kept one", got)
+	}
 }

@@ -47,6 +47,7 @@ import { useMiddlewares, useMiddlewareRoutes, apiFetch, getApiErrorMessage } fro
 import { usePermissions } from "../hooks/usePermissions";
 import { useTableDensity } from "../hooks/useTableDensity";
 import { MiddlewareConfigEditor } from "../components/MiddlewareConfig";
+import { authConfigProblem } from "../components/MiddlewareConfig/authConfigProblems";
 import { QueryError } from "../components/QueryError";
 
 export default function MiddlewaresPage() {
@@ -143,6 +144,11 @@ export default function MiddlewaresPage() {
       mutation.mutate(editingMW);
     }
   };
+
+  // A config the gateway would refuse -- or once accepted and ran unsafely --
+  // is not offered for saving (ADR 0043).
+  const configProblem =
+    editingMW?.type === "auth" ? authConfigProblem(editingMW.config || {}) : undefined;
 
   const middlewares = data?.middlewares || [];
   const totalCount = data?.totalCount || 0;
@@ -517,12 +523,17 @@ export default function MiddlewaresPage() {
             </Tabs.Panel>
           </Tabs>
 
+          {configProblem && (
+            <Text size="sm" c="red" mt="md" role="alert">
+              {configProblem}
+            </Text>
+          )}
           <Button
             onClick={handleSave}
             radius="md"
             mt="md"
             loading={mutation.isPending}
-            disabled={!editingMW?.name}
+            disabled={!editingMW?.name || !!configProblem}
           >
             Save Middleware
           </Button>

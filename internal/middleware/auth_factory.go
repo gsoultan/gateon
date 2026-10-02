@@ -30,12 +30,13 @@ func (f *Factory) createAuth(cfg map[string]string) (Middleware, error) {
 		}
 
 		jwtCfg := JWTConfig{
-			AuthBaseConfig:  baseCfg,
-			Issuer:          cfg["issuer"],
-			Audience:        cfg["audience"],
-			JWKSURL:         jwksURL,
-			Secret:          []byte(secret),
-			RevocationStore: revStore,
+			AuthBaseConfig:   baseCfg,
+			Issuer:           cfg["issuer"],
+			Audience:         cfg["audience"],
+			AllowAnyAudience: cfg["allow_any_audience"] == "true",
+			JWKSURL:          jwksURL,
+			Secret:           []byte(secret),
+			RevocationStore:  revStore,
 		}
 		validator, err := NewJWTValidator(jwtCfg)
 		if err != nil {
@@ -95,8 +96,12 @@ func (f *Factory) createAuth(cfg map[string]string) (Middleware, error) {
 		if issuer == "" {
 			return nil, fmt.Errorf("oidc auth requires issuer URL (e.g. https://auth.example.com)")
 		}
-		audience := strings.TrimSpace(cfg["audience"])
-		validator, err := NewOIDCValidator(issuer, audience, baseCfg)
+		validator, err := NewOIDCValidator(JWTConfig{
+			AuthBaseConfig:   baseCfg,
+			Issuer:           issuer,
+			Audience:         cfg["audience"],
+			AllowAnyAudience: cfg["allow_any_audience"] == "true",
+		})
 		if err != nil {
 			return nil, err
 		}

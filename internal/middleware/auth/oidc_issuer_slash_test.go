@@ -18,7 +18,7 @@ import (
 // issuer".
 func TestOIDCValidatorAcceptsATrailingSlashIssuer(t *testing.T) {
 	idp := testutil.NewFakeOIDCProviderAt(t, "api", "/")
-	v, err := NewOIDCValidator(idp.Issuer(), "api", AuthBaseConfig{})
+	v, err := NewOIDCValidator(JWTConfig{Issuer: idp.Issuer(), Audience: "api"})
 	if err != nil {
 		t.Fatalf("NewOIDCValidator: %v", err)
 	}

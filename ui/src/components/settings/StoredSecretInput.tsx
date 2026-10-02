@@ -33,6 +33,10 @@ export type StoredSecretInputProps = {
   generate?: () => string;
   /** Asked before a stored value may be replaced -- a key rotation. */
   confirm?: SecretReplaceConfirm;
+  /** Marks a field with nothing stored that must be filled in. */
+  required?: boolean;
+  /** Why the value being typed cannot be saved. A stored value has none. */
+  error?: ReactNode;
 };
 
 /**
@@ -44,7 +48,7 @@ export type StoredSecretInputProps = {
  * something is typed, so an abandoned replacement never clears it.
  */
 export function StoredSecretInput(props: StoredSecretInputProps) {
-  const { label, value, onChange, disabled, clearable, description, placeholder, generate, confirm } = props;
+  const { label, value, onChange, disabled, clearable, description, placeholder, generate, confirm, required, error } = props;
   const [replacing, setReplacing] = useState(false);
   const [draft, setDraft] = useState("");
   const [cleared, setCleared] = useState(false);
@@ -175,6 +179,8 @@ export function StoredSecretInput(props: StoredSecretInputProps) {
       description={description}
       placeholder={placeholder}
       disabled={disabled}
+      required={required}
+      error={error}
       value={value ?? ""}
       onChange={(e) => onChange(e.currentTarget.value)}
       radius="md"

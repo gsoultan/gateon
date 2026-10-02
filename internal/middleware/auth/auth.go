@@ -31,12 +31,23 @@ const (
 // JWTConfig holds configuration for JWT validation.
 type JWTConfig struct {
 	AuthBaseConfig
-	Issuer          string
-	Audience        string
-	JWKSURL         string          // For remote JWKS validation
-	Secret          []byte          // For local secret validation
-	RevocationStore RevocationStore // Optional store to check for revoked jti
+	Issuer   string
+	Audience string
+	// AllowAnyAudience is the named opt-out from the audience a key set
+	// requires (ADR 0043): for a provider that issues tokens to this gateway
+	// alone. Never implied by a blank Audience.
+	AllowAnyAudience bool
+	JWKSURL          string          // For remote JWKS validation
+	Secret           []byte          // For local secret validation
+	RevocationStore  RevocationStore // Optional store to check for revoked jti
 }
+
+// ErrAudienceRequired refuses a validator that verifies tokens with an
+// identity provider's published keys and names no audience.
+var ErrAudienceRequired = errors.New("an audience is required: an identity provider's published keys sign " +
+	"tokens for every application it serves, so without one this route accepts a token issued to any of " +
+	"them; set audience to this API's identifier at the provider, or set allow_any_audience=true if the " +
+	"provider issues tokens to this gateway alone")
 
 // JWTValidator validates JWT tokens in the Authorization header.
 type JWTValidator struct {
@@ -45,7 +56,17 @@ type JWTValidator struct {
 }
 
 // NewJWTValidator creates a new JWTValidator.
+//
+// One verifying with a JWKS URL needs an audience (ADR 0043). A key set is the
+// provider's, not this route's: it signs the tokens of every application the
+// provider serves, and with no audience to check, a token minted for any of
+// them passed. A shared secret is this gateway's alone, so a validator using
+// one may leave the audience out. Refused before the key set is fetched.
 func NewJWTValidator(cfg JWTConfig) (*JWTValidator, error) {
+	cfg.Audience = strings.TrimSpace(cfg.Audience)
+	if cfg.JWKSURL != "" && cfg.Audience == "" && !cfg.AllowAnyAudience {
+		return nil, ErrAudienceRequired
+	}
 	v := &JWTValidator{config: cfg}
 	if cfg.JWKSURL != "" {
 		kf, err := sharedJWKSKeyfunc(cfg.JWKSURL)

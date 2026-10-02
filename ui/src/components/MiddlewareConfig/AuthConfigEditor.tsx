@@ -6,26 +6,12 @@ import { IconPlus, IconTrash } from "@tabler/icons-react";
 import { KeyValueList } from "./KeyValueList";
 import { StoredSecretInput } from "../settings/StoredSecretInput";
 import { isSecretReference, isStoredSecret } from "../../utils/storedSecret";
+import { audienceProblem, basicUserProblem, joinUsers, parseUsers } from "./authConfigProblems";
 
 interface AuthConfigEditorProps {
   config: Record<string, string>;
   onChange: (config: Record<string, string>) => void;
 }
-
-type BasicUser = { name: string; password: string };
-
-function parseUsers(value: string): BasicUser[] {
-  return value
-    .split(",")
-    .map((part) => part.trim())
-    .filter(Boolean)
-    .map((part) => {
-      const at = part.indexOf(":");
-      return at < 0 ? { name: part, password: "" } : { name: part.slice(0, at), password: part.slice(at + 1) };
-    });
-}
-
-const joinUsers = (users: BasicUser[]) => users.map((u) => `${u.name}:${u.password}`).join(",");
 
 /**
  * The basic-auth user list, "name:password,...". The gateway returns each
@@ -38,7 +24,7 @@ function BasicUsersEditor({ value, onChange }: { value: string; onChange: (value
     return <StoredSecretInput label="Users" value={value} onChange={onChange} clearable />;
   }
   const users = parseUsers(value);
-  const update = (i: number, next: Partial<BasicUser>) =>
+  const update = (i: number, next: Partial<{ name: string; password: string }>) =>
     onChange(joinUsers(users.map((u, j) => (i === j ? { ...u, ...next } : u))));
   return (
     <Stack gap="xs">
@@ -48,8 +34,20 @@ function BasicUsersEditor({ value, onChange }: { value: string; onChange: (value
       </Text>
       {users.map((u, i) => (
         <Group key={i} grow align="flex-start">
-          <TextInput label="Username" value={u.name} onChange={(e) => update(i, { name: e.currentTarget.value })} />
-          <StoredSecretInput label="Password" value={u.password} onChange={(password) => update(i, { password })} />
+          <TextInput
+            label="Username"
+            required
+            value={u.name}
+            error={u.name.trim() ? undefined : basicUserProblem(u)}
+            onChange={(e) => update(i, { name: e.currentTarget.value })}
+          />
+          <StoredSecretInput
+            label="Password"
+            required
+            value={u.password}
+            error={u.name.trim() ? basicUserProblem(u) : undefined}
+            onChange={(password) => update(i, { password })}
+          />
           <ActionIcon
             color="red"
             variant="light"
@@ -71,6 +69,30 @@ function BasicUsersEditor({ value, onChange }: { value: string; onChange: (value
         Add user
       </Button>
     </Stack>
+  );
+}
+
+function AudienceFields({ config, updateConfig }: { config: Record<string, string>; updateConfig: (key: string, value: string) => void }) {
+  const anyAudience = config.allow_any_audience === "true";
+  return (
+    <>
+      <TextInput
+        label="Audience"
+        required={!anyAudience}
+        description="This API's identifier at the provider: the aud a token must carry to be accepted here."
+        placeholder="my-api"
+        value={config.audience || ""}
+        error={audienceProblem(config)}
+        onChange={(e) => updateConfig("audience", e.currentTarget.value)}
+      />
+      <Switch
+        label="Accept a token issued for any audience"
+        description="Only for a provider that issues tokens to this gateway alone. Any application's token from this provider passes."
+        color="red"
+        checked={anyAudience}
+        onChange={(e) => updateConfig("allow_any_audience", e.currentTarget.checked ? "true" : "false")}
+      />
+    </>
   );
 }
 
@@ -219,12 +241,6 @@ export function AuthConfigEditor({ config, onChange }: AuthConfigEditorProps) {
             onChange={(e) => updateConfig("issuer", e.currentTarget.value)}
           />
           <TextInput
-            label="Audience"
-            placeholder="my-api"
-            value={config.audience || ""}
-            onChange={(e) => updateConfig("audience", e.currentTarget.value)}
-          />
-          <TextInput
             label="JWKS URL"
             description="For RS256/ES256. If set, secret is optional."
             placeholder="https://auth.example.com/.well-known/jwks.json"
@@ -239,6 +255,16 @@ export function AuthConfigEditor({ config, onChange }: AuthConfigEditorProps) {
             onChange={(v) => updateConfig("secret", v)}
             clearable={!!config.jwks_url}
           />
+          {(config.jwks_url || "").trim() ? (
+            <AudienceFields config={config} updateConfig={updateConfig} />
+          ) : (
+            <TextInput
+              label="Audience (optional with a shared secret)"
+              placeholder="my-api"
+              value={config.audience || ""}
+              onChange={(e) => updateConfig("audience", e.currentTarget.value)}
+            />
+          )}
         </>
       )}
       {config.type === "oidc" && (
@@ -250,12 +276,7 @@ export function AuthConfigEditor({ config, onChange }: AuthConfigEditorProps) {
             value={config.issuer || ""}
             onChange={(e) => updateConfig("issuer", e.currentTarget.value)}
           />
-          <TextInput
-            label="Audience (optional)"
-            placeholder="my-api"
-            value={config.audience || ""}
-            onChange={(e) => updateConfig("audience", e.currentTarget.value)}
-          />
+          <AudienceFields config={config} updateConfig={updateConfig} />
         </>
       )}
       {config.type === "oauth2" && (
