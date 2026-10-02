@@ -7,6 +7,7 @@ import type { StatusResponse, WafConfig } from "../../../types/gateon";
 import { WAF_APP_PROFILES } from "../../../types/gateon";
 import { ClamAVSection } from "./ClamAVSection";
 import { BotManagementSection } from "./BotManagementSection";
+import { ADMIN_ONLY_REASON, useAdminOnlySetting } from "../../../hooks/usePermissions";
 
 interface WafSettingsCardProps {
   waf: WafConfig | undefined;
@@ -39,6 +40,8 @@ export function WafSettingsCard({
   onInstall,
   onUninstall,
 }: WafSettingsCardProps) {
+  // Which header names the client address is administrator-only (ADR 0040).
+  const clientTrust = useAdminOnlySetting(disabled);
   return (
     <Card withBorder shadow="sm" radius="md">
       <Stack gap="md">
@@ -85,6 +88,7 @@ export function WafSettingsCard({
               />
               <Switch
                 label="Trust Cloudflare IPs/Headers"
+                description={clientTrust.locked ? ADMIN_ONLY_REASON : undefined}
                 checked={waf.trustCloudflareHeaders}
                 onChange={(e) =>
                   onChange({
@@ -92,7 +96,7 @@ export function WafSettingsCard({
                     trustCloudflareHeaders: e.currentTarget.checked,
                   })
                 }
-                disabled={disabled}
+                disabled={clientTrust.disabled}
               />
               <Select
                 label="Paranoia Level"

@@ -3,6 +3,7 @@
 
 import { Text, NumberInput, Group, Divider, Switch, Box, Select } from "@mantine/core";
 import type { LogConfig } from "../../../types/gateon";
+import { ADMIN_ONLY_REASON, useAdminOnlySetting } from "../../../hooks/usePermissions";
 
 interface LoggingSectionProps {
   log: LogConfig;
@@ -12,6 +13,8 @@ interface LoggingSectionProps {
 
 // Log level and format, and how long each kind of record is kept.
 export function LoggingSection({ log, onChange, disabled }: LoggingSectionProps) {
+  // A short audit-log window deletes the audit trail (ADR 0040).
+  const auditRetention = useAdminOnlySetting(disabled);
   return (
     <Box>
       <Divider
@@ -114,8 +117,8 @@ export function LoggingSection({ log, onChange, disabled }: LoggingSectionProps)
         />
         <NumberInput
           label="Audit log retention (days)"
-          description="System changes and login logs"
-          disabled={disabled}
+          description={auditRetention.locked ? ADMIN_ONLY_REASON : "System changes and login logs"}
+          disabled={auditRetention.disabled}
           min={1}
           max={365}
           value={log.auditLogRetentionDays ?? 90}
