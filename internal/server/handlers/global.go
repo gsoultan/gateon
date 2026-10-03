@@ -524,16 +524,26 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 		if !telemetry.PathStatsStoreReady() {
 			notReady = append(notReady, "telemetry store")
 		}
-		if r := telemetry.TraceStoreNotReady(); r != "" {
-			notReady = append(notReady, r)
-		}
 		notReady = append(notReady, readiness.NotReady()...)
 		if len(notReady) > 0 {
 			w.WriteHeader(http.StatusServiceUnavailable)
 			_, _ = w.Write([]byte("not ready: " + strings.Join(notReady, "; ")))
 			return
 		}
+		// Serving, but something is failing: a full trace disk drops traces,
+		// an unreachable configuration database stops sign-in and writes. The
+		// proxy still answers, so the instance stays in rotation (a 503 here
+		// would make a degraded single-node gateway a down one) and the body
+		// and the gauges say what is wrong.
+		degraded := readiness.Degraded()
+		if r := telemetry.TraceStoreNotReady(); r != "" {
+			degraded = append(degraded, r)
+		}
 		w.WriteHeader(http.StatusOK)
+		if len(degraded) > 0 {
+			_, _ = w.Write([]byte("ready, degraded: " + strings.Join(degraded, "; ")))
+			return
+		}
 		_, _ = w.Write([]byte("ready"))
 	})
 	mux.HandleFunc("GET /v1/setup/required", func(w http.ResponseWriter, r *http.Request) {

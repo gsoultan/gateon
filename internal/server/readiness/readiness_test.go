@@ -73,25 +73,30 @@ func TestOneFailedListenerMakesItsEntrypointDown(t *testing.T) {
 	}
 }
 
-// TestAnUnreachableDatabaseIsNotReadyUntilItAnswers: with the configuration
-// Postgres stopped, /readyz said ready and nothing showed it. It is not ready
-// while the ping fails, says so without the driver's error, and recovers.
-func TestAnUnreachableDatabaseIsNotReadyUntilItAnswers(t *testing.T) {
+// TestAnUnreachableDatabaseIsReportedAsDegradedUntilItAnswers: with the
+// configuration Postgres stopped, /readyz said ready and nothing showed it. It
+// is reported as degraded while the ping fails -- not as not-ready, since the
+// data plane keeps serving through it -- says so without the driver's error,
+// and recovers.
+func TestAnUnreachableDatabaseIsReportedAsDegradedUntilItAnswers(t *testing.T) {
 	resetForTest(t)
 	down := func(context.Context) error { return errors.New("dial tcp 10.1.2.3:5432: connection refused") }
 	CheckDatabase(t.Context(), down)
 
-	got := NotReady()
+	got := Degraded()
 	if len(got) != 1 || got[0] != databaseDownReason {
-		t.Fatalf("NotReady() = %q, want [%q]", got, databaseDownReason)
+		t.Fatalf("Degraded() = %q, want [%q]", got, databaseDownReason)
+	}
+	if r := NotReady(); len(r) != 0 {
+		t.Errorf("NotReady() = %q with only the database down; a serving instance must stay in rotation", r)
 	}
 	if v := gaugeValue(t, configDBUp); v != 0 {
 		t.Errorf("gateon_config_db_up = %v while the database is down, want 0", v)
 	}
 
 	CheckDatabase(t.Context(), func(context.Context) error { return nil })
-	if got := NotReady(); len(got) != 0 {
-		t.Errorf("NotReady() = %q after the database answered, want none", got)
+	if got := Degraded(); len(got) != 0 {
+		t.Errorf("Degraded() = %q after the database answered, want none", got)
 	}
 	if v := gaugeValue(t, configDBUp); v != 1 {
 		t.Errorf("gateon_config_db_up = %v once the database answers, want 1", v)

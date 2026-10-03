@@ -4,13 +4,16 @@
 package handlers
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/gsoultan/gateon/internal/server/readiness"
+	"github.com/gsoultan/gateon/internal/telemetry"
 )
 
 // TestReadyzNamesAnEntrypointThatDidNotBind: /readyz looked at the telemetry
@@ -30,5 +33,31 @@ func TestReadyzNamesAnEntrypointThatDidNotBind(t *testing.T) {
 	}
 	if !strings.Contains(rr.Body.String(), "readyz-websecure") {
 		t.Errorf("/readyz does not name the entrypoint: %s", rr.Body.String())
+	}
+}
+
+// TestReadyzKeepsADegradedInstanceInRotation: with the configuration database
+// unreachable the data plane still serves (ADR 0043 fails block lookups open),
+// so /readyz answering 503 would let a load balancer turn a degraded
+// single-node gateway into a down one. It answers 200 and names what is wrong.
+func TestReadyzKeepsADegradedInstanceInRotation(t *testing.T) {
+	_ = telemetry.ClosePathStatsStore(context.Background())
+	if err := telemetry.InitPathStatsStore(filepath.Join(t.TempDir(), "telemetry.db"), 7); err != nil {
+		t.Fatalf("InitPathStatsStore: %v", err)
+	}
+	t.Cleanup(func() { _ = telemetry.ClosePathStatsStore(context.Background()) })
+	readiness.CheckDatabase(t.Context(), func(context.Context) error { return errors.New("connection refused") })
+	t.Cleanup(func() { readiness.CheckDatabase(context.Background(), func(context.Context) error { return nil }) })
+
+	mux := http.NewServeMux()
+	registerGlobalHandlers(mux, signInAPI{}, &Deps{})
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("/readyz = %d with only the configuration database down, want 200: the proxy still serves", rr.Code)
+	}
+	if body := rr.Body.String(); !strings.Contains(body, "degraded") || !strings.Contains(body, "database") {
+		t.Errorf("/readyz does not say what is degraded: %q", body)
 	}
 }

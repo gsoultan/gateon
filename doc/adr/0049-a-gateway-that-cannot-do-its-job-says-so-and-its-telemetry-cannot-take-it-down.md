@@ -44,13 +44,22 @@ shipped artifact failing in ways an operator only learns about in production:
 
 ## Decision
 
-**/readyz describes whether this instance should get traffic, and says why
-not.** It answers 503, with every reason, when the telemetry store did not
-open (as before), when the trace store has stopped writing for a full disk,
-when an entrypoint listener did not bind (named, with its address and error),
-and when the configuration database does not answer a ping (every 10 s in the
-background; the probe never waits on the database). Gauges
-`gateon_entrypoint_up{entrypoint}` and `gateon_config_db_up` carry the same.
+**/readyz describes whether this instance should get traffic, and says what
+is failing on one that should.** It answers 503, with every reason, when the
+instance cannot serve: the telemetry store did not open (as before), or an
+entrypoint listener did not bind (named, with its address and error). It
+answers 200 `ready, degraded: ...` when the instance serves but something is
+failing: the trace store has stopped writing for a full disk, or the
+configuration database does not answer a ping (every 10 s in the background;
+the probe never waits on the database). A load balancer that health-checks
+/readyz removes a 503 instance, and on the single-node target that is an
+outage; a full trace disk loses traces, and an unreachable database stops
+sign-in and writes while the data plane keeps serving by design (ADR 0043
+fails block lookups open), so neither is a reason to stop routing traffic to
+it. Gauges `gateon_entrypoint_up{entrypoint}`, `gateon_config_db_up` and
+`gateon_trace_dropped_total{reason}` carry the same, and are what to alert on.
+(As first written this ADR made both degraded conditions 503; integration
+review changed that before release.)
 
 **The management listener is required; an entrypoint is not.** The management
 listener binds before StartServers returns, and failing to is an error Run
