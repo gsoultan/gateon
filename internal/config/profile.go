@@ -68,6 +68,13 @@ type TierDefaults struct {
 	PebbleMemTableBytes int64
 	PebbleMaxOpenFiles  int
 
+	// TraceStoreMaxBytes is the most disk the live trace store may use; past
+	// it the oldest traces are evicted whatever their age (ADR 0049). Age alone
+	// bounded it before, which bounds nothing against traffic: ~1.1 KB a
+	// request is ~66 GB a week at 100 req/s. GATEON_TRACE_STORE_MAX_MB
+	// overrides it (internal/telemetry/tracebudget).
+	TraceStoreMaxBytes int64
+
 	// Trace archive (internal/telemetry/tracearchive): how long archived hours
 	// of traces are kept, and the most disk they may take, whichever binds
 	// first. The archive itself is off on every tier until it is enabled --
@@ -177,6 +184,7 @@ func DefaultsFor(tier Tier) TierDefaults {
 			PebbleCacheBytes:          4 << 20, // 4 MiB
 			PebbleMemTableBytes:       1 << 20, // 1 MiB
 			PebbleMaxOpenFiles:        50,
+			TraceStoreMaxBytes:        256 << 20, // 256 MiB
 			TraceArchiveRetentionDays: 7,
 			TraceArchiveMaxBytes:      256 << 20, // 256 MiB
 			DBMaxOpenConns:            5,
@@ -206,6 +214,7 @@ func DefaultsFor(tier Tier) TierDefaults {
 			PebbleCacheBytes:          32 << 20, // 32 MiB
 			PebbleMemTableBytes:       8 << 20,  // 8 MiB
 			PebbleMaxOpenFiles:        500,
+			TraceStoreMaxBytes:        20 << 30, // 20 GiB
 			TraceArchiveRetentionDays: 365,
 			TraceArchiveMaxBytes:      20 << 30, // 20 GiB
 			DBMaxOpenConns:            100,
@@ -235,6 +244,7 @@ func DefaultsFor(tier Tier) TierDefaults {
 			PebbleCacheBytes:          8 << 20, // 8 MiB
 			PebbleMemTableBytes:       4 << 20, // 4 MiB
 			PebbleMaxOpenFiles:        200,
+			TraceStoreMaxBytes:        2 << 30, // 2 GiB
 			TraceArchiveRetentionDays: 90,
 			TraceArchiveMaxBytes:      2 << 30, // 2 GiB
 			DBMaxOpenConns:            25,

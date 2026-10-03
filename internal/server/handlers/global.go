@@ -524,6 +524,9 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 		if !telemetry.PathStatsStoreReady() {
 			notReady = append(notReady, "telemetry store")
 		}
+		if r := telemetry.TraceStoreNotReady(); r != "" {
+			notReady = append(notReady, r)
+		}
 		notReady = append(notReady, readiness.NotReady()...)
 		if len(notReady) > 0 {
 			w.WriteHeader(http.StatusServiceUnavailable)

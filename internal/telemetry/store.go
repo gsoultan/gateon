@@ -34,6 +34,7 @@ import (
 	"github.com/gsoultan/gateon/internal/security/mitigation"
 	"github.com/gsoultan/gateon/internal/syncutil"
 	"github.com/gsoultan/gateon/internal/telemetry/repid"
+	"github.com/gsoultan/gateon/internal/telemetry/tracebudget"
 	lru "github.com/hashicorp/golang-lru"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
@@ -578,6 +579,12 @@ type pathStatsStore struct {
 	unmitigatedCache            *lru.ARCCache
 	userMitigationCache         *lru.ARCCache
 	traceStoreEnabled           atomic.Bool
+	// traceGuard stops trace writes while the disk holding the store is
+	// nearly full and backs Pebble off a full one (ADR 0049).
+	traceGuard *tracebudget.Guard
+	// nextBudgetCheck is when the store's size is next held to its budget;
+	// only the loop goroutine touches it.
+	nextBudgetCheck time.Time
 	// tracesPrunedThrough is where the last trace prune stopped, in Unix
 	// nanoseconds: every trace older than it has been deleted. See TraceHotFloor.
 	// It is kept on disk too, in traceDir, so a restart does not forget it.
@@ -684,6 +691,8 @@ func initStore(databaseURL string, retentionDays int) error {
 		MemTableSize: uint64(td.PebbleMemTableBytes),
 		MaxOpenFiles: td.PebbleMaxOpenFiles,
 	}
+	guard := tracebudget.NewGuard(pebbleDir, td.PebbleMemTableBytes)
+	guard.Configure(pebbleOpts)
 	pebbleOpts.EnsureDefaults()
 
 	pdb, err := pebble.Open(pebbleDir, pebbleOpts)
@@ -705,6 +714,11 @@ func initStore(databaseURL string, retentionDays int) error {
 		stopCh:       make(chan struct{}),
 	}
 	st.traceStoreEnabled.Store(td.TraceStoreEnabled)
+	st.traceGuard = guard
+	// The first size check a period after opening, not at once: the hourly
+	// prune is not due either, and a store opened over its budget waits half
+	// a minute to be brought under it.
+	st.nextBudgetCheck = time.Now().Add(budgetCheckEvery)
 	st.retentionDays.Store(int32(max(retentionDays, 1)))
 	st.traceDir = pebbleDir
 	st.tracesPrunedThrough.Store(readPrunedThrough(pebbleDir))
@@ -1130,6 +1144,7 @@ func (s *pathStatsStore) loop() {
 		case <-timer.C:
 			s.syncTierSettings()
 			flush()
+			s.checkTraceBudget(time.Now())
 			timer.Reset(flushInterval())
 		case ack := <-s.flushCh:
 			batch, traceBatch, threatBatch = s.drainQueued(batch, traceBatch, threatBatch)
@@ -1309,6 +1324,9 @@ func (s *pathStatsStore) flushTraces(traceBatch []*TraceRecord) []*TraceRecord {
 	if len(traceBatch) == 0 {
 		return traceBatch
 	}
+	if !s.traceGuard.Admit(len(traceBatch)) {
+		return recycleTraces(traceBatch)
+	}
 	pb := s.pebble.NewBatch()
 	// Commit does not release the batch. Pebble hands these out from a
 	// sync.Pool and only Close puts one back -- Batch.release is what returns
@@ -1330,7 +1348,14 @@ func (s *pathStatsStore) flushTraces(traceBatch []*TraceRecord) []*TraceRecord {
 	}
 	if err := pb.Commit(pebble.Sync); err != nil {
 		logger.Default().LogError("pebble: trace batch commit failed", "error", err)
+		s.traceGuard.BackgroundError(err)
 	}
+	return recycleTraces(traceBatch)
+}
+
+// recycleTraces returns a batch's records to the pool and the batch truncated
+// for reuse.
+func recycleTraces(traceBatch []*TraceRecord) []*TraceRecord {
 	for _, tr := range traceBatch {
 		tr.Reset()
 		tracePool.Put(tr)
@@ -1398,6 +1423,7 @@ func (s *pathStatsStore) prune() {
 
 	s.prunePathAndDomainStats(ctx)
 	s.pruneTraces()
+	s.holdTraceBudget()
 	s.pruneSecurityThreats(ctx)
 	s.pruneAuditLogs(ctx)
 	s.pruneUserMitigations(ctx)
@@ -1448,20 +1474,125 @@ func (s *pathStatsStore) pruneTraces() {
 	if !cutoffTime.After(time.Unix(0, 0)) {
 		return
 	}
-	startKey := make([]byte, 8) // All zeros
-	endKey := make([]byte, 8)
-	binary.BigEndian.PutUint64(endKey, uint64(cutoffTime.UnixNano()))
+	s.deleteTracesBefore(cutoffTime)
+}
 
+// deleteTracesBefore deletes every trace that started before cutoff and
+// compacts the range so the disk is given back, and reports whether the
+// delete was written.
+func (s *pathStatsStore) deleteTracesBefore(cutoff time.Time) bool {
+	if !s.traceGuard.Writable() {
+		return false // the commit pipeline failed on a full disk; see tracebudget
+	}
+	startKey := make([]byte, 8) // All zeros
+	endKey := traceKeyAt(cutoff)
 	if err := s.pebble.DeleteRange(startKey, endKey, pebble.Sync); err != nil {
 		logger.Default().LogError("pebble: prune failed", "error", err)
-		return
+		return false
 	}
-	s.notePruned(cutoffTime)
+	s.notePruned(cutoff)
 	// DeleteRange only writes tombstones; compact the pruned range to actually
 	// reclaim disk space instead of waiting for an opportunistic compaction.
 	if err := s.pebble.Compact(startKey, endKey, true); err != nil {
 		logger.Default().LogError("pebble: compaction failed", "error", err)
 	}
+	return true
+}
+
+// traceKeyAt is the store key every trace that started before t sorts below.
+func traceKeyAt(t time.Time) []byte {
+	return binary.BigEndian.AppendUint64(make([]byte, 0, 8), uint64(t.UnixNano()))
+}
+
+// budgetCheckEvery is how often the trace store's size is held to its budget.
+const budgetCheckEvery = 30 * time.Second
+
+// checkTraceBudget reads the free space now, and holds the store to its size
+// budget when that is due -- off this goroutine, since the eviction compacts.
+func (s *pathStatsStore) checkTraceBudget(now time.Time) {
+	s.traceGuard.Check()
+	if now.Before(s.nextBudgetCheck) {
+		return
+	}
+	s.nextBudgetCheck = now.Add(budgetCheckEvery)
+	s.wg.Go(s.enforceTraceBudget)
+}
+
+// enforceTraceBudget evicts the oldest traces, whatever their age, while the
+// store takes more disk than its budget, bringing it to four fifths of it.
+// It shares the prune's flag, so the two never compact at once.
+//
+// The trace archive's guard holds age-based pruning back until an hour is
+// archived; the budget does not wait for it. A store that may not shrink
+// until something else catches up is not bounded, and a disk filled by it
+// takes the archive down too. Evicting an hour the archive has not taken is
+// logged at WARN.
+func (s *pathStatsStore) enforceTraceBudget() {
+	if s.pruning.Swap(true) {
+		return
+	}
+	defer s.pruning.Store(false)
+	s.holdTraceBudget()
+}
+
+// holdTraceBudget is enforceTraceBudget's work, for a caller already holding
+// the prune flag.
+//
+// What is held to the budget is the store's live tables: the traces
+// themselves, which is what eviction can shrink. The write-ahead log and the
+// files a compaction has just replaced come and go within a few memtables,
+// and counting them would evict traces to pay for a moment's overhead.
+func (s *pathStatsStore) holdTraceBudget() {
+	budget := tracebudget.MaxBytes(config.CurrentTierDefaults())
+	m := s.pebble.Metrics()
+	tracebudget.ReportUsage(m.DiskSpaceUsage(), budget)
+	tables := uint64(max(m.Total().Size, 0))
+	if budget <= 0 || tables <= uint64(budget) {
+		return
+	}
+	cutoff, ok := s.traceEvictionCutoff(tables - tracebudget.EvictionTarget(budget))
+	if !ok {
+		return
+	}
+	if held := guardTracePrune(cutoff); held.Before(cutoff) {
+		logger.Default().LogWarn("trace store over its size budget: evicting traces the trace archive has not copied yet",
+			"archived_through", held, "evicting_before", cutoff)
+	}
+	if s.deleteTracesBefore(cutoff) {
+		after := s.pebble.Metrics()
+		tracebudget.ReportUsage(after.DiskSpaceUsage(), budget)
+		logger.Default().LogInfo("trace store over its size budget: oldest traces evicted",
+			"evicted_before", cutoff, "bytes_before", tables, "bytes_after", after.Total().Size, "budget", budget)
+	}
+}
+
+// traceEvictionCutoff is the time before which the stored traces take about
+// need bytes on disk; false when there are no traces.
+func (s *pathStatsStore) traceEvictionCutoff(need uint64) (time.Time, bool) {
+	oldest, found, err := firstTraceTime(context.Background(), s.pebble.NewIter)
+	if err != nil || !found {
+		return time.Time{}, false
+	}
+	start := make([]byte, 8)
+	below := func(t time.Time) uint64 {
+		n, err := s.pebble.EstimateDiskUsage(start, traceKeyAt(t))
+		if err != nil {
+			return 0
+		}
+		return n
+	}
+	// A moment past now, so that "every trace" is a cutoff the search can reach.
+	return tracebudget.FindCutoff(oldest, time.Now().Add(time.Millisecond), need, below), true
+}
+
+// TraceStoreNotReady is why the trace store is not writing, and "" while it
+// is: /readyz reports it.
+func TraceStoreNotReady() string {
+	s := getStore()
+	if s == nil {
+		return ""
+	}
+	return s.traceGuard.Paused()
 }
 
 // prunedThroughFile keeps where the last trace prune stopped, among the trace
@@ -1608,6 +1739,9 @@ func ClosePathStatsStore(ctx context.Context) error {
 			s.wg.Wait()
 			close(c)
 		}()
+		// Release a file creation held in the disk-full backoff, which the
+		// loop's last flush or Pebble's close would otherwise wait out.
+		s.traceGuard.Close()
 		select {
 		case <-c:
 		case <-ctx.Done():
