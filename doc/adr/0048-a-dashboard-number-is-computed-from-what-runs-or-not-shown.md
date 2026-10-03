@@ -153,8 +153,28 @@ selected?) and adds two:
   be marked inert with its finding; it then asserts the key is still inert and
   fails the day the fix lands, so the fixer turns it into a proof.
 
+- **Documented values.** A proto string field whose comment lists its values
+  (`string action = 6; // "notify", "block", "challenge"`) must have each value
+  compared against -- `==`/`!=` with a literal or string constant, or a `case`
+  -- in a package that reads the field or is handed it directly; values are
+  folded (case, `_`, `-`, `.`, space) as the readers fold them. Open lists
+  ("etc."), example values and wire messages are skipped. It flags the alert
+  playbook's "Trigger JS Challenge" action, which does what "Notify Only" does
+  (`values-baseline.txt`).
+
 `check-security-invariants.sh` check 6 reads keys written through `toggle()`
 and across line breaks, which it missed.
+
+### 7. Bot protection is counted where it runs
+
+The global bot-management settings only supply defaults to the
+`bot_management` middleware. Coverage (posture `waf.routes.botManagement`, the
+advisory's bot insight) counts the routes that carry the middleware; the
+global switch is not coverage. The funnel's bot stage counts what bot
+management records -- a challenge served in place of the response
+(`challenge_served`, `pow_challenge_served`) and the threat pipeline's
+`blocked` -- not the `integrity_failed` / `challenge_failed` outcomes nothing
+records.
 
 ## Consequences
 
