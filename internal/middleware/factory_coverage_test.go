@@ -104,7 +104,7 @@ func factoryCases(t *testing.T) []factoryCase {
 		{typ: "xfcc", cfg: map[string]string{}},
 		{typ: "transform", cfg: map[string]string{"response_search": "a", "response_replace": "b"}},
 		{typ: "file_security", cfg: map[string]string{"max_file_size": "1024"}},
-		{typ: "tls_binding", cfg: map[string]string{}},
+		{typ: "tls_binding", cfg: map[string]string{"secret": "factory-coverage-tls-binding-secret-32b"}},
 		{typ: "security_headers", cfg: map[string]string{}},
 		{typ: "circuit_breaker", cfg: map[string]string{"failure_threshold": "5"}},
 		{typ: "wasm", cfg: map[string]string{}, skipServe: true, why: "needs a compiled module"},

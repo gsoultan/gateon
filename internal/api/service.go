@@ -378,7 +378,8 @@ func (s *ApiService) bindingGuard() *routebind.Guard {
 }
 
 func (s *ApiService) routeService() route.Service {
-	return route.NewService(s.Routes, s.invalidator(), logger.Default(), s.bindingGuard())
+	return route.NewService(s.Routes, s.invalidator(), logger.Default(), s.bindingGuard(),
+		route.NewTLSBindingCheck(s.Middlewares, s.EntryPoints))
 }
 
 func (s *ApiService) serviceService() service.Service {

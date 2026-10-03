@@ -23,17 +23,20 @@ type serviceImpl struct {
 	store       config.RouteStore
 	invalidator proxy.Invalidator
 	logger      logger.Logger
-	guard       SaveGuard
+	guards      []SaveGuard
 }
 
-// NewService creates a Route Service. An optional SaveGuard authorizes saves
-// that bind a credential-injecting middleware; a build that passes none is
-// unguarded, which is why every caller that serves the management API passes
-// one.
-func NewService(store config.RouteStore, invalidator proxy.Invalidator, l logger.Logger, guard ...SaveGuard) Service {
+// NewService creates a Route Service. The optional SaveGuards each refuse
+// saves of their own kind -- binding a credential-injecting middleware (ADR
+// 0038), a tls_binding middleware on an entrypoint without TLS (ADR 0046) --
+// and all of them run; a build that passes none is unguarded, which is why
+// every caller that serves the management API passes them.
+func NewService(store config.RouteStore, invalidator proxy.Invalidator, l logger.Logger, guards ...SaveGuard) Service {
 	s := &serviceImpl{store: store, invalidator: invalidator, logger: l}
-	if len(guard) > 0 {
-		s.guard = guard[0]
+	for _, g := range guards {
+		if g != nil {
+			s.guards = append(s.guards, g)
+		}
 	}
 	return s
 }
@@ -62,8 +65,8 @@ func (s *serviceImpl) SaveRoute(ctx context.Context, rt *gateonv1.Route) error {
 	// Authorized after the id is assigned, so the guard can read the stored
 	// route (an update) or find none (a create), and before persistence, so a
 	// refusal changes nothing.
-	if s.guard != nil {
-		if err := s.guard.AuthorizeRouteSave(ctx, rt); err != nil {
+	for _, g := range s.guards {
+		if err := g.AuthorizeRouteSave(ctx, rt); err != nil {
 			return err
 		}
 	}

@@ -381,11 +381,7 @@ func (f *Factory) Create(m *gateonv1.Middleware, routeID string) (Middleware, er
 	case "file_security":
 		return f.createFileSecurity(cfg)
 	case "tls_binding":
-		cookieName := cfg["cookie_name"]
-		if cookieName == "" {
-			cookieName = "session"
-		}
-		return identity.TlsBinding(cookieName), nil
+		return identity.NewTLSBinding(cfg)
 	case "security_headers":
 		preset, err := kind.ParseSecurityHeadersPreset(cfg["preset"])
 		if err != nil {

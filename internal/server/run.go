@@ -167,7 +167,8 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 	// service) that carries one; it runs inside the domain saves, so REST,
 	// Connect/gRPC and config-import are all covered (ADR 0038).
 	bindingGuard := routebind.NewGuard(s.RouteStore, s.ServiceStore, s.MwStore)
-	routeService := route.NewService(s.RouteStore, proxyInvalidator, s.Logger, bindingGuard)
+	routeService := route.NewService(s.RouteStore, proxyInvalidator, s.Logger, bindingGuard,
+		route.NewTLSBindingCheck(s.MwStore, s.EpStore))
 	serviceService := service.NewService(s.ServiceStore, s.RouteStore, proxyInvalidator, s.Logger, bindingGuard)
 	epService := dentrypoint.NewService(s.EpStore, proxyInvalidator, s.Logger)
 

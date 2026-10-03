@@ -272,6 +272,9 @@ func (s *ApiService) prepareGlobalUpdate(ctx context.Context, update, stored *ga
 	if err := storedsecret.Restore(update, stored); err != nil {
 		return status.Error(codes.InvalidArgument, err.Error())
 	}
+	if update.GetSecurityAdvanced().GetTlsBinding().GetEnabled() && !stored.GetSecurityAdvanced().GetTlsBinding().GetEnabled() {
+		return status.Error(codes.InvalidArgument, errGlobalTLSBindingRetired.Error())
+	}
 	// After Restore, so a secret sent back as the placeholder compares equal
 	// to the one stored; before the session key is rotated, which would put
 	// a refused change in force.
@@ -319,6 +322,13 @@ func (s *ApiService) auditRecordSettingsChange(ctx context.Context, stored, prop
 func errorMessage(err error) string {
 	return status.Convert(err).Message()
 }
+
+// errGlobalTLSBindingRetired refuses turning the global TLS Session Binding
+// switch on (ADR 0046). It has no secret to bind with, so it could only ever
+// refuse sessions; a switch already on is kept, does nothing, and is logged.
+var errGlobalTLSBindingRetired = errors.New("security_advanced.tls_binding: the global TLS Session Binding " +
+	"switch is retired and cannot be turned on; add a tls_binding middleware, with a secret, to the routes " +
+	"that need it, on an entrypoint that asks for client certificates")
 
 // errGlobalStoreUnavailable is answered by an internal writer with no store.
 var errGlobalStoreUnavailable = errors.New("global configuration store not available")
