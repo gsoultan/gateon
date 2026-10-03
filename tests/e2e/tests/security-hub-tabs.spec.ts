@@ -40,12 +40,56 @@ test.describe('Security Hub: Incidents', () => {
       await expect(page.getByText('No correlated incidents')).toBeVisible();
     }
 
-    const pos = (await (await posture).json()) as { waf?: { enabled?: boolean }; signatures?: { enabled?: boolean; ruleCount?: number } };
-    await expect(page.getByText(pos.waf?.enabled ? 'Protecting all routes' : 'Disabled').first()).toBeVisible();
-    if (pos.signatures?.enabled) {
-      await expect(page.getByText(`${pos.signatures.ruleCount} rules active`)).toBeVisible();
-    }
+    const pos = (await (await posture).json()) as Posture;
+    await expect(page.getByText(expectedWafLabel(pos)).first()).toBeVisible();
+    const sig = pos.signatures;
+    await expect(
+      page.getByText(sig.enabled ? `${sig.ruleCount} rules on ${sig.routes} route` : 'Not running').first(),
+    ).toBeVisible();
   });
+
+  test('says so when the protection status cannot be loaded', async ({ page }) => {
+    await page.route('**/v1/security/posture', (route) =>
+      route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"posture unavailable"}' }),
+    );
+    await openTab(page, /^Incidents$/);
+    await expect(page.getByText('The protection status could not be loaded.')).toBeVisible({ timeout: 15_000 });
+  });
+});
+
+test.describe('Security Hub: Overview posture', () => {
+  test("shows the gateway's posture percentage, not one computed from traffic", async ({ page }) => {
+    const posture = page.waitForResponse((r) => new URL(r.url()).pathname === '/v1/security/posture');
+    await page.goto('/security-center');
+    const pos = (await (await posture).json()) as Posture;
+    expect(pos.score.controls.reduce((sum, c) => sum + c.weight, 0), 'control weights').toBe(100);
+    const card = page.locator('.mantine-Card-root').filter({ hasText: 'Security Posture' });
+    await expect(card).toContainText(`${pos.score.percent}%`);
+  });
+});
+
+type Posture = {
+  waf: {
+    mode: 'enforce' | 'detect' | 'off';
+    routes: { total: number; enforcing: number; detecting: number; unprotected: number };
+  };
+  signatures: { enabled: boolean; routes: number; ruleCount: number };
+  score: { percent: number; controls: { weight: number }[] };
+};
+
+/** The WAF card's words for the report, as postureView.wafStatus chooses them. */
+function expectedWafLabel(pos: Posture): string {
+  const r = pos.waf.routes;
+  if (r.total === 0) {
+    return { enforce: 'Blocking', detect: 'Detecting only (audit)', off: 'Disabled' }[pos.waf.mode];
+  }
+  if (r.unprotected === r.total) return 'Disabled';
+  if (r.enforcing === 0) return 'Detecting only (audit)';
+  if (r.enforcing === r.total) return 'Blocking on all';
+  return `Blocking on ${r.enforcing} of ${r.total}`;
+}
+
+test.describe('Security Hub: Incidents list', () => {
 
   test('an incident is listed with its signals, techniques and score, and its source as text', async ({ page }) => {
     const dialogs = trapDialogs(page);

@@ -45,6 +45,17 @@ import { useDisclosure } from '@mantine/hooks';
 import { SecurityAnomalyModal } from '../SecurityAnomalyModal';
 import TraceVisualizer from '../Diagnostics/TraceVisualizer';
 import { useSecurityPosture } from '../../hooks/useSecurityPosture';
+import type { SecurityPosture } from '../../hooks/useSecurityPosture';
+import { useReputations } from '../../hooks/useReputations';
+import {
+  DETECTING_ONLY,
+  POSTURE_FORMULA,
+  postureColor,
+  postureLines,
+  reputationSummary,
+  wafDetectsSomewhere,
+  wafStatus,
+} from './postureView';
 import type { MetricsSnapshot, SecurityThreat, DonutChartDataItem } from '../../types/metrics';
 import type { Anomaly } from '../../types/gateon';
 
@@ -57,17 +68,101 @@ const AnimatedTitle = ({ value, suffix = "" }: { value: number; suffix?: string 
 
 interface OverviewTabProps {
   metrics: MetricsSnapshot | null | undefined;
-  securityScore: number;
-  scoreColor: string;
   threatTypeData: DonutChartDataItem[];
   totalThreats: number;
 }
 
+/**
+ * The posture percentage, from the server's posture report: a weighted sum of
+ * the protections in effect, computed from configuration only (ADR 0048). It
+ * used to be computed here from client reputation, so it read 100% with nothing
+ * configured and rose as an attacker's reputation fell.
+ */
+export function SecurityPostureCard({ posture, isLoading, error }: {
+  posture: SecurityPosture | undefined;
+  isLoading: boolean;
+  error: unknown;
+}) {
+  const score = posture?.score;
+  const color = score ? postureColor(score.percent) : 'gray';
+  return (
+    <Card withBorder radius="md" p="md" className="hover:shadow-lg transition-all duration-300">
+      <Group justify="space-between">
+        <Stack gap={0}>
+          <Text size="xs" c="dimmed" fw={700} tt="uppercase">Security Posture</Text>
+          {isLoading ? (
+            <Skeleton height={28} width={60} mt={4} />
+          ) : score ? (
+            <Tooltip
+              multiline
+              w={360}
+              label={
+                <Stack gap={4}>
+                  <Text size="xs">{POSTURE_FORMULA}</Text>
+                  {postureLines(score).map((line) => (
+                    <Text key={line} size="xs">{line}</Text>
+                  ))}
+                </Stack>
+              }
+            >
+              <Title order={3} style={{ cursor: 'help' }}>{`${score.percent}%`}</Title>
+            </Tooltip>
+          ) : (
+            <Text size="sm" c="red">{error ? 'Unavailable' : 'Not reported'}</Text>
+          )}
+        </Stack>
+        <RingProgress
+          size={60}
+          thickness={6}
+          roundCaps
+          sections={[{ value: score?.percent ?? 0, color }]}
+          label={
+            <Center>
+              <IconShieldCheck size={18} color={`var(--mantine-color-${color}-6)`} />
+            </Center>
+          }
+        />
+      </Group>
+      <Text size="xs" c="dimmed" mt="sm">
+        Protections in effect, weighted. Hover the figure for each control. Traffic does not move it.
+      </Text>
+    </Card>
+  );
+}
+
+const REPUTATION_LIMIT = 50;
+
+/** Clients whose reputation the WAF and anomaly findings have lowered. */
+function ReputationCard() {
+  const { data, isLoading, error } = useReputations(REPUTATION_LIMIT);
+  const view = data ? reputationSummary(data.reputations ?? [], REPUTATION_LIMIT) : null;
+  return (
+    <Card withBorder radius="md" p="md" className="hover:shadow-lg transition-all duration-300">
+      <Group justify="space-between">
+        <Stack gap={0}>
+          <Text size="xs" c="dimmed" fw={700} tt="uppercase">Client Reputation</Text>
+          {isLoading ? (
+            <Skeleton height={28} width={80} mt={4} />
+          ) : view ? (
+            <Title order={3}>{view.value}</Title>
+          ) : (
+            <Text size="sm" c="red">{error ? 'Unavailable' : 'Not reported'}</Text>
+          )}
+        </Stack>
+        <ThemeIcon color="blue" variant="light" size="lg" radius="md">
+          <IconFingerprint size={20} />
+        </ThemeIcon>
+      </Group>
+      <Text size="xs" c="dimmed" mt="sm">
+        {view?.detail ?? 'Clients whose reputation WAF and anomaly findings have lowered.'}
+      </Text>
+    </Card>
+  );
+}
+
 export function OverviewTab({ 
-  metrics, 
-  securityScore, 
-  scoreColor, 
-  threatTypeData, 
+  metrics,
+  threatTypeData,
   totalThreats,
 }: OverviewTabProps) {
   const [selectedAnomaly, setSelectedAnomaly] = useState<Anomaly | null>(null);
@@ -124,8 +219,10 @@ export function OverviewTab({
     openTrace();
   };
 
-  const { data: posture } = useSecurityPosture();
-  const wafEnabled = posture?.waf?.enabled;
+  const { data: posture, isLoading: postureLoading, error: postureError } = useSecurityPosture();
+  const wafView = posture?.waf ? wafStatus(posture.waf) : null;
+  const wafOff = wafView?.label === 'Disabled';
+  const wafDetecting = wafDetectsSomewhere(posture?.waf);
 
   const funnelStages = React.useMemo(() => {
     const f = metrics?.mitigationFunnel;
@@ -139,12 +236,15 @@ export function OverviewTab({
     if ((f?.botBlocked || 0) > 0) stages.push({ label: "Bot Mitigation", value: f!.botBlocked, color: "pink" });
     if ((f?.fileSecurityBlocked || 0) > 0) stages.push({ label: "File Security", value: f!.fileSecurityBlocked, color: "red" });
     if ((f?.deceptionBlocked || 0) > 0) stages.push({ label: "Deception/Trap", value: f!.deceptionBlocked, color: "grape" });
+    if ((f?.mitigationBlocked || 0) > 0) stages.push({ label: "Blocked Source (mitigation)", value: f!.mitigationBlocked, color: "red" });
     if ((f?.advancedSecurityBlocked || 0) > 0) stages.push({ label: "Advanced Sec", value: f!.advancedSecurityBlocked, color: "dark" });
     if ((f?.geoipBlocked || 0) > 0) stages.push({ label: "GeoIP Block", value: f!.geoipBlocked, color: "indigo" });
     if ((f?.authFailures || 0) > 0) stages.push({ label: "Auth Failures", value: f!.authFailures, color: "cyan" });
     if ((f?.turnstileFailures || 0) > 0) stages.push({ label: "Turnstile Fail", value: f!.turnstileFailures, color: "violet" });
     if ((f?.hmacFailures || 0) > 0) stages.push({ label: "HMAC Fail", value: f!.hmacFailures, color: "gray" });
-    stages.push({ label: "Allowed (Passed)", value: f?.allowed || 0, color: "teal" });
+    if ((f?.otherRefused || 0) > 0) stages.push({ label: "Other Refusals (IP/host filter, limits, no route)", value: f!.otherRefused, color: "gray" });
+    if ((f?.answered || 0) > 0) stages.push({ label: "Answered by Gateway (redirects, challenges)", value: f!.answered, color: "violet" });
+    stages.push({ label: "Allowed (reached a backend)", value: f?.allowed || 0, color: "teal" });
     return { stages, ingress };
   }, [metrics?.mitigationFunnel]);
 
@@ -220,7 +320,20 @@ export function OverviewTab({
           </Stack>
         </Alert>
       )}
-      {wafEnabled === false && (
+      {wafDetecting && wouldBlock.total === 0 && wafView && (
+        <Alert
+          color="orange"
+          variant="light"
+          icon={<IconEye size={18} />}
+          title={`Web Application Firewall: ${DETECTING_ONLY}`}
+        >
+          <Text size="sm">
+            {wafView.detail} An audit-only WAF records the attacks it matches and forwards them to
+            the backend; nothing is blocked there.
+          </Text>
+        </Alert>
+      )}
+      {wafOff && (
         <Alert
           color="orange"
           variant="light"
@@ -240,28 +353,7 @@ export function OverviewTab({
         </Alert>
       )}
       <SimpleGrid cols={{ base: 1, sm: 2, lg: 3, xl: 5 }}>
-        <Card withBorder radius="md" p="md" className="hover:shadow-lg transition-all duration-300">
-          <Group justify="space-between">
-            <Stack gap={0}>
-              <Text size="xs" c="dimmed" fw={700} tt="uppercase">Security Posture</Text>
-              <AnimatedTitle value={securityScore} suffix="%" />
-            </Stack>
-            <RingProgress
-              size={60}
-              thickness={6}
-              roundCaps
-              sections={[{ value: securityScore, color: scoreColor }]}
-              label={
-                <Center>
-                  <IconShieldCheck size={18} color={`var(--mantine-color-${scoreColor}-6)`} />
-                </Center>
-              }
-            />
-          </Group>
-          <Text size="xs" c="dimmed" mt="sm">
-            Overall health based on active sessions and detected threats. Higher is better.
-          </Text>
-        </Card>
+        <SecurityPostureCard posture={posture} isLoading={postureLoading} error={postureError} />
 
         <Card withBorder radius="md" p="md" className="hover:shadow-lg transition-all duration-300">
           <Group justify="space-between">
@@ -296,7 +388,7 @@ export function OverviewTab({
         <Card withBorder radius="md" p="md" className="hover:shadow-lg transition-all duration-300">
           <Group justify="space-between">
             <Stack gap={0}>
-              <Text size="xs" c="dimmed" fw={700} tt="uppercase">Mitigated in 24h</Text>
+              <Text size="xs" c="dimmed" fw={700} tt="uppercase">Mitigated Today</Text>
               <AnimatedTitle value={metrics?.security?.mitigatedToday ?? 0} />
             </Stack>
             <ThemeIcon color="teal" variant="light" size="lg" radius="md">
@@ -304,24 +396,11 @@ export function OverviewTab({
             </ThemeIcon>
           </Group>
           <Text size="xs" c="dimmed" mt="sm">
-            Number of malicious requests successfully blocked or challenged.
+            Threats blocked or challenged since midnight, gateway time.
           </Text>
         </Card>
 
-        <Card withBorder radius="md" p="md" className="hover:shadow-lg transition-all duration-300">
-          <Group justify="space-between">
-            <Stack gap={0}>
-              <Text size="xs" c="dimmed" fw={700} tt="uppercase">Reputation Status</Text>
-              <Title order={3}>Good</Title>
-            </Stack>
-            <ThemeIcon color="blue" variant="light" size="lg" radius="md">
-              <IconFingerprint size={20} />
-            </ThemeIcon>
-          </Group>
-          <Text size="xs" c="dimmed" mt="sm">
-            Analysis of client behavioral patterns and user identification.
-          </Text>
-        </Card>
+        <ReputationCard />
       </SimpleGrid>
 
       <Grid>
