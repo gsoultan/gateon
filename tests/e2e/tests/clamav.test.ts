@@ -52,7 +52,7 @@ function sudoPrompt(page: Page) {
         await confirmUninstall(page);
         const sudoDialog = page.getByRole('heading', { name: 'Administrative Privileges Required' });
         if (await sudoDialog.isVisible({ timeout: 5000 })) {
-            await page.getByPlaceholder('Your password').fill('password123');
+            await page.getByPlaceholder('Your password').fill('e2e-horse-battery-42');
             await sudoPrompt(page).getByRole('button', { name: /^(Confirm|Uninstall)$/ }).click();
         }
         await expect(page.getByRole('button', { name: 'Install Now' })).toBeVisible({ timeout: 60000 });
@@ -65,7 +65,7 @@ function sudoPrompt(page: Page) {
     // Handle sudo dialog
     const sudoDialog = page.getByRole('heading', { name: 'Administrative Privileges Required' });
     await expect(sudoDialog).toBeVisible({ timeout: 10000 });
-    await page.getByPlaceholder('Your password').fill('password123');
+    await page.getByPlaceholder('Your password').fill('e2e-horse-battery-42');
     // Use dialog context to avoid strict mode violation with "Install Now" button
     await sudoPrompt(page).getByRole('button', { name: /^(Confirm|Install)$/ }).click();
     
@@ -80,7 +80,7 @@ function sudoPrompt(page: Page) {
     // Sudo dialog should appear for uninstallation now
     const sudoDialogUninstall = page.getByRole('heading', { name: 'Administrative Privileges Required' });
     await expect(sudoDialogUninstall).toBeVisible({ timeout: 10000 });
-    await page.getByPlaceholder('Your password').fill('password123');
+    await page.getByPlaceholder('Your password').fill('e2e-horse-battery-42');
     await sudoPrompt(page).getByRole('button', { name: /^(Confirm|Uninstall)$/ }).click();
 
     // Wait for Install Now button to reappear
@@ -97,7 +97,7 @@ function sudoPrompt(page: Page) {
             await page.getByRole('menuitem', { name: 'Local' }).click();
             const sudoDialog = page.getByRole('heading', { name: 'Administrative Privileges Required' });
             if (await sudoDialog.isVisible({ timeout: 5000 })) {
-                await page.getByPlaceholder('Your password').fill('password123');
+                await page.getByPlaceholder('Your password').fill('e2e-horse-battery-42');
                 await sudoPrompt(page).getByRole('button', { name: /^(Confirm|Install)$/ }).click();
             }
             await expect(page.getByRole('button', { name: 'Uninstall ClamAV' }).first()).toBeVisible({ timeout: 60000 });

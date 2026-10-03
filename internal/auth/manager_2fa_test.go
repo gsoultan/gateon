@@ -63,10 +63,10 @@ func enroll(t *testing.T, m *Manager, id, password string) (secret string, codes
 
 func TestAuthenticateDoesNotLeakSecretWhen2FARequired(t *testing.T) {
 	m := newTestManager(t)
-	id := createUser(t, m, "alice", "s3cret-pass")
-	enroll(t, m, id, "s3cret-pass")
+	id := createUser(t, m, "alice", "s3cret-passphrase")
+	enroll(t, m, id, "s3cret-passphrase")
 
-	token, user, err := m.Authenticate("alice", "s3cret-pass")
+	token, user, err := m.Authenticate("alice", "s3cret-passphrase", "")
 	if !errors.Is(err, ErrTwoFactorRequired) {
 		t.Fatalf("expected ErrTwoFactorRequired, got %v", err)
 	}
@@ -89,8 +89,8 @@ func TestAuthenticateDoesNotLeakSecretWhen2FARequired(t *testing.T) {
 
 func TestSetup2FAStoresEncryptedSecret(t *testing.T) {
 	m := newTestManager(t)
-	id := createUser(t, m, "carol", "pw")
-	e, err := m.Setup2FA(id, "pw")
+	id := createUser(t, m, "carol", "pw-long-enough")
+	e, err := m.Setup2FA(id, "pw-long-enough")
 	if err != nil {
 		t.Fatalf("Setup2FA: %v", err)
 	}
@@ -115,9 +115,9 @@ func TestSetup2FAStoresEncryptedSecret(t *testing.T) {
 
 func TestVerify2FARecoveryCodeOnlyAfterEnabled(t *testing.T) {
 	m := newTestManager(t)
-	id := createUser(t, m, "dave", "pw")
+	id := createUser(t, m, "dave", "pw-long-enough")
 	// Setup but do NOT enable.
-	e, err := m.Setup2FA(id, "pw")
+	e, err := m.Setup2FA(id, "pw-long-enough")
 	if err != nil {
 		t.Fatalf("Setup2FA: %v", err)
 	}
@@ -134,8 +134,8 @@ func TestVerify2FARecoveryCodeOnlyAfterEnabled(t *testing.T) {
 
 func TestVerify2FARecoveryCodeConsumed(t *testing.T) {
 	m := newTestManager(t)
-	id := createUser(t, m, "erin", "pw")
-	_, codes := enroll(t, m, id, "pw")
+	id := createUser(t, m, "erin", "pw-long-enough")
+	_, codes := enroll(t, m, id, "pw-long-enough")
 
 	// First use of a recovery code succeeds.
 	ok, token, _, err := m.Verify2FA(challengeFor(t, m, id), id, codes[0])
@@ -155,8 +155,8 @@ func TestVerify2FARecoveryCodeConsumed(t *testing.T) {
 
 func TestVerify2FALockoutAfterRepeatedFailures(t *testing.T) {
 	m := newTestManager(t)
-	id := createUser(t, m, "frank", "pw")
-	enroll(t, m, id, "pw")
+	id := createUser(t, m, "frank", "pw-long-enough")
+	enroll(t, m, id, "pw-long-enough")
 
 	var lastErr error
 	for range MaxFailedAttempts {

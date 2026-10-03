@@ -10,6 +10,7 @@ import (
 	"slices"
 
 	"github.com/gsoultan/gateon/internal/auth"
+	"github.com/gsoultan/gateon/internal/auth/passpolicy"
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/db"
 	"github.com/gsoultan/gateon/internal/logger"
@@ -62,6 +63,12 @@ func (s *ApiService) Setup(ctx context.Context, req *gateonv1.SetupRequest) (*ga
 	// See ADR 0021.
 	if !s.SetupToken.Matches(req.GetSetupToken()) {
 		return &gateonv1.SetupResponse{Success: false, Error: auth.ErrSetupTokenRequired.Error()}, nil
+	}
+	// Before anything is written: a refused password must not leave databases
+	// chosen or an auth manager installed behind it (ADR 0050). UpsertUser
+	// checks again; this is so nothing has happened when it would refuse.
+	if err := passpolicy.Check(req.AdminPassword, req.AdminUsername); err != nil {
+		return &gateonv1.SetupResponse{Success: false, Error: err.Error()}, nil
 	}
 	// After the guard, never before it: this writes the auth and audit
 	// databases, and on a configured gateway that would let an unauthenticated

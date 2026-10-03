@@ -136,7 +136,7 @@ func TestDashboardAndScriptWritesStillWork(t *testing.T) {
 	}
 
 	t.Run("script with a bearer token", func(t *testing.T) {
-		token, _, err := mgr.Authenticate("root", "correct-horse")
+		token, _, err := mgr.Authenticate("root", "correct-horse", "")
 		if err != nil {
 			t.Fatalf("authenticate: %v", err)
 		}
@@ -173,7 +173,7 @@ func TestAConfiguredCORSOriginMayWrite(t *testing.T) {
 // any GET that sent Accept: text/event-stream (review M15).
 func TestQueryTokenIsIgnoredOnAnEventStreamGet(t *testing.T) {
 	h, mgr, _ := buildManagementHandler(t)
-	token, _, err := mgr.Authenticate("root", "correct-horse")
+	token, _, err := mgr.Authenticate("root", "correct-horse", "")
 	if err != nil {
 		t.Fatalf("authenticate: %v", err)
 	}
@@ -235,7 +235,7 @@ func TestProxiedBackendNeverSeesTheManagementCredential(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	token, _, err := mgr.Authenticate("root", "correct-horse")
+	token, _, err := mgr.Authenticate("root", "correct-horse", "")
 	if err != nil {
 		t.Fatalf("authenticate: %v", err)
 	}

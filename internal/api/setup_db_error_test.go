@@ -96,7 +96,7 @@ func TestSetupStaysClosedWhenTheUserTableCannotBeRead(t *testing.T) {
 	if second.Success {
 		t.Errorf("Setup ran on a gateway that has an administrator because one read of the user table failed")
 	}
-	if _, _, err := mgr.Authenticate("admin", "attacker-password"); !errors.Is(err, auth.ErrInvalidCredentials) {
+	if _, _, err := mgr.Authenticate("admin", "attacker-password", ""); !errors.Is(err, auth.ErrInvalidCredentials) {
 		t.Errorf("the administrator's password was replaced: Authenticate(attacker-password) = %v", err)
 	}
 	if got := globals.Get(ctx).GetAuth().GetPasetoSecret(); got != strings.Repeat("a", 32) {

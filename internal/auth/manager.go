@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -16,6 +17,9 @@ import (
 
 	"aidanwoods.dev/go-paseto"
 	"github.com/google/uuid"
+	"github.com/gsoultan/gateon/internal/auth/apitoken"
+	"github.com/gsoultan/gateon/internal/auth/lockout"
+	"github.com/gsoultan/gateon/internal/auth/passpolicy"
 	"github.com/gsoultan/gateon/internal/db"
 	"github.com/gsoultan/gateon/internal/logger"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
@@ -42,6 +46,16 @@ type Manager struct {
 	// trust boundary's constructor gains no broker dependency. nil means no
 	// propagation, which is the default and the single-instance case.
 	bindingPub atomic.Pointer[BindingPublisher]
+
+	// knownAttempts and unknownAttempts count failed password attempts
+	// (ADR 0050): for accounts that exist, keyed by id, and for usernames that
+	// do not, so the two answer alike and invented names cannot evict a real
+	// account's count. In memory, per instance; bounded by lockout.DefaultBounds.
+	knownAttempts   *lockout.Tracker
+	unknownAttempts *lockout.Tracker
+
+	// tokens holds the scrape credentials (ADR 0050).
+	tokens *apitoken.Store
 }
 
 // NewManager creates an auth manager using the given database URL.
@@ -63,11 +77,14 @@ func NewManager(databaseURL, symmetricKey string, l logger.Logger) (*Manager, er
 	}
 
 	m := &Manager{
-		db:       database,
-		dialect:  dialect,
-		parser:   paseto.NewParser(),
-		logger:   l,
-		bindings: newBindingCache(),
+		db:              database,
+		dialect:         dialect,
+		parser:          paseto.NewParser(),
+		logger:          l,
+		bindings:        newBindingCache(),
+		knownAttempts:   lockout.New(lockout.DefaultBounds),
+		unknownAttempts: lockout.New(lockout.DefaultBounds),
+		tokens:          apitoken.NewStore(database, dialect),
 	}
 	m.keys.Store(keys)
 
@@ -120,48 +137,16 @@ func (m *Manager) IsSetupDone() bool {
 	return true
 }
 
-func (m *Manager) Authenticate(username, password string) (string, *gateonv1.User, error) {
-	var user gateonv1.User
-	var hashed string
-	var failedAttempts int
-	var lockedUntil sql.NullTime
-	var recoveryCodes string
-
-	q := m.dialect.Rebind(QueryUserByUsername)
-	err := m.db.QueryRow(q, username).
-		Scan(&user.Id, &user.Username, &hashed, &user.Role, &failedAttempts, &lockedUntil,
-			&user.TwoFactorEnabled, &user.TwoFactorSecret, &recoveryCodes,
-			&user.Disabled, &user.TwoFactorPending)
+// Authenticate is a password sign-in from source, the caller's address.
+func (m *Manager) Authenticate(username, password, source string) (string, *gateonv1.User, error) {
+	row, err := m.checkFirstFactor(username, password, source)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return "", nil, ErrInvalidCredentials
-		}
 		return "", nil, err
 	}
-
-	if user.Role == "" {
-		user.Role = RoleViewer
-	}
-
-	if lockedUntil.Valid && time.Now().Before(lockedUntil.Time) {
-		return "", nil, ErrAccountLocked
-	}
-
-	if err := bcrypt.CompareHashAndPassword([]byte(hashed), []byte(password)); err != nil {
-		m.handleFailedLogin(username, failedAttempts)
-		return "", nil, ErrInvalidCredentials
-	}
-
-	// A disabled account is blocked AFTER a correct password (so an attacker can't
-	// use this to enumerate which accounts are disabled vs. wrong-password).
-	if user.Disabled {
-		return "", nil, ErrAccountDisabled
-	}
-
-	m.resetFailedAttempts(username)
+	user := &row.user
 
 	if user.TwoFactorEnabled {
-		return m.owedSecondFactor(&user, ErrTwoFactorRequired)
+		return m.owedSecondFactor(user, ErrTwoFactorRequired)
 	}
 
 	// An administrator mandated 2FA but the user has not enrolled yet: do not issue
@@ -169,10 +154,174 @@ func (m *Manager) Authenticate(username, password string) (string, *gateonv1.Use
 	// then Verify2FA with the challenge) before login completes. The user id is
 	// returned (no secret) so the client knows which account to enroll.
 	if user.TwoFactorPending {
-		return m.owedSecondFactor(&user, ErrTwoFactorSetupRequired)
+		return m.owedSecondFactor(user, ErrTwoFactorSetupRequired)
 	}
 
-	return m.issueToken(&user)
+	return m.issueToken(user)
+}
+
+// loginRow is the account a password sign-in names, as the first factor reads it.
+type loginRow struct {
+	user   gateonv1.User
+	hashed string
+}
+
+// loadLoginRow reads username's account, or nil when there is none.
+func (m *Manager) loadLoginRow(username string) (*loginRow, error) {
+	var row loginRow
+	var recoveryCodes string
+	var failedAttempts int
+	var lockedUntil sql.NullTime
+	err := m.db.QueryRow(m.dialect.Rebind(QueryUserByUsername), username).
+		Scan(&row.user.Id, &row.user.Username, &row.hashed, &row.user.Role, &failedAttempts, &lockedUntil,
+			&row.user.TwoFactorEnabled, &row.user.TwoFactorSecret, &recoveryCodes,
+			&row.user.Disabled, &row.user.TwoFactorPending)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if row.user.Role == "" {
+		row.user.Role = RoleViewer
+	}
+	return &row, nil
+}
+
+// checkFirstFactor is the password step of a sign-in and of a mandated
+// enrolment, under the lockout of ADR 0050, and returns the account it proved.
+//
+// An unknown username takes the same path as a known one -- the same attempt
+// counting, the same lock answers, and a bcrypt comparison at the stored cost
+// -- so neither the answer nor its timing says whether the account exists.
+// Unknown names used to answer in 1-8 ms and real ones in about 55, and only a
+// real one could ever answer "locked".
+//
+// A disabled account is refused only after a correct password, so the refusal
+// does not tell a guesser which accounts are disabled.
+//
+// It does not touch the stored failure count. That count is the second
+// factor's (Verify2FA) and the re-authentication prompt's (confirmPassword):
+// the password step reset it on every correct password, so whoever held the
+// password could sign in again after every fourth wrong code and guess TOTP
+// codes without ever locking.
+func (m *Manager) checkFirstFactor(username, password, addr string) (*loginRow, error) {
+	row, err := m.loadLoginRow(username)
+	if err != nil {
+		return nil, err
+	}
+	source := lockout.Prefix(addr)
+	tracker, key := m.trackerFor(row, username)
+	if err := m.admit(row, tracker, key, source); err != nil {
+		return nil, err
+	}
+	if !passwordMatches(row, password) {
+		tracker.Fail(key, source)
+		return nil, ErrInvalidCredentials
+	}
+	if row.user.Disabled {
+		return nil, ErrAccountDisabled
+	}
+	tracker.Succeed(key, source)
+	m.rememberSource(row.user.Id, source)
+	return row, nil
+}
+
+// trackerFor is the tracker and key an attempt is counted under. Accounts
+// that exist are keyed by id in a tracker only they reach, so a flood of
+// invented usernames cannot evict a real account's count.
+func (m *Manager) trackerFor(row *loginRow, username string) (*lockout.Tracker, string) {
+	if row == nil {
+		return m.unknownAttempts, username
+	}
+	return m.knownAttempts, row.user.Id
+}
+
+// admit refuses an attempt the lockout does not allow. An account under attack
+// still admits a source it has signed in from before: that is what keeps the
+// owner in while strangers are kept out.
+func (m *Manager) admit(row *loginRow, tracker *lockout.Tracker, key, source string) error {
+	switch tracker.Check(key, source) {
+	case lockout.Allow:
+		return nil
+	case lockout.PairLocked:
+		return ErrAccountLocked
+	}
+	if row != nil && m.isKnownSource(row.user.Id, source) {
+		return nil
+	}
+	tracker.Renew(key)
+	return ErrAccountLocked
+}
+
+// dummyHash is compared against when there is no stored hash to compare
+// against, at the cost passwords are stored at, so a sign-in for an account
+// that does not exist takes as long as one for an account that does.
+var dummyHash = sync.OnceValue(func() []byte {
+	h, err := bcrypt.GenerateFromPassword([]byte("gateon: no such account"), productionBcryptCost)
+	if err != nil {
+		return nil
+	}
+	return h
+})
+
+// passwordMatches reports whether password is row's. With no row, or no
+// stored hash, it still pays for one comparison and answers false.
+func passwordMatches(row *loginRow, password string) bool {
+	if row == nil || row.hashed == "" {
+		_ = bcrypt.CompareHashAndPassword(dummyHash(), []byte(password))
+		return false
+	}
+	return bcrypt.CompareHashAndPassword([]byte(row.hashed), []byte(password)) == nil
+}
+
+// maxLoginSources is how many source prefixes an account remembers.
+const maxLoginSources = 8
+
+// isKnownSource reports whether account id has signed in from source before.
+// "" -- an address that did not parse -- is never known.
+func (m *Manager) isKnownSource(id, source string) bool {
+	if source == "" {
+		return false
+	}
+	return slices.Contains(m.loginSources(id), source)
+}
+
+func (m *Manager) loginSources(id string) []string {
+	var stored string
+	if err := m.db.QueryRow(m.dialect.Rebind(QueryLoginSources), id).Scan(&stored); err != nil {
+		return nil
+	}
+	if stored == "" {
+		return nil
+	}
+	return strings.Split(stored, ",")
+}
+
+// rememberSource records that account id signed in from source, keeping the
+// maxLoginSources most recent. A source already known is not rewritten, so an
+// ordinary sign-in costs a read and no write.
+func (m *Manager) rememberSource(id, source string) {
+	if source == "" {
+		return
+	}
+	known := m.loginSources(id)
+	if slices.Contains(known, source) {
+		return
+	}
+	known = append([]string{source}, known...)
+	if len(known) > maxLoginSources {
+		known = known[:maxLoginSources]
+	}
+	if _, err := m.db.Exec(m.dialect.Rebind(QueryUpdateLoginSources), strings.Join(known, ","), id); err != nil {
+		m.logger.LogError("could not record a sign-in source; under attack this account "+
+			"will not be admitted from it", "error", err)
+	}
+}
+
+// APITokens is the scrape-credential store (ADR 0050).
+func (m *Manager) APITokens() *apitoken.Store {
+	return m.tokens
 }
 
 // owedSecondFactor answers a correct password on an account that still owes a
@@ -355,11 +504,21 @@ func (m *Manager) ListUsers(page, pageSize int32, search string) ([]*gateonv1.Us
 // by an edit renaming onto it, is refused with ErrUsernameTaken and nothing is
 // written. The table's unique constraint refuses it rather than a lookup
 // beforehand, so two requests racing for one name cannot both win.
+//
+// A password, when one is given, must pass passpolicy.Check, and a create must
+// give one: there was no rule, so "a" was accepted and a create with no
+// password stored an empty hash (ADR 0050). An edit without one keeps the
+// account's password.
 func (m *Manager) UpsertUser(u *gateonv1.User) error {
 	if u.Role == "" {
 		u.Role = RoleViewer
 	} else if !ValidRole(u.Role) {
 		return fmt.Errorf("invalid role: %s", u.Role)
+	}
+	if u.Password != "" {
+		if err := passpolicy.Check(u.Password, u.Username); err != nil {
+			return err
+		}
 	}
 	hashed, err := hashPassword(u.Password)
 	if err != nil {
@@ -369,7 +528,11 @@ func (m *Manager) UpsertUser(u *gateonv1.User) error {
 		if updated, err := m.updateUser(u, hashed); err != nil || updated {
 			return err
 		}
-	} else {
+	}
+	if hashed == "" {
+		return passpolicy.ErrEmpty
+	}
+	if u.Id == "" {
 		u.Id = uuid.New().String()
 	}
 	return m.insertUser(u, hashed)
@@ -432,7 +595,25 @@ func userWriteError(err error) error {
 	return fmt.Errorf("failed to save user: %w", err)
 }
 
+// ChangePassword sets account id's password, which must pass passpolicy.Check.
 func (m *Manager) ChangePassword(id, password string) error {
+	if err := m.checkNewPassword(id, password); err != nil {
+		return err
+	}
+	return m.setPassword(id, password)
+}
+
+// checkNewPassword applies the password policy to password for account id.
+func (m *Manager) checkNewPassword(id, password string) error {
+	var username string
+	if err := m.db.QueryRow(m.dialect.Rebind(QueryUsernameByID), id).Scan(&username); err != nil &&
+		!errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("failed to read user: %w", err)
+	}
+	return passpolicy.Check(password, username)
+}
+
+func (m *Manager) setPassword(id, password string) error {
 	hashed, err := bcrypt.GenerateFromPassword([]byte(password), bcryptCost)
 	if err != nil {
 		return fmt.Errorf("failed to hash password: %w", err)
@@ -456,11 +637,17 @@ func (m *Manager) ChangePassword(id, password string) error {
 // changing their own password had to supply -- so the session was enough, and in
 // the dashboard the session is a cookie that script in the page can ride. A
 // password chosen by that script would outlive the session it was set from.
+//
+// The new password is checked against the policy first, so a refused one does
+// not spend a guess at the current one.
 func (m *Manager) ChangeOwnPassword(id, current, password string) error {
+	if err := m.checkNewPassword(id, password); err != nil {
+		return err
+	}
 	if err := m.confirmPassword(id, current); err != nil {
 		return err
 	}
-	return m.ChangePassword(id, password)
+	return m.setPassword(id, password)
 }
 
 func (m *Manager) DeleteUser(id string) error {
@@ -617,40 +804,21 @@ func secondFactorSecrets(tx *sql.Tx, d db.Dialect) (map[string]string, error) {
 // and only when the account is genuinely pending (not already enrolled). It
 // returns the same (secret, qrDataURL, recoveryCodes) tuple as Setup2FA plus the
 // resolved user id so the caller can complete verification.
-func (m *Manager) EnrollPending2FA(username, password string) (string, string, []string, string, error) {
-	var id, hashed, role, recoveryCodes string
-	var twoFactorEnabled, twoFactorPending, disabled bool
-	var failedAttempts int
-	var lockedUntil sql.NullTime
-	var twoFactorSecret, uname string
-
-	q := m.dialect.Rebind(QueryUserByUsername)
-	err := m.db.QueryRow(q, username).Scan(&id, &uname, &hashed, &role, &failedAttempts, &lockedUntil,
-		&twoFactorEnabled, &twoFactorSecret, &recoveryCodes, &disabled, &twoFactorPending)
+//
+// Its password step is the sign-in's, checkFirstFactor, under the same lockout
+// and from the same source: it is as public as /v1/login.
+func (m *Manager) EnrollPending2FA(username, password, source string) (string, string, []string, string, error) {
+	row, err := m.checkFirstFactor(username, password, source)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return "", "", nil, "", ErrInvalidCredentials
-		}
 		return "", "", nil, "", err
-	}
-
-	if lockedUntil.Valid && time.Now().Before(lockedUntil.Time) {
-		return "", "", nil, "", ErrAccountLocked
-	}
-	if err := bcrypt.CompareHashAndPassword([]byte(hashed), []byte(password)); err != nil {
-		m.handleFailedLogin(username, failedAttempts)
-		return "", "", nil, "", ErrInvalidCredentials
-	}
-	if disabled {
-		return "", "", nil, "", ErrAccountDisabled
 	}
 	// Enrollment via this unauthenticated path is only for accounts an admin
 	// mandated 2FA for and that haven't enrolled. Anything else must go through the
 	// authenticated self-service Setup2FA endpoint.
-	if twoFactorEnabled || !twoFactorPending {
+	if row.user.TwoFactorEnabled || !row.user.TwoFactorPending {
 		return "", "", nil, "", ErrInvalidCredentials
 	}
-
+	id := row.user.Id
 	secret, qr, codes, err := m.beginTOTPEnrolment(id)
 	if err != nil {
 		return "", "", nil, "", err
@@ -696,13 +864,18 @@ type Enrolment struct {
 }
 
 // confirmPassword applies login's first-factor rules to an account that is
-// already signed in, in Authenticate's order: a locked account is refused
-// before the password is compared, a wrong password counts towards the same
-// lockout the sign-in form enforces, a disabled account is refused only after
-// a correct one, and a correct one clears the count. Anything looser would make
-// a re-authentication prompt a faster way to guess the password than the
-// sign-in form -- one an attacker who holds a session reaches without a
-// captcha, a rate limit or a login audit entry.
+// already signed in: a locked account is refused before the password is
+// compared, a wrong password counts towards a lock of MaxFailedAttempts per
+// LockoutDuration, a disabled account is refused only after a correct one, and
+// a correct one clears the count. Anything looser would make a
+// re-authentication prompt a faster way to guess the password than the sign-in
+// form -- one an attacker who holds a session reaches without a captcha, a
+// rate limit or a login audit entry.
+//
+// The count is the stored one the second factor also uses, not the sign-in
+// form's (ADR 0050). They used to be one count, so a session in hostile hands
+// could lock the owner out of signing in, and anyone could lock the owner out
+// of this prompt and of the second factor by guessing at the sign-in form.
 func (m *Manager) confirmPassword(id, password string) error {
 	var uid, username, hashed, role, secret, recoveryCodes string
 	var failedAttempts int
@@ -834,8 +1007,9 @@ func (m *Manager) Verify2FA(challenge, id, code string) (bool, string, *gateonv1
 	// every permission check refuses.
 	user.Role = role
 
-	// Enforce the same lockout used for password login to throttle brute-force
-	// attempts against the 6-digit TOTP and recovery codes.
+	// The stored lock throttles guesses at the 6-digit TOTP and recovery codes.
+	// Only a caller who has shown the password reaches here, and the password
+	// step no longer clears this count (ADR 0050).
 	if lockedUntil.Valid && time.Now().Before(lockedUntil.Time) {
 		return false, "", nil, ErrAccountLocked
 	}

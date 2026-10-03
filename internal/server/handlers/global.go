@@ -791,7 +791,7 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 			WriteHTTPError(w, http.StatusBadRequest, "invalid json")
 			return
 		}
-		secret, qr, recovery, id, err := d.AuthManager.EnrollPending2FA(req.Username, req.Password)
+		secret, qr, recovery, id, err := d.AuthManager.EnrollPending2FA(req.Username, req.Password, request.ClientAddr(r))
 		if err != nil {
 			switch {
 			case errors.Is(err, auth.ErrAccountLocked):

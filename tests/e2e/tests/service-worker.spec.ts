@@ -22,7 +22,7 @@ import { test, expect, type APIRequestContext, type Page } from '@playwright/tes
 test.use({ storageState: { cookies: [], origins: [] } });
 test.setTimeout(120000);
 
-const ADMIN = { username: 'admin', password: 'password123' };
+const ADMIN = { username: 'admin', password: 'e2e-horse-battery-42' };
 
 async function login(page: Page, as: { username: string; password: string } = ADMIN) {
   const res = await page.request.post('/v1/login', { data: as });

@@ -48,10 +48,10 @@ func TestChangePasswordRefusesWhenTheCallerCannotBeRead(t *testing.T) {
 	}
 
 	// The real proof: the victim's password must be unchanged.
-	if _, _, authErr := svc.Auth.Authenticate("victim", "attacker-chosen-password"); authErr == nil {
+	if _, _, authErr := svc.Auth.Authenticate("victim", "attacker-chosen-password", ""); authErr == nil {
 		t.Error("the victim's password was replaced by a caller the guard could not identify")
 	}
-	if _, _, authErr := svc.Auth.Authenticate("victim", "victim-original-password"); authErr != nil {
+	if _, _, authErr := svc.Auth.Authenticate("victim", "original-passphrase-v", ""); authErr != nil {
 		t.Errorf("the victim's original password no longer works: %v", authErr)
 	}
 }
@@ -66,7 +66,7 @@ func TestChangePasswordStillAllowsSelfAndAdmin(t *testing.T) {
 	// The owner proves the change with the current password; without it the
 	// change is refused (users_password_test.go).
 	if _, err := svc.ChangePassword(self, &gateonv1.ChangePasswordRequest{
-		Id: victimID, Password: "chosen-by-the-owner", CurrentPassword: "victim-original-password",
+		Id: victimID, Password: "chosen-by-the-owner", CurrentPassword: "original-passphrase-v",
 	}); err != nil {
 		t.Fatalf("a user changing their own password was refused: %v", err)
 	}
@@ -81,7 +81,7 @@ func TestChangePasswordStillAllowsSelfAndAdmin(t *testing.T) {
 }
 
 // newUsersTestService returns a service backed by a real auth manager in a
-// temp dir, plus the id of a user whose password is "victim-original-password".
+// temp dir, plus the id of a user whose password is "original-passphrase-v".
 func newUsersTestService(t *testing.T) (*ApiService, string) {
 	t.Helper()
 	tmp := t.TempDir()
@@ -94,7 +94,7 @@ func newUsersTestService(t *testing.T) (*ApiService, string) {
 	u := &gateonv1.User{
 		Id:       "victim-id",
 		Username: "victim",
-		Password: "victim-original-password",
+		Password: "original-passphrase-v",
 		Role:     auth.RoleViewer,
 	}
 	if err := mgr.UpsertUser(u); err != nil {

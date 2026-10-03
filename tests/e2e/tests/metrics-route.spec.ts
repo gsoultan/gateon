@@ -24,7 +24,7 @@ test('the Metrics page survives a reload without a service worker', async ({ bro
   const page = await context.newPage();
   try {
     const login = await page.request.post('/v1/login', {
-      data: { username: 'admin', password: 'password123' },
+      data: { username: 'admin', password: 'e2e-horse-battery-42' },
     });
     expect(login.ok(), `login failed: ${login.status()}`).toBe(true);
 

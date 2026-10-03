@@ -43,7 +43,7 @@ func loginFixture(t *testing.T, m *Manager, username, password, role string) (id
 		t.Fatalf("created user %q not found", username)
 	}
 
-	token, _, err = m.Authenticate(username, password)
+	token, _, err = m.Authenticate(username, password, "")
 	if err != nil {
 		t.Fatalf("Authenticate: %v", err)
 	}
@@ -160,7 +160,7 @@ func TestSessionRevocation(t *testing.T) {
 			t.Fatalf("re-enable: %v", err)
 		}
 
-		token, _, err := m.Authenticate("erin", "correct-horse-battery")
+		token, _, err := m.Authenticate("erin", "correct-horse-battery", "")
 		if err != nil {
 			t.Fatalf("Authenticate after re-enable: %v", err)
 		}

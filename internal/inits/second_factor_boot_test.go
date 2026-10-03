@@ -74,7 +74,7 @@ func TestBootMovesSecondFactorsFromThePreviousSessionKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, _, signIn := m.Authenticate("gina", "correct-horse-battery")
+	_, _, signIn := m.Authenticate("gina", "correct-horse-battery", "")
 	ok, token, _, err := m.Verify2FA(auth.ChallengeFrom(signIn), id, code)
 	if err != nil || !ok || token == "" {
 		t.Fatalf("after a restart with a changed key, and the previous key given, the second factor does not verify: ok=%v err=%v",

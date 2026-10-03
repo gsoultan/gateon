@@ -11,6 +11,10 @@ import (
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
+// password is the e2e accounts' password. It meets the password policy
+// (ADR 0050); the specs sign in with it.
+const password = "e2e-horse-battery-42"
+
 func main() {
 	pasetoSecret := "12345678901234567890123456789012"
 	databaseURL := "gateon_test.db"
@@ -23,7 +27,7 @@ func main() {
 
 	admin := &gateonv1.User{
 		Username: "admin",
-		Password: "password123",
+		Password: password,
 		Role:     "admin",
 	}
 
@@ -33,7 +37,7 @@ func main() {
 
 	operator := &gateonv1.User{
 		Username: "operator",
-		Password: "password123",
+		Password: password,
 		Role:     "operator",
 	}
 	if err := mgr.UpsertUser(operator); err != nil {
@@ -42,7 +46,7 @@ func main() {
 
 	viewer := &gateonv1.User{
 		Username: "viewer",
-		Password: "password123",
+		Password: password,
 		Role:     "viewer",
 	}
 	if err := mgr.UpsertUser(viewer); err != nil {

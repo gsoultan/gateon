@@ -58,18 +58,25 @@ func TestVerify2FARefusesAMissingChallenge(t *testing.T) {
 func TestVerify2FARefusesAnotherAccountsChallenge(t *testing.T) {
 	m := newTestManager(t)
 	id, code := enrolledAccount(t, m, "alice")
-	bob := createUser(t, m, "bob", "bobs-password")
+	bob := createUser(t, m, "bob", "the-other-accounts-pw")
 	assertRefusedChallenge(t, m, challengeFor(t, m, bob), id, code)
 }
 
 // TestVerify2FARefusesAnotherAccountsChallengeWithTheSameBinding: the binding
 // is a digest of account state, not of the account, so two accounts can share
-// one -- here two with no password and the same role, which UpsertUser allows.
+// one -- here two with the same stored hash and the same role. UpsertUser no
+// longer creates an account with no password (ADR 0050), and two hashes of one
+// password differ by their salt, so the hash is copied across in the table.
 // The binding then says nothing about whose challenge it is; the subject must.
 func TestVerify2FARefusesAnotherAccountsChallengeWithTheSameBinding(t *testing.T) {
 	m := newTestManager(t)
-	alice := createUser(t, m, "alice", "")
-	bob := createUser(t, m, "bob", "")
+	alice := createUser(t, m, "alice", "shared-passphrase")
+	bob := createUser(t, m, "bob", "shared-passphrase")
+	if _, err := m.db.Exec(m.dialect.Rebind(
+		"UPDATE users SET password = (SELECT password FROM users WHERE id = ?) WHERE id = ?"), alice, bob); err != nil {
+		t.Fatal(err)
+	}
+	m.revokeSessions(bob)
 	secret, _, _, err := m.beginTOTPEnrolment(alice)
 	if err != nil {
 		t.Fatal(err)
@@ -99,7 +106,7 @@ func TestVerify2FARefusesAnExpiredChallenge(t *testing.T) {
 func TestVerify2FARefusesASessionAsChallenge(t *testing.T) {
 	m := newTestManager(t)
 	id := createUser(t, m, "alice", "correct-horse-battery")
-	session, _, err := m.Authenticate("alice", "correct-horse-battery")
+	session, _, err := m.Authenticate("alice", "correct-horse-battery", "")
 	if err != nil || session == "" {
 		t.Fatalf("sign-in before enrolment: %v", err)
 	}
@@ -212,7 +219,7 @@ func TestRefusedChallengesAreNotCounted(t *testing.T) {
 func TestAuthenticateCarriesAChallengeWhenASecondFactorIsOwed(t *testing.T) {
 	m := newTestManager(t)
 	id, code := enrolledAccount(t, m, "alice")
-	pending := createUser(t, m, "bob", "bobs-password")
+	pending := createUser(t, m, "bob", "the-other-accounts-pw")
 	if err := m.SetTwoFactorPending(pending, true); err != nil {
 		t.Fatal(err)
 	}
@@ -221,9 +228,9 @@ func TestAuthenticateCarriesAChallengeWhenASecondFactorIsOwed(t *testing.T) {
 		owed         error
 	}{
 		{"alice", "correct-horse-battery", id, ErrTwoFactorRequired},
-		{"bob", "bobs-password", pending, ErrTwoFactorSetupRequired},
+		{"bob", "the-other-accounts-pw", pending, ErrTwoFactorSetupRequired},
 	} {
-		token, _, err := m.Authenticate(tc.user, tc.pw)
+		token, _, err := m.Authenticate(tc.user, tc.pw, "")
 		if !errors.Is(err, tc.owed) || token != "" {
 			t.Fatalf("%s: token=%q err=%v, want %v and no session", tc.user, token, err, tc.owed)
 		}
@@ -244,7 +251,7 @@ func TestAuthenticateCarriesAChallengeWhenASecondFactorIsOwed(t *testing.T) {
 }
 
 func authErr(m *Manager, username, password string) error {
-	_, _, err := m.Authenticate(username, password)
+	_, _, err := m.Authenticate(username, password, "")
 	return err
 }
 

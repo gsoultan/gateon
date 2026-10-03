@@ -7,6 +7,7 @@ import (
 	"errors"
 	"sync/atomic"
 
+	"github.com/gsoultan/gateon/internal/auth/apitoken"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
@@ -117,12 +118,21 @@ func (h *Holder) IsSetupDone() bool {
 	return s.IsSetupDone()
 }
 
-func (h *Holder) Authenticate(username, password string) (string, *gateonv1.User, error) {
+func (h *Holder) Authenticate(username, password, source string) (string, *gateonv1.User, error) {
 	s := h.Get()
 	if s == nil {
 		return "", nil, ErrUnavailable
 	}
-	return s.Authenticate(username, password)
+	return s.Authenticate(username, password, source)
+}
+
+// APITokens is the backing service's token store, or nil before Setup.
+func (h *Holder) APITokens() *apitoken.Store {
+	s := h.Get()
+	if s == nil {
+		return nil
+	}
+	return s.APITokens()
 }
 
 // VerifyToken denies every token while no backing service exists. This is the
@@ -216,12 +226,12 @@ func (h *Holder) Setup2FA(id, password string) (Enrolment, error) {
 	return s.Setup2FA(id, password)
 }
 
-func (h *Holder) EnrollPending2FA(username, password string) (string, string, []string, string, error) {
+func (h *Holder) EnrollPending2FA(username, password, source string) (string, string, []string, string, error) {
 	s := h.Get()
 	if s == nil {
 		return "", "", nil, "", ErrUnavailable
 	}
-	return s.EnrollPending2FA(username, password)
+	return s.EnrollPending2FA(username, password, source)
 }
 
 func (h *Holder) Verify2FA(challenge, id, code string) (bool, string, *gateonv1.User, error) {

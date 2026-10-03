@@ -40,6 +40,12 @@ const (
 	// epoch, which every session issued before it no longer matches.
 	QueryAdvanceSessionEpoch = "UPDATE users SET session_epoch = session_epoch + 1 WHERE id = ?"
 
+	// QueryLoginSources and QueryUpdateLoginSources read and write the source
+	// prefixes an account has signed in from (ADR 0050).
+	QueryLoginSources       = "SELECT login_sources FROM users WHERE id = ?"
+	QueryUpdateLoginSources = "UPDATE users SET login_sources = ? WHERE id = ?"
+	QueryUsernameByID       = "SELECT username FROM users WHERE id = ?"
+
 	QueryDeleteUser = "DELETE FROM users WHERE id = ?"
 	// #nosec G101 -- a parameterised statement, not a credential. Both values
 	// are bound.

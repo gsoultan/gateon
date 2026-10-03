@@ -1613,6 +1613,39 @@ func init() {
 		}
 		return lapseLegacyShuns(db, dialect)
 	})
+
+	// ADR 0050. Two things the management plane's sign-in and scrape paths
+	// needed somewhere to keep:
+	//   - api_tokens: long-lived, scoped credentials an administrator issues to
+	//     a scraper, so /metrics no longer needs an eight-hour user session
+	//     refreshed by a script. Only a SHA-256 of each token is stored.
+	//   - users.login_sources: the source prefixes (an IPv4 /24, an IPv6 /64)
+	//     an account has signed in from, at most eight. When guesses spread over
+	//     many sources put an account under attack, these are the sources still
+	//     allowed to try, so the owner is not locked out with the attacker.
+	// Both start empty, so nothing an upgraded install does changes until an
+	// administrator issues a token or an account signs in.
+	Register(67, "api_tokens_and_login_sources", func(db *sql.DB, dialect Dialect) error {
+		tokens := `CREATE TABLE IF NOT EXISTS api_tokens (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			token_hash TEXT NOT NULL UNIQUE,
+			hint TEXT NOT NULL DEFAULT '',
+			scopes TEXT NOT NULL DEFAULT '',
+			created_by TEXT NOT NULL DEFAULT '',
+			created_at TIMESTAMP NOT NULL,
+			last_used_at TIMESTAMP,
+			expires_at TIMESTAMP
+		)`
+		if _, err := db.Exec(tokens); err != nil {
+			return fmt.Errorf("create api_tokens: %w", err)
+		}
+		column := `ALTER TABLE users ADD COLUMN login_sources TEXT NOT NULL DEFAULT ''`
+		if dialect.Driver == DriverPostgres {
+			column = `ALTER TABLE users ADD COLUMN IF NOT EXISTS login_sources TEXT NOT NULL DEFAULT ''`
+		}
+		return addColumns(db, dialect, column)
+	})
 }
 
 // legacyShunFirstRung is how long the first automatic shun lasted when

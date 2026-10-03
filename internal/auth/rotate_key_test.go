@@ -40,7 +40,7 @@ func TestUpdateSymmetricKeyKeepsEverySecondFactor(t *testing.T) {
 func TestUpdateSymmetricKeyEndsEverySession(t *testing.T) {
 	m := newTestManager(t)
 	createUser(t, m, "bob", "correct-horse-battery")
-	old, _, err := m.Authenticate("bob", "correct-horse-battery")
+	old, _, err := m.Authenticate("bob", "correct-horse-battery", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,7 +50,7 @@ func TestUpdateSymmetricKeyEndsEverySession(t *testing.T) {
 	if _, err := m.VerifyToken(old); err == nil {
 		t.Fatal("a session signed with the previous key still verifies")
 	}
-	fresh, _, err := m.Authenticate("bob", "correct-horse-battery")
+	fresh, _, err := m.Authenticate("bob", "correct-horse-battery", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +64,7 @@ func TestUpdateSymmetricKeyEndsEverySession(t *testing.T) {
 func TestUpdateSymmetricKeyRefusesAShortKey(t *testing.T) {
 	m := newTestManager(t)
 	createUser(t, m, "carol", "correct-horse-battery")
-	token, _, err := m.Authenticate("carol", "correct-horse-battery")
+	token, _, err := m.Authenticate("carol", "correct-horse-battery", "")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -131,7 +131,7 @@ func TestManagementHostRouteDoesNotBypassAuth(t *testing.T) {
 		if rr.Code != http.StatusUnauthorized {
 			t.Fatalf("POST /v1/users/password via Host route: status = %d, want 401; body: %s", rr.Code, rr.Body.String())
 		}
-		if _, _, err := mgr.Authenticate("root", "attacker-set"); err == nil {
+		if _, _, err := mgr.Authenticate("root", "attacker-set", ""); err == nil {
 			t.Fatal("unauthenticated request changed the admin password")
 		}
 	})
@@ -157,7 +157,7 @@ func TestManagementHostRouteStillAllowsAuthenticatedAdmin(t *testing.T) {
 	}
 	h, mgr, _ := buildManagementHandler(t, hostRoute)
 
-	token, _, err := mgr.Authenticate("root", "correct-horse")
+	token, _, err := mgr.Authenticate("root", "correct-horse", "")
 	if err != nil {
 		t.Fatalf("authenticate admin: %v", err)
 	}
