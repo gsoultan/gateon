@@ -241,7 +241,7 @@ export const SecurityAdvancedSettingsCard: React.FC<SecurityAdvancedSettingsCard
                   />
                   <NumberInput
                     label="Score Threshold"
-                    description="Start tarpitting when IP threat score exceeds this. Recommended: 7.0."
+                    description="Start tarpitting when a client's threat score (100 minus its reputation; a new client has 0) reaches this. Recommended: 7.0."
                     value={security.tarpit?.scoreThreshold}
                     onChange={(val) => updateSection("tarpit", { scoreThreshold: val })}
                     disabled={disabled}
@@ -261,7 +261,9 @@ export const SecurityAdvancedSettingsCard: React.FC<SecurityAdvancedSettingsCard
                     <Text fw={500}>PoW Challenge</Text>
                   </Group>
                   <Text size="xs" c="dimmed">
-                    Force clients to solve a computational puzzle to mitigate Layer 7 DDoS and scraping.
+                    Clients whose threat score is above the threshold must solve a computational puzzle before they
+                    are served. Browsers solve it automatically and are let through for 10 minutes; API clients get a
+                    429 naming the puzzle. It raises the cost of abuse; it does not prove a visitor is human.
                   </Text>
                 </Stack>
                 <Switch
@@ -283,7 +285,7 @@ export const SecurityAdvancedSettingsCard: React.FC<SecurityAdvancedSettingsCard
                   />
                   <NumberInput
                     label="Score Threshold"
-                    description="Serve challenge when IP threat score exceeds this. Recommended: 5.0."
+                    description="Serve the challenge when a client's threat score (100 minus its reputation; a new client has 0) exceeds this. Recommended: 5.0."
                     value={security.pow?.scoreThreshold}
                     onChange={(val) => updateSection("pow", { scoreThreshold: val })}
                     disabled={disabled}

@@ -23,6 +23,7 @@ import { IconPlus, IconTrash } from "@tabler/icons-react";
 import { apiFetch, getCloudflareIPs } from "../../hooks/useGateon";
 import { StoredSecretInput } from "../settings/StoredSecretInput";
 import { WAF_APP_PROFILES } from "../../types/gateon";
+import { BROWSER_HEADER_CHECK_HELP, JS_CHALLENGE_HELP } from "./botManagementCopy";
 
 interface EditorProps {
   config: Record<string, string>;
@@ -349,20 +350,20 @@ export function BotManagementConfigEditor({ config, updateConfig }: EditorProps)
   return (
     <Stack gap="md">
       <Switch
-        label="Browser Integrity Check"
-        description="Verify request is from a legitimate browser using Sec-Fetch-* headers"
+        label="Browser Header Check"
+        description={BROWSER_HEADER_CHECK_HELP}
         checked={isEnabled("enable_browser_integrity")}
         onChange={(e) => toggle("enable_browser_integrity", e.currentTarget.checked)}
       />
       <Switch
-        label="JS Challenge"
-        description="Serve a non-interactive JS challenge to verify browser capability"
+        label="JavaScript Challenge"
+        description={JS_CHALLENGE_HELP}
         checked={isEnabled("enable_js_challenge")}
         onChange={(e) => toggle("enable_js_challenge", e.currentTarget.checked)}
       />
       <NumberInput
         label="Challenge Timeout"
-        description="How long a solved challenge remains valid (seconds). Default: 3600"
+        description="How long a passed challenge admits the same address and browser (seconds). Default: 3600"
         value={parseInt(config.challenge_timeout) || 3600}
         onChange={(val) => updateConfig("challenge_timeout", (val ?? 3600).toString())}
         min={60}

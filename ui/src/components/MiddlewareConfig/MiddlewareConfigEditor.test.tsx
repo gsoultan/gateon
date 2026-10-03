@@ -163,10 +163,13 @@ describe("bot management editor", () => {
       config: { enable_js_challenge: "true", enable_browser_integrity: "true" },
       updateConfig: c.updateConfig,
     });
-    const js = findElement(tree, byLabel("JS Challenge"));
-    const integrity = findElement(tree, byLabel("Browser Integrity Check"));
+    const js = findElement(tree, byLabel("JavaScript Challenge"));
+    const integrity = findElement(tree, byLabel("Browser Header Check"));
     expect(js?.props.checked).toBe(true);
     expect(integrity?.props.checked).toBe(true);
+    // ADR 0045: say what each check proves, and what it does not.
+    expect(js?.props.description).toContain("does not prove a visitor is human");
+    expect(integrity?.props.description).toContain("do not claim to be a browser");
     flip(js, false);
     expect(c.last).toEqual({ enable_js_challenge: "false" });
     flip(integrity, false);
