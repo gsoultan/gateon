@@ -30,10 +30,15 @@ do what their labels said:
   never fired. The tarpit, under the identical label, compared `100 -
   reputation`, as the label says.
 
-Fixing T10 made a fourth defect live: a proof-of-work solution was honoured
+Fixing T10 made two more defects live. A proof-of-work solution was honoured
 only on the request that carried it, so the browser page -- solve, then reload
 -- was challenged again on the reload, solved again, and reloaded again for as
-long as the tab stayed open.
+long as the tab stayed open. And serving a challenge was recorded as a threat
+(`pow_challenge_issued`, action "challenged"): on the built gateway one blocked
+XSS plus the one challenge it caused correlated into a *critical* incident
+(`signal_types=pow_challenge_issued,waf_blocked`), the responder took the
+score to 0, and the reputation blocker refused the client on its next request
+-- before it could solve the challenge it had just been handed.
 
 ## Decision
 
@@ -109,6 +114,12 @@ address and User-Agent under the route's key, context `gateon-pow-pass-v1`),
 so the browser's reload gets through. API clients may still present the
 solution headers on each request. The browser fallback is the same accessible
 page as the JavaScript challenge.
+
+**Serving a challenge is not evidence.** It is the gateway's own action; the
+signal that lowered the score is already on record. Proof-of-work no longer
+files a threat when it challenges; it counts `pow_challenge_served` and
+`pow_challenge_solved` on `gateon_middleware_bot_management_total` (two fixed
+label values). A *wrong* solution is still a threat: that one the client sent.
 
 The global "Bot Management" settings are labelled as what they are: defaults
 for routes that attach a Bot Management middleware. They were never applied to

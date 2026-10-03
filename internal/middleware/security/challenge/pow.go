@@ -135,6 +135,7 @@ func (c powChallenge) challengeOrPass(next http.Handler, w http.ResponseWriter, 
 	}
 	if r.Header.Get(PowHeaderSolution) != "" && r.Header.Get(PowNonceHeader) != "" {
 		if c.verify(r) {
+			telemetry.MiddlewareBotManagementTotal.WithLabelValues(c.routeID, "pow_challenge_solved").Inc()
 			c.setPass(w, r)
 			next.ServeHTTP(w, r)
 			return
@@ -149,15 +150,14 @@ func (c powChallenge) challengeOrPass(next http.Handler, w http.ResponseWriter, 
 			ActionTaken: kind.ActionChallenged,
 		})
 	}
-	kind.RecordThreat(r, kind.Threat{
-		Type:        "pow_challenge_issued",
-		Score:       1.0,
-		Details:     "PoW challenge issued due to low reputation",
-		RouteID:     c.routeID,
-		Category:    categoryBot,
-		Severity:    kind.SeverityLow,
-		ActionTaken: kind.ActionChallenged,
-	})
+	// Counted, not recorded as a threat. Serving a challenge is the gateway's
+	// action, not evidence: the signal that lowered the score is already on
+	// record. As a threat it was a second signal type for the correlator and
+	// a "challenged" action for escalation, so one blocked attack and one
+	// challenge made a critical incident that zeroed the score, and the
+	// reputation blocker refused the client before it could solve anything
+	// (ADR 0045).
+	telemetry.MiddlewareBotManagementTotal.WithLabelValues(c.routeID, "pow_challenge_served").Inc()
 	c.serve(w, r)
 }
 
