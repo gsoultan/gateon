@@ -255,7 +255,10 @@ export function useSettingsState(): SettingsState {
         },
         body: JSON.stringify(config),
       });
-      if (!res.ok) throw new Error(await res.text());
+      // The gateway's refusal, not its JSON envelope: a refused country list
+      // or WAF setting explains itself, and the raw body buried that in
+      // escapes and a request id.
+      if (!res.ok) throw new Error(getApiErrorMessage(new Error(await res.text())) || `HTTP ${res.status}`);
       setSavedOk(true);
     } catch (e: unknown) {
       setError(errorMessage(e) || "Failed to save configuration");

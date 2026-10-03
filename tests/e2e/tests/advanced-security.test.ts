@@ -137,22 +137,31 @@ test.describe('Advanced Security & Global WAF E2E', () => {
         await wafSwitchLabel.click();
     }
 
-    // The WAF detail fields live behind two gates — `config.waf.enabled` and
-    // `config.waf.useCrs` — and both read state that arrives from /v1/global
-    // *after* first paint. The "Protect all routes" switch sits outside those
-    // gates, so it appears immediately and is not evidence the config has
-    // loaded. Waiting a fixed second was a race the loaded page usually lost.
-    // The CRS switch is inside the first gate, so its presence is the signal.
-    await expect(page.getByLabel('Use OWASP Core Rule Set (CRS)')).toBeVisible({ timeout: 20000 });
-
-    // Set Anomaly Threshold to 1 for easy testing
+    // The WAF detail fields live behind `config.waf.enabled`, which reads
+    // state that arrives from /v1/global *after* first paint. The "Protect all
+    // routes" switch sits outside that gate, so it appears immediately and is
+    // not evidence the config has loaded. Waiting a fixed second was a race
+    // the loaded page usually lost. The threshold is inside the gate, so its
+    // presence is the signal.
     const thresholdInput = page.getByLabel('Global Anomaly Threshold');
     await expect(thresholdInput).toBeVisible({ timeout: 20000 });
+
+    // Set Anomaly Threshold to 1 for easy testing
     await thresholdInput.fill('1');
 
     const saveBtn = page.getByRole('button', { name: 'Save WAF Settings' });
     await saveBtn.scrollIntoViewIfNeeded();
     await saveGlobalConfig(page, saveBtn);
+
+    // The card says what the running WAF does, read from the gateway rather
+    // than from switches the global WAF never read: it used to show every
+    // category OFF while each was enforced (ADR 0044).
+    const categoryState = (label: string) =>
+      page.getByText(label, { exact: true }).locator('xpath=..').getByText(/^(On|Off)$/);
+    await expect(page.getByText('Enforcing', { exact: true })).toBeVisible({ timeout: 20000 });
+    for (const label of ['SQL Injection', 'Cross-Site Scripting', 'Malware (web shells)', 'Ransomware']) {
+      await expect(categoryState(label)).toHaveText('On');
+    }
 
     // 2. Verify Global WAF blocks attack on ANY route
     await new Promise(r => setTimeout(r, 2000));

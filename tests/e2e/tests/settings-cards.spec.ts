@@ -230,4 +230,24 @@ test.describe('Settings cards', () => {
     await expect(geoip).toContainText('geoip/GeoLite2-City.mmdb');
     await expect(geoip.getByText(/GeoIP database is missing/)).toHaveCount(0);
   });
+
+  test('a country list with no GeoIP database is refused, saying what to install', async ({ page }) => {
+    // The suite's gateway has no GeoIP database, so every client resolves to
+    // the unknown country: "Blocked Countries" saved with success and blocked
+    // nobody (truth T1). The save is refused now, and the refusal says what to
+    // install and where (ADR 0044).
+    await openSettings(page);
+    await openTab(page, 'Security');
+    const geoip = card(page, 'GeoIP Configuration');
+    await geoip.getByLabel('Blocked Countries').click();
+    await page.getByRole('option', { name: /China/ }).click();
+    await page.keyboard.press('Escape');
+
+    const saved = page.waitForResponse((r) => new URL(r.url()).pathname === '/v1/global' && r.request().method() === 'PUT');
+    await geoip.getByRole('button', { name: 'Save GeoIP Settings' }).click();
+    const res = await saved;
+    expect(res.status(), 'a country list saved with no database').toBe(400);
+    await expect(page.getByText(/needs a GeoIP database/).first()).toBeVisible();
+    await expect(page.getByText(/Settings > GeoIP/).first()).toBeVisible();
+  });
 });

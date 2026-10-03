@@ -332,7 +332,11 @@ export function GeoIPSettingsCard({ config, onChange, onSave, saving, disabled }
 
           <MultiSelect
             label="Blocked Countries"
-            description="Select countries to block. Request from these countries will be denied."
+            description={
+              status?.exists
+                ? "Select countries to block. Requests from these countries will be denied."
+                : "Select countries to block. Needs a GeoIP database: without one, no client can be placed in a country and a list cannot be saved."
+            }
             placeholder="Select countries"
             data={COUNTRIES}
             value={config.blockedCountries || []}
