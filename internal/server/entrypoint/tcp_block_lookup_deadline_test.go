@@ -23,8 +23,22 @@ func TestATCPConnectionIsServedWithinTheLookupDeadlineWhenTheDatabaseHangs(t *te
 	const fresh, known = "198.51.100.91", "198.51.100.92"
 	t.Setenv("GATEON_BLOCK_LOOKUP_TIMEOUT", deadline.String())
 	withTelemetryStore(t)
-	if identity.AddressBlocked(known) { // read once, while the database answers
-		t.Fatalf("setup: %s is blocked", known)
+	// Read once while the database answers, so the cache holds a "not
+	// blocked" for it -- and confirm it does. A lookup's answer is dropped if a
+	// block or release is written while it is in flight (ADR 0054), and a
+	// write left over from an earlier test can land there on a loaded runner;
+	// then the address was never cached, the hung database was asked for it
+	// later, and this test counted two queries (CI, PR #10).
+	for i := 0; ; i++ {
+		if identity.AddressBlocked(known) {
+			t.Fatalf("setup: %s is blocked", known)
+		}
+		if _, cached := telemetry.IPMitigationFromCache(known); cached {
+			break
+		}
+		if i == 20 {
+			t.Fatalf("setup: %s's answer was never cached", known)
+		}
 	}
 	backend, sessions := countingEcho(t)
 	ep, deps := tcpEntrypoint(t, "blocklist-hung-db"), mockDepsForInspection(t)
