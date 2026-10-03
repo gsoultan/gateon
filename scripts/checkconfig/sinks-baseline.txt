@@ -1,0 +1,25 @@
+# Struct fields that are set from configuration and that no Go code reads.
+# Adopted 2026-10-03 (ADR 0048). Format: pkg.Type.Field, one per line, with a
+# note saying why it is accepted. When a field starts being read the check says
+# so and the line should be deleted.
+#
+# Each entry is either read by something no selector shows -- reflection, the
+# kernel -- or a known inert setting with an owner. Nothing goes in here
+# because it is inconvenient to fix.
+
+# Written whole into the global_ebpf_config BPF map (gcfg.Update); the XDP and
+# TC programs read mgmt_port in the kernel.
+ebpf.ebpfConfigVal.MgmtPort
+
+# INERT, found by this check: acme.challenge_type is validated and stored, and
+# the TLS manager never consults it. autocert answers HTTP-01 (its HTTPHandler
+# is mounted) and TLS-ALPN-01 (acme-tls/1 is always offered) whatever the
+# setting says, so choosing one in the dashboard changes nothing. Needs an
+# owner decision: honour it (withhold acme-tls/1 or the HTTP handler) or remove
+# the setting. Reported to the coordinator.
+tls.AcmeConfig.ChallengeType
+
+# INERT, T21 (review-truth 2026-10-02): the XFCC "Forward By" switch is read
+# into this field and never used, so no By= is emitted. The authmw agent is
+# fixing it under ADR 0046; delete this line when that lands.
+transform.XFCCConfig.ForwardBy
