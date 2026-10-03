@@ -65,7 +65,10 @@ func getEffectiveWAF(t *testing.T, svc *api.ApiService) effectiveWAFView {
 // was reported the same as an enforcing one. This endpoint answers from the
 // engine's config, and a route WAF's answer includes what it inherits.
 func TestEffectiveWAFReportsWhatRuns(t *testing.T) {
-	waf := &gateonv1.WafConfig{Enabled: true, UseCrs: true, ParanoiaLevel: 1, AuditOnly: true}
+	// The tier is named: unset, it comes from the process-wide profile, which
+	// another test in this package leaves at "minimal" -- a tier that does
+	// switch LFI, RCE and malware off, so the answer would depend on test order.
+	waf := &gateonv1.WafConfig{Enabled: true, UseCrs: true, ParanoiaLevel: 1, AuditOnly: true, Tier: "standard"}
 	svc := &api.ApiService{
 		Globals: fixedGlobalStore{&gateonv1.GlobalConfig{Waf: waf}},
 		Middlewares: listedMiddlewares{
