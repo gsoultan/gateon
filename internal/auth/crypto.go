@@ -36,6 +36,13 @@ const productionBcryptCost = bcrypt.DefaultCost
 // the package's tests outran CI's ten-minute test timeout.
 var bcryptCost = productionBcryptCost
 
+// compareHash and generateHash are bcrypt's, and every hash in this package
+// goes through them: named so a test can watch how many run at once.
+var (
+	compareHash  = bcrypt.CompareHashAndPassword
+	generateHash = bcrypt.GenerateFromPassword
+)
+
 // recoveryCodeEncoding produces uppercase, padding-free, human-friendly codes.
 var recoveryCodeEncoding = base32.StdEncoding.WithPadding(base32.NoPadding)
 
@@ -113,7 +120,7 @@ func generateRecoveryCodes() (plain []string, hashed []string, err error) {
 		}
 		code := recoveryCodeEncoding.EncodeToString(buf)
 		plain[i] = code
-		hash, hErr := bcrypt.GenerateFromPassword([]byte(code), bcryptCost)
+		hash, hErr := generateHash([]byte(code), bcryptCost)
 		if hErr != nil {
 			return nil, nil, fmt.Errorf("failed to hash recovery code: %w", hErr)
 		}
@@ -141,7 +148,7 @@ func matchRecoveryCode(hashes []string, code string) int {
 		if h == "" {
 			continue
 		}
-		if bcrypt.CompareHashAndPassword([]byte(h), []byte(normalized)) == nil {
+		if compareHash([]byte(h), []byte(normalized)) == nil {
 			return i
 		}
 	}

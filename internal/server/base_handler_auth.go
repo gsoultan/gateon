@@ -8,15 +8,20 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
+	"sync/atomic"
+	"time"
 
 	"github.com/gsoultan/gateon/internal/auth"
+	"github.com/gsoultan/gateon/internal/auth/admission"
 	"github.com/gsoultan/gateon/internal/auth/apitoken"
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/logger"
-	"github.com/gsoultan/gateon/internal/middleware/traffic"
-	pkghttputil "github.com/gsoultan/gateon/pkg/httputil"
+	"github.com/gsoultan/gateon/internal/request"
+	"github.com/gsoultan/gateon/internal/telemetry"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
+	"google.golang.org/grpc/codes"
 )
 
 // needsAuth returns true when global config has auth enabled and auth service is available.
@@ -244,18 +249,89 @@ func isHealthPath(path string) bool {
 	return path == "/healthz" || path == "/readyz" || path == "/grpc.health.v1.Health/Check"
 }
 
-// handleLoginWithRateLimit applies login rate limiting if configured, then serves internal.
-func handleLoginWithRateLimit(w http.ResponseWriter, r *http.Request, internal http.Handler, deps BaseHandlerDeps) {
-	if deps.LoginLimiter != nil {
-		limited := deps.LoginLimiter.Handler(traffic.PerIP)(internal)
-		sw := pkghttputil.GetStatusResponseWriter(w)
-		defer pkghttputil.PutStatusResponseWriter(sw)
+// passwordCheckPaths are the endpoints served without a session that can
+// reach a password check, a 2FA code check or the sign-in lockout -- or, for
+// setup's connection test, open a connection -- over REST, Connect and gRPC.
+// Every request to one spends from its client's budget first (ADR 0053).
+//
+// Only /v1/login used to have a budget, five a minute. POST /v1/auth/2fa/enroll
+// takes the same password step and had none: from one address it answered
+// 18,252 times in 75 s, each a bcrypt at the production cost (an unknown name
+// costs one too, ADR 0050), never once 429. One budget for all of them, so a
+// client cannot spend five on each.
+//
+// IsSetupRequired and /v1/setup/required are absent: they read one row and
+// the dashboard polls them.
+var passwordCheckPaths = map[string]struct{}{
+	"/v1/login":                   {},
+	"/gateon.v1.ApiService/Login": {},
+	"/v1/auth/2fa/enroll":         {},
+	"/v1/auth/2fa/verify":         {},
+	"/v1/setup":                   {},
+	"/v1/setup/test-db":           {},
+	"/gateon.v1.ApiService/Setup": {},
+}
 
-		limited.ServeHTTP(sw, r)
-		if sw.Status == http.StatusTooManyRequests {
-			logger.SecurityEvent("login_rate_limit", r, "too_many_attempts")
-		}
-		return
+// publicAuthRefusal is what a refused client is told, on every protocol.
+const publicAuthRefusal = "too many sign-in requests from this address; try again later"
+
+// refusalLog spaces the log lines refusals write: each is counted, but a
+// flood of them must not become a flood of log lines.
+var refusalLog limitWarning
+
+// admitPublicAuth spends one request from the client's budget when r is for
+// one of passwordCheckPaths, and reports whether it may proceed. A refused
+// request is answered here, before its body is read and before any hash, so
+// its answer is the same whatever username it carries.
+func admitPublicAuth(w http.ResponseWriter, r *http.Request, budget *admission.Sources) bool {
+	if _, ok := passwordCheckPaths[r.URL.Path]; !ok {
+		return true
 	}
-	internal.ServeHTTP(w, r)
+	ok, wait := budget.Take(request.ClientAddr(r))
+	if ok {
+		return true
+	}
+	telemetry.IncRateLimitRejected("local")
+	if refusalLog.due(time.Now()) {
+		logger.SecurityEvent("public_auth_rate_limit", r, "too_many_attempts")
+	}
+	writeTooManyAttempts(w, r, wait)
+	return false
+}
+
+// writeTooManyAttempts answers 429 with Retry-After, in the shape the caller's
+// protocol reads: a gRPC status (ResourceExhausted, in a trailers-only answer)
+// to a gRPC or gRPC-Web call, a Connect error to a Connect call, and the REST
+// API's JSON error to anything else.
+func writeTooManyAttempts(w http.ResponseWriter, r *http.Request, wait time.Duration) {
+	h := w.Header()
+	h.Set("Retry-After", strconv.Itoa(max(1, int(wait/time.Second))))
+	h.Set("Cache-Control", "no-store")
+	switch {
+	case strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc"):
+		h.Set("Content-Type", r.Header.Get("Content-Type"))
+		h.Set("Grpc-Status", strconv.Itoa(int(codes.ResourceExhausted)))
+		h.Set("Grpc-Message", publicAuthRefusal)
+		w.WriteHeader(http.StatusOK)
+	case strings.HasPrefix(r.URL.Path, "/gateon.v1."):
+		h.Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"code":"resource_exhausted","message":"` + publicAuthRefusal + `"}`))
+	default:
+		h.Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"error":"` + publicAuthRefusal + `"}`))
+	}
+}
+
+// limitWarning is when something last logged, in unix nanoseconds.
+type limitWarning struct{ last atomic.Int64 }
+
+// due reports whether a refusal at now should log: at most once a minute.
+func (l *limitWarning) due(now time.Time) bool {
+	last := l.last.Load()
+	if now.UnixNano()-last < int64(time.Minute) {
+		return false
+	}
+	return l.last.CompareAndSwap(last, now.UnixNano())
 }

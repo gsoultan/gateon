@@ -101,6 +101,22 @@ type TierDefaults struct {
 	// steady-state cost.
 	RLLimiterStates int
 
+	// AuthAttemptsPerMinute is how many requests one client -- an IPv4
+	// address, an IPv6 /64 -- may make a minute, and at once, to the public
+	// endpoints that can reach a password check: sign-in, the 2FA steps and
+	// setup, over REST, Connect and gRPC alike (ADR 0053). Ten covers a
+	// sign-in, its second step and a few typos; the old limit was five a minute
+	// on /v1/login alone. GATEON_AUTH_ATTEMPTS_PER_MINUTE overrides it.
+	AuthAttemptsPerMinute int
+
+	// AuthHashConcurrency is how many password hashes run at once in the whole
+	// process, besides one reserved for an account's known source; never more
+	// than half of GOMAXPROCS. A hash is a core for tens of milliseconds, and an
+	// unknown username costs one too, so without a bound a flood of sign-ins
+	// took every core from the data plane. GATEON_AUTH_HASH_CONCURRENCY
+	// overrides it.
+	AuthHashConcurrency int
+
 	// EntryPointMaxConnections is how many connections an entrypoint holds
 	// open at once when its own max_connections is 0: on a TCP entrypoint L4
 	// sessions and connections still being inspected, on an HTTP one its
@@ -201,6 +217,8 @@ func DefaultsFor(tier Tier) TierDefaults {
 			FlushIntervalSeconds:      10,
 			WAFTier:                   TierMinimal,
 			RLLimiterStates:           2000,
+			AuthAttemptsPerMinute:     10,
+			AuthHashConcurrency:       1,
 			EntryPointMaxConnections:  1000,
 			EntryPointMaxConnPerAddr:  128,
 			MaxHeaderBytes:            32 << 10, // 32 KiB
@@ -232,6 +250,8 @@ func DefaultsFor(tier Tier) TierDefaults {
 			FlushIntervalSeconds:      1,
 			WAFTier:                   TierEnterprise,
 			RLLimiterStates:           100000,
+			AuthAttemptsPerMinute:     10,
+			AuthHashConcurrency:       4,
 			EntryPointMaxConnections:  50000,
 			EntryPointMaxConnPerAddr:  1024,
 			MaxHeaderBytes:            64 << 10, // 64 KiB
@@ -263,6 +283,8 @@ func DefaultsFor(tier Tier) TierDefaults {
 			FlushIntervalSeconds:      2,
 			WAFTier:                   TierStandard,
 			RLLimiterStates:           20000,
+			AuthAttemptsPerMinute:     10,
+			AuthHashConcurrency:       2,
 			EntryPointMaxConnections:  10000,
 			EntryPointMaxConnPerAddr:  256,
 			MaxHeaderBytes:            32 << 10, // 32 KiB

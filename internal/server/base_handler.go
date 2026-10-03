@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gsoultan/gateon/internal/auth"
+	"github.com/gsoultan/gateon/internal/auth/admission"
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/middleware"
 	mwauth "github.com/gsoultan/gateon/internal/middleware/auth"
@@ -36,8 +37,11 @@ type BaseHandlerDeps struct {
 	RouteStore   config.RouteStore
 	GlobalReg    config.GlobalConfigStore
 	Auth         auth.Service
-	LoginLimiter traffic.RateLimiter // stricter rate limit for /v1/login (e.g. 5/min per IP)
-	MgmtCORS     *cors.Cors
+	// PublicAuth is the per-client budget on the public endpoints that can
+	// reach a password check (ADR 0053). Nil is the resource profile's budget,
+	// never none.
+	PublicAuth *admission.Sources
+	MgmtCORS   *cors.Cors
 	// MgmtOrigins names the origins, besides the management origin itself,
 	// that may write with the session cookie. Nil trusts none; the guard runs
 	// either way.
@@ -101,6 +105,11 @@ func CreateBaseHandler(
 	// service fails closed on its own.
 	authInternal := middleware.PasetoAuth(deps.Auth, middleware.AuthBaseConfig{})(finalInternal)
 
+	publicAuth := deps.PublicAuth
+	if publicAuth == nil {
+		publicAuth = admission.NewSources(admission.AttemptsPerMinute())
+	}
+
 	// mgmtLogic defines the internal handler for management API, UI, and auth.
 	// It is separated so that MgmtCORS can be applied only to this path.
 	mgmtLogic := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -108,6 +117,11 @@ func CreateBaseHandler(
 			// An answer holds configuration, users and audit entries. Set
 			// before any handler runs so an error answer carries it too.
 			w.Header().Set("Cache-Control", "no-store")
+		}
+		// Before anything reads the body, and whatever the authentication
+		// setting: these are the endpoints a stranger can make hash.
+		if !admitPublicAuth(w, r, publicAuth) {
+			return
 		}
 		gc := deps.GlobalReg.Get(r.Context())
 		epID := ""
@@ -124,11 +138,7 @@ func CreateBaseHandler(
 				finalInternal.ServeHTTP(w, r)
 				return
 			}
-			if isLoginPath(r.URL.Path) {
-				handleLoginWithRateLimit(w, withAuthNotRequired(r), finalInternal, deps)
-				return
-			}
-			if isPublicAuthPath(r.URL.Path) {
+			if isLoginPath(r.URL.Path) || isPublicAuthPath(r.URL.Path) {
 				finalInternal.ServeHTTP(w, withAuthNotRequired(r))
 				return
 			}
