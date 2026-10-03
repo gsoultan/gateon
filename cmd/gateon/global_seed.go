@@ -39,7 +39,7 @@ func seedGlobalConfig(target string) (bool, error) {
 	if _, err := os.Stat(target); !errors.Is(err, fs.ErrNotExist) {
 		return false, nil // there already is one, or it cannot be told; the registry reports that
 	}
-	b, err := os.ReadFile(seed) // #nosec G304 -- a path the operator names in the environment
+	b, err := os.ReadFile(seed) // #nosec G304 G703 -- a path the operator names in the environment
 	if errors.Is(err, fs.ErrNotExist) {
 		return false, nil
 	}
@@ -59,6 +59,7 @@ func writeFileAtomic(path string, b []byte) error {
 		return err
 	}
 	tmp := path + ".seed.tmp"
+	// #nosec G703 -- GLOBAL_CONFIG_FILE, a path the operator names in the environment
 	if err := os.WriteFile(tmp, b, 0o600); err != nil {
 		return err
 	}
