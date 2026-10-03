@@ -66,15 +66,34 @@ export function BufferingConfigEditor({ config, updateConfig }: EditorProps) {
   );
 }
 
+// The cap is per client address unless per_ip is "false", when it is one total
+// for the route the middleware is attached to (ADR 0047). The label says which.
 export function InFlightReqConfigEditor({ config, updateConfig }: EditorProps) {
+  const total = config.per_ip === "false";
   return (
     <Stack gap="md">
+      <Select
+        label="Count Concurrent Requests"
+        data={[
+          { label: "Per client address", value: "true" },
+          { label: "In total, for each route this is attached to", value: "false" },
+        ]}
+        value={total ? "false" : "true"}
+        onChange={(val) => updateConfig("per_ip", val === "false" ? "false" : "true")}
+        allowDeselect={false}
+        description={
+          total
+            ? "One count shared by every client. Requests over it get 503."
+            : "Each client address has its own count. Requests over it get 429; other addresses are unaffected."
+        }
+      />
       <NumberInput
-        label="Max Concurrent Requests"
+        label={total ? "Max Concurrent Requests (total)" : "Max Concurrent Requests per Client Address"}
         placeholder="100"
-        value={parseInt(config.amount) || 100}
-        onChange={(val) => updateConfig("amount", (val ?? 100).toString())}
+        value={config.amount ? parseInt(config.amount) : ""}
+        onChange={(val) => updateConfig("amount", val === "" ? "" : String(val))}
         min={1}
+        required
       />
     </Stack>
   );
