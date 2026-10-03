@@ -58,7 +58,10 @@ type SignaturePosture struct {
 // CustomRulesFromDisk is what the repurposed auto_update_rules flag does --
 // load a rules directory already present under the data directory.
 type WAFPosture struct {
-	Enabled             bool                  `json:"enabled"`
+	Enabled bool `json:"enabled"`
+	// Mode is what the gateway-wide WAF does with a match: "enforce",
+	// "detect" (audit only: it blocks nothing) or "off". Enabled alone
+	// reported an audit-only WAF as protecting (truth T12, ADRs 0044, 0048).
 	Mode                string                `json:"mode"`
 	Routes              posture.RouteCoverage `json:"routes"`
 	CustomRulesFromDisk bool                  `json:"customRulesFromDisk"`

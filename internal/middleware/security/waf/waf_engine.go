@@ -43,50 +43,75 @@ type wafEngine struct {
 // files now, so the same intent is expressed as selection over the corpus —
 // which is strictly more precise, because a category and a tag describe what a
 // rule detects rather than which file somebody filed it in.
+//
+// core names the gwaf core-ruleset tags the same switch turns off. Without
+// them a switch reached only gateon's own corpus, and gwaf's core -- where the
+// structural SQLi, XSS, traversal and command-injection detection lives --
+// kept blocking with every switch off (ADR 0044). A switch with no core entry
+// has no core rules to reach: malware, ransomware, DLP and the reputation
+// buckets are gateon's alone.
 type categoryDisable struct {
 	categories []string
 	tags       []string
+	core       []string
 }
 
-func wafSelection(cfg WAFConfig) (categories, tags map[string]bool) {
-	categories, tags = map[string]bool{}, map[string]bool{}
+// ruleSelection is what a WAFConfig's switches leave out of each corpus.
+type ruleSelection struct {
+	categories map[string]bool
+	tags       map[string]bool
+	coreTags   map[string]bool
+}
 
-	switches := []struct {
-		disabled bool
-		d        categoryDisable
-	}{
-		{cfg.DisableSQLI, categoryDisable{[]string{"SQLi"}, []string{"attack-sqli"}}},
-		{cfg.DisableXSS, categoryDisable{[]string{"XSS"}, []string{"attack-xss"}}},
-		{cfg.DisableRCE, categoryDisable{[]string{"RCE"}, []string{"attack-rce", "rce"}}},
-		{cfg.DisablePHP, categoryDisable{nil, []string{"php"}}},
-		{cfg.DisableJava, categoryDisable{nil, []string{"java"}}},
-		{cfg.DisableScanner, categoryDisable{[]string{"Scanner"}, []string{"scanner"}}},
-		{cfg.DisableProtocol, categoryDisable{[]string{"Protocol"}, []string{"protocol"}}},
-		{cfg.DisableWordPress, categoryDisable{[]string{"WordPress"}, []string{"wp_scan"}}},
-		{cfg.DisableLFI, categoryDisable{nil, []string{"lfi"}}},
-		{!cfg.EnableMalwareDetection, categoryDisable{[]string{"Malware"}, []string{"malware"}}},
-		{!cfg.EnableRansomwareDetection, categoryDisable{[]string{"Ransomware"}, []string{"ransomware"}}},
-		{!cfg.EnableDLP, categoryDisable{[]string{"DLP"}, []string{"dlp"}}},
-		{!cfg.EnableIPReputation, categoryDisable{[]string{"Reputation"}, []string{"reputation"}}},
-	}
-
-	for _, s := range switches {
+func wafSelection(cfg WAFConfig) ruleSelection {
+	sel := ruleSelection{categories: map[string]bool{}, tags: map[string]bool{}, coreTags: map[string]bool{}}
+	for _, s := range categorySwitches(cfg) {
 		if !s.disabled {
 			continue
 		}
 		for _, c := range s.d.categories {
-			categories[c] = true
+			sel.categories[c] = true
 		}
 		for _, t := range s.d.tags {
-			tags[t] = true
+			sel.tags[t] = true
+		}
+		for _, t := range s.d.core {
+			sel.coreTags[t] = true
 		}
 	}
-	return categories, tags
+	return sel
+}
+
+type categorySwitch struct {
+	disabled bool
+	d        categoryDisable
+}
+
+// categorySwitches pairs every switch with what it reaches in both corpora.
+// The core tags are gwaf's; several are spelled as the route config key that
+// switches them.
+func categorySwitches(cfg WAFConfig) []categorySwitch {
+	return []categorySwitch{
+		{cfg.DisableSQLI, categoryDisable{[]string{secwaf.CategorySQLi}, []string{secwaf.TagAttackSqli}, []string{keySQLi}}},
+		{cfg.DisableXSS, categoryDisable{[]string{secwaf.CategoryXSS}, []string{secwaf.TagAttackXss}, []string{keyXSS}}},
+		{cfg.DisableRCE, categoryDisable{[]string{secwaf.CategoryRCE}, []string{secwaf.TagAttackRce, secwaf.TagRce}, []string{keyRCE}}},
+		{cfg.DisablePHP, categoryDisable{nil, []string{secwaf.TagPhp}, []string{keyPHP}}},
+		{cfg.DisableJava, categoryDisable{nil, []string{secwaf.TagJava}, []string{keyJava, "jndi", "ognl", "spel"}}},
+		{cfg.DisableNodeJS, categoryDisable{nil, []string{keyNodeJS}, []string{keyNodeJS, "prototype-pollution"}}},
+		{cfg.DisableScanner, categoryDisable{[]string{secwaf.CategoryScanner}, []string{secwaf.TagScanner}, []string{keyScanner}}},
+		{cfg.DisableProtocol, categoryDisable{[]string{secwaf.CategoryProtocol}, []string{secwaf.TagProtocol}, nil}},
+		{cfg.DisableWordPress, categoryDisable{[]string{secwaf.CategoryWordPress}, []string{secwaf.TagWpScan}, []string{keyWordPress}}},
+		{cfg.DisableLFI, categoryDisable{nil, []string{keyLFI}, []string{keyLFI, "traversal", "rfi"}}},
+		{!cfg.EnableMalwareDetection, categoryDisable{[]string{secwaf.CategoryMalware}, []string{secwaf.TagMalware}, nil}},
+		{!cfg.EnableRansomwareDetection, categoryDisable{[]string{secwaf.CategoryRansomware}, []string{secwaf.TagRansomware}, nil}},
+		{!cfg.EnableDLP, categoryDisable{[]string{secwaf.CategoryDLP}, []string{secwaf.TagDlp}, nil}},
+		{!cfg.EnableIPReputation, categoryDisable{[]string{secwaf.CategoryReputation}, []string{secwaf.TagReputation}, nil}},
+	}
 }
 
 // newWAFEngine builds the engine a config describes.
 func newWAFEngine(cfg WAFConfig, onDecision func(gwaf.Decision)) (*wafEngine, error) {
-	categories, tags := wafSelection(cfg)
+	sel := wafSelection(cfg)
 
 	policy := secwaf.Policy{
 		ParanoiaLevel:      cfg.ParanoiaLevel,
@@ -95,8 +120,9 @@ func newWAFEngine(cfg WAFConfig, onDecision func(gwaf.Decision)) (*wafEngine, er
 		FailOpen:           cfg.FailOpen,
 		Limits:             wafLimits(cfg),
 		ResponseInspection: cfg.EnableResponseInspection,
-		DisabledCategories: categories,
-		DisabledTags:       tags,
+		DisabledCategories: sel.categories,
+		DisabledTags:       sel.tags,
+		CoreDisabledTags:   sel.coreTags,
 		AppProfiles:        cfg.AppProfiles,
 		AppProfileScope:    cfg.appProfileScope(),
 		SSRFProtection:     cfg.EnableSSRFProtection,
@@ -117,6 +143,7 @@ func newWAFEngine(cfg WAFConfig, onDecision func(gwaf.Decision)) (*wafEngine, er
 
 	policy.ExtraRules = append(policy.ExtraRules, cfg.ExtraRules...)
 	loadOperatorTuning(&policy, cfg)
+	warnInertSettings(cfg)
 
 	w, err := policy.NewEngine()
 	if err != nil {
@@ -136,6 +163,19 @@ func newWAFEngine(cfg WAFConfig, onDecision func(gwaf.Decision)) (*wafEngine, er
 		policy:           policy,
 		allowedAdminNets: secwaf.ParseAllowedAdminIPs(cfg.AllowedAdminIps),
 	}, nil
+}
+
+// warnInertSettings names, once per engine build, a setting that is stored and
+// does nothing. dos_protection selects no rule: the request shapes it was
+// meant for are in the protocol category, which runs with or without it. The
+// dashboard no longer offers it (ADR 0044); a config that still carries it is
+// told so here rather than left believing it is protected by it.
+func warnInertSettings(cfg WAFConfig) {
+	if cfg.EnableDOSProtection {
+		logger.L.LogWarn("WAF dos_protection is set and does nothing",
+			"route", cfg.RouteID,
+			"detail", "no rule reads it; DoS-shaped requests are covered by the protocol category")
+	}
 }
 
 // loadOperatorTuning folds the dashboard-authored parts of the policy in: the

@@ -4,14 +4,55 @@
 package handlers
 
 import (
+	"context"
 	"net/http"
+	"strings"
 
 	"github.com/gsoultan/gateon/internal/api"
 	"github.com/gsoultan/gateon/internal/auth"
+	wafmw "github.com/gsoultan/gateon/internal/middleware/security/waf"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
+// effectiveWAFView is GET /v1/waf/effective: what the global WAF runs, and what
+// each route WAF middleware runs once merged over it (ADR 0044). The dashboard
+// reads switches and mode from here rather than from the stored booleans.
+type effectiveWAFView struct {
+	Global    wafmw.Effective     `json:"global"`
+	RouteWAFs []effectiveRouteWAF `json:"routeWafs"`
+}
+
+type effectiveRouteWAF struct {
+	ID        string          `json:"id"`
+	Name      string          `json:"name"`
+	Effective wafmw.Effective `json:"effective"`
+}
+
+func buildEffectiveWAFView(ctx context.Context, apiService *api.ApiService) effectiveWAFView {
+	store := apiService.GetGlobals()
+	view := effectiveWAFView{Global: wafmw.EffectiveGlobal(ctx, store), RouteWAFs: []effectiveRouteWAF{}}
+	if apiService.Middlewares == nil {
+		return view
+	}
+	for _, mw := range apiService.Middlewares.List(ctx) {
+		if !strings.EqualFold(mw.GetType(), "waf") {
+			continue
+		}
+		view.RouteWAFs = append(view.RouteWAFs, effectiveRouteWAF{
+			ID: mw.GetId(), Name: mw.GetName(), Effective: wafmw.EffectiveRoute(ctx, mw.GetConfig(), store),
+		})
+	}
+	return view
+}
+
 func registerWafRuleHandlers(mux *http.ServeMux, apiService *api.ApiService) {
+	mux.HandleFunc("GET /v1/waf/effective", func(w http.ResponseWriter, r *http.Request) {
+		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceGlobal) {
+			return
+		}
+		WriteJSON(w, http.StatusOK, buildEffectiveWAFView(r.Context(), apiService))
+	})
+
 	mux.HandleFunc("GET /v1/waf/rules", func(w http.ResponseWriter, r *http.Request) {
 		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceWafRules) {
 			return

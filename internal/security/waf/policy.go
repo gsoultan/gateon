@@ -139,6 +139,19 @@ type Policy struct {
 	// of the same control.
 	DisabledTags map[string]bool
 
+	// CoreDisabledTags names gwaf core-ruleset tags whose rules are left out:
+	// a core rule carrying any of them is dropped. It is how a category switch
+	// reaches the core ruleset, which is where most detection lives -- the
+	// gateon corpus filtered by DisabledTags alone left a switched-off SQLi
+	// category blocking on gwaf's structural SQLi rule (ADR 0044).
+	//
+	// It is a separate set from DisabledTags because the two corpora tag
+	// differently: "reputation" is off in DisabledTags whenever the WAF's
+	// reputation switch is, and gwaf's scanner rule also carries
+	// "reputation", so one shared set would have dropped scanner detection by
+	// default.
+	CoreDisabledTags map[string]bool
+
 	// ExtraRules are operator-authored rules from the database.
 	ExtraRules rules.Set
 
@@ -313,13 +326,44 @@ func (p Policy) optInRules(pl int) rules.Set {
 	return set
 }
 
-func (p Policy) tagDisabled(tags []string) bool {
+// narrowedCore is gwaf's core ruleset without the rules CoreDisabledTags
+// excludes, or nothing when no core tag is excluded -- gwaf then loads the
+// core itself, unfiltered, which is the same rules. gwaf loads its core whole
+// or not at all, so a narrowed core is the whole set filtered here and handed
+// back as the embedder's own; Options puts it first so the core still
+// evaluates before gateon's rules, as it does when gwaf loads it.
+//
+// narrowed reports whether anything was left out, which is when gwaf must be
+// told not to load the core itself.
+func (p Policy) narrowedCore() (set rules.Set, narrowed bool) {
+	if p.CoreRulesetDisabled || len(p.CoreDisabledTags) == 0 {
+		return nil, false
+	}
+	all := core.Default()
+	kept := make(rules.Set, 0, len(all))
+	for _, r := range all {
+		if !anyTagIn(r.Tags, p.CoreDisabledTags) {
+			kept = append(kept, r)
+		}
+	}
+	if len(kept) == len(all) {
+		return nil, false
+	}
+	return kept, true
+}
+
+// anyTagIn reports whether any of tags is in set.
+func anyTagIn(tags []string, set map[string]bool) bool {
 	for _, t := range tags {
-		if p.DisabledTags[t] {
+		if set[t] {
 			return true
 		}
 	}
 	return false
+}
+
+func (p Policy) tagDisabled(tags []string) bool {
+	return anyTagIn(tags, p.DisabledTags)
 }
 
 // Options renders the policy as gwaf options.
@@ -338,6 +382,7 @@ func (p Policy) Options() []gwaf.Option {
 		limits = gwaf.DefaultLimits()
 	}
 
+	coreSet, narrowed := p.narrowedCore()
 	opts := []gwaf.Option{
 		gwaf.WithMode(mode),
 		gwaf.WithFailMode(failMode),
@@ -347,14 +392,14 @@ func (p Policy) Options() []gwaf.Option {
 		// Confidence and paranoia level are two statements about the same
 		// thing. Setting both from one source keeps them from drifting.
 		gwaf.WithMinConfidence(types.ConfidenceFromParanoiaLevel(p.paranoiaLevel())),
-		gwaf.WithRuleset(p.Ruleset()),
+		gwaf.WithRuleset(append(coreSet, p.Ruleset()...)),
 	}
 
 	if len(p.Origins) > 0 {
 		opts = append(opts, gwaf.WithOrigins(p.Origins...))
 	}
 
-	if p.CoreRulesetDisabled {
+	if p.CoreRulesetDisabled || narrowed {
 		opts = append(opts, gwaf.WithoutCoreRuleset())
 	}
 

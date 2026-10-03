@@ -27,6 +27,7 @@ import { BROWSER_HEADER_CHECK_HELP, JS_CHALLENGE_HELP } from "./botManagementCop
 import { ClientAddressNote } from "./RatelimitConfigEditor";
 import { tlsBindingProblem, xfccProblem } from "./middlewareConfigProblems";
 import { ipListError } from "./ipList";
+import { routeSwitchOn, useEffectiveWaf, type EffectiveWaf } from "../../hooks/useEffectiveWaf";
 
 interface EditorProps {
   config: Record<string, string>;
@@ -34,40 +35,74 @@ interface EditorProps {
 }
 
 export function WAFConfigEditor({ config, updateConfig }: EditorProps) {
-  const isEnabled = (key: string) => config[key] !== "false";
+  const effective = useEffectiveWaf();
+  return (
+    <WAFConfigFields
+      config={config}
+      updateConfig={updateConfig}
+      global={effective.data?.global}
+      globalUnreadable={effective.isError}
+    />
+  );
+}
+
+interface WAFConfigFieldsProps extends EditorProps {
+  /** What the global WAF runs, from GET /v1/waf/effective; undefined while loading. */
+  global: EffectiveWaf | undefined;
+  globalUnreadable: boolean;
+}
+
+// The route WAF form. The switches show the gateway's merge rule (ADR 0044): a
+// key this route sets wins, a key it leaves out is what the global WAF runs,
+// so an untouched switch reads as the route will actually run it.
+export function WAFConfigFields({ config, updateConfig, global, globalUnreadable }: WAFConfigFieldsProps) {
+  const globalOn = global !== undefined && global.mode !== "off";
+  const isEnabled = (key: string) => routeSwitchOn(config, key, global).on;
+  const from = (key: string, text: string) =>
+    routeSwitchOn(config, key, global).inherited ? `${text} (as the global WAF runs it)` : text;
   const toggle = (key: string, val: boolean) => updateConfig(key, val ? "true" : "false");
+  const auditOnly =
+    config.audit_only !== undefined && config.audit_only.trim() !== ""
+      ? config.audit_only.trim().toLowerCase() === "true"
+      : globalOn && global?.mode === "audit_only";
 
   return (
     <Stack gap="md">
       <Text size="xs" c="dimmed">
-        The OWASP Core Rule Set is switched on for the whole gateway in Settings
-        under Global WAF Settings; the controls below tune it for this route.
+        {globalOn
+          ? "The global WAF is on. On a route with this middleware it is replaced by this WAF, which starts from what the global WAF runs: a switch you leave alone is inherited, and one you change adds to or narrows protection on this route only."
+          : "The global WAF is off, so this WAF is the only one on its routes. Switch the global WAF on in Settings under Global WAF Settings to protect every route."}
       </Text>
+      {globalUnreadable && (
+        <Text size="xs" c="red">
+          Could not read the global WAF, so untouched switches show the route defaults.
+        </Text>
+      )}
 
       <Divider label="Protection Categories" labelPosition="center" />
       <Group grow>
         <Stack gap="xs">
           <Switch
             label="SQL Injection"
-            description="Detects common SQL injection attacks"
+            description={from("sqli", "Detects common SQL injection attacks")}
             checked={isEnabled("sqli")}
             onChange={(e) => toggle("sqli", e.currentTarget.checked)}
           />
           <Switch
             label="Cross-Site Scripting (XSS)"
-            description="Detects XSS injection attempts"
+            description={from("xss", "Detects XSS injection attempts")}
             checked={isEnabled("xss")}
             onChange={(e) => toggle("xss", e.currentTarget.checked)}
           />
           <Switch
             label="Local/Remote File Inclusion"
-            description="Detects LFI/RFI attacks"
+            description={from("lfi", "Detects LFI/RFI attacks")}
             checked={isEnabled("lfi")}
             onChange={(e) => toggle("lfi", e.currentTarget.checked)}
           />
           <Switch
             label="Remote Code Execution"
-            description="Detects RCE and shell commands"
+            description={from("rce", "Detects RCE and shell commands")}
             checked={isEnabled("rce")}
             onChange={(e) => toggle("rce", e.currentTarget.checked)}
           />
@@ -75,37 +110,37 @@ export function WAFConfigEditor({ config, updateConfig }: EditorProps) {
         <Stack gap="xs">
           <Switch
             label="Scanner Detection"
-            description="Blocks known vulnerability scanners"
+            description={from("scanner", "Blocks known vulnerability scanners")}
             checked={isEnabled("scanner")}
             onChange={(e) => toggle("scanner", e.currentTarget.checked)}
           />
           <Switch
             label="Protocol Enforcement"
-            description="Enforces strict HTTP protocol compliance"
+            description={from("protocol", "Enforces strict HTTP protocol compliance")}
             checked={isEnabled("protocol")}
             onChange={(e) => toggle("protocol", e.currentTarget.checked)}
           />
           <Switch
             label="PHP Injection"
-            description="Detects PHP-specific injection attacks"
+            description={from("php", "Detects PHP-specific injection attacks")}
             checked={isEnabled("php")}
             onChange={(e) => toggle("php", e.currentTarget.checked)}
           />
           <Switch
             label="NodeJS Attacks"
-            description="Detects NodeJS-specific injection attacks"
+            description={from("nodejs", "Detects NodeJS-specific injection attacks")}
             checked={isEnabled("nodejs")}
             onChange={(e) => toggle("nodejs", e.currentTarget.checked)}
           />
           <Switch
             label="Java Injection"
-            description="Detects Java-specific injection attacks"
+            description={from("java", "Detects Java-specific injection attacks")}
             checked={isEnabled("java")}
             onChange={(e) => toggle("java", e.currentTarget.checked)}
           />
           <Switch
             label="WordPress Protection"
-            description="Detects WP-specific attacks and probes"
+            description={from("wordpress", "Detects WP-specific attacks and probes")}
             checked={isEnabled("wordpress")}
             onChange={(e) => toggle("wordpress", e.currentTarget.checked)}
           />
@@ -116,38 +151,35 @@ export function WAFConfigEditor({ config, updateConfig }: EditorProps) {
       <Group grow align="start">
         <Stack gap="xs">
           <Switch
-            label="IP Reputation"
-            description="Block requests from known malicious IPs"
-            checked={config.ip_reputation === "true"}
-            onChange={(e) => updateConfig("ip_reputation", e.currentTarget.checked ? "true" : "false")}
-          />
-          <Switch
-            label="DOS Protection"
-            description="Basic HTTP-level DOS protection rules"
-            checked={config.dos_protection === "true"}
-            onChange={(e) => updateConfig("dos_protection", e.currentTarget.checked ? "true" : "false")}
+            label="Behavioural Reputation"
+            description={from(
+              "ip_reputation",
+              "Refuse clients whose reputation here has fallen below 20. Threat-feed listings are refused on every route by Settings > Advanced Security > IP Reputation, with or without this",
+            )}
+            checked={isEnabled("ip_reputation")}
+            onChange={(e) => toggle("ip_reputation", e.currentTarget.checked)}
           />
           <Switch
             label="Malware Detection"
-            description="Detect common malware and web shell patterns"
-            checked={config.malware_detection === "true"}
-            onChange={(e) => updateConfig("malware_detection", e.currentTarget.checked ? "true" : "false")}
+            description={from("malware_detection", "Detect common malware and web shell patterns")}
+            checked={isEnabled("malware_detection")}
+            onChange={(e) => toggle("malware_detection", e.currentTarget.checked)}
           />
           <Switch
             label="Ransomware Detection"
-            description="Detect ransomware file extension uploads"
-            checked={config.ransomware_detection === "true"}
-            onChange={(e) => updateConfig("ransomware_detection", e.currentTarget.checked ? "true" : "false")}
+            description={from("ransomware_detection", "Detect ransomware file extension uploads")}
+            checked={isEnabled("ransomware_detection")}
+            onChange={(e) => toggle("ransomware_detection", e.currentTarget.checked)}
           />
         </Stack>
         <Stack gap="xs">
           <Switch
             label="Data Loss Prevention (DLP)"
-            description="Detect card numbers, credentials and stack traces leaking in responses"
-            checked={config.dlp === "true"}
-            onChange={(e) => updateConfig("dlp", e.currentTarget.checked ? "true" : "false")}
+            description={from("dlp", "Detect card numbers, credentials and stack traces leaking in responses")}
+            checked={isEnabled("dlp")}
+            onChange={(e) => toggle("dlp", e.currentTarget.checked)}
           />
-          {config.dlp === "true" && (
+          {isEnabled("dlp") && (
             <Select
               label="When a leak is found"
               description="Roll out in stages: watch first, then redact, then block once the false-positive rate is known."
@@ -205,7 +237,7 @@ export function WAFConfigEditor({ config, updateConfig }: EditorProps) {
         <NumberInput
           label="Paranoia Level"
           description="CRS paranoia 1-4. Higher = stricter."
-          value={parseInt(config.paranoia_level) || 1}
+          value={parseInt(config.paranoia_level) || (globalOn ? (global?.paranoiaLevel ?? 1) : 1)}
           onChange={(val) => updateConfig("paranoia_level", (val ?? 1).toString())}
           min={1}
           max={4}
@@ -303,8 +335,8 @@ export function WAFConfigEditor({ config, updateConfig }: EditorProps) {
       />
       <Switch
         label="Audit Only"
-        description="Log matched rules but do not block requests (SecRuleEngine DetectionOnly)"
-        checked={config.audit_only === "true"}
+        description="Record matched rules and block nothing on this route."
+        checked={auditOnly}
         onChange={(e) =>
           updateConfig("audit_only", e.currentTarget.checked ? "true" : "false")
         }

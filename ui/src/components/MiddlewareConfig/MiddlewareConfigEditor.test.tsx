@@ -19,7 +19,7 @@ const {
   FileSecurityConfigEditor,
   PolicyConfigEditor,
   SecurityHeadersConfigEditor,
-  WAFConfigEditor,
+  WAFConfigFields,
 } = await import("./SecurityConfigEditors");
 const { CORSConfigEditor, CORS_PRESETS, StripPrefixConfigEditor } =
   await import("./MiscConfigEditors");
@@ -182,16 +182,41 @@ describe("bot management editor", () => {
 // keys below have no reader in internal/, cmd/ or pkg/ under either spelling,
 // so the controls that wrote them are gone.
 
+const noGlobal = { global: undefined, globalUnreadable: false };
+
 describe("waf editor", () => {
+  // Truth T7's dashboard half: under the global WAF a route WAF that leaves
+  // malware detection alone runs it (ADR 0044), and the editor showed the
+  // switch OFF because it read only the route's own key.
+  test("an untouched switch shows what the route inherits from the global WAF", () => {
+    const global = {
+      mode: "enforcing" as const,
+      paranoiaLevel: 2,
+      categories: { malware_detection: true, sqli: true },
+    };
+    const tree = WAFConfigFields({ config: {}, updateConfig: () => {}, global, globalUnreadable: false });
+    const malware = findElement(tree, byLabel("Malware Detection"));
+    expect(malware?.props.checked).toBe(true);
+    expect(String(malware?.props.description)).toContain("as the global WAF runs it");
+
+    const narrowed = WAFConfigFields({
+      config: { malware_detection: "false" },
+      updateConfig: () => {},
+      global,
+      globalUnreadable: false,
+    });
+    expect(findElement(narrowed, byLabel("Malware Detection"))?.props.checked).toBe(false);
+  });
+
   test("a route saved with useCrs=false still shows every control the gateway reads", () => {
     // useCrs was never read by createWAF or parseWAFConfig; it only hid the
     // rest of this editor. A route carrying the key from an older dashboard was
     // fully protected while showing none of the controls that said so.
-    const tree = WAFConfigEditor({ config: { useCrs: "false" }, updateConfig: () => {} });
+    const tree = WAFConfigFields({ ...noGlobal, config: { useCrs: "false" }, updateConfig: () => {} });
     for (const label of [
       "SQL Injection",
       "Cross-Site Scripting (XSS)",
-      "IP Reputation",
+      "Behavioural Reputation",
       "Data Loss Prevention (DLP)",
       "Paranoia Level",
       "Anomaly Threshold",
@@ -205,9 +230,10 @@ describe("waf editor", () => {
   });
 
   test("the switches no Go code reads are gone", () => {
-    const tree = WAFConfigEditor({ config: {}, updateConfig: () => {} });
+    const tree = WAFConfigFields({ ...noGlobal, config: {}, updateConfig: () => {} });
     for (const label of [
       "Use OWASP CRS",
+      "DOS Protection",
       "Behavioral Profiling",
       "Impossible Travel",
       "Device Posture Check",
@@ -220,7 +246,7 @@ describe("waf editor", () => {
   test("renders the tuning controls and none of the dead ones", () => {
     const html = renderToString(
       <MantineProvider>
-        <WAFConfigEditor config={{ useCrs: "false" }} updateConfig={() => {}} />
+        <WAFConfigFields {...noGlobal} config={{ useCrs: "false" }} updateConfig={() => {}} />
       </MantineProvider>,
     );
     expect(html).toContain("SQL Injection");
