@@ -185,39 +185,74 @@ Custom rules file format (JSON array of rules):
 GET /v1/security/posture
 ```
 
-Requires authentication with read permission on the global resource (same RBAC
-gate as `/v1/diagnostics`). It returns a JSON snapshot of the gateway's
-defensive subsystems:
+Requires authentication with read permission on diagnostics (same RBAC gate as
+`/v1/diagnostics`). It returns a JSON snapshot of the gateway's defensive
+subsystems. Keys are lowerCamelCase, as sent:
 
 ```jsonc
 {
   "version": "1.2.3",
-  "generated_at": "2026-06-15T18:09:00Z",
+  "generatedAt": "2026-10-03T08:00:00Z",
   "waf": {
     "enabled": true,
-    "auto_update": true,
-    "last_updated": "2026-06-14T02:00:00Z"
+    "mode": "detect",              // the gateway-wide WAF: "enforce" | "detect" (audit-only) | "off"
+    "routes": {                    // enabled HTTP routes, by the WAF that inspects each
+      "total": 3,
+      "enforcing": 1,              // blocks what it matches
+      "detecting": 2,              // audit-only: records and forwards
+      "unprotected": 0,            // no WAF at all
+      "signatureScanning": 1       // runs the upload signature engine
+    },
+    "customRulesFromDisk": false   // auto_update_rules: loads a rules directory already on disk
   },
   "clamav": {
     "enabled": true,
     "installed": true,
-    "last_scan": "2026-06-15T03:00:00Z",
-    "last_result": "no threats found"
+    "lastScan": "2026-10-03T03:00:00Z",
+    "lastResult": "no threats found"
   },
   "signatures": {
-    "enabled": true,
-    "rule_count": 11
+    "enabled": true,               // some route runs a file_security middleware with signature scanning
+    "routes": 1,
+    "ruleCount": 11
+  },
+  "siem": { "enabled": false, "stats": { "enqueued": 0, "shipped": 0, "dropped": 0, "errors": 0 } },
+  "ebpf": { "enabled": false, "attached": false, "shunnedIps": 0 },
+  "score": {
+    "percent": 60,
+    "controls": [
+      { "id": "waf", "label": "Web application firewall", "weight": 40, "state": "partial",
+        "credit": 0.67, "detail": "1 of 3 routes blocking, 2 detecting only (audit), 0 with no WAF." }
+      // tls, management, anomaly, audit
+    ]
   },
   "fim": {
     "enabled": true,
-    "watched_paths": ["/etc/gateon", "/var/www/static"],
-    "baseline_files": 128,
-    "last_scan": "2026-06-15T18:05:00Z",
-    "total_drift": 0,
-    "recent_events": []
+    "watchedPaths": ["/etc/gateon", "/var/www/static"],
+    "baselineFiles": 128,
+    "lastScan": "2026-10-03T08:05:00Z",
+    "totalDrift": 0
   }
 }
 ```
+
+A route that attaches its own `waf` middleware runs that WAF instead of the
+gateway-wide one, in that middleware's mode, so `routes` -- not `mode` -- says
+what is blocked. There is no `autoUpdate`: rules are compiled into the binary
+and nothing downloads them.
+
+`score` is computed from configuration only, never from traffic, threats or
+client reputation, so nothing a client does moves it (ADR 0048):
+
+    percent = round( sum(weight * credit) )
+
+| control | weight | full credit | half credit |
+|---|---|---|---|
+| `waf` | 40 | every route's WAF blocks | averaged per route; a detecting (audit-only) route earns half |
+| `tls` | 20 | every entrypoint reachable from another host encrypts, or redirects to one that does | averaged per entrypoint |
+| `management` | 20 | the management API is served only on its own listener, restricted | that listener accepts any address |
+| `anomaly` | 10 | anomaly detection is on | -- |
+| `audit` | 10 | audit logging on with signed entries | logging on, entries unsigned |
 
 The `fim` section is omitted when FIM is disabled. The endpoint never fails on a
 partially-initialized server: if posture cannot be assembled it returns a
