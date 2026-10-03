@@ -24,6 +24,8 @@ import { apiFetch, getCloudflareIPs } from "../../hooks/useGateon";
 import { StoredSecretInput } from "../settings/StoredSecretInput";
 import { WAF_APP_PROFILES } from "../../types/gateon";
 import { BROWSER_HEADER_CHECK_HELP, JS_CHALLENGE_HELP } from "./botManagementCopy";
+import { ClientAddressNote } from "./RatelimitConfigEditor";
+import { tlsBindingProblem, xfccProblem } from "./middlewareConfigProblems";
 
 interface EditorProps {
   config: Record<string, string>;
@@ -512,17 +514,7 @@ export function GeoIPConfigEditor({ config, updateConfig }: EditorProps) {
         styles={{ input: { minHeight: 60 } }}
         clearable
       />
-      <Switch
-        label="Trust Cloudflare Headers"
-        description="Use CF-Connecting-IP for client IP"
-        checked={config.trust_cloudflare_headers === "true"}
-        onChange={(e) =>
-          updateConfig(
-            "trust_cloudflare_headers",
-            e.currentTarget.checked ? "true" : "false"
-          )
-        }
-      />
+      <ClientAddressNote />
     </Stack>
   );
 }
@@ -582,9 +574,21 @@ export function XFCCConfigEditor({ config, updateConfig }: EditorProps) {
       <Text size="sm">Extract and forward client certificate details to backend services via X-Forwarded-Client-Cert header.</Text>
       <Switch
         label="Forward By"
+        description="Name this gateway in By=, Envoy's URI SAN of the proxy's own certificate."
         checked={config.forward_by === "true"}
         onChange={(e) => updateConfig("forward_by", e.currentTarget.checked ? "true" : "false")}
       />
+      {config.forward_by === "true" && (
+        <TextInput
+          label="By (this gateway's URI)"
+          description="The URI this gateway forwards as By=, usually the URI SAN of its certificate."
+          placeholder="spiffe://example.org/gateway"
+          required
+          value={config.by || ""}
+          error={xfccProblem(config)}
+          onChange={(e) => updateConfig("by", e.currentTarget.value)}
+        />
+      )}
       <Switch
         label="Forward Hash"
         checked={config.forward_hash === "true"}
@@ -604,6 +608,34 @@ export function XFCCConfigEditor({ config, updateConfig }: EditorProps) {
         label="Forward DNS"
         checked={config.forward_dns === "true"}
         onChange={(e) => updateConfig("forward_dns", e.currentTarget.checked ? "true" : "false")}
+      />
+    </Stack>
+  );
+}
+
+export function TLSBindingConfigEditor({ config, updateConfig }: EditorProps) {
+  return (
+    <Stack gap="md">
+      <Text size="sm">
+        Binds the backend's session cookie to the client certificate of the TLS connection it was issued on. The
+        session is then refused from any other certificate, from a connection without one, and over plain HTTP.
+        Needs a TLS entrypoint that asks clients for a certificate; saving it on a route served without TLS is
+        refused.
+      </Text>
+      <TextInput
+        label="Session Cookie Name"
+        description="The cookie your backend sets for a signed-in session."
+        placeholder="session"
+        value={config.cookie_name || ""}
+        onChange={(e) => updateConfig("cookie_name", e.currentTarget.value)}
+      />
+      <StoredSecretInput
+        label="Binding Secret"
+        description="32+ characters, the same on every gateway serving the route. Changing it ends every bound session."
+        required
+        value={config.secret || ""}
+        error={tlsBindingProblem(config)}
+        onChange={(v) => updateConfig("secret", v)}
       />
     </Stack>
   );
@@ -664,17 +696,7 @@ export function IPFilterConfigEditor({ config, updateConfig }: EditorProps) {
         styles={{ input: { minHeight: 60 } }}
         clearable
       />
-      <Switch
-        label="Trust Cloudflare Headers"
-        description="Use CF-Connecting-IP when behind Cloudflare"
-        checked={config.trust_cloudflare_headers === "true"}
-        onChange={(e) =>
-          updateConfig(
-            "trust_cloudflare_headers",
-            e.currentTarget.checked ? "true" : "false"
-          )
-        }
-      />
+      <ClientAddressNote />
     </Stack>
   );
 }

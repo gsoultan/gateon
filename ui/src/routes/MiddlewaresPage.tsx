@@ -47,7 +47,10 @@ import { useMiddlewares, useMiddlewareRoutes, apiFetch, getApiErrorMessage } fro
 import { usePermissions } from "../hooks/usePermissions";
 import { useTableDensity } from "../hooks/useTableDensity";
 import { MiddlewareConfigEditor } from "../components/MiddlewareConfig";
-import { authConfigProblem } from "../components/MiddlewareConfig/authConfigProblems";
+import {
+  middlewareConfigProblem,
+  withoutRetiredKeys,
+} from "../components/MiddlewareConfig/middlewareConfigProblems";
 import { QueryError } from "../components/QueryError";
 
 export default function MiddlewaresPage() {
@@ -141,14 +144,13 @@ export default function MiddlewaresPage() {
 
   const handleSave = () => {
     if (editingMW) {
-      mutation.mutate(editingMW);
+      mutation.mutate({ ...editingMW, config: withoutRetiredKeys(editingMW.type, editingMW.config || {}) });
     }
   };
 
   // A config the gateway would refuse -- or once accepted and ran unsafely --
-  // is not offered for saving (ADR 0043).
-  const configProblem =
-    editingMW?.type === "auth" ? authConfigProblem(editingMW.config || {}) : undefined;
+  // is not offered for saving (ADR 0043, ADR 0046).
+  const configProblem = editingMW ? middlewareConfigProblem(editingMW.type, editingMW.config || {}) : undefined;
 
   const middlewares = data?.middlewares || [];
   const totalCount = data?.totalCount || 0;
@@ -485,13 +487,13 @@ export default function MiddlewaresPage() {
                 <IconInfoCircle size={14} color="blue" />
                 <Text size="xs" c="dimmed">
                   {editingMW?.type === "ratelimit" &&
-                    "Keys: requests_per_minute, burst, per_tenant (true/false), storage (local/redis), strategy (ip/tenant/ja4h/fingerprint), trust_cloudflare_headers"}
+                    "Keys: requests_per_minute, burst, per_tenant (true/false), storage (local/redis; redis needs Redis configured for this gateway), strategy (ip/tenant/ja4h/fingerprint). The client address is the one the entrypoint resolved, under Settings > Trust Cloudflare Headers."}
                   {editingMW?.type === "inflightreq" &&
                     "Keys: amount (required), per_ip (true/false)"}
                   {editingMW?.type === "buffering" &&
                     "Keys: max_request_body_bytes (required)"}
                   {editingMW?.type === "auth" &&
-                    "Keys: type (jwt/oidc/oauth2/paseto/apikey/basic); jwt: issuer, audience, jwks_url, secret, enable_revocation; oidc: issuer, audience; oauth2: introspection_url, client_id, client_secret, token_type_hint; paseto: secret; apikey: header, query_param, hashed, key_X=value; basic: username, password, users (user:pass,), realm; all: dry_run, required_scopes, required_roles, error_template, map_claim_X"}
+                    "Keys: type (jwt/oidc/oauth2/paseto/apikey/basic); jwt: issuer, audience, jwks_url, secret; oidc: issuer, audience; jwt/oidc/paseto: enable_revocation (needs Redis), revocation_prefix (default revoked_jti:); oauth2: introspection_url, client_id, client_secret, token_type_hint; paseto: secret; apikey: header, query_param, hashed, key_X=value; basic: username, password, users (user:pass,), realm; all: dry_run, required_scopes (comma or space separated), required_roles (comma separated), error_template, map_claim_X"}
                   {editingMW?.type === "headers" &&
                     "Keys: sts_seconds, sts_include_subdomains, sts_preload, force_sts_header; add_request_X, set_request_X, del_request_X, add_response_X, set_response_X, del_response_X"}
                   {editingMW?.type === "forwardedheaders" &&
@@ -506,15 +508,19 @@ export default function MiddlewaresPage() {
                   {editingMW?.type === "replacepathregex" &&
                     "Keys: pattern, replacement"}
                   {editingMW?.type === "cors" &&
-                    "Keys: preset (permissive/standard/grpc-web/restricted), allowed_origins, allowed_methods, allowed_headers, exposed_headers, allow_credentials (true/false), max_age"}
+                    "Keys: preset (permissive/standard/grpc-web/restricted), allowed_origins (empty = no origin; * = every origin), allowed_methods, allowed_headers, exposed_headers, allow_credentials (true/false; needs named origins, never *), max_age"}
                   {editingMW?.type === "compress" &&
                     "Keys: algorithm (auto/gzip/br), min_response_body_bytes (1024), excluded_content_types, included_content_types, max_buffer_bytes"}
                   {editingMW?.type === "geoip" &&
-                    "Keys: db_path (required), allow_countries, deny_countries, trust_cloudflare_headers"}
+                    "Keys: db_path (required), allow_countries, deny_countries. The client address is the one the entrypoint resolved, under Settings > Trust Cloudflare Headers."}
                   {editingMW?.type === "forwardauth" &&
                     "Keys: address (required), auth_response_headers, auth_request_headers, trust_forward_header, forward_body, preserve_request_method, max_body_size, tls_insecure_skip_verify"}
                   {editingMW?.type === "grpcweb" &&
-                    "Required for grpc routes called from browsers. Keys: preset (grpc-web/permissive), allowed_origins, allow_credentials, max_age."}
+                    "Required for grpc routes called from browsers. Keys: preset (grpc-web/permissive/restricted), allowed_origins, allow_credentials (needs named origins, never *), max_age."}
+                  {editingMW?.type === "xfcc" &&
+                    "Keys: forward_by with by (the URI this gateway names as By=), forward_hash, forward_subject, forward_uri, forward_dns (true/false)."}
+                  {editingMW?.type === "tls_binding" &&
+                    "Keys: secret (required, 32+ characters, shared by every gateway), cookie_name (default session). Binds the session cookie to the client certificate; needs a TLS entrypoint that asks for client certificates."}
                   {editingMW?.type === "errors" &&
                     "Keys: status_codes (comma separated), page_404, page_500, etc."}
                   {editingMW?.type === "retry" && "Keys: attempts"}

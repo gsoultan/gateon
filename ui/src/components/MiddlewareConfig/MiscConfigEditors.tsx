@@ -3,16 +3,18 @@
 
 import { Stack, TextInput, Group, NumberInput, Switch, TagsInput, Select, Text } from "@mantine/core";
 import { KeyValueList } from "./KeyValueList";
+import { corsProblem } from "./middlewareConfigProblems";
 
 // Keyed the way the editor fields below and internal/middleware/cors_factory.go
-// read the config map; applying a preset spreads these straight into it.
+// read the config map; applying a preset spreads these straight into it. None
+// pairs origin "*" with credentials, which browsers refuse (ADR 0046).
 export const CORS_PRESETS: Record<string, Record<string, string>> = {
   permissive: {
     allowed_origins: "*",
     allowed_methods: "GET, POST, PUT, DELETE, OPTIONS, HEAD, PATCH",
     allowed_headers: "*",
     exposed_headers: "*",
-    allow_credentials: "true",
+    allow_credentials: "false",
     max_age: "86400",
   },
   standard: {
@@ -20,7 +22,7 @@ export const CORS_PRESETS: Record<string, Record<string, string>> = {
     allowed_methods: "GET, POST, OPTIONS",
     allowed_headers: "Content-Type, Authorization, Accept",
     exposed_headers: "Content-Length, Content-Type",
-    allow_credentials: "true",
+    allow_credentials: "false",
     max_age: "3600",
   },
   "grpc-web": {
@@ -28,7 +30,7 @@ export const CORS_PRESETS: Record<string, Record<string, string>> = {
     allowed_methods: "POST, OPTIONS",
     allowed_headers: "Content-Type, X-User-Agent, X-Grpc-Web, Grpc-Timeout",
     exposed_headers: "Grpc-Status, Grpc-Message, Grpc-Encoding, Grpc-Accept-Encoding, X-Grpc-Web, X-Accept-Content-Transfer-Encoding, X-Accept-Response-Streaming",
-    allow_credentials: "true",
+    allow_credentials: "false",
     max_age: "86400",
   },
   restricted: {
@@ -149,7 +151,7 @@ function CORSPolicyFields({ config, updateConfig }: Omit<EditorProps, "onChange"
         placeholder="*, https://example.com"
         value={splitTags(config.allowed_origins)}
         onChange={(val) => updateConfig("allowed_origins", joinTags(val))}
-        description="List of origins (e.g. *, https://example.com). Press Enter to add."
+        description="Origins allowed to call cross-origin; empty allows none, * allows every origin (without credentials). Press Enter to add."
         styles={{ input: { minHeight: 60 } }}
         clearable
       />
@@ -192,6 +194,8 @@ function CORSPolicyFields({ config, updateConfig }: Omit<EditorProps, "onChange"
         />
         <Switch
           label="Allow Credentials"
+          description="Cookies and Authorization; needs named origins, never *."
+          error={corsProblem(config)}
           checked={config.allow_credentials === "true"}
           onChange={(e) =>
             updateConfig(

@@ -520,24 +520,22 @@ export const SecurityAdvancedSettingsCard: React.FC<SecurityAdvancedSettingsCard
                     <Text fw={500}>TLS Session Binding</Text>
                   </Group>
                   <Text size="xs" c="dimmed">
-                    Bind application sessions to TLS connections to prevent hijacking.
+                    Retired. Bind sessions per route with a TLS Binding middleware: it ties the session cookie to
+                    the client certificate and needs a shared secret, which this switch never had.
                   </Text>
                 </Stack>
+                {/* Only turning it off is offered: it does nothing, and the gateway refuses turning it on. */}
                 <Switch
-                  checked={security.tlsBinding?.enabled}
+                  aria-label="TLS Session Binding (retired)"
+                  checked={!!security.tlsBinding?.enabled}
                   onChange={(e) => updateSection("tlsBinding", { enabled: e.currentTarget.checked })}
-                  disabled={disabled}
+                  disabled={disabled || !security.tlsBinding?.enabled}
                 />
               </Group>
               {security.tlsBinding?.enabled && (
-                <TextInput
-                  label="Cookie Name"
-                  description="The name of the session cookie to bind. Recommended: session, authToken, or your app's session ID."
-                  placeholder="session"
-                  value={security.tlsBinding?.cookieName || ""}
-                  onChange={(e) => updateSection("tlsBinding", { cookieName: e.currentTarget.value })}
-                  disabled={disabled}
-                />
+                <Text size="xs" c="orange">
+                  This switch is on and has no effect. Turn it off; it no longer refuses or binds anything.
+                </Text>
               )}
             </Stack>
           </Paper>
