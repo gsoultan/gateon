@@ -155,6 +155,14 @@ func writeServiceRefusal(w http.ResponseWriter, err error) {
 		WriteHTTPError(w, http.StatusTooManyRequests, st.Message())
 	case codes.AlreadyExists:
 		WriteHTTPError(w, http.StatusConflict, st.Message())
+	// A refusal each, not a failure; they read as 500 (ADR 0050's token and
+	// audit-verification answers were the first to use them over REST).
+	case codes.NotFound:
+		WriteHTTPError(w, http.StatusNotFound, st.Message())
+	case codes.FailedPrecondition:
+		WriteHTTPError(w, http.StatusBadRequest, st.Message())
+	case codes.Unavailable:
+		WriteHTTPError(w, http.StatusServiceUnavailable, st.Message())
 	default:
 		logger.L.LogError("management request failed", "error", err)
 		WriteHTTPError(w, http.StatusInternalServerError, "the request could not be completed")

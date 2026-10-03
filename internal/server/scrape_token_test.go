@@ -97,8 +97,8 @@ func TestARevokedScrapeTokenStopsAtOnce(t *testing.T) {
 	if rr := c.do(http.MethodGet, "/metrics", "", secret); rr.Code != http.StatusUnauthorized {
 		t.Errorf("GET /metrics with a revoked token: %d, want 401", rr.Code)
 	}
-	if rr := c.do(http.MethodDelete, "/v1/api-tokens/"+id, "", admin); rr.Code == http.StatusOK {
-		t.Errorf("revoking it twice answered 200")
+	if rr := c.do(http.MethodDelete, "/v1/api-tokens/"+id, "", admin); rr.Code != http.StatusNotFound {
+		t.Errorf("revoking it twice: %d %s, want 404", rr.Code, rr.Body.String())
 	}
 }
 

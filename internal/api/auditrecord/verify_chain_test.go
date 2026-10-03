@@ -153,11 +153,16 @@ func TestVerifyingTheChainNeedsAnAdministrator(t *testing.T) {
 
 // TestVerifyingWithSigningOffSaysWhy rather than reporting a broken chain.
 func TestVerifyingWithSigningOffSaysWhy(t *testing.T) {
-	_, _, grpcc := verifyAPI(t, adminClaims)
+	base, client, grpcc := verifyAPI(t, adminClaims)
 	audit.UpdateConfig(&gateonv1.AuditConfig{Enabled: true})
 	_, err := grpcc.VerifyAuditChain(context.Background(), &gateonv1.VerifyAuditChainRequest{})
 	if status.Code(err) != codes.FailedPrecondition || !strings.Contains(err.Error(), "sign_entries") {
 		t.Errorf("verifying with signing off: %v, want FailedPrecondition naming sign_entries", err)
+	}
+	// A refusal over REST too, not the 500 every unmapped code became.
+	if code, body := httpCall(t, client, http.MethodGet, base+"/v1/audit/verify", ""); code != http.StatusBadRequest ||
+		!strings.Contains(string(body), "sign_entries") {
+		t.Errorf("GET /v1/audit/verify with signing off: %d %s, want 400 naming sign_entries", code, body)
 	}
 	if _, err := grpcc.VerifyAuditChain(context.Background(), &gateonv1.VerifyAuditChainRequest{From: "yesterday"}); status.Code(err) != codes.InvalidArgument {
 		t.Errorf("a malformed from: %v, want InvalidArgument", err)

@@ -54,6 +54,19 @@
     "/v1/users/{id}": {
       "delete": { "summary": "Delete user (admin only)", "tags": ["users"], "responses": { "200": { "description": "OK" }, "403": { "description": "Insufficient permissions" } } }
     },
+    "/v1/api-tokens": {
+      "get": { "summary": "List API tokens, without their secrets (admin only)", "tags": ["users"], "responses": { "200": { "description": "OK" }, "403": { "description": "Insufficient permissions" } } },
+      "post": { "summary": "Create an API token; the secret is in this answer only (admin only)", "tags": ["users"], "responses": { "200": { "description": "OK" }, "400": { "description": "Invalid name, scopes or ttlDays" }, "403": { "description": "Insufficient permissions" }, "429": { "description": "Too many tokens" } } }
+    },
+    "/v1/api-tokens/{id}": {
+      "delete": { "summary": "Revoke an API token (admin only)", "tags": ["users"], "responses": { "200": { "description": "OK" }, "403": { "description": "Insufficient permissions" }, "404": { "description": "No such token" } } }
+    },
+    "/v1/audit/verify": {
+      "get": { "summary": "Verify the audit log's HMAC chain over a window: from, to (RFC 3339), afterId, limit (at most 5000) (admin only)", "tags": ["audit"], "responses": { "200": { "description": "OK" }, "400": { "description": "Signing is off, or a malformed bound or cursor" }, "403": { "description": "Insufficient permissions" } } }
+    },
+    "/metrics": {
+      "get": { "summary": "Prometheus exposition; a session, or an API token with metrics:read as a bearer token", "tags": ["status"], "responses": { "200": { "description": "OK" }, "401": { "description": "Not authenticated" } } }
+    },
     "/v1/config/export": {
       "get": { "summary": "Export config as JSON", "tags": ["config"], "responses": { "200": { "description": "OK" } } }
     },
