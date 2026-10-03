@@ -234,6 +234,8 @@ describe("waf editor", () => {
     for (const label of [
       "Use OWASP CRS",
       "DOS Protection",
+      // The client address is the global setting's to decide (ADR 0044/0046).
+      "Trust Cloudflare Headers",
       "Behavioral Profiling",
       "Impossible Travel",
       "Device Posture Check",

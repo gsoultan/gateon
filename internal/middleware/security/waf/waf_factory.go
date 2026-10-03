@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"maps"
 	"os"
 	"path/filepath"
@@ -19,6 +20,7 @@ import (
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware/kind"
 	"github.com/gsoultan/gateon/internal/middleware/security"
+	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/security/waf"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 	"google.golang.org/protobuf/proto"
@@ -352,7 +354,7 @@ func inheritedSettings(c WAFConfig) map[string]string {
 		"paranoia_level":  strconv.Itoa(c.ParanoiaLevel),
 		"ssrf_protection": b(c.EnableSSRFProtection),
 		// Cloudflare trust is a fact about where the gateway sits.
-		"trust_cloudflare_headers":      b(c.TrustCloudflare),
+		keyTrustCloudflare:              b(c.TrustCloudflare),
 		"audit_log_relevant_only":       b(c.AuditLogRelevantOnly),
 		"disable_entropy":               b(c.DisableEntropy),
 		"enable_body_entropy":           b(c.EnableBodyEntropy),
@@ -405,7 +407,36 @@ func applyGlobalCRSTunables(cfg map[string]string, w *gateonv1.WafConfig, dataDi
 	}
 }
 
+// checkRouteCloudflareTrust refuses a route WAF whose trust_cloudflare_headers
+// disagrees with the gateway's. Who the client is gets decided once, at the
+// entrypoint, from the global setting, which only an administrator may change
+// (ADR 0040); a per-middleware switch either changed nothing (the resolved
+// address wins) or gave one request two answers, and it let anyone who may
+// edit a middleware move a trust boundary. The same rule as every other
+// middleware's switch (ADR 0046). A value that agrees still saves, so an
+// existing config that merely restated the global setting keeps working.
+func checkRouteCloudflareTrust(cfg map[string]string, d security.Deps) error {
+	v := strings.TrimSpace(cfg[keyTrustCloudflare])
+	if v == "" {
+		return nil
+	}
+	global := config.TrustCloudflare(storedGlobal(context.TODO(), d.GlobalStore).GetWaf())
+	if request.ParseTrustCloudflareStrict(v) == global {
+		return nil
+	}
+	return fmt.Errorf("waf: %s=%q disagrees with the gateway's Cloudflare trust (%t). The client address is "+
+		"resolved once, for every middleware, from Settings > Global WAF Settings > Trust Cloudflare IPs/Headers "+
+		"(or GATEON_TRUST_CLOUDFLARE_HEADERS), which only an administrator may change; remove the key from this "+
+		"WAF or set it to match", keyTrustCloudflare, v, global)
+}
+
+// keyTrustCloudflare is the route config key of the Cloudflare trust switch.
+const keyTrustCloudflare = "trust_cloudflare_headers"
+
 func NewWAF(cfg map[string]string, d security.Deps) (kind.Middleware, error) {
+	if err := checkRouteCloudflareTrust(cfg, d); err != nil {
+		return nil, err
+	}
 	globalDirectives := mergeGlobalWAFDefaults(cfg, d)
 
 	grpcMode := d.IsGRPCRoute()

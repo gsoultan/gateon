@@ -322,17 +322,11 @@ export function WAFConfigFields({ config, updateConfig, global, globalUnreadable
       </Stack>
 
       <Divider label="Advanced" labelPosition="center" />
-      <Switch
-        label="Trust Cloudflare Headers"
-        description="Use CF-Connecting-IP for WAF REMOTE_ADDR"
-        checked={config.trust_cloudflare_headers === "true"}
-        onChange={(e) =>
-          updateConfig(
-            "trust_cloudflare_headers",
-            e.currentTarget.checked ? "true" : "false"
-          )
-        }
-      />
+      {/*
+        No "Trust Cloudflare Headers" here: the client address is resolved once,
+        from the global setting only an administrator may change, and a route
+        WAF value that disagrees is refused (ADR 0044, 0046).
+      */}
       <Switch
         label="Audit Only"
         description="Record matched rules and block nothing on this route."

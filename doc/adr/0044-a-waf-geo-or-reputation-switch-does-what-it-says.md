@@ -80,6 +80,17 @@ empty) is the global WAF's. So a route adds to or narrows the global policy only
 by saying so, and the dashboard shows which. Previously inheritance also
 depended on `use_crs`; it no longer does.
 
+**A route WAF's "Trust Cloudflare Headers" is the gateway's, not the route's.**
+The address a WAF inspects is the one the entrypoint resolved from the global
+setting, which only an administrator may change (ADR 0040), so the route switch
+either changed nothing or gave one request two answers -- and let anyone who may
+edit a middleware move a trust boundary. As for every other middleware (ADR
+0046), a route WAF value that disagrees with the global one is refused at save;
+one that agrees, or none, still builds; the route editor no longer offers it. A
+stored disagreeing value fails to build like any other refused security
+middleware, so an administrator who later changes the global setting must also
+remove an explicit, now-disagreeing value from a route WAF.
+
 ### What runs, read from the engine (T8 card, T12)
 
 `GET /v1/waf/effective` (read on the global resource) returns the global WAF's
