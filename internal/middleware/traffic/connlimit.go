@@ -51,6 +51,42 @@ func MaxConnections(max int) kind.Middleware {
 	}
 }
 
+// ManagementInflight is MaxConnections for the management plane, which also
+// answers the gateway's own liveness and readiness probes: a probe is served
+// without taking a slot. Two addresses at the per-address cap could hold every
+// one of the management chain's slots with slow request bodies, and /healthz
+// -- from loopback too -- then answered 503, so an orchestrator's liveness
+// probe restarted a gateway that was only busy (review finding MGMT-N4).
+//
+// The limit bounds work held in flight, and a probe holds none: it has no
+// body (one that declares any is not a probe), needs no credential, and is
+// answered from memory at once. It is not a shape that lets a caller step out
+// of the limit with anything the limit protects; connections stay bounded by
+// the listener's per-address cap. Never used on a data-plane route, where
+// /healthz is the backend's path, not the gateway's.
+func ManagementInflight(max int) kind.Middleware {
+	limited := MaxConnections(max)
+	return func(next http.Handler) http.Handler {
+		l := limited(next)
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if isGatewayProbe(r) {
+				next.ServeHTTP(w, r)
+				return
+			}
+			l.ServeHTTP(w, r)
+		})
+	}
+}
+
+// isGatewayProbe reports whether r is a bodiless GET or HEAD of /healthz or
+// /readyz.
+func isGatewayProbe(r *http.Request) bool {
+	if r.ContentLength != 0 || (r.Method != http.MethodGet && r.Method != http.MethodHead) {
+		return false
+	}
+	return r.URL.Path == "/healthz" || r.URL.Path == "/readyz"
+}
+
 type connBucket struct {
 	sem chan struct{}
 	ref int

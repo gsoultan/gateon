@@ -85,7 +85,7 @@ func CreateBaseHandler(
 		security.XSSRecognition("gateon-management"),
 		security.SQLiRecognition("gateon-management"),
 		security.ThreatRecognition("gateon-management"),
-		traffic.MaxConnections(500),
+		traffic.ManagementInflight(500), // probes take no slot (MGMT-N4)
 	)(internalHandler)
 
 	// Built unconditionally, and deliberately not guarded on whether auth is

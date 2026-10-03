@@ -165,7 +165,9 @@ func startSecureManagementServer(port string, deps *Deps, wg *syncutil.WaitGroup
 		middleware.SecurityHeaders(middleware.SecurityHeadersConfig{Preset: "recommended"}),
 		middleware.HostFilter(managementHost(bind)),
 		security.IPFilter(allowedIPs, nil),
-		traffic.MaxConnections(500),
+		// The gateway's own probes take no slot: two addresses could hold
+		// all 500 and turn /healthz into a 503 (MGMT-N4).
+		traffic.ManagementInflight(500),
 	)(deps.BaseHandler)
 
 	timeouts := managementTimeouts(deps)
