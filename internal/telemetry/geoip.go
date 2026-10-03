@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	lru "github.com/hashicorp/golang-lru"
@@ -123,10 +124,13 @@ func GetPublicIP(ctx context.Context) string {
 }
 
 // InitGeoIP initializes the global GeoIP database for background country resolution.
+//
+// The new database is opened before the old one is closed, and a path that
+// does not open leaves the old one in force. It used to close the loaded
+// database first, so saving a mistyped db_path in Settings -- or an upload the
+// reader rejects -- took geolocation away for the life of the process, and
+// with it every country geofence, until the next restart (ADR 0044).
 func InitGeoIP(dbPath string) error {
-	geoMu.Lock()
-	defer geoMu.Unlock()
-
 	if dbPath == "" {
 		dbPath = os.Getenv("GATEON_GEOIP_DB_PATH")
 	}
@@ -141,29 +145,44 @@ func InitGeoIP(dbPath string) error {
 		return nil // Not configured
 	}
 
-	if geoDB != nil {
-		_ = geoDB.Close()
-		// Cleared, not just closed. Leaving the pointer at a closed reader
-		// meant every later lookup took the geoDB != nil branch and got
-		// maxminddb's "cannot call Lookup on a closed database" -- silently,
-		// because the error is discarded and the caller reads a blank result.
-		// All geo resolution went dead for the life of the process while
-		// GetGeoIPStatus still reported the database loaded at the old path.
-		//
-		// InitGeoIPASN and InitGeoIPCountry both already nil their handles on
-		// this path; only the primary City database did not.
-		geoDB = nil
-		geoDBPath = ""
-	}
-
 	db, err := geoip2.Open(dbPath)
 	if err != nil {
 		return fmt.Errorf("failed to open GeoIP database at %s: %w", dbPath, err)
 	}
 
+	geoMu.Lock()
+	defer geoMu.Unlock()
+	// Closed after the swap, under the write lock, so no lookup holds it.
+	if geoDB != nil {
+		_ = geoDB.Close()
+	}
 	geoDB = db
 	geoDBPath = dbPath
+	geoChangedLocked()
 	return nil
+}
+
+// geoLoaded is whether a database that resolves countries is loaded: the
+// City database, or the Country one. Read on the request path by the global
+// geofence, so it is an atomic rather than a read of geoDB under geoMu.
+var geoLoaded atomic.Bool
+
+// GeoIPLoaded reports whether a database that resolves countries is loaded.
+// Without one every address resolves to the unknown country "XX", which no
+// country list can tell apart.
+func GeoIPLoaded() bool { return geoLoaded.Load() }
+
+// geoChangedLocked records a change of database. Cached answers came from the
+// previous one, so they are dropped. Called with geoMu held for writing.
+func geoChangedLocked() {
+	geoLoaded.Store(geoDB != nil || countryDB != nil)
+	initGeoCaches()
+	if countryCache != nil {
+		countryCache.Purge()
+	}
+	if asnCache != nil {
+		asnCache.Purge()
+	}
 }
 
 // ResolveIPInfo resolves an IP address to country code, city name, latitude and longitude.
@@ -242,7 +261,13 @@ func ResolveCountry(ipStr string) string {
 	geoMu.RLock()
 	defer geoMu.RUnlock()
 
-	if geoDB == nil {
+	// The City database answers country lookups too; a Country database
+	// alone is enough for a geofence, and used to be ignored here.
+	db := geoDB
+	if db == nil {
+		db = countryDB
+	}
+	if db == nil {
 		return "XX"
 	}
 
@@ -251,7 +276,7 @@ func ResolveCountry(ipStr string) string {
 		return "XX"
 	}
 
-	record, err := geoDB.Country(ip)
+	record, err := db.Country(ip)
 	if err != nil {
 		return "XX"
 	}
@@ -271,9 +296,6 @@ func ResolveCountry(ipStr string) string {
 // autonomous system of an IP address. A missing database is not an error: ASN
 // resolution is treated as optional so existing deployments keep working.
 func InitGeoIPASN(dbPath string) error {
-	geoMu.Lock()
-	defer geoMu.Unlock()
-
 	if dbPath == "" {
 		dbPath = os.Getenv("GATEON_GEOIP_ASN_DB_PATH")
 	}
@@ -287,26 +309,25 @@ func InitGeoIPASN(dbPath string) error {
 		return nil // Not configured; ASN resolution stays disabled.
 	}
 
-	if asnDB != nil {
-		_ = asnDB.Close()
-		asnDB = nil
-	}
-
+	// Opened first, so a path that does not open keeps the loaded one.
 	db, err := geoip2.Open(dbPath)
 	if err != nil {
 		return fmt.Errorf("failed to open GeoIP ASN database at %s: %w", dbPath, err)
 	}
 
+	geoMu.Lock()
+	defer geoMu.Unlock()
+	if asnDB != nil {
+		_ = asnDB.Close()
+	}
 	asnDB = db
+	geoChangedLocked()
 	return nil
 }
 
 // InitGeoIPCountry initializes the optional GeoLite2-Country reader. It is used
 // as an additional fallback and is treated as optional like the ASN database.
 func InitGeoIPCountry(dbPath string) error {
-	geoMu.Lock()
-	defer geoMu.Unlock()
-
 	if dbPath == "" {
 		dbPath = os.Getenv("GATEON_GEOIP_COUNTRY_DB_PATH")
 	}
@@ -320,17 +341,19 @@ func InitGeoIPCountry(dbPath string) error {
 		return nil // Not configured.
 	}
 
-	if countryDB != nil {
-		_ = countryDB.Close()
-		countryDB = nil
-	}
-
+	// Opened first, so a path that does not open keeps the loaded one.
 	db, err := geoip2.Open(dbPath)
 	if err != nil {
 		return fmt.Errorf("failed to open GeoIP Country database at %s: %w", dbPath, err)
 	}
 
+	geoMu.Lock()
+	defer geoMu.Unlock()
+	if countryDB != nil {
+		_ = countryDB.Close()
+	}
 	countryDB = db
+	geoChangedLocked()
 	return nil
 }
 
@@ -400,6 +423,7 @@ func CloseGeoIP() error {
 		}
 		countryDB = nil
 	}
+	geoChangedLocked()
 	return errors.Join(errs...)
 }
 

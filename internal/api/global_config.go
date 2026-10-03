@@ -20,6 +20,7 @@ import (
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/config/storedsecret"
 	"github.com/gsoultan/gateon/internal/logger"
+	"github.com/gsoultan/gateon/internal/middleware/security"
 	wafmw "github.com/gsoultan/gateon/internal/middleware/security/waf"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
@@ -278,7 +279,20 @@ func (s *ApiService) prepareGlobalUpdate(ctx context.Context, update, stored *ga
 	// After Restore, so a secret sent back as the placeholder compares equal
 	// to the one stored; before the session key is rotated, which would put
 	// a refused change in force.
-	return s.authorizeGlobalSave(ctx, stored, update)
+	if err := s.authorizeGlobalSave(ctx, stored, update); err != nil {
+		return err
+	}
+	return validateGlobalSave(stored, update)
+}
+
+// validateGlobalSave refuses a global config that would save a setting the
+// gateway cannot enforce. A country list with no GeoIP database to resolve
+// clients against blocked nobody and saved with success (ADR 0044).
+func validateGlobalSave(stored, proposed *gateonv1.GlobalConfig) error {
+	if err := security.ValidateGeoIPSave(stored.GetGeoip(), proposed.GetGeoip()); err != nil {
+		return status.Error(codes.InvalidArgument, err.Error())
+	}
+	return nil
 }
 
 // authorizeGlobalSave refuses, as PermissionDenied naming the fields, a save
@@ -352,6 +366,9 @@ func (s *ApiService) editGlobal(ctx context.Context, edit func(*gateonv1.GlobalC
 	}
 	edit(proposed)
 	if err := s.authorizeGlobalSave(ctx, stored, proposed); err != nil {
+		return err
+	}
+	if err := validateGlobalSave(stored, proposed); err != nil {
 		return err
 	}
 	return s.Globals.Update(ctx, proposed)
