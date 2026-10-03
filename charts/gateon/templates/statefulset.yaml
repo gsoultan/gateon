@@ -93,6 +93,13 @@ spec:
               value: {{ .Values.service.managementPort | quote }}
             - name: GATEON_DATA_DIR
               value: {{ .Values.persistence.mountPath | quote }}
+            # global.json lives on the data volume, where first-run setup and
+            # the dashboard can write it; the read-only Secret below only seeds
+            # it, once, on a volume that has none (ADR 0049).
+            - name: GLOBAL_CONFIG_FILE
+              value: {{ printf "%s/global.json" .Values.persistence.mountPath | quote }}
+            - name: GATEON_GLOBAL_CONFIG_SEED
+              value: /etc/gateon/global.json
             {{- with .Values.kubernetesIntegration.watchNamespace }}
             # The Role rbac.yaml grants for a watchNamespace only covers that
             # namespace; without this the controller lists cluster-wide, is
@@ -131,6 +138,8 @@ spec:
           volumeMounts:
             - name: data
               mountPath: {{ .Values.persistence.mountPath }}
+            # Seeds only: global.json is copied to the data volume on first
+            # start, and entrypoints.json seeds a fresh database.
             - name: config
               mountPath: /etc/gateon
               readOnly: true

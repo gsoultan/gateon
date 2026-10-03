@@ -11,9 +11,9 @@ SPDX-License-Identifier: MIT
 > push it yourself and point `image.repository` at it:
 >
 > ```bash
-> docker build -t your-registry/gateon:2.7.0 .
-> docker push your-registry/gateon:2.7.0
-> helm install gateon ./charts/gateon --set image.repository=your-registry/gateon
+> docker build --build-arg VERSION=1.0.0 -t your-registry/gateon:1.0.0 .
+> docker push your-registry/gateon:1.0.0
+> helm install gateon ./charts/gateon --set image.repository=your-registry/gateon --set image.tag=1.0.0
 > ```
 
 ```bash
@@ -49,6 +49,23 @@ the old data is unreadable.
 written in cleartext** — warned once, otherwise indistinguishable from success.
 The chart refuses one outright.
 
+## global.json lives on the volume, and is seeded once
+
+Setup writes `global.json` -- the session key, `auth.enabled`, the management
+bind -- and so does every save of global settings in the dashboard. The chart
+used to mount it read-only from a Secret at `/etc/gateon`, so setup failed with
+`read-only file system` and a fresh install could never finish it.
+
+The gateway now keeps `global.json` on the data volume
+(`GLOBAL_CONFIG_FILE=<persistence.mountPath>/global.json`). The Secret is still
+mounted at `/etc/gateon`, and its `global.json` -- `globalConfig` with
+`externalDatabase` and `redis` rendered in -- **seeds** the one on the volume
+the first time the volume has none (`GATEON_GLOBAL_CONFIG_SEED`). After that the
+copy on the volume is what the gateway reads, so changing `globalConfig`,
+`externalDatabase` or `redis` on an existing install does not reach it; change
+those settings in the dashboard. With `persistence.enabled=false` the volume is
+an `emptyDir`, so every pod start seeds afresh and runs setup again.
+
 ## Entrypoints are seeded once
 
 `entrypoints` renders `entrypoints.json`, so the ports the Service publishes are
@@ -77,7 +94,7 @@ about in advance.
 | `kubernetesIntegration.gatewayAPI` | `false` | needs the CRDs installed |
 | `ebpf.enabled` | `false` | runs the container as uid 0 with only NET_ADMIN and BPF |
 | `ebpf.hostNetwork` | `false` | attaches to the node's NIC instead of the pod's interface |
-| `globalConfig` | `{}` | merged into `global.json` |
+| `globalConfig` | `{}` | seeds `global.json` on a volume that has none |
 
 ### Why the database is not configured through environment variables
 

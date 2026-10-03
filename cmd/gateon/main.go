@@ -341,6 +341,7 @@ func buildUIAssets(uiPath *string) {
 
 func initConfigRegistries() (*config.GlobalRegistry, string) {
 	globalFile := getEnvDefault("GLOBAL_CONFIG_FILE", "global.json")
+	applyGlobalConfigSeed(globalFile)
 
 	// A missing global.json is not an error — first run reaches the setup
 	// wizard through it — but it must be visible. The zero-value config has the
