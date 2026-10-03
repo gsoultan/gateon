@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1745,14 +1746,18 @@ func RecordSecurityThreatWithJA4(r *http.Request, t SecurityThreat) SecurityThre
 
 // RecordSecurityThreat attempts to enqueue a security threat.
 func RecordSecurityThreat(t SecurityThreat) {
-	// Never record security threats for localhost to avoid flooding during tests
-	// and management operations. Local loopback is trusted.
-	if httputil.IsLoopback(t.SourceIP) {
-		return
-	}
-
 	st := GetSecurityThreat()
 	*st = t
+	// A threat from loopback is recorded, counted and shown -- and held
+	// against nobody. It used to be dropped here, so a gateway behind a local
+	// nginx or cloudflared with no trusted proxies (every client arrives as
+	// 127.0.0.1) refused attacks while Security Hub said "0 threats" and the
+	// funnel listed them as allowed (T27). It is still kept out of reputation,
+	// escalation and correlation, as an unattributed threat is: loopback is
+	// every local client at once, and the request path never refuses it.
+	if httputil.IsLoopback(st.SourceIP) {
+		st.Unattributed = true
+	}
 	if st.ID == "" {
 		st.ID = uuid.NewString()
 	}
@@ -4118,25 +4123,35 @@ func GetThreatsByCountry(ctx context.Context, limit int) []LabeledCount {
 	return res
 }
 
-// attackTrendBucketQuery builds the threat-count trend query. Grouping by
-// truncated timestamp is faster than grouping by formatted string.
+// attackTrendBucketQuery builds the threat-count trend query.
+//
+// SQLite has no timestamp type: the driver stores a time.Time as Go's own
+// text ("2026-10-02 16:39:31.975189 +0700 WIB m=+25.13"), which strftime()
+// and date() cannot parse, so every row fell into one NULL bucket that the
+// reader then dropped and the chart was always empty (T28). The bucket is cut
+// from the text instead -- its first 13 characters are the hour, its first 10
+// the day, in the writer's local time -- and one row's full timestamp comes
+// back with it so the reader knows which zone that local time was in.
+//
+// Postgres stores the same local wall clock in a timestamp without time zone,
+// and date_trunc works on it.
 func attackTrendBucketQuery(driver string, daily bool) string {
 	isPostgres := driver == db.DriverPostgres || driver == "pgx"
 	switch {
 	case isPostgres && daily:
-		return "SELECT date_trunc('day', timestamp) as bucket, COUNT(*) as cnt FROM security_threats WHERE timestamp >= ? GROUP BY bucket ORDER BY bucket ASC"
+		return "SELECT date_trunc('day', timestamp) as bucket, MIN(timestamp) as sample, COUNT(*) as cnt FROM security_threats WHERE timestamp >= ? GROUP BY bucket ORDER BY bucket ASC"
 	case isPostgres:
-		return "SELECT date_trunc('hour', timestamp) as bucket, COUNT(*) as cnt FROM security_threats WHERE timestamp >= ? GROUP BY bucket ORDER BY bucket ASC"
+		return "SELECT date_trunc('hour', timestamp) as bucket, MIN(timestamp) as sample, COUNT(*) as cnt FROM security_threats WHERE timestamp >= ? GROUP BY bucket ORDER BY bucket ASC"
 	case daily:
-		// SQLite: date() is faster than strftime()
-		return "SELECT date(timestamp) as bucket, COUNT(*) as cnt FROM security_threats WHERE timestamp >= ? GROUP BY bucket ORDER BY bucket ASC"
+		return "SELECT substr(timestamp, 1, 10) as bucket, MIN(timestamp) as sample, COUNT(*) as cnt FROM security_threats WHERE timestamp >= ? GROUP BY bucket ORDER BY bucket ASC"
 	default:
-		// SQLite hourly
-		return "SELECT strftime('%Y-%m-%d %H:00:00', timestamp) as bucket, COUNT(*) as cnt FROM security_threats WHERE timestamp >= ? GROUP BY bucket ORDER BY bucket ASC"
+		return "SELECT substr(timestamp, 1, 13) as bucket, MIN(timestamp) as sample, COUNT(*) as cnt FROM security_threats WHERE timestamp >= ? GROUP BY bucket ORDER BY bucket ASC"
 	}
 }
 
-// GetAttackTrend returns a time-series of security threat counts.
+// GetAttackTrend returns a time-series of security threat counts: one sample
+// per hour, or per day past attackTrendDailyThresholdDays, stamped with the
+// bucket's start.
 func GetAttackTrend(ctx context.Context, days int) []TrafficSample {
 	s := getStore()
 	if s == nil {
@@ -4146,46 +4161,76 @@ func GetAttackTrend(ctx context.Context, days int) []TrafficSample {
 		days = 1
 	}
 	cutoff := time.Now().Add(time.Duration(-days*24) * time.Hour).Format(threatTimestampLayout)
-	query := attackTrendBucketQuery(s.dialect.Driver, days > attackTrendDailyThresholdDays)
+	daily := days > attackTrendDailyThresholdDays
+	query := attackTrendBucketQuery(s.dialect.Driver, daily)
 
 	ex, cleanup := s.getExecutor(ctx)
 	defer cleanup()
 
 	rows, err := ex.QueryContext(ctx, s.dialect.Rebind(query), cutoff)
 	if err != nil {
+		logger.Default().LogError("attack trend: query failed", "error", err)
 		return nil
 	}
 	defer rows.Close()
 
-	res := make([]TrafficSample, 0, 48) // typical dashboard view
+	counts := make(map[int64]uint64, 48) // typical dashboard view
 	for rows.Next() {
-		var bucket any
+		var bucket, sample any
 		var count uint64
-		if err := rows.Scan(&bucket, &count); err != nil {
+		if err := rows.Scan(&bucket, &sample, &count); err != nil {
 			continue
 		}
-
-		var t time.Time
-		switch v := bucket.(type) {
-		case time.Time:
-			t = v
-		case string:
-			// SQLite returns strings
-			if len(v) > 19 {
-				v = v[:19]
-			}
-			t, _ = time.Parse("2006-01-02 15:04:05", v)
-			if t.IsZero() {
-				t, _ = time.Parse("2006-01-02", v)
-			}
-		}
-
-		if !t.IsZero() {
-			res = append(res, TrafficSample{
-				Timestamp: t.UnixMilli(),
-				Requests:  count,
-			})
+		if t, ok := parseThreatTimestamp(sample); ok {
+			counts[trendBucketStart(t, daily).UnixMilli()] += count
 		}
 	}
+	res := make([]TrafficSample, 0, len(counts))
+	for ts, n := range counts {
+		res = append(res, TrafficSample{Timestamp: ts, Requests: n})
+	}
+	slices.SortFunc(res, func(a, b TrafficSample) int { return cmp.Compare(a.Timestamp, b.Timestamp) })
 	return res
+}
+
+// trendBucketStart is the start of t's hour (or day) in t's own zone.
+func trendBucketStart(t time.Time, daily bool) time.Time {
+	hour := t.Hour()
+	if daily {
+		hour = 0
+	}
+	return time.Date(t.Year(), t.Month(), t.Day(), hour, 0, 0, 0, t.Location())
+}
+
+// threatTimestampLayouts are the forms security_threats.timestamp is found
+// in: the SQLite driver's (Go's time.String without the monotonic part),
+// SQLite's own, and the layout this package compares against.
+var threatTimestampLayouts = []string{
+	"2006-01-02 15:04:05.999999999 -0700 MST",
+	"2006-01-02 15:04:05.999999999-07:00",
+	time.RFC3339Nano,
+}
+
+// parseThreatTimestamp reads one stored threat timestamp. A time.Time is what
+// lib/pq returns for a timestamp without time zone: the writer's local wall
+// clock labelled UTC, which is re-read as local time. Text with no zone is
+// local for the same reason.
+func parseThreatTimestamp(v any) (time.Time, bool) {
+	switch x := v.(type) {
+	case time.Time:
+		return time.Date(x.Year(), x.Month(), x.Day(), x.Hour(), x.Minute(), x.Second(), x.Nanosecond(), time.Local), true
+	case []byte:
+		return parseThreatTimestamp(string(x))
+	case string:
+		text, _, _ := strings.Cut(x, " m=")
+		for _, layout := range threatTimestampLayouts {
+			if t, err := time.Parse(layout, text); err == nil {
+				return t, true
+			}
+		}
+		if t, err := time.ParseInLocation(threatTimestampLayout, text, time.Local); err == nil {
+			return t, true
+		}
+	}
+	return time.Time{}, false
 }
