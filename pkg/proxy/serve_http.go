@@ -6,11 +6,9 @@ package proxy
 import (
 	"log/slog"
 	"net/http"
-	"strings"
 	"sync/atomic"
 	"time"
 
-	"github.com/gsoultan/gateon/internal/auth/apitoken"
 	"github.com/gsoultan/gateon/internal/logger"
 	mwauth "github.com/gsoultan/gateon/internal/middleware/auth"
 	"github.com/gsoultan/gateon/internal/request"
@@ -66,51 +64,26 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // withholdManagementCredentials removes from r what would let the backend act
-// as a signed-in dashboard user (ADR 0041). A browser sends the session cookie
-// to every port on the dashboard's host, so without this every app behind the
-// gateway on that host received the admin's session. It is done here, the one
-// place every protocol's request passes on its way to a backend -- HTTP/1, h2,
-// gRPC and the WebSocket upgrade alike -- and after the route's middlewares,
-// which still see the request as the client sent it.
+// as a signed-in dashboard user or as a scrape client (ADR 0041, 0050). Since
+// ADR 0051 the base handler withholds them as a request enters the data plane,
+// before route matching and before any route middleware -- forwardauth and
+// introspection call out to servers an operator chose -- so by the time a
+// request gets here there is normally nothing left to remove. This is the
+// second line: it is the one place every protocol's request passes on its way
+// to a backend, HTTP/1, h2, gRPC and the WebSocket upgrade alike, and a
+// handler that reaches the proxy some other way is still covered.
 //
-// Without a session cookie or a PASETO bearer token this allocates nothing.
+// Without a session cookie or a management bearer token this allocates
+// nothing.
 func (h *ProxyHandler) withholdManagementCredentials(r *http.Request) {
-	mwauth.StripSessionCookie(r.Header)
-	authorization := r.Header.Get("Authorization")
-	if authorization == "" {
-		return
-	}
-	// A gateway API token (ADR 0050) is withheld by its shape: its prefix is
-	// gateon's own, so no app's credential has it, and recognising it needs no
-	// lookup on the request path.
-	if _, ok := apitoken.BearerToken(authorization); ok {
-		r.Header.Del("Authorization")
-		return
-	}
-	if h.sessions == nil {
-		return
-	}
-	token, ok := pasetoLocalBearer(authorization)
-	if !ok {
-		return
-	}
-	// Only a token this gateway's management plane accepts is withheld: an app
-	// may use PASETO v4.local tokens of its own, under its own key, and those
-	// are its business.
-	if _, err := h.sessions.VerifyToken(token); err == nil {
-		r.Header.Del("Authorization")
-	}
+	mwauth.WithholdManagementCredentials(r.Header, h.sessions)
 }
 
-// pasetoLocalBearer returns the token of a "Bearer v4.local." credential, the
-// only form a management session token takes.
-func pasetoLocalBearer(header string) (string, bool) {
-	const scheme, prefix = "bearer ", "v4.local."
-	if len(header) <= len(scheme)+len(prefix) || !strings.EqualFold(header[:len(scheme)], scheme) {
-		return "", false
-	}
-	token := header[len(scheme):]
-	return token, strings.HasPrefix(token, prefix)
+// ManagementSessions is the management plane's session check this handler
+// was built with, so the route's middlewares can refuse to send a session on
+// (ADR 0051). Nil when it has none.
+func (h *ProxyHandler) ManagementSessions() mwauth.TokenVerifier {
+	return h.sessions
 }
 
 func (h *ProxyHandler) logRequest(r *http.Request, targetURL string) {

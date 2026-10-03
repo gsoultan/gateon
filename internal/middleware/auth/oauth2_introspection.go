@@ -24,6 +24,10 @@ type OAuth2IntrospectionConfig struct {
 	ClientID         string // Required
 	ClientSecret     string // Required
 	TokenTypeHint    string // Optional: "access_token" or "refresh_token"
+	// ManagementSessions is the management plane's session check. A session
+	// it accepts is never posted for introspection, nor is the session cookie
+	// or an API token (ADR 0051).
+	ManagementSessions TokenVerifier
 }
 
 // oauth2IntrospectionResponse is the RFC 7662 introspection response.
@@ -86,7 +90,9 @@ func (v *OAuth2IntrospectionValidator) Handler(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		token := ExtractToken(r)
+		// The app's token, never the dashboard's: the session cookie and any
+		// management credential are not posted to the app's endpoint (ADR 0051).
+		token := ExtractAppToken(r, v.config.ManagementSessions)
 		if token == "" {
 			v.config.HandleFailure(w, r, next, fmt.Errorf("authorization header or token query required"))
 			return

@@ -278,3 +278,34 @@ func TestWebSocketBackendNeverSeesTheManagementSessionCookie(t *testing.T) {
 			c, survivingCookies)
 	}
 }
+
+// TestBackendNeverSeesAManagementBearerInASecondAuthorizationValue: a request
+// may carry Authorization twice. Only the first value used to be checked, so a
+// session or a scrape token sent second reached the backend (ADR 0051).
+func TestBackendNeverSeesAManagementBearerInASecondAuthorizationValue(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Seen-Authorization", strings.Join(r.Header.Values("Authorization"), " | "))
+	}))
+	t.Cleanup(backend.Close)
+	h := credentialTestHandler(backend.URL)
+	h.sessions = sessionsAccepting{token: "v4.local.MGMT", asked: new(int)}
+	defer h.Close()
+	front := httptest.NewServer(h)
+	t.Cleanup(front.Close)
+
+	req, err := http.NewRequest(http.MethodGet, front.URL+"/app", nil)
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+	req.Header.Add("Authorization", "Bearer v4.local.APP")
+	req.Header.Add("Authorization", "Bearer v4.local.MGMT")
+	req.Header.Add("Authorization", "Bearer "+apiTokenShaped)
+	resp, err := front.Client().Do(req)
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	_ = resp.Body.Close()
+	if got, want := resp.Header.Get("X-Seen-Authorization"), "Bearer v4.local.APP"; got != want {
+		t.Errorf("backend saw Authorization %q, want only the app's %q", got, want)
+	}
+}

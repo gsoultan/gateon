@@ -30,6 +30,10 @@ type ForwardAuthConfig struct {
 	PreserveRequestMethod bool     // Use same HTTP method; if false, use GET
 	MaxBodySize           int64    // Max body size when forwarding; 0 = 1MB default, -1 = unlimited
 	TLSInsecureSkipVerify bool     // Skip TLS cert verification (for dev)
+	// ManagementSessions is the management plane's session check. A session
+	// it accepts is never forwarded to the auth service, nor are the session
+	// cookie and API tokens, which are recognised without it (ADR 0051).
+	ManagementSessions TokenVerifier
 }
 
 // ForwardAuth returns a middleware that delegates auth to an external service.
@@ -151,6 +155,11 @@ func ForwardAuth(cfg ForwardAuthConfig) (Middleware, error) {
 					}
 				}
 			}
+			// The auth service is the operator's choice of server; the
+			// dashboard's credentials are not the operator's to send it. The
+			// base handler has already withheld them (ADR 0051); this is the
+			// second line, on the copy, so the backend's request is untouched.
+			WithholdManagementCredentials(authReq.Header, cfg.ManagementSessions)
 
 			// X-Forwarded-* headers (Traefik-style). Set *after* the copy
 			// above: Set replaces and Add appends, and these are the values the

@@ -31,6 +31,7 @@ func (f *Factory) createForwardAuth(cfg map[string]string) (Middleware, error) {
 		PreserveRequestMethod: bools.Get("preserve_request_method", false),
 		MaxBodySize:           int64(maxBody),
 		TLSInsecureSkipVerify: bools.Get("tls_insecure_skip_verify", false),
+		ManagementSessions:    f.sessions,
 	}
 	if err := bools.Err(); err != nil {
 		return nil, err
