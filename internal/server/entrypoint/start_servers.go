@@ -22,6 +22,7 @@ import (
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/deadline"
 	"github.com/gsoultan/gateon/internal/logger"
+	"github.com/gsoultan/gateon/internal/mgmtaddr"
 	"github.com/gsoultan/gateon/internal/middleware"
 	"github.com/gsoultan/gateon/internal/middleware/security"
 	"github.com/gsoultan/gateon/internal/middleware/security/identity"
@@ -185,7 +186,13 @@ func startSecureManagementServer(port string, deps *Deps, wg *syncutil.WaitGroup
 			"management.port to a free port)", addr, err)
 	}
 	logger.L.LogInfo("Secure Management Entrypoint started", "addr", addr)
-	wg.Go(func() { serveManagement(server, l, deps.Phantom) })
+	// From here on, the data plane refuses to connect to this listener
+	// (ADR 0052), and a service saved with a target on it is refused.
+	unregister := mgmtaddr.RegisterListener(l.Addr())
+	wg.Go(func() {
+		defer unregister()
+		serveManagement(server, l, deps.Phantom)
+	})
 	return nil
 }
 

@@ -8,6 +8,8 @@ import (
 	"errors"
 	"net"
 	"time"
+
+	"github.com/gsoultan/gateon/internal/mgmtaddr"
 )
 
 // SpeculativeProxy is a TCPProxy that can connect to a backend before it is
@@ -38,6 +40,13 @@ type Backend struct {
 // dialTimeout bounds a backend connect.
 const dialTimeout = 10 * time.Second
 
+// backendDialer opens every connection to a TCP backend, the health checks'
+// included. Control refuses one to this gateway's own management listener
+// (ADR 0052): an L4 route carries no request for the listener to tell apart,
+// so a TCP service pointed at it would hand the dashboard and API to whoever
+// reached the entrypoint, with the gateway's loopback address as the client.
+var backendDialer = &net.Dialer{Timeout: dialTimeout, Control: mgmtaddr.Control}
+
 // DialBackend picks a backend for client and connects to it, sending the
 // PROXY header first when the pool sends one.
 func (p *TCPBackendPool) DialBackend(ctx context.Context, client net.Conn) (Backend, error) {
@@ -45,8 +54,7 @@ func (p *TCPBackendPool) DialBackend(ctx context.Context, client net.Conn) (Back
 	if addr == "" {
 		return Backend{}, errNoBackend
 	}
-	dialer := net.Dialer{Timeout: dialTimeout}
-	conn, err := dialer.DialContext(ctx, "tcp", addr)
+	conn, err := backendDialer.DialContext(ctx, "tcp", addr)
 	if err != nil {
 		p.Release(addr)
 		return Backend{}, err

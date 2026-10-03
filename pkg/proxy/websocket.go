@@ -182,8 +182,7 @@ func (h *ProxyHandler) dialUpgradeBackend(r *http.Request, targetURL *url.URL) (
 	ctx, cancel := context.WithTimeout(r.Context(), upgradeDialTimeout)
 	defer cancel()
 
-	var d net.Dialer
-	rawConn, err := d.DialContext(ctx, "tcp", addr)
+	rawConn, err := backendDialer.DialContext(ctx, "tcp", addr)
 	if err != nil || scheme != "https" {
 		return rawConn, err
 	}
