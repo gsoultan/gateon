@@ -11,6 +11,804 @@ here after the fact.
 
 ## Unreleased
 
+### "Enable Revocation" now checks revoked tokens for JWT, PASETO and OIDC, and needs Redis
+
+**Read this before upgrading if any `auth` middleware has `enable_revocation: "true"`.**
+
+The switch was offered for JWT, PASETO and OIDC but only JWT read it, and only with
+Redis configured. A PASETO or OIDC route kept accepting a token whose `jti` you had
+written to Redis; a JWT route with the switch on and no Redis checked nothing.
+
+- All three now refuse a verified token while the Redis key
+  `<revocation_prefix><jti>` exists (default prefix `revoked_jti:`), with `401
+  token revoked`. A Redis lookup that fails refuses the request (`401 token
+  revocation status unavailable`), as JWT already did. A token with no `jti`
+  cannot be revoked by this list.
+- **With the switch on and no Redis configured, the middleware no longer builds:**
+  saving it is refused ("revocation needs Redis: ..."), and a stored one makes its
+  routes answer `503` until Redis is configured (Settings > Redis, then restart) or
+  the switch is turned off. Nothing could ever have been revoked on such a route --
+  the gateway has no other place to be told a token is revoked.
+- Required scopes are now read as the form shows them: separated by commas, spaces
+  or both (`read, write` and `read write` both mean two scopes). Required roles are
+  separated by commas and trimmed. A list typed with spaces after its commas used
+  to refuse every valid token.
+
+**Who is affected:** JWT/PASETO/OIDC auth middlewares with Enable Revocation on.
+Without Redis, turn the switch off (or configure Redis) before upgrading, or their
+routes answer 503. Routes whose required scopes or roles had spaces start
+accepting the tokens they were meant to. See ADR 0046.
+
+### `tls_binding` binds a session to the client certificate, and needs a secret
+
+**Read this if you use the `tls_binding` middleware or the Settings switch "TLS
+Session Binding".**
+
+`tls_binding` refused every TLS request carrying the session cookie (nothing ever
+issued the binding it checked) and did nothing over plain HTTP.
+
+- It now binds the session cookie your backend sets to the client certificate of
+  the TLS connection that received it: the gateway adds `<cookie_name>_binding`
+  next to the session, and later requests must carry that session from the same
+  certificate. Another certificate, no certificate, or plain HTTP is refused with
+  `403`; a request without the session cookie is not checked. Signing out (the
+  backend emptying or expiring the session) expires the binding too.
+- It needs a `secret` of at least 32 characters, the same on every gateway serving
+  the route. **A stored `tls_binding` without one no longer builds** and its routes
+  answer `503`. It needs a TLS entrypoint that asks clients for a certificate.
+- Saving a route that puts `tls_binding` on an HTTP entrypoint without TLS (or on
+  no named entrypoint while one lacks TLS) is refused.
+- The global Settings switch "TLS Session Binding" is retired: turning it on is
+  refused, and one already on no longer does anything (it used to refuse every TLS
+  request carrying the cookie) and logs a warning once. Use the middleware on the
+  routes that need binding, and turn the switch off.
+
+**Who is affected:** anyone with a `tls_binding` middleware (add a `secret` and serve
+it on TLS with client certificates, or remove it) or with the global switch on
+(turn it off; routes that were refusing every session start serving them).
+
+### CORS: a blank origin list allows no origin, and `*` never carries credentials
+
+- **A `cors` middleware with Allowed Origins left blank and no preset used to allow
+  every origin; it now allows none.** Put `*` in the list for every origin, or name
+  the origins. A blank field beside a preset still takes the preset's origins.
+- The Permissive, Standard and gRPC-Web presets no longer turn credentials on.
+  They granted `*` with `Access-Control-Allow-Credentials: true`, which every
+  browser refuses, so credentialed cross-origin calls already failed; uncredentialed
+  ones are unchanged.
+- Saving credentials together with origin `*` (cors or grpcweb) is refused; a stored
+  one is served without `Access-Control-Allow-Credentials`. Name the origins that
+  send cookies or an `Authorization` header.
+- A `grpcweb` middleware with the Restricted preset allowed every origin; it now
+  allows none, as the preset says.
+
+**Who is affected:** cors middlewares with an empty origin list (browsers calling
+those routes cross-origin are now refused until you add origins or `*`), and
+grpcweb middlewares on the Restricted preset.
+
+### XFCC values are escaped, and Forward By forwards the gateway's URI
+
+- Certificate fields in `X-Forwarded-Client-Cert` are now quoted and escaped when
+  they contain `,` `;` `=` `"` `\` or a space, as Envoy's format requires; a
+  certificate's URI SAN can no longer add pairs (such as a second `Hash=`). The
+  subject is always quoted, now with XFCC escaping rather than Go's (its
+  backslashes are no longer doubled). Backends parsing XFCC see the same values,
+  correctly delimited.
+- "Forward By" now emits `By=<by>` first, where `by` is a new field: the URI this
+  gateway names itself (the URI SAN of its certificate, e.g.
+  `spiffe://example.org/gateway`). Saving Forward By without an absolute URI is
+  refused; a stored one emits no `By` and logs a warning, as before.
+
+**Who is affected:** backends that read XFCC (values that needed quoting now
+arrive quoted); xfcc middlewares with Forward By on (add `by`).
+
+### Rate-limit Redis storage needs Redis; per-middleware "Trust Cloudflare Headers" is gone
+
+- Saving a rate limit with `storage: redis` on a gateway with no Redis is refused.
+  A stored one keeps limiting in each instance's memory (each instance allows the
+  full limit) and logs `effective_storage=local`.
+- The "Trust Cloudflare Headers" switch on rate-limit, IP-filter and GeoIP
+  middlewares never changed the client address they saw: the entrypoint resolves
+  it once, under Settings > Trust Cloudflare Headers (`waf.trust_cloudflare_headers`
+  / `GATEON_TRUST_CLOUDFLARE_HEADERS`). The dashboard no longer shows it, and drops
+  the stored key when you save. Saving a `trust_cloudflare_headers` value that
+  disagrees with the global setting is refused, naming the global setting; one
+  that agrees is accepted.
+
+**Who is affected:** multi-instance deployments that chose Redis storage without
+configuring Redis (configure Redis to share the count); anyone behind Cloudflare
+who relied on the per-middleware switch (turn on the global setting -- it was the
+only one that ever applied).
+
+### A full disk no longer takes the gateway down, and the trace store has a size budget
+
+The live trace store was bounded by age alone (about 1.1 KB a request, kept 7
+days on `standard`), so traffic decided how much disk it used. On a full disk it
+either retried a failed compaction in a loop at two cores, or -- when its
+write-ahead log hit the full disk -- exited the whole process, proxy included.
+
+- The trace store now has a **size budget**: 256 MiB / 2 GiB / 20 GiB on
+  `minimal` / `standard` / `enterprise`, or `GATEON_TRACE_STORE_MAX_MB`. Past it the
+  oldest traces are evicted every 30 seconds, whatever their age, down to four
+  fifths of it (INFO line). An hour the trace archive has not copied yet is
+  evicted anyway, with a WARN.
+- **Below a free-space floor** on its disk (a twentieth of the disk, at least
+  four memtables, at most 1 GiB) trace writes stop: each dropped trace is counted
+  in `gateon_trace_dropped_total{reason="disk_full"}`, an ERROR line says so once a
+  minute, and `/readyz` answers `200 ready, degraded: trace store paused: disk
+  nearly full ...` until the free space is half as much again above the floor.
+  Proxying is unaffected, so the instance stays in rotation; alert on
+  `gateon_trace_dropped_total`.
+- If the disk fills anyway, Pebble's retries back off (1 s doubling to 30 s), and
+  a write that fails on the full disk stops the trace store for the life of the
+  process (`/readyz`: `200 ready, degraded: trace store stopped ...`) instead of
+  exiting it. Free the
+  space and restart.
+- Pebble's errors are logged at ERROR/WARN, rate-limited, instead of every one at
+  INFO. New gauges: `gateon_trace_store_bytes`, `gateon_trace_store_max_bytes`.
+
+**Who is affected:** every install with the trace store on (`standard`,
+`enterprise`). On a busy gateway the budget, not the retention, now decides how
+far back traces go -- 2 GiB is about 1.9 million requests, five hours at 100 req/s.
+Raise `GATEON_TRACE_STORE_MAX_MB` or turn on the trace archive for more. A store
+already over its budget is cut to it 30 seconds after the upgrade starts. A
+Kubernetes readiness probe now takes a pod whose trace disk is nearly full out of
+rotation. See ADR 0049.
+
+### The gateway exits if the management port cannot bind, /readyz goes 503 for an unbound entrypoint and reports an unreachable database
+
+- **The management listener failing to bind is fatal**: the process exits `1`
+  with `refusing to run without a management plane: management listener could not
+  bind <addr>`, and systemd's `Restart=on-failure` restarts it. It used to log
+  `Management listen failed` and run on with no management plane.
+- **An entrypoint that cannot bind** (its port held by another process) is still
+  not fatal -- the other entrypoints keep serving -- but it is logged at ERROR,
+  `/readyz` answers `503` naming it (`entrypoint websecure could not listen on
+  :443: ...`), and `gateon_entrypoint_up{entrypoint="websecure"}` is `0`. It used to
+  answer `200`.
+- **The configuration database** is pinged every 10 seconds. While it does not
+  answer, `/readyz` answers `200 ready, degraded: configuration database
+  unreachable` -- the data plane keeps serving through it, so the instance stays
+  in rotation -- `gateon_config_db_up` is `0`, and `POST /v1/login` answers `503` ("sign-in is
+  unavailable ...") instead of `401` with the driver's error -- the dashboard shows
+  "The gateway is not ready to sign you in yet" rather than "Invalid username or
+  password".
+- `/readyz` joins several reasons with `; ` (it used `, `).
+- A 2FA sign-in against a database restored under a different session key now
+  explains that, instead of answering `failed to decrypt secret: cipher: message
+  authentication failed`.
+- The startup line `Gateon API Gateway started` no longer carries a `port`; the
+  management listener logs its own address.
+
+**Who is affected:** anyone whose management port is taken at start (it now
+restarts in a loop with the reason in the journal); anyone whose load balancer or
+Kubernetes probe reads `/readyz`, which now also goes `503` for an unbound
+entrypoint (a degraded instance -- full trace disk, unreachable configuration
+database -- stays `200` and says so in the body); scripts that matched the
+`401` of a failed sign-in during a database outage. See ADR 0049.
+
+### A relative SQLite path is in the data directory, and a set-up gateway refuses to start without its database
+
+- A relative SQLite path -- the default `gateon.db`, or any relative
+  `sqlite_path`/`database_url` -- now resolves against `GATEON_DATA_DIR` (else
+  `GATEON_STATE_DIR`, else `/var/lib/gateon` on Linux if it exists, else the
+  working directory). It used to resolve against the working directory, so the
+  tarball or a hand-run binary started elsewhere created an empty `gateon.db` and
+  reopened first-run setup. The Pebble trace store moves with it.
+- A gateway whose `global.json` says it was set up (`auth.enabled: true`, which
+  setup writes) **refuses to start** when its SQLite database file is missing, or
+  when the database it opens has no administrator, with a message saying how to
+  restore it. It used to create an empty one and reopen setup to whoever reached
+  the management port first.
+
+**Who is affected:** the packaged systemd unit already started in
+`/var/lib/gateon` and is unaffected. A tarball or hand-run install started from a
+directory other than its data directory, with `GATEON_DATA_DIR` set elsewhere,
+will now open the database in `GATEON_DATA_DIR`: move `gateon.db*` (and
+`telemetry_pebble/`) there before upgrading, or set an absolute path. Anyone who
+deliberately started a set-up gateway on an empty database to re-run setup must
+now move `global.json` aside first. See ADR 0049.
+
+### The access log is capped per second
+
+The access log wrote one stdout line per request. Under journald's default rate
+limit (10000 lines in 30 s) that silenced every line from the service -- ERRORs
+and security events included -- once traffic passed about 333 req/s.
+
+- At most 50 / 100 / 200 access-log lines a second (`minimal` / `standard` /
+  `enterprise`) are written across the gateway; `GATEON_ACCESS_LOG_MAX_PER_SECOND`
+  overrides it, `0` lifts the cap. A WARN once a minute says how many lines were
+  left out. Below the cap nothing changes; the trace store still records every
+  request.
+
+**Who is affected:** deployments that ship the stdout access log somewhere and
+serve more than the cap. Set `GATEON_ACCESS_LOG_MAX_PER_SECOND=0` (and raise
+journald's `RateLimitBurst=` for the unit, or log to a collector that does not
+rate-limit) to keep every line. See ADR 0049.
+
+### Container image and Helm chart: global.json lives on the data volume, so first-run setup completes
+
+The image had no `/etc/gateon`, and the chart mounted it read-only, so setup failed
+(`read-only file system`) and so did every save of global settings.
+
+- The image and chart now set `GLOBAL_CONFIG_FILE=/var/lib/gateon/global.json`
+  (the chart: `<persistence.mountPath>/global.json`) and `GATEON_DATA_DIR`.
+- A `global.json` mounted at `/etc/gateon/global.json` is a **seed**
+  (`GATEON_GLOBAL_CONFIG_SEED`): copied to the data volume the first time the volume
+  has none, and not read again.
+- The image's `/var/lib/gateon` is owned by the nonroot user, so a named volume
+  mounted there is writable: `docker run -v gateon-data:/var/lib/gateon -p 8080:8080
+  <image>`. Still distroless, nonroot, CGO-free.
+- The chart's `appVersion` is `1.0.0`, the release that exists (it was `2.7.0`);
+  chart version `0.3.0`.
+
+**Who is affected:** container users who mount a writable `/etc/gateon` and keep
+`global.json` there: on the first start after the upgrade it is copied to
+`/var/lib/gateon/global.json` (which must be on a persistent volume), and from then
+on that copy is the live one. To keep the old layout, set
+`GLOBAL_CONFIG_FILE=/etc/gateon/global.json` and `GATEON_GLOBAL_CONFIG_SEED=`.
+Helm users: changes to `globalConfig`, `externalDatabase` or `redis` no longer
+reach an existing install after its first start; change those in the dashboard.
+See ADR 0049.
+
+### First-run setup is all or nothing
+
+A setup whose `global.json` write failed used to leave the administrator it had
+created (and the auth service it had installed) behind; where `global.json` already
+existed, that closed setup for good over a config without the session key or
+`auth.enabled`. A failed setup now removes what it did, so setup stays open and a
+retry starts clean.
+
+**Who is affected:** nobody whose setup succeeded. See ADR 0049.
+
+### The systemd unit holds only CAP_NET_BIND_SERVICE; eBPF and HA need a drop-in
+
+- The packaged unit (and the one `gateon install` writes) no longer grants
+  `CAP_BPF` and `CAP_NET_ADMIN`, which eBPF and HA's virtual IP need and nothing
+  else does. Both features are off by default. To use either, link the shipped
+  drop-in and restart:
+  `mkdir -p /etc/systemd/system/gateon.service.d && ln -s /usr/share/gateon/systemd/ebpf-ha.conf /etc/systemd/system/gateon.service.d/ && systemctl daemon-reload && systemctl restart gateon`
+  (with `gateon install`, `systemctl edit gateon` and paste the lines in
+  doc/services.md).
+- The unit adds systemd's standard sandboxing (`PrivateDevices`,
+  `ProtectKernelTunables`/`Modules`/`Logs`, `ProtectControlGroups`, `ProtectClock`,
+  `ProtectHostname`, `RestrictNamespaces`, `RestrictRealtime`, `RestrictSUIDSGID`,
+  `LockPersonality`, `RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK`,
+  `SystemCallFilter=@system-service` with `SystemCallErrorNumber=EPERM`).
+- `MemoryMax=90%`, and gateon now derives its Go soft limit from a cgroup memory
+  limit when neither `GATEON_MEMORY_LIMIT` nor `GOMEMLIMIT` is set: 85% of it, about
+  1.5 GiB on a 2 GB host -- the figure doc/deployment-sizing.md recommended. This
+  also applies to a container started with `--memory` and no `GOMEMLIMIT`.
+- `EnvironmentFile=-/etc/default/gateon`: put `GATEON_ENCRYPTION_KEY` there,
+  `root:root 0600`, not in an `Environment=` line, which any local account can read
+  with `systemctl show`.
+- `Environment=GATEON_DATA_DIR=/var/lib/gateon`; `Documentation=` points at the
+  right repository; the `# Environment=PORT=8080` hint is gone -- `PORT` never moved
+  the management listener. Use `GATEON_MANAGEMENT_PORT`.
+
+**Who is affected:** anyone running eBPF or HA under the packaged unit or `gateon
+install`: after the upgrade, enabling either logs `eBPF is enabled but this process
+lacks the capabilities` (HA: `Failed to add VIP`) until the drop-in is in place.
+Anyone who ran something unusual from the gateway process (a hook needing a device
+or a namespace) may need a drop-in relaxing the sandbox. On hosts with more than
+2 GB, `MemoryMax=90%` and the derived soft limit apply in proportion. See ADR 0049.
+
+### Package upgrades leave the service as you had it
+
+The deb/rpm scripts enabled and restarted the service on every upgrade, undoing a
+deliberate `systemctl disable` (a standby node, maintenance). On rpm it was worse:
+the old package's scriptlet ran last and **stopped and disabled a running service
+on every upgrade**.
+
+- A fresh install still enables and starts the service. An upgrade records
+  whether it was enabled and running first and leaves it that way, including when
+  upgrading from v1.0.0 (whose own scriptlets still run).
+- The Windows service wrapper XML is no longer installed as
+  `/etc/gateon/gateon-service.xml`; an existing copy is left in place by dpkg as an
+  obsolete conffile and can be deleted.
+
+**Who is affected:** deb/rpm installs. rpm hosts that worked around the stop on
+upgrade (re-enabling after each one) can stop doing so. See ADR 0049.
+
+### Five wrong passwords no longer lock an account for everyone; sign-in failures are counted per address
+
+A stranger sending five wrong passwords for `admin` used to lock the account for
+fifteen minutes for everyone -- the owner's right password from their own address
+included -- and could keep it locked indefinitely (M6).
+
+- Failures are now counted per account **and source** (an IPv4 /24, an IPv6 /64):
+  five lock that pair for fifteen minutes, and nobody else.
+- Twenty failures for one account from any number of sources within fifteen minutes
+  put it "under attack" for fifteen minutes (renewed while refused attempts keep
+  coming). While it holds, only addresses the account has signed in from before may
+  try; every other address gets "account locked". The eight most recent sign-in
+  networks per account are remembered (migration 67, `users.login_sources`), so this
+  survives a restart; an account that has never signed in since the upgrade has none
+  yet.
+- The counts are in memory and per instance: a restart clears them, and each node of
+  an HA pair counts on its own.
+- The stored count (`failed_attempts` / `locked_until`) is now used only by the
+  two-factor code and by the password prompts inside the dashboard (password change,
+  2FA setup). Wrong passwords there lock that prompt for fifteen minutes, not sign-in;
+  wrong sign-in passwords no longer lock those prompts. A correct password no longer
+  clears the two-factor code's count, which let whoever held the password guess TOTP
+  codes without ever reaching the lock.
+- Unknown usernames are answered exactly like real ones, including "account locked"
+  and the time it takes (a bcrypt comparison).
+
+**Who is affected:** everyone. Nothing to configure. If an administrator is refused
+with "account locked" during an attack, sign in from a network the account has used
+before, or wait fifteen minutes after the attack stops.
+
+### New passwords must have at least 12 characters
+
+There was no password rule: `a` was accepted, and an account could be created with
+no password at all (M11).
+
+- A password set at first-run setup, when creating a user, when an administrator
+  resets one, or when you change your own must have at least 12 characters, at most
+  72 bytes, must not contain the username, must not be one character repeated or a
+  simple run, and must not be one of a short built-in list of the most common long
+  passwords. The check is offline.
+- Creating a user now requires a password. Editing a user without one keeps theirs.
+- A refusal is `400` over REST (`InvalidArgument` over gRPC/Connect) naming the rule,
+  and the dashboard states the rule under every password field.
+- Existing passwords are not affected and keep working until they are changed.
+
+**Who is affected:** anyone scripting user creation or password changes with short
+passwords (`/v1/users`, `/v1/users/password`, `/v1/setup`). Development: the
+`dev/seed` default password is now `gateon-dev-passphrase`; the e2e accounts use
+`e2e-horse-battery-42`.
+
+### An anonymous password change is refused even with authentication switched off
+
+With no authenticated caller -- authentication switched off, or any path that
+reached the API without a credential -- `POST /v1/users/password` and the gRPC
+`ChangePassword` changed the password of whatever account id they were given (M3).
+They now answer `403` / `PermissionDenied` and change nothing.
+
+**Who is affected:** only a deployment that relied on changing passwords without
+signing in, which is the hole this closes.
+
+### New installs record a signed audit log, and the log can be verified
+
+The audit log was off by default, so a default install recorded nothing, and its
+HMAC chain was never checked (M8).
+
+- **New installs:** first-run setup now turns `audit.enabled` and
+  `audit.sign_entries` on and generates `audit.signature_key`.
+- **Existing installs keep their setting.** `"enabled": false` is not written to
+  `global.json` (it is the default), so an install that switched audit off cannot be
+  told from one that never chose, and turning it on would override a deliberate
+  choice. Instead the gateway logs at startup `the audit log is off ...`
+  (`event=audit_disabled`) or `audit entries are not signed ...`
+  (`event=audit_unsigned`). To turn it on: Settings, Audit, enable **and** sign.
+- An administrator can verify the chain: **Audit Logs → Verify integrity** in the
+  dashboard, or `GET /v1/audit/verify?from=<RFC3339>&to=<RFC3339>&limit=<n>` (gRPC/
+  Connect `VerifyAuditChain`). Each call checks at most 5,000 entries (default 1,000)
+  and answers `intact`, or the first entry that breaks the chain and why; continue
+  with `afterId=<nextAfterId>`. With signing off it answers `400` (`FailedPrecondition` over gRPC/Connect) saying "audit signing is off".
+- Entries written before signing was on, or while it was off, do not verify; start
+  the check from a time after them.
+- An unsigned entry now ends the chain and the next signed one starts a new one, as a
+  restart already did.
+
+**Who is affected:** new installs (audit on); existing installs with audit off (a
+startup warning, no behaviour change); anyone with an HA pair writing one audit
+database (each node chains on its own, so the combined log does not verify as one
+chain).
+
+### Prometheus can scrape `/metrics` with a long-lived, revocable API token
+
+`/metrics` accepted only a user's eight-hour session, so a scraper needed a viewer
+account and a script signing it in on a timer.
+
+- An administrator creates a token under **API Tokens** in the dashboard (or
+  `POST /v1/api-tokens {"name":"prometheus","scopes":["metrics:read"],"ttlDays":0}`,
+  gRPC/Connect `CreateApiToken`). The token (`gateon_tok_…`) is shown **once**; only
+  its hash is stored. Tokens are listed with a hint, creator, last use and expiry,
+  and revoked with `DELETE /v1/api-tokens/{id}` (`RevokeApiToken`), effective on the
+  next request. At most 50 exist. Administrators only.
+- The token is accepted only as `Authorization: Bearer <token>` on `/metrics`. On
+  any other path, and on every transport, it is refused with `401`; it is never a
+  dashboard session, and the proxy strips anything shaped like one before a request
+  reaches a backend.
+
+**Who is affected:** anyone scraping `/metrics`. The viewer-account workaround keeps
+working; replace it at your convenience: create a token, put it in a file only
+Prometheus can read, and point the job's `authorization.credentials_file` at it
+([production-runbook.md](production-runbook.md) section 5 has the steps).
+
+If you used the viewer account for scraping: after switching, delete that account
+and its timer (`/usr/local/bin/gateon-metrics-token`, `/etc/gateon-metrics.pw`).
+
+### IP reputation feeds now refuse what they list, on every route (ADR 0044)
+
+"IP Reputation -- sync with threat feeds to block known malicious actors"
+(Settings > Advanced Security) used to load the feeds and refuse no one unless
+the route also ran a WAF with its own, separate "IP Reputation" switch on. A
+listed address is now refused on every HTTP and TCP entrypoint and every route,
+with or without a WAF, by the same check that refuses a blocked address: HTTP
+answers `403 Forbidden: Address Listed by an IP Reputation Feed`, a TCP
+entrypoint closes the connection, and the Security Hub lists the refusal.
+Loopback and `GATEON_MITIGATION_ALLOWLIST` are never refused. A feed listing
+scores 100, so any block threshold up to 100 refuses it; set the threshold
+above 100 to load a feed without refusing anyone.
+
+The WAF's own "IP Reputation" switch is now labelled "Behavioural Reputation":
+it refuses clients whose reputation on this gateway has fallen below 20, as it
+did before.
+
+**Who is affected:** installs with IP reputation enabled and feed URLs set.
+Before upgrading, check what your feeds list -- in particular any private or
+internal range a broad feed may include -- and add addresses you must keep
+serving to `GATEON_MITIGATION_ALLOWLIST`.
+
+### A country list needs a GeoIP database, and the GeoIP card says what the lists do (ADR 0044)
+
+Without a MaxMind database every client resolves to the unknown country `XX`,
+so a global "Blocked Countries" list refused no one -- on a default install,
+which has no licence key and so no database -- while saving with success, and
+an "Allowed Countries" list refused everyone. Now:
+
+- Saving a new or changed country list (Settings > GeoIP, `PUT /v1/global`,
+  gRPC, or a "block country" recommendation) with geofencing enabled and no
+  database is refused with `400`/`InvalidArgument`, saying what to install:
+  upload a GeoLite2 City or Country `.mmdb` under Settings > GeoIP, download it
+  there with a MaxMind licence key, or set `geoip.db_path` /
+  `GATEON_GEOIP_DB_PATH`. Naming a database that opens in the same save is
+  enough. An entry that is not a two-letter country code (`USA`, `China`) is
+  refused, globally and on a route `geoip` middleware, where it used to match
+  nothing.
+- A list already stored keeps saving with your other settings. While no
+  database is loaded, an allow list refuses every request (fail closed, as
+  before) and a block list refuses no one (as before); both are now logged at
+  error once a minute, and the GeoIP card shows a red notice saying which, from
+  the new `geofence` field of `GET /v1/geoip/status`.
+- Saving a GeoIP database path that does not open no longer unloads the
+  database already in use (it used to, until restart). A GeoLite2 Country
+  database on its own now resolves countries.
+
+**Who is affected:** installs with a global country list and no GeoIP database
+(their block list was not enforced; install a database to enforce it), and
+API clients that save country names instead of codes.
+
+### A route WAF keeps what the global WAF runs, and its category switches work (ADR 0044)
+
+With the global WAF on, a route that has its own `waf` middleware runs that WAF
+instead of the global one. It used to fill the settings it left unset from the
+raw global switches, which the global WAF itself ignores, so attaching a WAF to
+a route dropped the global WAF's malware and ransomware rules there (`/c99.php`
+went from 403 to 200), its paranoia level, and its enforcement mode. A route
+WAF now starts from what the global WAF actually runs; a setting the route
+sets explicitly adds to or narrows it on that route only.
+
+The category switches on a route WAF (SQL Injection, XSS, File Inclusion, Code
+Execution, PHP, Java, Node.js, Scanner) now switch their family off, including
+the gwaf core rules that blocked it whatever the switch said. Turning Code
+Execution off also lets PHP, Java and Node.js code injection through. Rules no
+switch names still run.
+
+The global WAF card shows what the global WAF runs, read from the running
+engine, instead of switches it never read: every category is on and cannot be
+narrowed gateway-wide; narrow a family for one application with a route WAF.
+"Use OWASP Core Rule Set" and "DOS Protection" are gone (neither selected any
+rule; a stored `dos_protection` is named in the log). The card and the route
+editor read the new `GET /v1/waf/effective`, and the security posture's `waf`
+carries `mode` (`enforcing`, `audit_only`, `off`), so an audit-only WAF is no
+longer reported the same as an enforcing one.
+
+A route WAF no longer has its own "Trust Cloudflare Headers" switch. The client
+address is resolved once, from Settings > Global WAF Settings > "Trust
+Cloudflare IPs/Headers" (or `GATEON_TRUST_CLOUDFLARE_HEADERS`), which only an
+administrator may change. A route `waf` middleware whose
+`trust_cloudflare_headers` disagrees with that setting is refused at save, and
+a stored one fails to build, so its route answers 503 until the key is removed
+or made to match; one that agrees keeps working. The same holds after an
+administrator changes the global setting.
+
+**Who is affected:** routes with their own `waf` middleware under an enabled
+global WAF -- they now enforce malware and ransomware detection and the global
+paranoia level and mode, so review them for false positives before upgrading;
+set `malware_detection`, `paranoia_level` or `audit_only` on the route to keep
+the old behaviour deliberately. Route WAFs with a category switched off now
+stop detecting that family.
+
+### A malformed IP filter entry is refused, and a stored one takes its route down until fixed (ADR 0047)
+
+**Read this before upgrading if any `ipfilter` middleware has an entry that is not
+a plain IP address or CIDR** -- a wildcard (`10.0.0.*`), a range
+(`10.0.0.1-10.0.0.9`), a mask past the address size (`/33`, `/129`), or two
+addresses typed as one entry (`10.0.0.1 10.0.0.2`).
+
+Such an entry used to be dropped with a server-side WARN while the save answered
+`200`: a deny list of `127.0.0.*` blocked nobody, and the operator was told it was
+saved.
+
+- Saving one is now refused (REST `400`, gRPC error, config import error), naming
+  the list and the entry: `middleware config "deny_list": "127.0.0.*" is not
+  valid: ...`. The dashboard marks it before you save.
+- **An existing filter with such an entry no longer builds after the upgrade, and
+  every route using it answers `503`** until the entry is fixed, as any security
+  middleware that cannot be built does. It is not served unfiltered.
+- Fix: write the CIDR (`10.0.0.0/24` for `10.0.0.*`), or split the entry.
+
+**Who is affected:** operators with a hand-typed `allow_list`/`deny_list`. Lists
+the dashboard's Cloudflare import or "Block IP" wrote are well-formed.
+
+### Every service's targets are health-checked, and an all-down route answers 503 (ADR 0047)
+
+A service with health check "Auto" and no path -- the dashboard's default -- ran
+no health check at all: a dead backend stayed in rotation for good (one request in
+N got `502`) and the dashboard showed it healthy and CLOSED.
+
+- With no path, the gateway now checks each target by **opening a TCP connection
+  to it** every 15 s. Two failures in a row take it out of rotation; two successes
+  bring it back (the existing Unhealthy/Healthy Threshold settings). A path, when
+  set, is requested as before (a 5xx or no answer is a failure).
+- When every target is out of rotation the route answers **`503`** "no healthy
+  targets available for service" (it answered `502`).
+- Saving a service with health check type **HTTP and no path is refused**
+  ("an HTTP health check needs a path"); choose Auto or TCP to check by
+  connecting. A stored one checks by connecting.
+- Negative health thresholds are refused at save.
+
+**Who is affected:** every HTTP/gRPC service without a health check path (they
+now get checked; backends will see a TCP connection every 15 s), and monitoring
+that alerts on `502` for a service with no live backend (it is `503` now).
+
+### Target weights are honoured under Round Robin, and refused where they would be ignored (ADR 0047)
+
+The service form showed a Weight on every target, and the default policy, Round
+Robin, ignored it (weights 1:2:6 gave 30/30/30).
+
+- **Round Robin now sends each target traffic in proportion to its weight**,
+  interleaved (6:1:1 goes a a b a a c a a, not six in a row). Equal weights --
+  what the form saves unless you change one -- are plain rotation, as before.
+  Weighted Round Robin is the same balancer, and is now interleaved too.
+- Once any target has a weight, a target at weight 0 gets no traffic (standby), as
+  under Weighted Round Robin. A service saved through the API with some targets at
+  0 and others above 0 under Round Robin will stop sending traffic to the 0s.
+- Least Connections, the predictive balancer, and every TCP/UDP service ignore
+  weights, so **saving one of them with different weights on its targets is
+  refused**; the form hides the weight field there and saves 1. Unknown policy
+  names (`ip_hash`, typos) and negative weights are refused too -- they were
+  saved and balanced round robin.
+- A canary can now run on a Round Robin service.
+- REST answers a refused service save `400` with the reason (every save error was
+  `500 "failed to save service"`); gRPC answers `InvalidArgument`.
+
+**Who is affected:** services whose targets have different weights under Round
+Robin (traffic shifts to match the weights on upgrade); API/config users with
+non-standard policy names or weights on least-connections/TCP services (their next
+save is refused; stored services keep running).
+
+### "Max Concurrent Requests" says it is per client address; its total mode is a total (ADR 0047)
+
+The in-flight middleware always counted per client address (`429` when one address
+is at the cap); the dashboard labelled it "Max Concurrent Requests". It now reads
+"Max Concurrent Requests per Client Address", and the editor offers the other mode,
+"In total, for each route this is attached to" (`per_ip: "false"`, `503` when
+full). That mode used to count per request `Host` -- which the client writes -- so
+it capped nothing; it is now one count per route.
+
+**Who is affected:** anyone who set `per_ip: "false"` in raw JSON (the cap now
+holds), and anyone who read the old label as a total (it never was; choose the
+total mode if that is what you want).
+
+### Circuit breakers can be created in the dashboard, and an open one shows OPEN (ADR 0047)
+
+Middlewares > Add Middleware > Circuit Breaker (error threshold, minimum requests,
+window, sleep window). On the Circuit Breaker page and in route stats, a target
+behind an open breaker now reads OPEN (it read CLOSED while the route answered
+`503`), and `/v1/routes/stats` carries `breaker` with the route breaker's own state.
+
+**Who is affected:** dashboards and scripts reading `circuitState` -- it is OPEN
+when either the health check or the route's breaker has taken the target out.
+
+### Dashboard counts survive configuration changes and memory-pressure purges (ADR 0047)
+
+Per-target request and error counts started again at zero whenever a route was
+rebuilt -- on any service save (even of another service) and when the resource
+governor purged caches above 80% host memory. They now carry over for every
+target the rebuilt route keeps.
+
+**Who is affected:** nobody needs to act.
+
+### Mitigating a loopback or allowlisted address says it is not enforced (ADR 0047)
+
+`POST /v1/diagnostics/mitigate` for `127.0.0.1`, `::1` or an address in
+`GATEON_MITIGATION_ALLOWLIST` answered "successfully mitigated" while every request
+from it was still served. The block is still recorded, but the answer is now
+`success: false`: "recorded on the block list but is not enforced", naming the
+exemption.
+
+**Who is affected:** scripts that treat that success as "blocked" (it never was).
+
+### Canary rollback judges each step on its own traffic, and is shown on the Circuit Breaker page (ADR 0047)
+
+A canary's error-rate limit was compared with the service's lifetime error rate, so
+a long healthy history diluted a failing step below any limit. Each step is now
+judged on the requests it served. A rollback is listed in the Circuit Breaker
+page's Event Timeline as `service <id> (canary)`, OPEN, with the step's rate.
+The p99 limit still reads the service's lifetime latency.
+
+**Who is affected:** canaries with an error-rate limit roll back sooner, on the
+step that fails.
+
+### The JavaScript challenge works on every route, and only a client that does its work passes
+
+**Read this before upgrading if any route uses a `bot_management` middleware with
+`enable_js_challenge`, or if global proof-of-work (`security_advanced.pow`) is on.**
+
+The bot-management JavaScript challenge did not do what it was described as doing
+(ADR 0045):
+
+- **On a route with a path rule it could never be passed.** The challenge page
+  fetched `/_gateon/seed` and posted to `/_gateon/challenge`; on a route such as
+  `PathPrefix(/app)` those requests are not the route's, so they were `404` and
+  every visitor was held at the challenge. Only routes whose rule happened to
+  match `/_gateon/*` (a `Host()` route, a catch-all) worked.
+- **Where it worked, curl passed it.** The "work" was a two-second wait: fetch the
+  seed, sleep, post it back. No JavaScript had to run.
+
+Now:
+
+- The page asks the browser to find a proof of work (an 18-bit SHA-256 puzzle;
+  0.1-0.5 s on a desktop browser, a second or two on a slow phone) and hands the
+  answer back **at the URL that was challenged**, marked by the
+  `X-Gateon-Challenge` header. That reaches the same route whatever its rule.
+  The gateway answers those marked requests itself; they never reach the backend.
+  `/_gateon/seed` and `/_gateon/challenge` are no longer special paths.
+- A pass (`gateon_bot_challenge` cookie, HttpOnly, bound to the client's address
+  and User-Agent, lasting `challenge_timeout`) is issued only for a correct answer.
+  **Every pass issued before the upgrade is invalid, so every visitor is challenged
+  once more after it.**
+- **Clients that cannot run JavaScript are refused on a challenged route** --
+  curl, SDKs, most uptime monitors and link-preview bots. That was always the
+  intent; it is now true. Give such clients a route without the middleware: the
+  challenge has no allowlist (`GATEON_MITIGATION_ALLOWLIST` exempts a source from
+  proof-of-work, not from this).
+- The challenge proves work, not a human: a headless browser passes, and so does a
+  bot that solves the puzzle natively, at a CPU cost per address and User-Agent.
+  The dashboard now says so beside the switch.
+- The page is accessible: a status line read by screen readers, a `<noscript>`
+  explanation, and, when a check fails or expires, a message and a Try again
+  button instead of an automatic reload.
+
+**Who is affected:** every route with a `bot_management` middleware that has the
+JavaScript challenge on (or inherits it from the global Bot Management defaults).
+Routes with a path rule start admitting browsers for the first time; all such
+routes start refusing clients that run no JavaScript.
+
+### "Browser Integrity" is relabelled "Browser Header Check", and now checks Firefox
+
+The check never verified that a client was a browser: it refuses a request with no
+User-Agent, and one whose User-Agent claims a modern browser but carries none of
+the `Sec-Fetch-*` headers such a browser sends. A client that does not claim to be
+a browser (curl, python-requests, Googlebot) passes, as before. The dashboard now
+says exactly that. **Firefox is now among the browsers it checks** (Firefox has
+sent fetch metadata since version 90): a request claiming Firefox without any
+`Sec-Fetch-*` header is now refused with `403`.
+
+**Who is affected:** routes with `enable_browser_integrity`; scripts that send a
+copied Firefox User-Agent and nothing else.
+
+### Proof-of-work now challenges the clients its setting names
+
+Global proof-of-work (`security_advanced.pow.score_threshold`, "Serve challenge when
+IP threat score exceeds this", recommended 5) challenged a client only when its
+*reputation* was below the threshold. At 5 that is a reputation the reputation
+blocker refuses first, so **proof-of-work has never challenged anyone**. It now
+challenges a client whose threat score, `100 - reputation`, *exceeds* the
+threshold -- the scale the tarpit beside it already used. At the recommended 5 a
+client is challenged after its first penalty (one blocked attack takes a score
+from 100 to 50).
+
+- A threshold of `0` challenges every client with any penalty, not every client.
+- A route-level `pow` middleware's `threshold` (default `20`) has the same meaning
+  now: it challenges a client whose threat score exceeds 20.
+- A browser that solves the puzzle gets a `gateon_pow_pass` cookie for 10 minutes,
+  bound to its address and User-Agent; before, the solution was honoured only on
+  the request that carried it, so the browser page solved, reloaded and was
+  challenged again, indefinitely. API clients may still send the solution headers
+  on each request.
+- Serving a challenge is no longer recorded as a security threat. It used to be,
+  and a challenge plus the blocked attack that caused it correlated into a
+  critical incident that dropped the client's reputation to 0, so it was blocked
+  before it could solve anything. Served and solved challenges are counted on
+  `gateon_middleware_bot_management_total{outcome="pow_challenge_served"|"pow_challenge_solved"}`.
+  A wrong solution is still recorded as a threat.
+
+**Who is affected:** anyone with `security_advanced.pow.enabled` or a `pow`
+middleware. Expect challenges (`429` with the puzzle for API clients, the challenge
+page for browsers) where there were none. If that is not wanted, raise the
+threshold or turn proof-of-work off before upgrading.
+
+### The global Bot Management settings are labelled as route defaults
+
+The Settings > WAF "Global Bot Management" switches were never applied to every
+route: they are the defaults a route's Bot Management middleware falls back to for
+any setting the route leaves unset. The section is now titled "Bot Management
+Defaults" and says so. Nothing about their effect changed.
+
+**Who is affected:** operators who turned these on expecting every route to be
+protected; attach a Bot Management middleware to the routes that need it.
+
+### The Security Hub's numbers are computed from what the gateway runs (ADR 0048)
+
+Several Security Hub figures were constants or counted the wrong thing. They now
+describe the running gateway, and most installs will see them change on upgrade.
+
+- **Security Posture %** is computed by the gateway from configuration only: a
+  weighted sum of WAF (40), TLS on reachable entrypoints (20), management plane
+  not exposed (20), anomaly detection (10) and audit logging (10). A control
+  earns full weight when it blocks, half when it only detects (an audit-only
+  WAF) or covers part, none when off. Traffic and attackers no longer move it.
+  It used to read 100% with nothing configured; expect a lower figure. Hover
+  it for each control's share.
+- **WAF card** reads "Detecting only (audit)" for an audit-only WAF and
+  "Blocking on N of M routes" when some route's own WAF middleware is audit-only
+  or it has none. A route WAF replaces the global one on that route, so a
+  route-level audit-only WAF is now shown as such. The AI Advisory reports
+  audit-only as a finding.
+- **Signature engine card** reads "Not running" unless a route has a File
+  Security middleware with signature scanning; it used to say "11 rules active"
+  on every install.
+- **Client Reputation card** (was "Reputation Status: Good", a constant) counts
+  the clients whose reputation has been lowered and gives the lowest score.
+- **Mitigation funnel** counts each request once (it showed twice the traffic)
+  and no longer lists IP- or host-filter refusals as "Allowed": "Allowed" now
+  means a backend was reached, refusals no stage claims appear as "Other
+  refusals", blocked sources (shuns, fingerprint blocks) are their own stage.
+  The counts restart with the gateway, as before.
+- **Threats from 127.0.0.1 / ::1 are now recorded and shown.** Behind a local
+  nginx or cloudflared without trusted proxies every client is loopback, and
+  their WAF blocks used to be invisible. They are held against nobody: no
+  reputation penalty, no automatic block, no correlated incident.
+- **Attack-trend chart** now has data on SQLite (it was always empty), and on
+  Postgres its hours are no longer shifted by the server's UTC offset.
+- **Bandwidth by IP** counts a chunked upload at its size (it counted 256 bytes).
+- **"Unlisted route" findings** are no longer raised for requests refused before
+  routing (a banned client hitting routes that exist).
+- **Bot management coverage** in the AI Advisory counts the routes that carry a
+  bot management middleware; the global bot settings are only its defaults and
+  no longer count as protection. The funnel's bot stage now counts challenges
+  served and bot blocks (it counted outcomes nothing records).
+- **"Mitigated in 24h"** is relabelled "Mitigated Today": it has always counted
+  since midnight.
+
+**API:** `GET /v1/security/posture` adds `waf.mode`, `waf.routes`,
+`signatures.routes` and `score`, and **removes `waf.autoUpdate`**: rules are
+compiled in and nothing downloads them. `waf.customRulesFromDisk` reports what
+the old `auto_update_rules` flag does (load a rules directory already on disk).
+Keys are lowerCamel, as they always were on the wire; doc/security-posture.md
+now says so. The metrics snapshot's `mitigationFunnel` adds `refused`,
+`answered`, `otherRefused` and `mitigationBlocked`; `totalMitigated` now equals
+`refused`. New Prometheus counter: `gateon_request_outcomes_total{outcome}`.
+
+**Who is affected:** everyone who reads the Security Hub, and anyone whose SIEM
+or script reads `waf.autoUpdate` (gone) or derived "allowed" traffic from the
+funnel (now counted once).
+
+### The compress middleware honours "Max Compressed Size" (max_buffer_bytes)
+
+The setting was saved and never read, so every response was compressed. A
+response that declares a longer body (Content-Length) is now sent uncompressed;
+the default is 10 MB. **Who is affected:** routes with a compress middleware
+whose responses declare more than the configured size -- they now go out
+uncompressed, as the setting always said.
+
+### make check-config checks that a setting is used, not just mentioned
+
+`go run ./scripts/checkconfig` (also in `make sec` and CI) now fails when a
+struct field filled from configuration is read by nothing, and when a key the
+dashboard's middleware editors write has no row in the effect registry
+(`internal/middleware/dashboard_key_effects_test.go`) and no line in
+`scripts/checkconfig/effects-baseline.txt`. **Who is affected:** contributors
+adding a dashboard setting -- add an effect row that flips it and shows the
+gateway answering differently.
+
 ### OIDC and JWKS-verified JWT auth now require an audience; existing ones without one stop serving
 
 **Read this before upgrading if any `auth` middleware is `type: oidc`, or `type: jwt`
