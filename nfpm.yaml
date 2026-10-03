@@ -18,9 +18,14 @@ contents:
     dst: "/usr/bin/gateon"
   - src: "packaging/gateon.service"
     dst: "/lib/systemd/system/gateon.service"
-  - src: "packaging/gateon-service.xml"
-    dst: "/etc/gateon/gateon-service.xml"
-    type: "config"
+  - src: "packaging/ebpf-ha.conf"
+    dst: "/usr/share/gateon/systemd/ebpf-ha.conf"
+    file_info:
+      mode: 0644
 scripts:
+  preinstall: "scripts/preinstall.sh"
   postinstall: "scripts/postinstall.sh"
   postremove: "scripts/postremove.sh"
+rpm:
+  scripts:
+    posttrans: "scripts/posttrans.sh"

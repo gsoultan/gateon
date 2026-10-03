@@ -77,7 +77,7 @@ const (
 
 const systemdUnitTemplate = `[Unit]
 Description=Gateon - API Gateway and Reverse Proxy
-Documentation=https://github.com/gateon/gateon
+Documentation=https://github.com/gsoultan/gateon
 After=network-online.target
 Wants=network-online.target
 
@@ -90,6 +90,12 @@ Restart=on-failure
 RestartSec=5s
 WorkingDirectory=%s
 Environment=GLOBAL_CONFIG_FILE=%s/global.json
+Environment=GATEON_DATA_DIR=%s
+
+# Secrets -- GATEON_ENCRYPTION_KEY above all -- go in this root-owned 0600
+# file, not in an Environment= line, which every local account can read with
+# systemctl show.
+EnvironmentFile=-/etc/default/gateon
 
 # State and config directories. systemd re-applies the *DirectoryMode on
 # every start and defaults it to 0755, so without these the modes the
@@ -99,22 +105,36 @@ StateDirectoryMode=0700
 ConfigurationDirectory=gateon
 ConfigurationDirectoryMode=0750
 
-# Its own account, holding only the capabilities it uses (ADR 0019):
-# CAP_NET_BIND_SERVICE for entrypoints below 1024, and CAP_BPF with
-# CAP_NET_ADMIN for eBPF (ADR 0018) -- CAP_NET_ADMIN also lets HA move the
-# virtual IP. Ambient, so the process holds them without being root; the
-# bounding set is the most it, or anything it runs, can ever have.
-AmbientCapabilities=CAP_NET_BIND_SERVICE CAP_BPF CAP_NET_ADMIN
-CapabilityBoundingSet=CAP_NET_BIND_SERVICE CAP_BPF CAP_NET_ADMIN
-# Kernels before 5.11 charge BPF maps to RLIMIT_MEMLOCK, which a process that
-# is not root cannot raise for itself.
-LimitMEMLOCK=infinity
+# Its own account, holding only CAP_NET_BIND_SERVICE (ADR 0019, ADR 0049).
+# eBPF and HA's virtual IP need CAP_BPF and CAP_NET_ADMIN as well; both are
+# off by default, and are granted by a drop-in: run systemctl edit gateon and
+# add the lines in doc/services.md.
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+
+# gateon derives its Go soft limit from this (85%%).
+MemoryMax=90%%
 
 # Security hardening
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
 ReadWritePaths=-%s -%s
 
 [Install]
@@ -250,7 +270,7 @@ func uninstallWindows() error {
 // writable-path list produces a service that cannot write its own state, and
 // systemd reports it as a permissions problem rather than a malformed unit.
 func renderSystemdUnit(binPath string) string {
-	return fmt.Sprintf(systemdUnitTemplate, binPath, stateDir, configDir, configDir, stateDir)
+	return fmt.Sprintf(systemdUnitTemplate, binPath, stateDir, configDir, stateDir, configDir, stateDir)
 }
 
 // secureDir creates dir if absent and forces it to mode, returning an error if

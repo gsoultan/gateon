@@ -1,6 +1,6 @@
 [Unit]
 Description=Gateon - API Gateway and Reverse Proxy
-Documentation=https://github.com/gateon/gateon
+Documentation=https://github.com/gsoultan/gateon
 After=network-online.target
 Wants=network-online.target
 
@@ -12,12 +12,24 @@ ExecStart=/usr/bin/gateon
 Restart=on-failure
 RestartSec=5s
 
-# Config: place global.json, routes.json, etc. in /etc/gateon
+# Config: place global.json, routes.json, etc. in /etc/gateon. State -- the
+# SQLite database, the trace store -- lives in /var/lib/gateon, which a
+# relative database path is resolved against.
 WorkingDirectory=/var/lib/gateon
 Environment=GLOBAL_CONFIG_FILE=/etc/gateon/global.json
+Environment=GATEON_DATA_DIR=/var/lib/gateon
 
-# Override with: systemctl edit gateon
-# Environment=PORT=8080
+# Secrets go here, not in an Environment= line. GATEON_ENCRYPTION_KEY above
+# all: an Environment= value -- this file's, or one added with `systemctl
+# edit` -- is readable by every local account through `systemctl show`. This
+# file is read by systemd before it drops to the gateon account; keep it
+# root:root and 0600:
+#   install -m 0600 -o root -g root /dev/null /etc/default/gateon
+#   echo 'GATEON_ENCRYPTION_KEY=...' >> /etc/default/gateon
+# The management port and bind are set here too, or with `systemctl edit`:
+# GATEON_MANAGEMENT_PORT and GATEON_MANAGEMENT_BIND. PORT does not move the
+# management listener; see doc/management-entrypoint.md.
+EnvironmentFile=-/etc/default/gateon
 
 # State and config directories. systemd creates them if missing and re-applies
 # the *DirectoryMode on every start, defaulting to 0755 -- which made the
@@ -28,23 +40,50 @@ StateDirectoryMode=0700
 ConfigurationDirectory=gateon
 ConfigurationDirectoryMode=0750
 
-# Its own account, holding only the capabilities it uses (ADR 0019):
-# CAP_NET_BIND_SERVICE for entrypoints below 1024, and CAP_BPF with
-# CAP_NET_ADMIN for eBPF (ADR 0018) -- CAP_NET_ADMIN also lets HA move the
-# virtual IP. Ambient, so the process holds them without being root; the
-# bounding set is the most it, or anything it runs, can ever have. CAP_PERFMON
-# and CAP_SYS_RESOURCE are gone: the programs load without either.
-AmbientCapabilities=CAP_NET_BIND_SERVICE CAP_BPF CAP_NET_ADMIN
-CapabilityBoundingSet=CAP_NET_BIND_SERVICE CAP_BPF CAP_NET_ADMIN
-# Kernels before 5.11 charge BPF maps to RLIMIT_MEMLOCK, which a process that
-# is not root cannot raise for itself.
-LimitMEMLOCK=infinity
+# Its own account, holding only the capability it uses by default (ADR 0019,
+# ADR 0049): CAP_NET_BIND_SERVICE, for entrypoints below 1024. Ambient, so the
+# process holds it without being root; the bounding set is the most it, or
+# anything it runs, can ever have.
+#
+# eBPF (ADR 0018) and HA's virtual IP need CAP_BPF and CAP_NET_ADMIN, and both
+# are off by default -- so a compromised proxy no longer holds interface,
+# route and firewall control it was not using. Turning either on needs the
+# drop-in this package ships:
+#   mkdir -p /etc/systemd/system/gateon.service.d
+#   ln -s /usr/share/gateon/systemd/ebpf-ha.conf /etc/systemd/system/gateon.service.d/
+#   systemctl daemon-reload && systemctl restart gateon
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
 
-# Security hardening
+# A hard ceiling, as a share of the host. gateon derives its Go soft limit
+# (GOMEMLIMIT) from it -- 85% of this unless GATEON_MEMORY_LIMIT or GOMEMLIMIT
+# says otherwise -- so on the 2 GB target that is ~1.8 GiB hard and ~1.5 GiB
+# soft, the 1536MiB doc/deployment-sizing.md recommends.
+MemoryMax=90%
+
+# Security hardening. None of these is needed by the gateway; eBPF and HA's
+# extra needs are in the drop-in above.
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+# AF_NETLINK: Go's net.Interfaces, which HA and eBPF use to find interfaces.
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+# A refused system call fails with EPERM rather than killing the process.
+SystemCallErrorNumber=EPERM
 ReadWritePaths=-/etc/gateon -/var/lib/gateon
 
 [Install]
