@@ -15,9 +15,9 @@ import (
 	"time"
 )
 
-// powTestThreshold sits above the neutral score every unknown client starts
-// with, so the middleware challenges each request in these tests.
-const powTestThreshold = 101.0
+// powTestThreshold sits below the threat score of 0 every unknown client
+// starts with, so the middleware challenges each request in these tests.
+const powTestThreshold = -1.0
 
 // testPowChallenge is a challenge issuer with a fixed key, for tests that
 // exercise the challenge page directly.
