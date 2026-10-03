@@ -7,6 +7,10 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"unicode"
+
+	"github.com/gsoultan/gateon/internal/middleware/auth"
+	"github.com/gsoultan/gateon/internal/middleware/kind"
 )
 
 func (f *Factory) createAuth(cfg map[string]string) (Middleware, error) {
@@ -24,9 +28,9 @@ func (f *Factory) createAuth(cfg map[string]string) (Middleware, error) {
 			return nil, fmt.Errorf("jwt auth requires jwks_url or secret (or GATEON_JWT_SECRET env)")
 		}
 
-		var revStore RevocationStore
-		if cfg["enable_revocation"] == "true" && f.redisClient != nil {
-			revStore = NewRedisRevocationStore(f.redisClient, cfg["revocation_prefix"])
+		revStore, err := f.revocationStore(cfg)
+		if err != nil {
+			return nil, err
 		}
 
 		jwtCfg := JWTConfig{
@@ -51,11 +55,15 @@ func (f *Factory) createAuth(cfg map[string]string) (Middleware, error) {
 		if secret == "" {
 			return nil, fmt.Errorf("paseto auth requires config secret or GATEON_PASETO_SECRET env")
 		}
+		revStore, err := f.revocationStore(cfg)
+		if err != nil {
+			return nil, err
+		}
 		verifier, err := NewPasetoVerifier(secret)
 		if err != nil {
 			return nil, err
 		}
-		return PasetoAuth(verifier, baseCfg), nil
+		return auth.PasetoAuthWithRevocation(verifier, baseCfg, revStore), nil
 	case "apikey":
 		hashed := cfg["hashed"] == "true"
 		var store APIKeyStore
@@ -96,11 +104,17 @@ func (f *Factory) createAuth(cfg map[string]string) (Middleware, error) {
 		if issuer == "" {
 			return nil, fmt.Errorf("oidc auth requires issuer URL (e.g. https://auth.example.com)")
 		}
+		// Before discovery, so a refused config asks the provider nothing.
+		revStore, err := f.revocationStore(cfg)
+		if err != nil {
+			return nil, err
+		}
 		validator, err := NewOIDCValidator(JWTConfig{
 			AuthBaseConfig:   baseCfg,
 			Issuer:           issuer,
 			Audience:         cfg["audience"],
 			AllowAnyAudience: cfg["allow_any_audience"] == "true",
+			RevocationStore:  revStore,
 		})
 		if err != nil {
 			return nil, err
@@ -139,12 +153,8 @@ func (f *Factory) parseAuthBaseConfig(cfg map[string]string) AuthBaseConfig {
 		ErrorTemplate: cfg["error_template"],
 	}
 
-	if scopes := cfg["required_scopes"]; scopes != "" {
-		base.RequiredScopes = strings.Split(scopes, ",")
-	}
-	if roles := cfg["required_roles"]; roles != "" {
-		base.RequiredRoles = strings.Split(roles, ",")
-	}
+	base.RequiredScopes = parseRequiredScopes(cfg["required_scopes"])
+	base.RequiredRoles = kind.ParseListStrict(cfg["required_roles"])
 
 	mappings := make(map[string]string)
 	for k, v := range cfg {
@@ -156,4 +166,33 @@ func (f *Factory) parseAuthBaseConfig(cfg map[string]string) AuthBaseConfig {
 	base.ClaimMappings = mappings
 
 	return base
+}
+
+// parseRequiredScopes reads required_scopes as the dashboard documents it:
+// separated by commas, spaces or both ("read, write", "read write"). It split
+// on "," alone and kept the space, so " write" matched no token's scope and
+// every valid token was refused (ADR 0046). A scope never contains a space
+// (RFC 6749 section 3.3), which is what makes a space a separator here.
+func parseRequiredScopes(v string) []string {
+	return strings.FieldsFunc(v, func(r rune) bool { return r == ',' || unicode.IsSpace(r) })
+}
+
+// revocationStore is the revocation list an auth middleware with "Enable
+// Revocation" on checks: the Redis keys "<revocation_prefix><jti>". With the
+// switch on and no Redis it refuses the build -- there is nowhere a revoked
+// token could be recorded -- rather than build a check that reads nothing
+// (ADR 0046). The router serves a security middleware that cannot be built as
+// a refusal, so a route that relied on revocation is not opened by it.
+func (f *Factory) revocationStore(cfg map[string]string) (RevocationStore, error) {
+	on, err := kind.ParseBoolStrict(cfg["enable_revocation"], false)
+	if err != nil {
+		return nil, kind.CfgError("enable_revocation", cfg["enable_revocation"], err)
+	}
+	if !on {
+		return nil, nil
+	}
+	if f.redisClient == nil {
+		return nil, kind.CfgError("enable_revocation", cfg["enable_revocation"], auth.ErrRevocationNeedsRedis)
+	}
+	return NewRedisRevocationStore(f.redisClient, cfg["revocation_prefix"]), nil
 }

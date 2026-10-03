@@ -232,29 +232,8 @@ func (v *JWTValidator) validateToken(ctx context.Context, claims jwt.MapClaims) 
 		}
 	}
 
-	// Check revocation.
-	//
-	// The error is deliberately fatal to the request rather than discarded.
-	// RedisRevocationStore returns (false, err) when the backend is unreachable,
-	// so treating a failed lookup as "not revoked" honoured every revoked token
-	// for as long as Redis was down — a restart, a network blip, a timeout or a
-	// wrong password. Revocation is the control you reach for after a
-	// compromise, which makes an outage precisely the wrong moment to stop
-	// enforcing it, and the operator turned this on deliberately.
-	//
-	// The cause goes to the log, not to the caller: HandleFailure writes
-	// err.Error() straight into the response body, so a wrapped driver error
-	// would hand an unauthenticated client the address of an internal service.
-	if v.config.RevocationStore != nil {
-		jti, _ := claims["jti"].(string)
-		revoked, err := v.config.RevocationStore.IsRevoked(ctx, jti)
-		if err != nil {
-			logger.L.LogError("auth: revocation lookup failed, denying request", "error", err)
-			return errors.New("token revocation status unavailable")
-		}
-		if revoked {
-			return errors.New("token revoked")
-		}
+	if err := checkRevocation(ctx, v.config.RevocationStore, claims); err != nil {
+		return err
 	}
 
 	// RBAC/Scope checks
@@ -589,52 +568,80 @@ func bearerToken(r *http.Request) string {
 // either serves unauthenticated or never recovers. Denying at request time
 // keeps that decision where the information is.
 func PasetoAuth(verifier TokenVerifier, cfg AuthBaseConfig) Middleware {
+	return PasetoAuthWithRevocation(verifier, cfg, nil)
+}
+
+// PasetoAuthWithRevocation is PasetoAuth that also refuses a verified token
+// whose ID (jti) revocation lists as revoked; a nil store checks nothing. The
+// dashboard offered "Enable Revocation" for PASETO and nothing read it, so a
+// revoked token kept working (ADR 0046).
+func PasetoAuthWithRevocation(verifier TokenVerifier, cfg AuthBaseConfig, revocation RevocationStore) Middleware {
+	p := pasetoAuth{verifier: verifier, cfg: cfg, revocation: revocation}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if IsCorsPreflight(r) {
-				cfg.stripMappedHeaders(r)
-				next.ServeHTTP(w, r)
-				return
-			}
-			activeRouteID := GetRouteName(r)
-
-			if verifier == nil {
-				telemetry.MiddlewareAuthFailuresTotal.WithLabelValues(activeRouteID, "paseto").Inc()
-				telemetry.RequestFailuresTotal.WithLabelValues(activeRouteID, "auth:paseto").Inc()
-				cfg.HandleFailure(w, r, next, errors.New("no token verifier is configured"))
-				return
-			}
-
-			token := ExtractToken(r)
-			if token == "" {
-				telemetry.MiddlewareAuthFailuresTotal.WithLabelValues(activeRouteID, "paseto").Inc()
-				telemetry.RequestFailuresTotal.WithLabelValues(activeRouteID, "auth:paseto").Inc()
-				cfg.HandleFailure(w, r, next, errors.New("authorization header, session cookie, or token/access_token/auth query required"))
-				return
-			}
-
-			claimsRaw, err := verifier.VerifyToken(token)
-			if err != nil {
-				telemetry.MiddlewareAuthFailuresTotal.WithLabelValues(activeRouteID, "paseto").Inc()
-				telemetry.RequestFailuresTotal.WithLabelValues(activeRouteID, "auth:paseto").Inc()
-				cfg.refuseToken(w, r, next, errors.New("invalid or expired token"))
-				return
-			}
-
-			if err := cfg.ValidateClaims(claimsRaw); err != nil {
-				telemetry.MiddlewareAuthFailuresTotal.WithLabelValues(activeRouteID, "paseto").Inc()
-				telemetry.RequestFailuresTotal.WithLabelValues(activeRouteID, "auth:paseto").Inc()
-				cfg.refuseToken(w, r, next, err)
-				return
-			}
-
-			// Add claims to context and headers
-			ctx := InjectContext(r.Context(), claimsRaw)
-			cfg.MapClaimsToHeaders(r, claimsRaw)
-
-			next.ServeHTTP(w, r.WithContext(ctx))
+			p.serve(next, w, r)
 		})
 	}
+}
+
+// pasetoAuth is one PASETO auth middleware's configuration.
+type pasetoAuth struct {
+	verifier   TokenVerifier
+	cfg        AuthBaseConfig
+	revocation RevocationStore
+}
+
+func (p pasetoAuth) serve(next http.Handler, w http.ResponseWriter, r *http.Request) {
+	if IsCorsPreflight(r) {
+		p.cfg.stripMappedHeaders(r)
+		next.ServeHTTP(w, r)
+		return
+	}
+	if p.verifier == nil {
+		p.countFailure(r)
+		p.cfg.HandleFailure(w, r, next, errors.New("no token verifier is configured"))
+		return
+	}
+	token := ExtractToken(r)
+	if token == "" {
+		p.countFailure(r)
+		p.cfg.HandleFailure(w, r, next, errors.New("authorization header, session cookie, or token/access_token/auth query required"))
+		return
+	}
+	claimsRaw, err := p.verifier.VerifyToken(token)
+	if err != nil {
+		p.countFailure(r)
+		p.cfg.refuseToken(w, r, next, errors.New("invalid or expired token"))
+		return
+	}
+	if err := p.authorize(r, claimsRaw); err != nil {
+		p.countFailure(r)
+		p.cfg.refuseToken(w, r, next, err)
+		return
+	}
+	// Add claims to context and headers
+	ctx := InjectContext(r.Context(), claimsRaw)
+	p.cfg.MapClaimsToHeaders(r, claimsRaw)
+	next.ServeHTTP(w, r.WithContext(ctx))
+}
+
+// authorize holds verified claims to the revocation list, then to the route's
+// scopes and roles. The claims are converted to a map only when a revocation
+// list will read them: the management plane's verifier returns a struct, and
+// converting it allocated on every request it serves.
+func (p pasetoAuth) authorize(r *http.Request, claims any) error {
+	if p.revocation != nil {
+		if err := checkRevocation(r.Context(), p.revocation, ToMap(claims)); err != nil {
+			return err
+		}
+	}
+	return p.cfg.ValidateClaims(claims)
+}
+
+func (p pasetoAuth) countFailure(r *http.Request) {
+	activeRouteID := GetRouteName(r)
+	telemetry.MiddlewareAuthFailuresTotal.WithLabelValues(activeRouteID, "paseto").Inc()
+	telemetry.RequestFailuresTotal.WithLabelValues(activeRouteID, "auth:paseto").Inc()
 }
 
 // BasicAuth returns a middleware that validates Basic Auth credentials (single user).

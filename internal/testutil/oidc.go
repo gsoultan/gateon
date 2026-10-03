@@ -90,14 +90,24 @@ func (p *FakeOIDCProvider) jwks(w http.ResponseWriter, _ *http.Request) {
 
 // Mint returns an ID token for subject, issued by this provider to its client.
 func (p *FakeOIDCProvider) Mint(subject string) (string, error) {
-	tok := jwt.NewWithClaims(jwt.SigningMethodRS256, jwt.MapClaims{
+	return p.MintWithID(subject, "")
+}
+
+// MintWithID is Mint with the token ID (jti) set, which a revocation list
+// names; an empty id leaves the claim out, as Mint does.
+func (p *FakeOIDCProvider) MintWithID(subject, id string) (string, error) {
+	claims := jwt.MapClaims{
 		"iss":   p.Issuer(),
 		"sub":   subject,
 		"aud":   p.ClientID,
 		"email": subject + "@example.com",
 		"iat":   time.Now().Unix(),
 		"exp":   time.Now().Add(time.Hour).Unix(),
-	})
+	}
+	if id != "" {
+		claims["jti"] = id
+	}
+	tok := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
 	tok.Header["kid"] = "k1"
 	return tok.SignedString(p.key)
 }
