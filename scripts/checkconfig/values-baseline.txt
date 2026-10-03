@@ -1,0 +1,34 @@
+# Documented setting values no code that reads the field compares against.
+# Adopted 2026-10-03 (ADR 0048). Format: Message.field=value [# note]. When a
+# value becomes handled the check says so and the line should be deleted.
+# Lines marked INERT are choices that do nothing today.
+
+# "notify" is the default: dispatchers run for every matching playbook, and
+# only "block" adds an action. Nothing to compare.
+AlertPlaybook.action=notify
+# INERT: "Trigger JS Challenge" in the alerting settings is saved and does what
+# "Notify Only" does; executePlaybook acts only on "block". Owner decision
+# pending: implement a challenge action or remove the choice. Reported by the
+# challenge agent, flagged by this check.
+AlertPlaybook.action=challenge
+
+# Compared dynamically: allowedDynamic matches perm.Action against the action
+# being authorised (string(action)), so no literal "write" appears.
+Permission.action=write
+
+# Candidates, not verdicts: the HTTP proxy picks its transport from the target
+# URL, and pkg/l4 compares only "tcp" and "udp". Whether http/grpc/graphql
+# change anything deserves ten minutes before anyone relies on them.
+Service.backend_type=graphql
+Service.backend_type=grpc
+Service.backend_type=http
+
+# Read by no Go code (Target is not a *Config message, so the field check never
+# asked). Not inert from the dashboard: choosing a protocol rewrites the scheme
+# of the target URL, which is what the gateway reads; the field is a display
+# hint. A target written by the API with a protocol that disagrees with its URL
+# gets the URL's scheme.
+Target.protocol=h2
+Target.protocol=h2c
+Target.protocol=http
+Target.protocol=https

@@ -132,7 +132,7 @@ const protoPkgPath = "github.com/gsoultan/gateon/proto/gateon/v1"
 // flag a dead Enabled; "Password" is read for auth while RedisConfig.password is
 // dropped on the floor. A check that reports "ok" for config nothing reads is the
 // very failure it exists to catch, one level up.
-func readSelections(sinks *sinkFacts) (map[string]map[string]bool, error) {
+func readSelections(sinks *sinkFacts, values *valueFacts) (map[string]map[string]bool, error) {
 	out := map[string]map[string]bool{}
 	// Build constraints hide readers: internal/ebpf/manager_linux.go is
 	// //go:build linux, so loading only the host platform on a Mac reports every
@@ -160,6 +160,7 @@ func readSelections(sinks *sinkFacts) (map[string]map[string]bool, error) {
 			for _, file := range pkg.Syntax {
 				recordSelections(file, pkg.TypesInfo, out)
 				recordSinks(pkg.Fset, file, pkg.TypesInfo, sinks)
+				recordValues(pkg.PkgPath, file, pkg.TypesInfo, values)
 			}
 		}
 	}
@@ -233,14 +234,15 @@ func main() {
 		fmt.Fprintf(os.Stderr, "checkconfig: reading schema: %v\n", err)
 		os.Exit(2)
 	}
-	sinks := newSinkFacts()
-	selections, err := readSelections(sinks)
+	sinks, values := newSinkFacts(), newValueFacts()
+	selections, err := readSelections(sinks, values)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "checkconfig: loading packages: %v\n", err)
 		os.Exit(2)
 	}
 	failed := checkFields(fields, selections)
 	failed = checkSinks(sinks) || failed
+	failed = checkValues(values) || failed
 	failed = checkEffects() || failed
 	if failed {
 		os.Exit(1)
