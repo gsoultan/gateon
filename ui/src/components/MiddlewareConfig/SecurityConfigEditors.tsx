@@ -26,6 +26,7 @@ import { WAF_APP_PROFILES } from "../../types/gateon";
 import { BROWSER_HEADER_CHECK_HELP, JS_CHALLENGE_HELP } from "./botManagementCopy";
 import { ClientAddressNote } from "./RatelimitConfigEditor";
 import { tlsBindingProblem, xfccProblem } from "./middlewareConfigProblems";
+import { ipListError } from "./ipList";
 
 interface EditorProps {
   config: Record<string, string>;
@@ -674,6 +675,7 @@ export function IPFilterConfigEditor({ config, updateConfig }: EditorProps) {
         placeholder="10.0.0.0/8, 192.168.1.1"
         value={splitTags(config.allow_list)}
         onChange={(val) => updateConfig("allow_list", joinTags(val))}
+        error={ipListError(splitTags(config.allow_list))}
         styles={{ input: { minHeight: 60 } }}
         clearable
       />
@@ -693,6 +695,7 @@ export function IPFilterConfigEditor({ config, updateConfig }: EditorProps) {
         placeholder="10.0.0.100, 192.168.0.0/24"
         value={splitTags(config.deny_list)}
         onChange={(val) => updateConfig("deny_list", joinTags(val))}
+        error={ipListError(splitTags(config.deny_list))}
         styles={{ input: { minHeight: 60 } }}
         clearable
       />
