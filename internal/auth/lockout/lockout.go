@@ -26,6 +26,7 @@
 package lockout
 
 import (
+	"crypto/sha256"
 	"net"
 	"net/netip"
 	"sync"
@@ -68,8 +69,8 @@ type Bounds struct {
 	Accounts int
 }
 
-// DefaultBounds hold about 16k (account, source) pairs and 4k accounts, under
-// 3 MiB together.
+// DefaultBounds hold about 16k (account, source) pairs and 4k accounts, about
+// 4 MiB together whatever the names are: every key is a fixed-size digest.
 var DefaultBounds = Bounds{Pairs: 16384, Accounts: 4096}
 
 type window struct {
@@ -101,18 +102,37 @@ func (t *Tracker) SetClock(now func() time.Time) {
 	t.mu.Unlock()
 }
 
-type pairKey struct{ account, source string }
+// digest is what a table keys a name by: a fixed number of bytes, whatever
+// the name's length (ADR 0053). The tables were keyed by the text itself, and
+// the unknown-name table's text is whatever a caller typed into the username
+// field: with the public body limit at 64 KiB, 16,384 pairs held a GiB. 128
+// bits of SHA-256 leave no collision anyone can find, so two names never share
+// a count.
+type digest [16]byte
+
+func digestOf(s string) digest {
+	sum := sha256.Sum256([]byte(s))
+	return digest(sum[:16])
+}
+
+// pairKey is an (account, source) pair, both as digests.
+type pairKey struct{ account, source digest }
+
+func pairOf(account, source string) pairKey {
+	return pairKey{digestOf(account), digestOf(source)}
+}
 
 // Check answers whether an attempt for account from source may proceed.
 // source is a Prefix.
 func (t *Tracker) Check(account, source string) Decision {
+	pair, acct := pairOf(account, source), digestOf(account)
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	now := t.now()
-	if w := t.get(t.pairs, pairKey{account, source}); w != nil && now.Before(w.lockedUntil) {
+	if w := t.get(t.pairs, pair); w != nil && now.Before(w.lockedUntil) {
 		return PairLocked
 	}
-	if w := t.get(t.accounts, account); w != nil && now.Before(w.lockedUntil) {
+	if w := t.get(t.accounts, acct); w != nil && now.Before(w.lockedUntil) {
 		return UnderAttack
 	}
 	return Allow
@@ -120,20 +140,22 @@ func (t *Tracker) Check(account, source string) Decision {
 
 // Fail records a wrong password for account from source.
 func (t *Tracker) Fail(account, source string) {
+	pair, acct := pairOf(account, source), digestOf(account)
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	now := t.now()
-	t.count(t.pairs, pairKey{account, source}, now, PairLimit, PairLock)
-	t.count(t.accounts, account, now, AccountLimit, AccountWindow)
+	t.count(t.pairs, pair, now, PairLimit, PairLock)
+	t.count(t.accounts, acct, now, AccountLimit, AccountWindow)
 }
 
 // Renew keeps account under attack for another AccountWindow. It is called
 // for an attempt refused because the account was, so an attack that goes on
 // keeps strangers out for as long as it goes on.
 func (t *Tracker) Renew(account string) {
+	acct := digestOf(account)
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if w := t.get(t.accounts, account); w != nil {
+	if w := t.get(t.accounts, acct); w != nil {
 		w.lockedUntil = t.now().Add(AccountWindow)
 	}
 }
@@ -142,9 +164,10 @@ func (t *Tracker) Renew(account string) {
 // count is cleared. The account's count is not -- the owner signing in from
 // home does not hand the attacker a fresh twenty guesses.
 func (t *Tracker) Succeed(account, source string) {
+	pair := pairOf(account, source)
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	t.pairs.Remove(pairKey{account, source})
+	t.pairs.Remove(pair)
 }
 
 func (t *Tracker) get(table *simplelru.LRU, key any) *window {
