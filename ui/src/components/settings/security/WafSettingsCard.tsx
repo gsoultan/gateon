@@ -9,6 +9,7 @@ import type { StatusResponse, WafConfig } from "../../../types/gateon";
 import { WAF_APP_PROFILES } from "../../../types/gateon";
 import { ClamAVSection } from "./ClamAVSection";
 import { BotManagementSection } from "./BotManagementSection";
+import { DLP_ACTION_HELP, GLOBAL_AUDIT_ONLY_HELP } from "../../MiddlewareConfig/wafCopy";
 import { ADMIN_ONLY_REASON, useAdminOnlySetting } from "../../../hooks/usePermissions";
 
 interface WafSettingsCardProps {
@@ -165,7 +166,7 @@ export function WafSettingsCard({
                 {waf.dlp && (
                   <Select
                     label="When a leak is found"
-                    description="Roll out in stages: watch first, then redact, then block once the false-positive rate is known. Applies to data-leak rules only."
+                    description={`${DLP_ACTION_HELP} Applies to data-leak rules only.`}
                     data={[
                       { value: "block", label: "Block — refuse the whole response (default)" },
                       { value: "redact", label: "Redact — remove the finding, send the rest" },
@@ -325,7 +326,7 @@ function WafModeLine({ effective }: { effective: EffectiveQuery }) {
   if (mode === "audit_only") {
     return (
       <Alert color="yellow" title="Audit only: nothing is blocked">
-        The global WAF records what it would block and lets every request through.
+        {GLOBAL_AUDIT_ONLY_HELP}
       </Alert>
     );
   }
