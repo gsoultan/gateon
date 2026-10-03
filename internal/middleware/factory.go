@@ -107,6 +107,10 @@ func (f *Factory) checkSave(m *gateonv1.Middleware) error {
 	switch m.GetType() {
 	case "xfcc":
 		return transform.CheckXFCCSave(cfg)
+	case "cors":
+		return transform.CheckCORSSave(cfg)
+	case "grpcweb":
+		return transform.CheckCORSSave(cfg)
 	}
 	return nil
 }

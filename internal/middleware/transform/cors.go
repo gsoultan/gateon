@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/google/uuid"
@@ -45,7 +46,7 @@ func corsOptions(cfg CORSConfig) cors.Options {
 		AllowedMethods:   cfg.AllowedMethods,
 		AllowedHeaders:   cfg.AllowedHeaders,
 		ExposedHeaders:   cfg.ExposedHeaders,
-		AllowCredentials: cfg.AllowCredentials,
+		AllowCredentials: corsCredentials(cfg),
 		MaxAge:           cfg.MaxAge,
 		Debug:            cfg.Debug,
 	}
@@ -54,6 +55,20 @@ func corsOptions(cfg CORSConfig) cors.Options {
 		o.AllowOriginFunc = func(string) bool { return false }
 	}
 	return o
+}
+
+// corsCredentials is whether a policy sends Access-Control-Allow-Credentials:
+// never with origin "*" (ADR 0046). rs/cors answers that pair with
+// Access-Control-Allow-Origin: * and Allow-Credentials: true, which browsers
+// refuse for a credentialed request; without credentials the same request
+// still gets the "*" every uncredentialed caller does. A stored config asking
+// for the pair is served this way, and a save of one is refused (CheckCORSSave).
+func corsCredentials(cfg CORSConfig) bool {
+	return cfg.AllowCredentials && !hasWildcardOrigin(cfg.AllowedOrigins)
+}
+
+func hasWildcardOrigin(origins []string) bool {
+	return slices.Contains(origins, "*")
 }
 
 // CORS returns a middleware that handles Cross-Origin Resource Sharing (CORS).

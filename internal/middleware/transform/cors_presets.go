@@ -21,13 +21,18 @@ type CORSPreset struct {
 	MaxAge           int
 }
 
+// corsPresets are the named policies. None pairs origin "*" with credentials:
+// browsers refuse a credentialed response that says
+// Access-Control-Allow-Origin: *, so the three that grant every origin sent
+// Allow-Credentials: true to no effect (ADR 0046). Credentials need named
+// origins, typed next to the preset.
 var corsPresets = map[string]CORSPreset{
 	"permissive": {
 		AllowedOrigins:   []string{"*"},
 		AllowedMethods:   defaultCORSMethods(),
 		AllowedHeaders:   []string{"*"},
 		ExposedHeaders:   []string{"*"},
-		AllowCredentials: true,
+		AllowCredentials: false,
 		MaxAge:           86400,
 	},
 	"standard": {
@@ -35,7 +40,7 @@ var corsPresets = map[string]CORSPreset{
 		AllowedMethods:   []string{"GET", "POST", "OPTIONS"},
 		AllowedHeaders:   []string{"Content-Type", kind.HeaderAuthorization, kind.HeaderAccept},
 		ExposedHeaders:   []string{"Content-Length", "Content-Type"},
-		AllowCredentials: true,
+		AllowCredentials: false,
 		MaxAge:           3600,
 	},
 	"grpc-web": {
@@ -43,7 +48,7 @@ var corsPresets = map[string]CORSPreset{
 		AllowedMethods:   []string{"POST", "OPTIONS"},
 		AllowedHeaders:   []string{"Content-Type", "X-User-Agent", "X-Grpc-Web", "Grpc-Timeout"},
 		ExposedHeaders:   []string{"Grpc-Status", "Grpc-Message", "Grpc-Encoding", "Grpc-Accept-Encoding", "X-Grpc-Web", "X-Accept-Content-Transfer-Encoding", "X-Accept-Response-Streaming"},
-		AllowCredentials: true,
+		AllowCredentials: false,
 		MaxAge:           86400,
 	},
 	"restricted": {
@@ -108,8 +113,11 @@ func ApplyCORSPreset(cfg map[string]string, base CORSConfig) CORSConfig {
 		return base
 	}
 
-	// Apply preset values if not explicitly provided in cfg
-	if _, ok := cfg["allowed_origins"]; !ok && len(base.AllowedOrigins) == 0 {
+	// Apply preset values if not explicitly provided in cfg. An origin list
+	// typed blank is not provided: the dashboard writes the field next to a
+	// preset whether or not anything is in it, and a preset with no origins
+	// would now grant none.
+	if len(base.AllowedOrigins) == 0 {
 		base.AllowedOrigins = preset.AllowedOrigins
 	}
 	if _, ok := cfg["allowed_methods"]; !ok && len(base.AllowedMethods) == 0 {
