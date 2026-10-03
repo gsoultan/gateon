@@ -45,7 +45,10 @@ var probeTimeout = 5 * time.Second
 // submit. Both run before anyone has signed in, which is what probeFailure is
 // about.
 func Probe(databaseURL string, cfg *gateonv1.DatabaseConfig, dataDir string) error {
-	dsn := databaseURL
+	// Judged where it will be opened: AuthDatabaseURL takes a relative SQLite
+	// path inside the data directory, so the probe must too, or it tests one
+	// file and the gateway opens another.
+	dsn := ResolveSQLitePath(databaseURL, dataDir)
 	if dsn == "" {
 		dsn = BuildURLFromConfig(cfg)
 	}

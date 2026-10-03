@@ -211,7 +211,7 @@ func chosenDatabase(databaseURL string, cfg *gateonv1.DatabaseConfig) (string, *
 // Extracted from Setup because the nesting there had grown past the point where
 // the interesting line — the Holder swap — was visible at a glance.
 func (s *ApiService) installAuthManager(ctx context.Context, pasetoSecret string) error {
-	databaseURL := "gateon.db"
+	databaseURL := db.AuthDatabaseURL(nil)
 	if s.Globals != nil {
 		if conf := s.Globals.Get(ctx); conf != nil && conf.Auth != nil {
 			databaseURL = db.AuthDatabaseURL(conf.Auth)

@@ -5,6 +5,9 @@ package inits
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"io/fs"
 	"os"
 	"strconv"
 	"strings"
@@ -30,7 +33,7 @@ func InitGlobalConfig(globalFile string, globalReg *config.GlobalRegistry) *auth
 		return nil
 	}
 	if gc := globalReg.Get(context.Background()); gc != nil {
-		if gc.Auth == nil || (gc.Auth.PasetoSecret == "" && db.AuthDatabaseURL(gc.Auth) == "gateon.db") {
+		if gc.Auth == nil || (gc.Auth.PasetoSecret == "" && db.AuthDatabaseURL(gc.Auth) == db.AuthDatabaseURL(nil)) {
 			if gc.Auth == nil {
 				gc.Auth = &gateonv1.AuthConfig{}
 			}
@@ -53,18 +56,72 @@ func InitGlobalConfig(globalFile string, globalReg *config.GlobalRegistry) *auth
 		if gc.Auth.PasetoSecret == "" {
 			gc.Auth.PasetoSecret = config.GenerateRandomSecret(32)
 		}
-		databaseURL := db.AuthDatabaseURL(gc.Auth)
-		if databaseURL != "" {
-			var err error
-			authManager, err = auth.NewManager(databaseURL, gc.Auth.PasetoSecret, logger.Default())
-			if err != nil {
-				logger.Fatal("failed to initialize auth manager", "error", err)
-			}
-			reconcileSecondFactors(authManager)
-		}
+		authManager = openAuthManager(gc.Auth)
 		applyGlobalEnv(gc)
 	}
 	return authManager
+}
+
+// openAuthManager opens the user database a configured gateway names, and
+// refuses to start one that was set up and has lost it.
+func openAuthManager(a *gateonv1.AuthConfig) *auth.Manager {
+	databaseURL := db.AuthDatabaseURL(a)
+	if err := setUpDatabaseMissing(a, databaseURL); err != nil {
+		logger.Fatal(err.Error())
+	}
+	m, err := auth.NewManager(databaseURL, a.GetPasetoSecret(), logger.Default())
+	if err != nil {
+		logger.Fatal("failed to initialize auth manager", "error", err)
+	}
+	if err := setUpWithoutAdministrator(a, m); err != nil {
+		_ = m.Close()
+		logger.Fatal(err.Error())
+	}
+	reconcileSecondFactors(m)
+	return m
+}
+
+// refusedReopen is what both refusals below end with: what the operator can do.
+const refusedReopen = "Refusing to start: going on would reopen first-run setup on a configured gateway, " +
+	"to whoever reaches the management port first. Restore the database from a backup " +
+	"(doc/backup-restore.md), or check GATEON_DATA_DIR and the configured database; to set this " +
+	"gateway up from scratch, move global.json aside."
+
+// setUpDatabaseMissing refuses a gateway that was set up -- auth.enabled is
+// what setup writes -- whose SQLite user database file is not there.
+//
+// Opening it would have created it: an empty database, so no administrator, so
+// setup reopened with every route and user apparently gone, and /readyz said
+// ready. A data directory that is not mounted, a different working directory,
+// a restore that missed a file -- each of those looked like a first run.
+func setUpDatabaseMissing(a *gateonv1.AuthConfig, databaseURL string) error {
+	if !a.GetEnabled() {
+		return nil
+	}
+	file, ok := db.SQLiteFile(databaseURL)
+	if !ok {
+		return nil
+	}
+	if _, err := os.Stat(file); !errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	return fmt.Errorf("the user database %s does not exist, but global.json says this gateway was set up "+
+		"(auth.enabled is true). %s", file, refusedReopen)
+}
+
+// setupState is the part of auth.Manager setUpWithoutAdministrator reads.
+type setupState interface{ IsSetupDone() bool }
+
+// setUpWithoutAdministrator refuses a gateway that was set up whose user
+// database opened and holds no administrator: a Postgres database recreated
+// empty, or a SQLite file replaced by an empty one. The same reopening as a
+// missing file, by a different road.
+func setUpWithoutAdministrator(a *gateonv1.AuthConfig, m setupState) error {
+	if !a.GetEnabled() || m.IsSetupDone() {
+		return nil
+	}
+	return fmt.Errorf("the user database has no administrator, but global.json says this gateway was set up "+
+		"(auth.enabled is true). %s", refusedReopen)
 }
 
 // previousSessionKeyEnv names the session key that a key change replaced, so
