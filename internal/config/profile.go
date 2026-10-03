@@ -159,6 +159,17 @@ type TierDefaults struct {
 	// GATEON_STREAM_MAX_LIFETIME override them; 0 disables either.
 	StreamIdleTimeout time.Duration
 	StreamMaxLifetime time.Duration
+
+	// BlockLookupTimeout is the longest a request, or a connection being
+	// accepted, waits for the database to say whether its address or
+	// fingerprint is blocked (ADR 0054). Past it the lookup is answered as a
+	// failed one is (ADR 0043): served, unless this node's cache already holds
+	// a block. With no deadline a Postgres that stopped answering held every
+	// new client for as long as it stayed stopped. A healthy point read takes
+	// a millisecond or two; the minimal tier's small hosts get more headroom
+	// for scheduling, the enterprise tier's request rates less.
+	// GATEON_BLOCK_LOOKUP_TIMEOUT overrides it.
+	BlockLookupTimeout time.Duration
 }
 
 // NormalizeTier coerces an arbitrary string to a known tier, defaulting to
@@ -224,6 +235,7 @@ func DefaultsFor(tier Tier) TierDefaults {
 			MaxHeaderBytes:            32 << 10, // 32 KiB
 			StreamIdleTimeout:         2 * time.Minute,
 			StreamMaxLifetime:         time.Hour,
+			BlockLookupTimeout:        200 * time.Millisecond,
 		}
 	case TierEnterprise:
 		return TierDefaults{
@@ -257,6 +269,7 @@ func DefaultsFor(tier Tier) TierDefaults {
 			MaxHeaderBytes:            64 << 10, // 64 KiB
 			StreamIdleTimeout:         10 * time.Minute,
 			StreamMaxLifetime:         12 * time.Hour,
+			BlockLookupTimeout:        50 * time.Millisecond,
 		}
 	default: // TierStandard
 		return TierDefaults{
@@ -290,6 +303,7 @@ func DefaultsFor(tier Tier) TierDefaults {
 			MaxHeaderBytes:            32 << 10, // 32 KiB
 			StreamIdleTimeout:         5 * time.Minute,
 			StreamMaxLifetime:         4 * time.Hour,
+			BlockLookupTimeout:        100 * time.Millisecond,
 		}
 	}
 }

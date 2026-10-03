@@ -33,6 +33,7 @@ import (
 	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/security/mitigation"
 	"github.com/gsoultan/gateon/internal/syncutil"
+	"github.com/gsoultan/gateon/internal/telemetry/lookupgate"
 	"github.com/gsoultan/gateon/internal/telemetry/repid"
 	"github.com/gsoultan/gateon/internal/telemetry/tracebudget"
 	lru "github.com/hashicorp/golang-lru"
@@ -623,7 +624,10 @@ type pathStatsStore struct {
 	scoreCache                  *lru.ARCCache
 	unmitigatedCache            *lru.ARCCache
 	userMitigationCache         *lru.ARCCache
-	traceStoreEnabled           atomic.Bool
+	// lookups reads the block list on the request path under a deadline,
+	// one query per key and a bounded number in flight (ADR 0054).
+	lookups           *blockLookups
+	traceStoreEnabled atomic.Bool
 	// traceGuard stops trace writes while the disk holding the store is
 	// nearly full and backs Pebble off a full one (ADR 0049).
 	traceGuard *tracebudget.Guard
@@ -777,6 +781,7 @@ func initStore(databaseURL string, retentionDays int) error {
 	if cache, err := lru.NewARC(cacheSizeFromEnv(envUserMitigatedCacheSize, cacheNameUserMitigated, defaultUserMitigatedCacheSize)); err == nil {
 		st.userMitigationCache = cache
 	}
+	st.lookups = newBlockLookups(st)
 
 	if err := db.Migrate(database, dialect); err != nil {
 		_ = pdb.Close()
@@ -818,6 +823,8 @@ func (s *pathStatsStore) syncTierSettings() {
 
 	// Update trace store toggle
 	s.traceStoreEnabled.Store(td.TraceStoreEnabled)
+
+	s.lookups.setTimeout(blockLookupTimeout(td))
 
 	// Update retention days if not explicitly overridden in global config.
 	// We read the global config directly to see if there's an override.
@@ -2264,62 +2271,99 @@ func IsIPUnmitigated(ip string) bool {
 	return err == nil && row.held(time.Now())
 }
 
-// IsIPMitigated reports whether ip is shunned now: an operator's block, or an
-// automatic shun that has not lapsed. A lapsed shun is lifted from the moment
-// it lapses, with no sweeper involved: the cache keeps when the shun ends, not
-// that there is one. It runs for every request IPMitigation sees.
-//
-// A shun in force is cached until it ends. "Not shunned" is cached for one to
-// two mitigationEpochLength and then read again, so a block another node wrote
-// is enforced here within that time (ADR 0043). It used to be cached until
-// evicted -- and so was the answer to a lookup that failed.
-//
-// A lookup that fails is never cached. The request it was for is served,
-// unless the cache already holds a shun in force for the address: during a
-// database outage the data plane keeps serving, and refusing every address
-// the cache cannot vouch for would turn the outage into a total one -- one a
-// client can provoke wherever load alone produces SQLITE_BUSY. Blocks this
-// node has seen stay enforced, from the cache; a block it has not seen since
-// its last start is enforced from the first lookup after the database is back.
-// The failures are counted in gateon_mitigation_lookup_errors_total.
+// IsIPMitigated is IsIPMitigatedContext for a caller with no context of its
+// own -- the TCP accept path, the detectors -- which waits no longer than the
+// lookup's deadline.
 func IsIPMitigated(ip string) bool {
+	return IsIPMitigatedContext(context.Background(), ip)
+}
+
+// IsIPMitigatedContext reports whether ip is shunned now: an operator's block,
+// or an automatic shun that has not lapsed. A lapsed shun is lifted from the
+// moment it lapses, with no sweeper involved: the cache keeps when the shun
+// ends, not that there is one. It runs for every request IPMitigation sees and
+// every connection a TCP entrypoint accepts.
+//
+// A shun in force is cached until it ends. "Not shunned" is answered from the
+// cache for one to two mitigationEpochLength (ADR 0043); after that, for up to
+// staleAnswerEpochs, the request is still answered from the cache and the
+// address is read again in the background (ADR 0054), so a client the cache
+// knows never waits for the database. Past that it is read again before the
+// request is decided.
+//
+// That read waits at most the lookup deadline, or until ctx ends, and a
+// lookup that fails or times out is never cached. The request it was for is
+// served, unless the cache already holds a shun in force for the address:
+// during a database outage the data plane keeps serving, and refusing every
+// address the cache cannot vouch for would turn the outage into a total one --
+// one a client can provoke wherever load alone produces SQLITE_BUSY. Blocks
+// this node has seen stay enforced, from the cache; a block it has not seen
+// since its last start is enforced from the first lookup after the database
+// is back. The failures are counted in gateon_mitigation_lookup_errors_total.
+func IsIPMitigatedContext(ctx context.Context, ip string) bool {
 	s := getStore()
 	if s == nil {
 		return false
 	}
-	if s.unmitigatedCache != nil {
-		if val, ok := s.unmitigatedCache.Get(ip); ok {
-			if blocked, fresh := cachedIPAnswer(val); fresh {
-				return blocked
-			}
-		}
+	if blocked, ok := s.cachedIPMitigation(ip); ok {
+		return blocked
 	}
-
-	until, err := s.readIPShunUntil(ip)
+	until, err := s.lookups.ip.Do(ctx, ip)
 	if err != nil {
 		mitigationLookupFailed(mitigationLookupIP, err)
 		return false
 	}
-	if s.unmitigatedCache != nil {
-		s.unmitigatedCache.Add(ip, ipAnswerToCache(until))
-	}
 	return until.active()
 }
 
+// IPMitigationFromCache is IsIPMitigatedContext without the database: whether
+// ip is shunned, and whether the cache could say. It never waits; an answer
+// that is stale still answers, and is read again in the background. A caller
+// with a cheaper decision of its own to make before the database is asked --
+// the exemption, in identity.AddressBlocked -- asks this first, so the
+// requests the cache answers, nearly all of them, pay for neither.
+func IPMitigationFromCache(ip string) (blocked, ok bool) {
+	s := getStore()
+	if s == nil {
+		return false, true
+	}
+	return s.cachedIPMitigation(ip)
+}
+
+func (s *pathStatsStore) cachedIPMitigation(ip string) (blocked, ok bool) {
+	if s.unmitigatedCache == nil {
+		return false, false
+	}
+	val, hit := s.unmitigatedCache.Get(ip)
+	if !hit {
+		return false, false
+	}
+	blocked, age := cachedIPAnswer(val)
+	switch age {
+	case answerFresh:
+		return blocked, true
+	case answerStale:
+		s.lookups.ip.Refresh(ip)
+		return blocked, true
+	}
+	return false, false
+}
+
 // cachedIPAnswer reads what the cache holds for an address: whether it is
-// shunned, and whether the answer may be used without asking the database. A
-// shun that has lapsed, a "not shunned" past its time and anything else are
-// read again. Comma-ok: a bare assertion here panics on the request path.
-func cachedIPAnswer(val any) (blocked, fresh bool) {
+// shunned, and how far the answer may be used without asking the database. A
+// shun in force is fresh until it ends; a shun that has lapsed, and anything
+// that is not an answer, is read again before the request is decided.
+// Comma-ok: a bare assertion here panics on the request path.
+func cachedIPAnswer(val any) (blocked bool, age answerAge) {
 	switch v := val.(type) {
 	case shunUntil:
 		if v.active() {
-			return true, true
+			return true, answerFresh
 		}
 	case notBlockedUntil:
-		return false, v.fresh()
+		return false, epochAge(int64(v))
 	}
-	return false, false
+	return false, answerNone
 }
 
 // ipAnswerToCache is what the cache keeps for a shun read from the database:
@@ -2331,14 +2375,26 @@ func ipAnswerToCache(until shunUntil) any {
 	return notBlocked()
 }
 
+// lookupIPShun is the IP gate's read: ip's shun, cached when the database
+// answered.
+func (s *pathStatsStore) lookupIPShun(ctx context.Context, ip string) (shunUntil, error) {
+	since := s.lookups.writes.Load()
+	until, err := s.readIPShunUntil(ctx, ip)
+	if err == nil {
+		s.lookups.keep(s.unmitigatedCache, ip, ipAnswerToCache(until), since)
+	}
+	return until, err
+}
+
 // readIPShunUntil is ip's shun as enforcement needs it: the status and the
 // end, and nothing else, so a timestamp written by an older version that does
 // not scan cannot turn a block off. If the end does not scan, the status
 // decides alone, as it did before shuns lapsed: a block stays a block. An
 // error is returned only when neither read succeeds; it is not an answer.
-func (s *pathStatsStore) readIPShunUntil(ip string) (shunUntil, error) {
+func (s *pathStatsStore) readIPShunUntil(ctx context.Context, ip string) (shunUntil, error) {
+	database := s.lookups.db.Load()
 	var r ipShunRow
-	err := s.db.QueryRow(s.dialect.Rebind(QueryReadIPShunEnd), ip).Scan(&r.status, &r.expiresAt)
+	err := database.QueryRowContext(ctx, s.lookups.queryIPEnd, ip).Scan(&r.status, &r.expiresAt)
 	switch {
 	case err == nil:
 		return r.until(), nil
@@ -2346,7 +2402,7 @@ func (s *pathStatsStore) readIPShunUntil(ip string) (shunUntil, error) {
 		return shunNone, nil
 	}
 	var status string
-	statusErr := s.db.QueryRow(s.dialect.Rebind(QueryReadIPShunStatus), ip).Scan(&status)
+	statusErr := database.QueryRowContext(ctx, s.lookups.queryIPStatus, ip).Scan(&status)
 	switch {
 	case statusErr == nil && status == statusMitigated:
 		return shunForever, nil
@@ -2356,15 +2412,23 @@ func (s *pathStatsStore) readIPShunUntil(ip string) (shunUntil, error) {
 	return shunNone, errors.Join(err, statusErr)
 }
 
-// A "not blocked" answer -- for an address or a fingerprint -- is trusted for
-// the epoch it was read in and the one after, then read again: between one
-// and two mitigationEpochLength. That bounds how long a block written by
-// another node, or straight to the database, goes unenforced here, at one
-// indexed point read per active client per minute or two. The epoch is an
-// atomic dailyResetLoop advances, so the answer nearly every request gets
+// A "not blocked" answer -- for an address or a fingerprint -- and a
+// fingerprint block are trusted for the epoch they were read in and the one
+// after, then read again: between one and two mitigationEpochLength. That
+// bounds how long a block written by another node, or straight to the
+// database, goes unenforced here -- and a release, for a fingerprint block --
+// at one indexed point read per active client per minute or two. The epoch is
+// an atomic dailyResetLoop advances, so the answer nearly every request gets
 // reads no clock. Not a tunable: shorter buys little, and longer is the
 // staleness this replaces, which had no bound at all.
 const mitigationEpochLength = time.Minute
+
+// staleAnswerEpochs is how many epochs old an answer may be and still decide
+// a request while it is read again in the background (ADR 0054): a client
+// active in the last ten minutes never waits for the database. One gone for
+// longer is read before its request is decided -- it has had time to earn a
+// block elsewhere, and its first request is the one that should meet it.
+const staleAnswerEpochs = 10
 
 // mitigationEpoch counts mitigationEpochLength intervals since start.
 var mitigationEpoch atomic.Int64
@@ -2378,8 +2442,37 @@ func notBlocked() notBlockedUntil {
 	return notBlockedUntil(mitigationEpoch.Load())
 }
 
-func (n notBlockedUntil) fresh() bool {
-	return mitigationEpoch.Load()-int64(n) <= 1
+// blockedAt is a fingerprint block as the enforcement cache keeps it: the
+// mitigationEpoch it was read, or written, in.
+type blockedAt int64
+
+// blockedNow is a fingerprint block read, or written, now.
+func blockedNow() blockedAt {
+	return blockedAt(mitigationEpoch.Load())
+}
+
+// answerAge is how a cached answer may be used.
+type answerAge uint8
+
+const (
+	// answerNone: there is no answer to use; the request waits for a lookup.
+	answerNone answerAge = iota
+	// answerFresh: the answer decides the request.
+	answerFresh
+	// answerStale: the answer decides the request, and is read again in the
+	// background.
+	answerStale
+)
+
+// epochAge is how an answer read in epoch may be used now.
+func epochAge(epoch int64) answerAge {
+	switch d := mitigationEpoch.Load() - epoch; {
+	case d <= 1:
+		return answerFresh
+	case d <= staleAnswerEpochs:
+		return answerStale
+	}
+	return answerNone
 }
 
 // The kinds of enforcement lookup, as gateon_mitigation_lookup_errors_total
@@ -2389,27 +2482,46 @@ const (
 	mitigationLookupUser = "user"
 )
 
+// Why an enforcement lookup decided a request without the database, as
+// gateon_mitigation_lookup_errors_total labels it under labelReason.
+const (
+	labelReason = "reason"
+
+	lookupReasonError     = "error"
+	lookupReasonTimeout   = "timeout"
+	lookupReasonSaturated = "saturated"
+)
+
 // MitigationLookupErrorsTotal counts enforcement lookups that could not read
-// the database, by kind ("ip" or "user"). Each is a request decided without
-// it; see IsIPMitigated.
+// the database, by kind ("ip" or "user") and reason: "error" (the database
+// refused), "timeout" (it did not answer within the lookup deadline) or
+// "saturated" (every lookup slot was held, so none was started). Each is a
+// request decided without it; see IsIPMitigatedContext.
 var MitigationLookupErrorsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 	Name: "gateon_mitigation_lookup_errors_total",
-	Help: "Address and fingerprint block lookups that could not read the database; the request was decided from the cache alone.",
-}, []string{"kind"})
+	Help: "Address and fingerprint block lookups that could not read the database, by reason (error, timeout, saturated); the request was decided from the cache alone.",
+}, []string{"kind", labelReason})
 
 // lastLookupErrorLog is when a failed lookup was last logged, in Unix
 // nanoseconds: an outage fails every lookup, and one line a minute says so.
 var lastLookupErrorLog atomic.Int64
 
 func mitigationLookupFailed(kind string, err error) {
-	MitigationLookupErrorsTotal.WithLabelValues(kind).Inc()
+	reason := lookupReasonError
+	switch {
+	case errors.Is(err, lookupgate.ErrTimeout):
+		reason = lookupReasonTimeout
+	case errors.Is(err, lookupgate.ErrSaturated):
+		reason = lookupReasonSaturated
+	}
+	MitigationLookupErrorsTotal.WithLabelValues(kind, reason).Inc()
 	now := time.Now().UnixNano()
 	last := lastLookupErrorLog.Load()
 	if now-last < int64(time.Minute) || !lastLookupErrorLog.CompareAndSwap(last, now) {
 		return
 	}
 	logger.Default().LogError("block lookup failed; deciding requests from the cache until the database answers",
-		"kind", kind, "error", err)
+		"kind", kind, labelReason, reason, "error", err)
 }
 
 // Automatic shuns lapse (ADR 0031). A shun refuses everyone behind an address
@@ -2586,6 +2698,7 @@ func (s *pathStatsStore) applyAutoShun(ip, reason string, now, until time.Time) 
 		}
 		return ShunResult{Outcome: ShunExempt}, nil
 	}
+	s.lookups.noteWrite()
 	if s.unmitigatedCache != nil {
 		s.unmitigatedCache.Add(ip, shunUntil(until.UnixNano()))
 	}
@@ -2751,6 +2864,9 @@ func markIPMitigated(ip string, reason string, duration time.Duration) error {
 	//
 	// On failure the cache is left alone, so IsIPMitigated falls through to
 	// the database, finds nothing, and the verification reports the truth.
+	if err == nil {
+		s.lookups.noteWrite()
+	}
 	if err == nil && s.unmitigatedCache != nil {
 		s.unmitigatedCache.Add(ip, cacheEnd)
 	}
@@ -2810,6 +2926,9 @@ func MarkIPUnmitigated(ip string) error {
 	// persist used to seed the cache anyway, so the API answered "removed
 	// successfully" while the row still said mitigated -- and once the cache
 	// entry was evicted the block came back on its own.
+	if err == nil {
+		s.lookups.noteWrite()
+	}
 	if err == nil && s.unmitigatedCache != nil {
 		s.unmitigatedCache.Add(ip, notBlocked())
 	}
@@ -2900,83 +3019,122 @@ func GetIPMitigations(ctx context.Context, limit, offset int) ([]IPMitigation, i
 	return res, total
 }
 
-// IsUserMitigated reports whether a client class is blocked on a network: key
-// is repid.For(fingerprint, address), the identity UserMitigation enforces
-// (telemetry.GetReputationID). A key without a network scope -- a bare
-// fingerprint, as blocks were keyed before ADR 0026 -- names a class on every
-// network and is never enforced.
+// IsUserMitigated is IsUserMitigatedContext for a caller with no context of
+// its own, which waits no longer than the lookup's deadline.
 func IsUserMitigated(ja4plus string) bool {
+	return IsUserMitigatedContext(context.Background(), ja4plus)
+}
+
+// IsUserMitigatedContext reports whether a client class is blocked on a
+// network: key is repid.For(fingerprint, address), the identity UserMitigation
+// enforces (telemetry.GetReputationID). A key without a network scope -- a
+// bare fingerprint, as blocks were keyed before ADR 0026 -- names a class on
+// every network and is never enforced.
+func IsUserMitigatedContext(ctx context.Context, ja4plus string) bool {
 	s := getStore()
-	if s == nil || !repid.Scoped(ja4plus) {
+	if s == nil {
 		return false
 	}
-
-	// 1. An operator's release on this node overrides (MarkUserUnmitigated).
-	if s.unmitigatedCache != nil {
-		if _, ok := s.unmitigatedCache.Get(ja4plus); ok {
-			return false
-		}
+	blocked, ok := s.cachedUserMitigation(ja4plus)
+	if ok {
+		return blocked
 	}
-
-	// 2. A cached block is read again every time, so a release on another
-	// node ends it; a cached "not blocked" is trusted for one to two
-	// mitigationEpochLength, so a block written on another node starts within
-	// that (ADR 0043). Comma-ok: a bare assertion panics on the request path.
-	knownBlocked := false
-	if s.userMitigationCache != nil {
-		if val, ok := s.userMitigationCache.Get(ja4plus); ok {
-			switch v := val.(type) {
-			case bool:
-				knownBlocked = v
-			case notBlockedUntil:
-				if v.fresh() {
-					return false
-				}
-			}
-		}
-	}
-
-	mitigated, err := s.readUserMitigated(ja4plus)
+	mitigated, err := s.lookups.user.Do(ctx, ja4plus)
 	if err != nil {
 		// Not cached, and not an answer: a block this node holds stays a
 		// block, and anything else is decided for this request alone, as
-		// IsIPMitigated decides it. A failure used to be cached as "not
-		// blocked", over the block, for as long as the entry lived.
+		// IsIPMitigatedContext decides it.
 		mitigationLookupFailed(mitigationLookupUser, err)
-		return knownBlocked
-	}
-	if s.userMitigationCache != nil {
-		if mitigated {
-			s.userMitigationCache.Add(ja4plus, true)
-		} else {
-			s.userMitigationCache.Add(ja4plus, notBlocked())
-		}
+		return blocked
 	}
 	return mitigated
 }
 
+// UserMitigationFromCache is IsUserMitigatedContext without the database, as
+// IPMitigationFromCache is for an address.
+func UserMitigationFromCache(ja4plus string) (blocked, ok bool) {
+	s := getStore()
+	if s == nil {
+		return false, true
+	}
+	return s.cachedUserMitigation(ja4plus)
+}
+
+// cachedUserMitigation answers a fingerprint key without the database when it
+// can. When it cannot, blocked still says whether the cache held a block too
+// old to decide, which a lookup that then fails keeps.
+func (s *pathStatsStore) cachedUserMitigation(ja4plus string) (blocked, ok bool) {
+	if !repid.Scoped(ja4plus) {
+		return false, true
+	}
+	// 1. An operator's release on this node overrides (MarkUserUnmitigated).
+	if s.unmitigatedCache != nil {
+		if _, released := s.unmitigatedCache.Get(ja4plus); released {
+			return false, true
+		}
+	}
+	// 2. A cached answer -- block or "not blocked" -- decides for one to two
+	// mitigationEpochLength, so a block or a release written on another node
+	// takes effect here within that (ADR 0043); then, for up to
+	// staleAnswerEpochs, it still decides while it is read again in the
+	// background (ADR 0054). A cached block used to be read again on every
+	// request, which put a database round trip on every request a blocked
+	// client made (dataplane F7).
+	blocked, age := s.cachedUserAnswer(ja4plus)
+	switch age {
+	case answerFresh:
+		return blocked, true
+	case answerStale:
+		s.lookups.user.Refresh(ja4plus)
+		return blocked, true
+	}
+	return blocked, false
+}
+
+// cachedUserAnswer reads what the cache holds for a fingerprint key, as
+// cachedIPAnswer does for an address. A block too old to decide is still
+// reported blocked, so a lookup that then fails keeps it.
+func (s *pathStatsStore) cachedUserAnswer(key string) (blocked bool, age answerAge) {
+	if s.userMitigationCache == nil {
+		return false, answerNone
+	}
+	val, ok := s.userMitigationCache.Get(key)
+	if !ok {
+		return false, answerNone
+	}
+	switch v := val.(type) {
+	case blockedAt:
+		return true, epochAge(int64(v))
+	case notBlockedUntil:
+		return false, epochAge(int64(v))
+	}
+	return false, answerNone
+}
+
+// userAnswerToCache is what the cache keeps for a fingerprint lookup.
+func userAnswerToCache(blocked bool) any {
+	if blocked {
+		return blockedNow()
+	}
+	return notBlocked()
+}
+
+// lookupUserBlock is the fingerprint gate's read: whether key is blocked,
+// cached when the database answered.
+func (s *pathStatsStore) lookupUserBlock(ctx context.Context, key string) (bool, error) {
+	since := s.lookups.writes.Load()
+	blocked, err := s.readUserMitigated(ctx, key)
+	if err == nil {
+		s.lookups.keep(s.userMitigationCache, key, userAnswerToCache(blocked), since)
+	}
+	return blocked, err
+}
+
 // readUserMitigated reads whether key is blocked; sql.ErrNoRows is "not
 // blocked", any other error is no answer.
-func (s *pathStatsStore) readUserMitigated(ja4plus string) (bool, error) {
-	// Ties break towards "unmitigated", and that is the whole point of the
-	// second ORDER BY term.
-	//
-	// CURRENT_TIMESTAMP is second-granular on SQLite, and a release is normally
-	// applied within the same second as the block it undoes — an operator
-	// clicking Remove Mitigation on a threat that just fired, or a test
-	// releasing what it just earned. With only updated_at to sort by, those two
-	// rows tie and the winner is whatever the storage engine returns first, so
-	// the release lands, reports success, and the client stays blocked.
-	//
-	// Breaking the tie the other way would mean a stale block outliving an
-	// explicit unblock, which is the failure an operator cannot diagnose and
-	// cannot work around.
-	query := s.dialect.Rebind(`SELECT status FROM user_mitigations
-		WHERE (fingerprint = ? OR ja4h = ?) AND updated_at > ?
-		ORDER BY updated_at DESC, CASE status WHEN 'unmitigated' THEN 0 ELSE 1 END
-		LIMIT 1`)
+func (s *pathStatsStore) readUserMitigated(ctx context.Context, ja4plus string) (bool, error) {
 	var status string
-	err := s.db.QueryRow(query, ja4plus, ja4plus, mitigationCutoff()).Scan(&status)
+	err := s.lookups.db.Load().QueryRowContext(ctx, s.lookups.queryUser, ja4plus, ja4plus, mitigationCutoff()).Scan(&status)
 	switch {
 	case err == nil:
 		return status == statusMitigated, nil
@@ -2984,6 +3142,143 @@ func (s *pathStatsStore) readUserMitigated(ja4plus string) (bool, error) {
 		return false, nil
 	}
 	return false, err
+}
+
+// queryReadUserMitigated reads a fingerprint key's latest decision inside the
+// block TTL. Ties break towards "unmitigated", and that is the whole point of
+// the second ORDER BY term.
+//
+// CURRENT_TIMESTAMP is second-granular on SQLite, and a release is normally
+// applied within the same second as the block it undoes -- an operator
+// clicking Remove Mitigation on a threat that just fired, or a test releasing
+// what it just earned. With only updated_at to sort by, those two rows tie and
+// the winner is whatever the storage engine returns first, so the release
+// lands, reports success, and the client stays blocked.
+//
+// Breaking the tie the other way would mean a stale block outliving an
+// explicit unblock, which is the failure an operator cannot diagnose and
+// cannot work around.
+const queryReadUserMitigated = `SELECT status FROM user_mitigations
+		WHERE (fingerprint = ? OR ja4h = ?) AND updated_at > ?
+		ORDER BY updated_at DESC, CASE status WHEN 'unmitigated' THEN 0 ELSE 1 END
+		LIMIT 1`
+
+// blockLookups runs the block lookups the request path waits for -- an
+// address's shun and a fingerprint's block -- through lookupgate (ADR 0054):
+// each waits at most the lookup deadline, concurrent lookups of one key share
+// a query, and at most blockLookupSlots run at once across both kinds.
+type blockLookups struct {
+	// db is what the lookups read: the store's database, or the one a test
+	// stands in (SetBlockLookupDBForTest).
+	db    atomic.Pointer[sql.DB]
+	slots *lookupgate.Slots
+	ip    *lookupgate.Gate[shunUntil]
+	user  *lookupgate.Gate[bool]
+	// writes counts this node's writes to the block list and its releases. A
+	// lookup that read the database before one of them must not leave its
+	// answer cached over the write's (keep).
+	writes atomic.Uint64
+	// The lookup queries, rebound for the dialect once rather than per read.
+	queryIPEnd, queryIPStatus, queryUser string
+}
+
+func newBlockLookups(s *pathStatsStore) *blockLookups {
+	td := config.CurrentTierDefaults()
+	l := &blockLookups{
+		slots:         lookupgate.NewSlots(blockLookupSlots(td)),
+		queryIPEnd:    s.dialect.Rebind(QueryReadIPShunEnd),
+		queryIPStatus: s.dialect.Rebind(QueryReadIPShunStatus),
+		queryUser:     s.dialect.Rebind(queryReadUserMitigated),
+	}
+	l.db.Store(s.db)
+	timeout := blockLookupTimeout(td)
+	l.ip = lookupgate.New(l.slots, timeout, s.lookupIPShun)
+	l.user = lookupgate.New(l.slots, timeout, s.lookupUserBlock)
+	return l
+}
+
+func (l *blockLookups) setTimeout(d time.Duration) {
+	l.ip.SetTimeout(d)
+	l.user.SetTimeout(d)
+}
+
+// noteWrite records a write to the block list or a release, before the write
+// touches the cache.
+func (l *blockLookups) noteWrite() { l.writes.Add(1) }
+
+// keep caches a lookup's answer -- unless a block or a release was written on
+// this node since the lookup began, which may have read the database before
+// it. Then the entry is dropped rather than kept over the write's own, and the
+// next request reads the database again. Rare: blocks are.
+func (l *blockLookups) keep(c *lru.ARCCache, key string, answer any, since uint64) {
+	if c == nil {
+		return
+	}
+	c.Add(key, answer)
+	if l.writes.Load() != since {
+		c.Remove(key)
+	}
+}
+
+// BlockLookupTimeout is how long one block lookup waits for the database:
+// what a request that has to look up waits at most (ADR 0054). Zero with no
+// store open.
+func BlockLookupTimeout() time.Duration {
+	if s := getStore(); s != nil {
+		return s.lookups.ip.Timeout()
+	}
+	return 0
+}
+
+// envBlockLookupTimeout overrides the tier's block lookup deadline
+// (TierDefaults.BlockLookupTimeout), as a Go duration: "150ms".
+const envBlockLookupTimeout = "GATEON_BLOCK_LOOKUP_TIMEOUT"
+
+// blockLookupTimeout is the lookup deadline: GATEON_BLOCK_LOOKUP_TIMEOUT if it
+// is a positive duration, else the tier's. Zero is not "no deadline": that is
+// the defect the deadline removes.
+func blockLookupTimeout(td config.TierDefaults) time.Duration {
+	return envDuration(envBlockLookupTimeout, td.BlockLookupTimeout)
+}
+
+// blockLookupSlots is how many block lookups may be in flight at once: eight
+// per connection in the tier's database pool -- minimal 40, standard 200,
+// enterprise 800.
+//
+// The pool, not this, bounds what the lookups ask of the database: one past
+// it waits for a connection inside database/sql, and that wait honours the
+// lookup's deadline. So against a stopped server at most the pool's worth are
+// stuck in a driver read, and the rest give up at the deadline and free their
+// slot. What this bounds is goroutines and the gate's map, under a flood of
+// new addresses. It is generous because a lookup refused a slot is decided
+// without the database: half the pool -- two lookups on the minimal tier --
+// left a burst of twenty new clients to a healthy database mostly unchecked
+// (measured on Postgres, ADR 0054), while eight 1-2 ms reads queued on each
+// connection clear well inside the deadline.
+func blockLookupSlots(td config.TierDefaults) int {
+	return 8 * max(1, td.DBMaxOpenConns)
+}
+
+// SetBlockLookupDBForTest points the block lookups at database until the
+// returned func restores the store's own, so a test outside this package can
+// stand a database that stops answering behind the request path
+// (testutil.HangDB). It panics with no store open. Tests only.
+func SetBlockLookupDBForTest(database *sql.DB) (restore func()) {
+	s := getStore()
+	if s == nil {
+		panic("telemetry: SetBlockLookupDBForTest with no store open")
+	}
+	prev := s.lookups.db.Swap(database)
+	return func() { s.lookups.db.Store(prev) }
+}
+
+// WaitBlockLookupsForTest returns once every block lookup started so far has
+// ended -- after a test released the database it stood in. Tests only.
+func WaitBlockLookupsForTest() {
+	if s := getStore(); s != nil {
+		s.lookups.ip.Wait()
+		s.lookups.user.Wait()
+	}
 }
 
 // unmitigationHoldWindow is how long a manual release of a fingerprint holds
@@ -3145,8 +3440,9 @@ func MarkUserMitigated(ja4plus string, fpType string, reason string, category st
 	if err != nil {
 		logger.Default().LogError("failed to mark user as mitigated", "ja4plus", ja4plus, "error", err)
 	}
+	s.lookups.noteWrite()
 	if s.userMitigationCache != nil {
-		s.userMitigationCache.Add(ja4plus, true)
+		s.userMitigationCache.Add(ja4plus, blockedNow())
 	}
 	// A block ends a release this node is holding: IsUserMitigated consults
 	// the release override first, so one left in place outlived the new block
@@ -3176,6 +3472,7 @@ func MarkUserUnmitigated(ja4plus string) bool {
 	released := s.countInForceUserMitigations(ja4plus) > 0
 
 	// 1. Populate high-priority override cache (Bypass all security for 24h)
+	s.lookups.noteWrite()
 	if s.unmitigatedCache != nil {
 		s.unmitigatedCache.Add(ja4plus, true)
 	}
