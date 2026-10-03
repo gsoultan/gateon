@@ -192,3 +192,60 @@ message Verify2FAResponse {
   string token = 2;
   User user = 3;
 }
+
+// ApiToken is a long-lived, scoped credential an administrator issues to a
+// machine -- a Prometheus scraper -- so it does not need a user's eight-hour
+// session. Only its hash is stored; the secret is shown once, in
+// CreateApiTokenResponse, and never again. It is accepted only where one of
+// its scopes allows (today: GET /metrics with "metrics:read"), never as a
+// dashboard session, and the proxy withholds it from every backend. ADR 0050.
+message ApiToken {
+  string id = 1;
+  string name = 2;
+  repeated string scopes = 3;
+  // hint is the token's first characters: enough to tell two apart, never
+  // enough to use.
+  string hint = 4;
+  string created_by = 5;
+  string created_at = 6;
+  // last_used_at is when the token was last accepted, to the minute, or ""
+  // when it never has been.
+  string last_used_at = 7;
+  // expires_at is "" for a token that lasts until it is revoked.
+  string expires_at = 8;
+}
+
+message ListApiTokensRequest {
+  int32 page = 1;
+  int32 page_size = 2;
+}
+
+message ListApiTokensResponse {
+  repeated ApiToken tokens = 1;
+  int32 total_count = 2;
+  int32 page = 3;
+  int32 page_size = 4;
+}
+
+message CreateApiTokenRequest {
+  string name = 1;
+  // scopes are what the token may do: at least one, each a known read-only
+  // scope. "metrics:read" is the only one today.
+  repeated string scopes = 2;
+  // ttl_days is how long the token lasts; 0 is until it is revoked.
+  int32 ttl_days = 3;
+}
+
+message CreateApiTokenResponse {
+  ApiToken token = 1;
+  // secret is the token itself. It is returned here once and is not stored.
+  string secret = 2;
+}
+
+message RevokeApiTokenRequest {
+  string id = 1;
+}
+
+message RevokeApiTokenResponse {
+  bool success = 1;
+}

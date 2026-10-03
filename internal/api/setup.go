@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"slices"
 
+	"github.com/gsoultan/gateon/internal/audit"
 	"github.com/gsoultan/gateon/internal/auth"
 	"github.com/gsoultan/gateon/internal/auth/passpolicy"
 	"github.com/gsoultan/gateon/internal/config"
@@ -160,7 +161,14 @@ func (s *ApiService) saveSetupConfig(ctx context.Context, req *gateonv1.SetupReq
 	if req.ManagementPort != "" {
 		conf.Management.Port = req.ManagementPort
 	}
-	return s.Globals.Update(ctx, conf)
+	recordFromTheStart(conf)
+	if err := s.Globals.Update(ctx, conf); err != nil {
+		return err
+	}
+	// The saved audit settings take effect now, so Setup's own entry below is
+	// the first one recorded and signed.
+	audit.UpdateConfig(conf.Audit)
+	return nil
 }
 
 // undoSetup takes back what a failed Setup did: the administrator it created
@@ -184,6 +192,26 @@ func (s *ApiService) undoSetup(prev auth.Service, installed bool, createdID stri
 	}
 	if c, ok := installedSvc.(interface{ Close() error }); ok {
 		_ = c.Close()
+	}
+}
+
+// recordFromTheStart turns the audit log on, signed, for an install being set
+// up (ADR 0050). It was off by default, so a default install recorded nothing
+// -- sign-ins, user changes, configuration changes -- and the chain its
+// entries would have formed was never there to verify. Setup is the one moment
+// that is unambiguously a new install: a stored "enabled": false is not
+// written to global.json (it is the zero value), so an existing install that
+// chose to switch audit off cannot be told from one that never chose, and is
+// left as it is. An administrator can switch it off afterwards; that change is
+// itself recorded.
+func recordFromTheStart(conf *gateonv1.GlobalConfig) {
+	if conf.Audit == nil {
+		conf.Audit = &gateonv1.AuditConfig{}
+	}
+	conf.Audit.Enabled = true
+	conf.Audit.SignEntries = true
+	if conf.Audit.SignatureKey == "" {
+		conf.Audit.SignatureKey = audit.GenerateSignatureKey()
 	}
 }
 

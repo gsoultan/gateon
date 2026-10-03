@@ -5,6 +5,7 @@ package handlers
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -978,4 +979,72 @@ func handleLogout(d *Deps) http.HandlerFunc {
 		}
 		_ = json.NewEncoder(w).Encode(map[string]bool{"success": true})
 	}
+}
+
+// credentialAPI is what the scrape-credential and audit-verification
+// handlers need of ApiService (ADR 0050).
+type credentialAPI interface {
+	ListApiTokens(ctx context.Context, req *gateonv1.ListApiTokensRequest) (*gateonv1.ListApiTokensResponse, error)
+	CreateApiToken(ctx context.Context, req *gateonv1.CreateApiTokenRequest) (*gateonv1.CreateApiTokenResponse, error)
+	RevokeApiToken(ctx context.Context, req *gateonv1.RevokeApiTokenRequest) (*gateonv1.RevokeApiTokenResponse, error)
+	VerifyAuditChain(ctx context.Context, req *gateonv1.VerifyAuditChainRequest) (*gateonv1.VerifyAuditChainResponse, error)
+}
+
+// registerCredentialHandlers serves the REST twins of the scrape-credential
+// RPCs and of VerifyAuditChain. Each checks the permission its RPC is mapped
+// to, and ApiService then requires an administrator, as it does for users.
+func registerCredentialHandlers(mux *http.ServeMux, svc credentialAPI) {
+	mux.HandleFunc("GET /v1/api-tokens", func(w http.ResponseWriter, r *http.Request) {
+		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceUsers) {
+			return
+		}
+		page, pageSize, _ := ParsePagination(r)
+		resp, err := svc.ListApiTokens(r.Context(), &gateonv1.ListApiTokensRequest{Page: page, PageSize: pageSize})
+		writeServiceAnswer(w, resp, err)
+	})
+	mux.HandleFunc("POST /v1/api-tokens", func(w http.ResponseWriter, r *http.Request) {
+		if !RequirePermission(w, r, auth.ActionWrite, auth.ResourceUsers) {
+			return
+		}
+		var req gateonv1.CreateApiTokenRequest
+		if !DecodeProtoRequest(w, r, &req) {
+			return
+		}
+		resp, err := svc.CreateApiToken(r.Context(), &req)
+		writeServiceAnswer(w, resp, err)
+	})
+	mux.HandleFunc("DELETE /v1/api-tokens/{id}", func(w http.ResponseWriter, r *http.Request) {
+		if !RequirePermission(w, r, auth.ActionWrite, auth.ResourceUsers) {
+			return
+		}
+		resp, err := svc.RevokeApiToken(r.Context(), &gateonv1.RevokeApiTokenRequest{Id: r.PathValue("id")})
+		writeServiceAnswer(w, resp, err)
+	})
+	mux.HandleFunc("GET /v1/audit/verify", func(w http.ResponseWriter, r *http.Request) {
+		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceDiagnostics) {
+			return
+		}
+		q := r.URL.Query()
+		resp, err := svc.VerifyAuditChain(r.Context(), &gateonv1.VerifyAuditChainRequest{
+			From: q.Get("from"), To: q.Get("to"), AfterId: q.Get("afterId"),
+			Limit: boundedInt32(q.Get("limit"), audit.MaxVerifyLimit),
+		})
+		writeServiceAnswer(w, resp, err)
+	})
+}
+
+// writeServiceAnswer writes an ApiService answer as protojson, or its refusal
+// with the status writeServiceRefusal gives it.
+func writeServiceAnswer(w http.ResponseWriter, resp proto.Message, err error) {
+	w.Header().Set("Content-Type", "application/json")
+	if err != nil {
+		writeServiceRefusal(w, err)
+		return
+	}
+	data, mErr := ProtojsonOptions().Marshal(resp)
+	if mErr != nil {
+		WriteHTTPError(w, http.StatusInternalServerError, "the answer could not be encoded")
+		return
+	}
+	_, _ = w.Write(data)
 }

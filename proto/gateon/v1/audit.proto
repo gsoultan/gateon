@@ -51,3 +51,40 @@ message GetAuditArchiveRequest {
 message GetAuditArchiveResponse {
   repeated AuditLog logs = 1;
 }
+
+// VerifyAuditChainRequest asks for the audit log's HMAC chain to be checked,
+// oldest first, over a window of at most limit entries. A window starts at
+// `from` (RFC 3339; "" is the beginning of the log) or, to continue, after
+// after_id -- the next_after_id an earlier answer gave. `to` (RFC 3339; "" is
+// now) ends the range either way.
+message VerifyAuditChainRequest {
+  string from = 1;
+  string to = 2;
+  string after_id = 3;
+  // limit caps the entries this call checks; 0 is the default (1000) and
+  // anything over 5000 is 5000.
+  int32 limit = 4;
+}
+
+// AuditChainBreak is the first entry the chain does not account for.
+message AuditChainBreak {
+  string id = 1;
+  string timestamp = 2;
+  string reason = 3;
+}
+
+message VerifyAuditChainResponse {
+  // intact is true when every entry checked is signed and chained to the one
+  // before it.
+  bool intact = 1;
+  int32 checked = 2;
+  // first_break is set when intact is false.
+  AuditChainBreak first_break = 3;
+  // next_after_id continues the range in the next call; "" when complete or
+  // broken.
+  string next_after_id = 4;
+  // complete is true when the range has no entries left to check.
+  bool complete = 5;
+  // last_timestamp is the newest entry checked, "" when none was.
+  string last_timestamp = 6;
+}

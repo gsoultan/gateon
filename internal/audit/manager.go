@@ -132,8 +132,25 @@ func Init(cfg *gateonv1.AuditConfig, databaseURL string) error {
 		manager.loadLastHash()
 		manager.prepareStatements()
 		go manager.runRetentionTask()
+		warnIfNotRecording(cfg)
 	})
 	return err
+}
+
+// warnIfNotRecording says at startup what an install that is not recording,
+// or not signing, does not have. Audit is on, and signed, for installs set up
+// since ADR 0050; one set up before keeps the setting it had, which for most
+// is off, and nothing else told them.
+func warnIfNotRecording(cfg *gateonv1.AuditConfig) {
+	switch {
+	case cfg != nil && !cfg.GetEnabled():
+		logger.L.LogWarn("the audit log is off: sign-ins, user changes and configuration changes are not "+
+			"being recorded; turn on audit.enabled (and audit.sign_entries) in Settings",
+			"event", "audit_disabled")
+	case cfg != nil && !cfg.GetSignEntries():
+		logger.L.LogWarn("audit entries are not signed, so the audit log cannot be verified; turn on "+
+			"audit.sign_entries in Settings", "event", "audit_unsigned")
+	}
 }
 
 func Stop() {
@@ -237,8 +254,14 @@ func (m *AuditManager) log(ctx context.Context, userID, action, resource, detail
 	// the rotated key was in-memory only and lost on restart.)
 	if cfg != nil && cfg.SignEntries && cfg.SignatureKey != "" {
 		entry.Signature = m.sign(entry, cfg.SignatureKey)
-		m.lastHash = entry.Signature
 	}
+	// Every entry, signed or not, is the predecessor of the next: an unsigned
+	// one ends the chain and the next signed one starts a new one from "". That
+	// is what loadLastHash has always read back after a restart (the newest
+	// row's signature), and what VerifyRange expects; keeping the last signed
+	// hash across unsigned entries instead made a chain that verified after a
+	// restart and not before it, or the other way round.
+	m.lastHash = entry.Signature
 	m.mu.Unlock()
 
 	var err error
@@ -289,6 +312,11 @@ type ChainError struct {
 }
 
 func (e *ChainError) Error() string {
+	if e == nil {
+		// A VerifyResult with no break holds a nil *ChainError, and printing
+		// one must not dereference it.
+		return "<nil>"
+	}
 	if e.ID == "" {
 		return fmt.Sprintf("audit chain broken at index %d: %s", e.Index, e.Reason)
 	}

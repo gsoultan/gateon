@@ -4,12 +4,14 @@
 package server
 
 import (
+	"errors"
 	"net"
 	"net/http"
 	"os"
 	"strings"
 
 	"github.com/gsoultan/gateon/internal/auth"
+	"github.com/gsoultan/gateon/internal/auth/apitoken"
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware/traffic"
@@ -129,6 +131,7 @@ func isGateonManagementAPIPath(path string) bool {
 		"/v1/AnalyzeConfig",
 		"/v1/AnalyzeLogs",
 		"/v1/users",
+		"/v1/api-tokens",
 		"/v1/client-authorities",
 		"/v1/system",
 		"/v1/openapi",
@@ -139,6 +142,50 @@ func isGateonManagementAPIPath(path string) bool {
 		}
 	}
 	return false
+}
+
+// serveScrape answers GET /metrics for a request carrying a scrape credential
+// -- an API token with the metrics:read scope -- and reports whether the
+// request carried one (ADR 0050). A request that does not is left to the
+// session check. /metrics used to accept only a user's eight-hour session, so
+// a scraper needed a viewer account, its password on disk and a timer signing
+// in again every few hours.
+//
+// It is the only place a token is accepted. PasetoAuth does not recognise the
+// format, so on every other path, and on every transport, a token is refused
+// as an invalid session; and the token never reaches the API handlers, so it
+// carries no claims and no role.
+func serveScrape(w http.ResponseWriter, r *http.Request, svc auth.Service, next http.Handler) bool {
+	if r.URL.Path != "/metrics" {
+		return false
+	}
+	token, ok := apitoken.BearerToken(r.Header.Get("Authorization"))
+	if !ok {
+		return false
+	}
+	store := svc.APITokens()
+	if store == nil {
+		writeScrapeRefused(w)
+		return true
+	}
+	if _, err := store.Verify(r.Context(), token, apitoken.ScopeMetricsRead); err != nil {
+		if !errors.Is(err, apitoken.ErrInvalid) {
+			logger.L.LogError("a scrape credential could not be checked", "error", err)
+		}
+		logger.SecurityEvent("scrape_token_refused", r, "invalid_expired_revoked_or_unscoped")
+		writeScrapeRefused(w)
+		return true
+	}
+	next.ServeHTTP(w, r)
+	return true
+}
+
+func writeScrapeRefused(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("WWW-Authenticate", `Bearer realm="gateon-metrics"`)
+	w.WriteHeader(http.StatusUnauthorized)
+	_, _ = w.Write([]byte(`{"error":"the api token is not valid for /metrics"}`))
 }
 
 // isLoginPath returns true for /v1/login or /gateon.v1.ApiService/Login.

@@ -7,8 +7,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/gsoultan/gateon/internal/auth"
+	"github.com/gsoultan/gateon/internal/auth/apitoken"
 	"github.com/gsoultan/gateon/internal/auth/passpolicy"
 	"github.com/gsoultan/gateon/internal/logger"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
@@ -184,4 +186,94 @@ func (s *ApiService) requireAdmin(ctx context.Context) error {
 		return status.Error(codes.PermissionDenied, "admin role required")
 	}
 	return nil
+}
+
+// errNoTokenStore answers the token RPCs before there is a database.
+var errNoTokenStore = status.Error(codes.Unavailable, "api tokens are unavailable until setup has run")
+
+// tokenStore is the scrape-credential store, for an administrator only.
+func (s *ApiService) tokenStore(ctx context.Context) (*apitoken.Store, error) {
+	if err := s.requireAdmin(ctx); err != nil {
+		return nil, err
+	}
+	if !auth.Available(s.Auth) || s.Auth.APITokens() == nil {
+		return nil, errNoTokenStore
+	}
+	return s.Auth.APITokens(), nil
+}
+
+// ListApiTokens lists the scrape credentials, without their secrets (ADR 0050).
+func (s *ApiService) ListApiTokens(ctx context.Context, req *gateonv1.ListApiTokensRequest) (*gateonv1.ListApiTokensResponse, error) {
+	store, err := s.tokenStore(ctx)
+	if err != nil {
+		return nil, err
+	}
+	tokens, total, err := store.List(ctx, int(req.GetPage()), int(req.GetPageSize()))
+	if err != nil {
+		return nil, err
+	}
+	out := &gateonv1.ListApiTokensResponse{
+		TotalCount: int32(total), //nolint:gosec // at most apitoken.MaxActive
+		Page:       req.GetPage(),
+		PageSize:   req.GetPageSize(),
+	}
+	for _, t := range tokens {
+		out.Tokens = append(out.Tokens, apiTokenProto(t))
+	}
+	return out, nil
+}
+
+// CreateApiToken issues a scrape credential and returns its secret, once.
+func (s *ApiService) CreateApiToken(ctx context.Context, req *gateonv1.CreateApiTokenRequest) (*gateonv1.CreateApiTokenResponse, error) {
+	store, err := s.tokenStore(ctx)
+	if err != nil {
+		return nil, err
+	}
+	claims, _ := callerClaims(ctx)
+	tok, secret, err := store.Create(ctx, apitoken.CreateParams{
+		Name: req.GetName(), Scopes: req.GetScopes(), CreatedBy: claims.Username, TTLDays: int(req.GetTtlDays()),
+	})
+	switch {
+	case errors.Is(err, apitoken.ErrBadRequest):
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	case errors.Is(err, apitoken.ErrTooMany):
+		return nil, status.Error(codes.ResourceExhausted, err.Error())
+	case err != nil:
+		return nil, err
+	}
+	s.logAudit(ctx, "create", "api_token", fmt.Sprintf("Created API token %s (%s) with scopes %v", tok.ID, tok.Name, tok.Scopes))
+	return &gateonv1.CreateApiTokenResponse{Token: apiTokenProto(tok), Secret: secret}, nil
+}
+
+// RevokeApiToken deletes a scrape credential; it stops working at once.
+func (s *ApiService) RevokeApiToken(ctx context.Context, req *gateonv1.RevokeApiTokenRequest) (*gateonv1.RevokeApiTokenResponse, error) {
+	store, err := s.tokenStore(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := store.Revoke(ctx, req.GetId()); err != nil {
+		if errors.Is(err, apitoken.ErrNotFound) {
+			return nil, status.Error(codes.NotFound, err.Error())
+		}
+		return nil, err
+	}
+	s.logAudit(ctx, "revoke", "api_token", "Revoked API token "+req.GetId())
+	return &gateonv1.RevokeApiTokenResponse{Success: true}, nil
+}
+
+func apiTokenProto(t apitoken.Token) *gateonv1.ApiToken {
+	out := &gateonv1.ApiToken{
+		Id: t.ID, Name: t.Name, Hint: t.Hint, CreatedBy: t.CreatedBy,
+		CreatedAt: t.CreatedAt.UTC().Format(time.RFC3339),
+	}
+	for _, sc := range t.Scopes {
+		out.Scopes = append(out.Scopes, string(sc))
+	}
+	if !t.LastUsedAt.IsZero() {
+		out.LastUsedAt = t.LastUsedAt.UTC().Format(time.RFC3339)
+	}
+	if !t.ExpiresAt.IsZero() {
+		out.ExpiresAt = t.ExpiresAt.UTC().Format(time.RFC3339)
+	}
+	return out
 }
