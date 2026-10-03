@@ -171,6 +171,7 @@ func AccessLogSampled(routeID string, sampleRate uint32) Middleware {
 	if sampleRate == 0 {
 		return func(next http.Handler) http.Handler { return next }
 	}
+	accessLogs.max.Store(accessLogMaxPerSecond())
 	var counter uint64
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -196,7 +197,8 @@ func AccessLogSampled(routeID string, sampleRate uint32) Middleware {
 				}
 				rs.AccessLogged = true
 			}
-			if sampleRate == 1 || (atomic.AddUint64(&counter, 1)%uint64(sampleRate) == 0) {
+			sampled := sampleRate == 1 || (atomic.AddUint64(&counter, 1)%uint64(sampleRate) == 0)
+			if sampled && accessLogs.allow(start) {
 				statusCode := sw.Status
 				if statusCode == 0 {
 					statusCode = http.StatusOK
@@ -215,6 +217,73 @@ func AccessLogSampled(routeID string, sampleRate uint32) Middleware {
 					"route", routeID)
 			}
 		})
+	}
+}
+
+// accessLogMaxPerSecondEnv caps the access-log lines written in one second,
+// across every route and entrypoint; 0 lifts the cap.
+const accessLogMaxPerSecondEnv = "GATEON_ACCESS_LOG_MAX_PER_SECOND"
+
+// accessLogMaxPerSecond is GATEON_ACCESS_LOG_MAX_PER_SECOND when it is a
+// non-negative integer, else the profile's AccessLogMaxPerSecond.
+func accessLogMaxPerSecond() int64 {
+	if n, err := strconv.ParseInt(strings.TrimSpace(os.Getenv(accessLogMaxPerSecondEnv)), 10, 64); err == nil && n >= 0 {
+		return n
+	}
+	return int64(config.CurrentTierDefaults().AccessLogMaxPerSecond)
+}
+
+// accessLogs is the process-wide cap on access-log lines (ADR 0049).
+//
+// The access log wrote one stdout line per request by default. Under the
+// packaged unit those go to journald, whose default rate limit (10000 lines
+// in 30 s) then suppresses every line from the service once it passes about
+// 333 a second -- the ERRORs, the security events and the setup token with
+// them. Capping the access log well under that keeps every other line
+// written: a busy gateway logs the first max lines of each second, and once a
+// minute says how many it left out. The trace store already records every
+// request; the access log is a convenience, and is what gives.
+var accessLogs accessLogCap
+
+// accessLogCap counts the access-log lines of the current second. It is
+// approximate at the second's edge -- two requests can both reset it -- and
+// that is the price of no lock on the request path.
+type accessLogCap struct {
+	max        atomic.Int64
+	second     atomic.Int64
+	written    atomic.Int64
+	suppressed atomic.Int64
+	minute     atomic.Int64
+}
+
+// allow reports whether an access-log line may be written at now.
+func (c *accessLogCap) allow(now time.Time) bool {
+	limit := c.max.Load()
+	if limit <= 0 {
+		return true
+	}
+	sec := now.Unix()
+	if cur := c.second.Load(); cur != sec && c.second.CompareAndSwap(cur, sec) {
+		c.written.Store(0)
+		c.reportSuppressed(sec, limit)
+	}
+	if c.written.Add(1) <= limit {
+		return true
+	}
+	c.suppressed.Add(1)
+	return false
+}
+
+// reportSuppressed logs, at most once a minute, how many lines the cap left
+// out since it last said so.
+func (c *accessLogCap) reportSuppressed(sec, limit int64) {
+	minute := sec / 60
+	if cur := c.minute.Load(); cur == minute || !c.minute.CompareAndSwap(cur, minute) {
+		return
+	}
+	if n := c.suppressed.Swap(0); n > 0 {
+		logger.L.LogWarn("access log: lines over the per-second cap were not written; every request is still "+
+			"in the trace store", "not_written", n, "max_per_second", limit, "env", accessLogMaxPerSecondEnv)
 	}
 }
 
