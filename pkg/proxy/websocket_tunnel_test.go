@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"sync"
 	"testing"
 	"time"
 )
@@ -150,6 +151,155 @@ func TestClientReaderReplaysBytesAlreadyBuffered(t *testing.T) {
 	}
 	if string(got) != "ABCD" {
 		t.Fatalf("tunnel source read %q, want %q: bytes buffered before the hijack were lost", got, "ABCD")
+	}
+}
+
+// rawUpgradeBackend accepts connections and hands each, once its request has
+// been read, to serve; the test ends when every one has returned.
+func rawUpgradeBackend(t *testing.T, serve func(net.Conn, *bufio.Reader)) string {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	var wg sync.WaitGroup
+	t.Cleanup(func() { _ = ln.Close(); wg.Wait() })
+	wg.Go(func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			wg.Go(func() {
+				defer c.Close()
+				_ = c.SetDeadline(time.Now().Add(10 * time.Second))
+				br := bufio.NewReader(c)
+				if _, err := http.ReadRequest(br); err != nil {
+					return
+				}
+				serve(c, br)
+			})
+		}
+	})
+	return "http://" + ln.Addr().String()
+}
+
+// switched answers 101 on c.
+func switched(c net.Conn) bool {
+	_, err := io.WriteString(c, "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n")
+	return err == nil
+}
+
+// TestAnUpgradeBackendThatNeverAnswersIsCutByTheResponseHeaderTimeout: the
+// backend's answer to an upgrade is bounded like any other response's. It was
+// read with no deadline, so a backend that never answered held the request,
+// a goroutine and a backend connection for as long as the client stayed --
+// here there are no entrypoint deadlines in front to end it either.
+func TestAnUpgradeBackendThatNeverAnswersIsCutByTheResponseHeaderTimeout(t *testing.T) {
+	backend := rawUpgradeBackend(t, func(c net.Conn, br *bufio.Reader) { _, _ = io.Copy(io.Discard, br) })
+	h := &ProxyHandler{
+		lb:                   NewRoundRobinLB([]string{backend}),
+		stopDiscovery:        make(chan struct{}),
+		stopHealthCheck:      make(chan struct{}),
+		upgradeHeaderTimeout: 300 * time.Millisecond,
+	}
+	gw := httptest.NewServer(h)
+	t.Cleanup(gw.Close)
+	u, _ := url.Parse(gw.URL)
+	conn, err := net.Dial("tcp", u.Host)
+	if err != nil {
+		t.Fatalf("dial gateway: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	if _, err := io.WriteString(conn, "GET /ws HTTP/1.1\r\nHost: "+u.Host+"\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n"); err != nil {
+		t.Fatalf("write upgrade: %v", err)
+	}
+	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	resp, err := http.ReadResponse(bufio.NewReader(conn), nil)
+	if err != nil {
+		t.Fatalf("no answer 5s after an upgrade whose backend never answered (300ms response-header timeout): %v", err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Fatalf("an upgrade whose backend never answered was answered %d, want 502", resp.StatusCode)
+	}
+}
+
+// TestATunnelStaysOpenWhileOneSideTalksAndEndsWhenNeitherDoes: a byte in
+// either direction keeps the whole tunnel open -- a backend pushing to a
+// client that never writes is not idle -- and nothing in either direction for
+// the idle timeout ends it.
+func TestATunnelStaysOpenWhileOneSideTalksAndEndsWhenNeitherDoes(t *testing.T) {
+	const idle = 400 * time.Millisecond
+	t.Setenv("GATEON_STREAM_IDLE_TIMEOUT", idle.String())
+	t.Setenv("GATEON_STREAM_MAX_LIFETIME", "1m")
+	const pushes = 10 // 10 x 100ms is two and a half idle timeouts
+	backend := rawUpgradeBackend(t, func(c net.Conn, br *bufio.Reader) {
+		if !switched(c) {
+			return
+		}
+		tick := time.NewTicker(100 * time.Millisecond)
+		defer tick.Stop()
+		for range pushes {
+			<-tick.C
+			if _, err := c.Write([]byte("p")); err != nil {
+				return
+			}
+		}
+		_, _ = io.Copy(io.Discard, br) // silent now, until the gateway closes
+	})
+	conn, br := dialUpgrade(t, upgradeGateway(t, backend).URL, nil)
+
+	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	for i := range pushes {
+		if _, err := br.ReadByte(); err != nil {
+			t.Fatalf("push %d of %d never arrived (%v): a client that only listens was treated as idle", i+1, pushes, err)
+		}
+	}
+	last := time.Now()
+	_, err := br.ReadByte()
+	if !errors.Is(err, io.EOF) {
+		t.Fatalf("read after both sides went quiet: %v, want EOF from the %v idle timeout", err, idle)
+	}
+	if quiet := time.Since(last); quiet < idle/2 {
+		t.Fatalf("the tunnel closed %v after its last byte, inside the %v idle timeout", quiet, idle)
+	}
+}
+
+// TestATunnelEndsAtItsMaxLifetime: a tunnel that never goes quiet still ends
+// at its maximum lifetime.
+func TestATunnelEndsAtItsMaxLifetime(t *testing.T) {
+	const lifetime = 600 * time.Millisecond
+	t.Setenv("GATEON_STREAM_IDLE_TIMEOUT", "5s")
+	t.Setenv("GATEON_STREAM_MAX_LIFETIME", lifetime.String())
+	backend := rawUpgradeBackend(t, func(c net.Conn, br *bufio.Reader) {
+		if switched(c) {
+			_, _ = io.Copy(c, br)
+		}
+	})
+	conn, br := dialUpgrade(t, upgradeGateway(t, backend).URL, nil)
+	start := time.Now()
+	tick := time.NewTicker(50 * time.Millisecond)
+	defer tick.Stop()
+	_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
+	for {
+		<-tick.C
+		if _, err := conn.Write([]byte("e")); err != nil {
+			break
+		}
+		if _, err := br.ReadByte(); err != nil {
+			// EOF, or a reset when the gateway closed with a byte of ours
+			// still unread: ended either way. Only the test's own deadline is
+			// not an end.
+			var ne net.Error
+			if errors.As(err, &ne) && ne.Timeout() {
+				t.Fatalf("a busy tunnel was still open 5s on: no maximum lifetime (%v)", err)
+			}
+			break
+		}
+	}
+	if took := time.Since(start); took < lifetime*3/4 || took > 5*time.Second {
+		t.Fatalf("a busy tunnel ended after %v, want about its %v lifetime", took, lifetime)
 	}
 }
 

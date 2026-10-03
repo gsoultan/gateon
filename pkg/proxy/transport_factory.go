@@ -34,6 +34,10 @@ const clientRemoteAddrContextKey contextKey = 1
 // transport, which is not bound to any particular target.
 const healthCheckTransportKey = "__healthcheck"
 
+// backendResponseHeaderTimeout is how long an HTTP/1 backend has to answer a
+// request once it has been sent, an upgrade request included.
+const backendResponseHeaderTimeout = time.Minute
+
 type backendTransportFactory struct {
 	tlsConfig        *tls.Config
 	transportConfig  *TransportConfig
@@ -214,7 +218,7 @@ func (f *backendTransportFactory) buildTransport(state *targetState, selectedIde
 		t.MaxIdleConns = tc.maxIdleConns()
 		t.MaxIdleConnsPerHost = tc.maxIdleConnsPerHost()
 		t.IdleConnTimeout = tc.idleConnTimeout()
-		t.ResponseHeaderTimeout = 1 * time.Minute
+		t.ResponseHeaderTimeout = backendResponseHeaderTimeout
 		t.ExpectContinueTimeout = 1 * time.Second
 		t.ForceAttemptHTTP2 = !proxyProtocolEnabled
 		t.TLSClientConfig = tlsCfg

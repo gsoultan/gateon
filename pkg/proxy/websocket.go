@@ -18,6 +18,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/gsoultan/gateon/internal/deadline"
 	"github.com/gsoultan/gateon/internal/httputil"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware/security/identity"
@@ -28,6 +29,10 @@ const (
 	// upgradeDialTimeout is the max time to establish backend connection for WebSocket.
 	upgradeDialTimeout = 10 * time.Second
 )
+
+// longAgo is a deadline already passed: setting it ends a blocked read or
+// write at once.
+var longAgo = time.Unix(1, 0)
 
 // isUpgradeRequest returns true if the request is an HTTP protocol upgrade.
 func isUpgradeRequest(r *http.Request) bool {
@@ -103,11 +108,23 @@ func (h *ProxyHandler) proxyUpgrade(w http.ResponseWriter, r *http.Request, targ
 // startUpgrade dials the backend, sends it the upgrade request and reads its
 // answer, without touching the client connection. On success the caller owns
 // the connection; backendBuf holds any bytes the backend sent past the head.
+//
+// Until the backend has answered, this is an ordinary request (ADR 0042): the
+// client's side keeps its entrypoint deadlines -- a body sent with the
+// upgrade is read under the read deadline -- and the backend's side is bounded
+// by the response-header timeout, as it is for every other request. When the
+// client's request ends first -- its deadline passed, or it left -- the wait
+// for the backend ends with it. It used to have no bound on either side, so a
+// backend that never answered held a client, a goroutine and a backend
+// connection for as long as the client stayed.
 func (h *ProxyHandler) startUpgrade(r *http.Request, targetURL *url.URL, state *targetState) (net.Conn, *bufio.Reader, *http.Response, error) {
 	backendConn, err := h.dialUpgradeBackend(r, targetURL)
 	if err != nil {
 		return nil, nil, nil, errUpgradeDial
 	}
+	_ = backendConn.SetDeadline(time.Now().Add(h.upgradeResponseHeaderTimeout()))
+	stop := context.AfterFunc(r.Context(), func() { _ = backendConn.SetDeadline(longAgo) })
+	defer stop()
 
 	// 1. PROXY Protocol: If enabled for the target, write the PROXY header before any HTTP data.
 	if state.proxyProtocolEnabled {
@@ -127,6 +144,16 @@ func (h *ProxyHandler) startUpgrade(r *http.Request, targetURL *url.URL, state *
 		return nil, nil, nil, errUpgradeRead
 	}
 	return backendConn, backendBuf, resp, nil
+}
+
+// upgradeResponseHeaderTimeout is how long the backend has to answer an
+// upgrade request: the HTTP transport's response-header timeout, unless a test
+// set its own.
+func (h *ProxyHandler) upgradeResponseHeaderTimeout() time.Duration {
+	if h.upgradeHeaderTimeout > 0 {
+		return h.upgradeHeaderTimeout
+	}
+	return backendResponseHeaderTimeout
 }
 
 // upgradeScheme returns the scheme the backend is dialled with, defaulting to
@@ -320,7 +347,11 @@ func clientReader(conn net.Conn, buffered *bufio.Reader) io.Reader {
 	return io.MultiReader(bytes.NewReader(head), conn)
 }
 
-// tunnelUpgrade relays bytes both ways until each side has finished.
+// tunnelUpgrade relays bytes both ways until each side has finished, or the
+// tunnel has been idle for the stream idle timeout, or has reached its maximum
+// lifetime (ADR 0042) -- whichever comes first. It had no bound of its own:
+// the request's deadlines were never set on an upgrade, so a tunnel nobody
+// used was held for as long as either end kept it open.
 func tunnelUpgrade(clientConn net.Conn, fromClient io.Reader, backendConn net.Conn, backendBuf *bufio.Reader) {
 	// Bidirectional tunnel: backendBuf has any bytes after response headers,
 	// then backendConn streams the rest. Client writes go to backend.
@@ -331,15 +362,21 @@ func tunnelUpgrade(clientConn net.Conn, fromClient io.Reader, backendConn net.Co
 	// waited on the client->backend copy for as long as the client cared to
 	// keep an apparently live connection -- a goroutine and two sockets per
 	// backend-initiated close, held until the client gave up on its own.
-	backendReader := io.MultiReader(backendBuf, backendConn)
+	//
+	// Both directions share one clock, so a byte either way keeps both open,
+	// and the deadlines it sets replace whatever the request left on the
+	// connections.
+	clock := deadline.NewClock(deadline.CurrentStreamLimits())
+	backendReader := clock.Reader(backendConn, io.MultiReader(backendBuf, backendConn))
+	clientSide := clock.Reader(clientConn, fromClient)
 
 	done := make(chan struct{})
 	go func() {
-		copyWithPooledBuffer(backendConn, fromClient)
+		copyWithPooledBuffer(clock.Writer(backendConn), clientSide)
 		closeWrite(backendConn)
 		close(done)
 	}()
-	copyWithPooledBuffer(clientConn, backendReader)
+	copyWithPooledBuffer(clock.Writer(clientConn), backendReader)
 	closeWrite(clientConn)
 	<-done
 }

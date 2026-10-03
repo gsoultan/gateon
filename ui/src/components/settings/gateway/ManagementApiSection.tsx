@@ -4,6 +4,8 @@
 import { Text, Stack, TextInput, Group, Divider, Box } from "@mantine/core";
 import { IconServer } from "@tabler/icons-react";
 import type { ManagementConfig } from "../../../types/gateon";
+import { useAdminOnlySetting } from "../../../hooks/usePermissions";
+import { AdminOnlyNote } from "../adminOnly/AdminOnlyNote";
 
 interface ManagementApiSectionProps {
   management: ManagementConfig;
@@ -12,7 +14,8 @@ interface ManagementApiSectionProps {
 }
 
 // Where the Management API and the dashboard are served, and to whom.
-export function ManagementApiSection({ management, onChange, disabled }: ManagementApiSectionProps) {
+export function ManagementApiSection({ management, onChange, disabled: formDisabled }: ManagementApiSectionProps) {
+  const { disabled, locked } = useAdminOnlySetting(formDisabled);
   return (
     <Box>
       <Divider
@@ -31,6 +34,7 @@ export function ManagementApiSection({ management, onChange, disabled }: Managem
         Configure where Gateon's Management API and Dashboard are served.
       </Text>
       <Stack gap="sm">
+        <AdminOnlyNote locked={locked} />
         <Group grow>
           <TextInput
             label="Bind Address"

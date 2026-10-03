@@ -16,6 +16,7 @@ import (
 	"github.com/gsoultan/gateon/internal/middleware/traffic"
 	"github.com/gsoultan/gateon/internal/router"
 	"github.com/gsoultan/gateon/internal/server/entrypoint"
+	"github.com/gsoultan/gateon/internal/server/mgmtorigin"
 	"github.com/rs/cors"
 )
 
@@ -36,7 +37,21 @@ type BaseHandlerDeps struct {
 	Auth         auth.Service
 	LoginLimiter traffic.RateLimiter // stricter rate limit for /v1/login (e.g. 5/min per IP)
 	MgmtCORS     *cors.Cors
+	// MgmtOrigins names the origins, besides the management origin itself,
+	// that may write with the session cookie. Nil trusts none; the guard runs
+	// either way.
+	MgmtOrigins *mgmtorigin.Policy
 }
+
+// publicBodyLimit caps the body of a request to an endpoint served before
+// authentication -- login, setup, the 2FA steps (ADR 0042). Every other
+// management endpoint authenticates before it reads a byte of its body, so
+// these are the only ones whose body anyone can make the gateway buffer, and
+// each was allowed the 10 MiB every authenticated endpoint is: one address at
+// the per-address connection cap could have it holding gigabytes. Their real
+// bodies are credentials, a code, and setup's names, addresses and database
+// settings -- a few hundred bytes.
+const publicBodyLimit = 64 << 10
 
 // CreateBaseHandler builds the main HTTP handler that routes to proxy or local API/UI.
 func CreateBaseHandler(
@@ -88,6 +103,11 @@ func CreateBaseHandler(
 	// mgmtLogic defines the internal handler for management API, UI, and auth.
 	// It is separated so that MgmtCORS can be applied only to this path.
 	mgmtLogic := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if isCacheableManagementAnswer(r) {
+			// An answer holds configuration, users and audit entries. Set
+			// before any handler runs so an error answer carries it too.
+			w.Header().Set("Cache-Control", "no-store")
+		}
 		gc := deps.GlobalReg.Get(r.Context())
 		epID := ""
 		if rs := middleware.GetRequestState(r); rs != nil {
@@ -142,13 +162,22 @@ func CreateBaseHandler(
 	if deps.MgmtCORS != nil {
 		mgmtHandler = deps.MgmtCORS.Handler(mgmtLogic)
 	}
+	// Outside CORS, so a refused request is answered with no CORS headers,
+	// and around everything the management plane serves -- sign-in and setup
+	// included, which are writes too. Not conditional: it is the only thing
+	// that tells a write the dashboard asked for from one another page on the
+	// same site did with the dashboard's cookie (ADR 0041).
+	mgmtHandler = deps.MgmtOrigins.Guard(mgmtHandler)
 
 	mainHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Limit request body size to prevent DoS via large payloads.
 		// Default is 10MB, but GeoIP database uploads can be much larger.
 		limit := int64(10 * 1024 * 1024)
-		if r.URL.Path == "/v1/geoip/upload" {
+		switch {
+		case r.URL.Path == "/v1/geoip/upload":
 			limit = 512 * 1024 * 1024 // 512MB for GeoIP database
+		case isLoginPath(r.URL.Path) || isPublicAuthPath(r.URL.Path):
+			limit = publicBodyLimit
 		}
 		r.Body = http.MaxBytesReader(w, r.Body, limit)
 

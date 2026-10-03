@@ -35,6 +35,25 @@ test.describe('RBAC: Operator', () => {
     await expect(card.getByText(/level=(DEBUG|INFO|WARN|ERROR)/).first()).toBeVisible({ timeout: 30000 });
   });
 
+  // ADR 0040: the gateway refuses an operator's change to the settings that
+  // guard the management plane. The dashboard shows them read-only with the
+  // reason, and the whole-object save it sends -- those settings unchanged --
+  // still goes through.
+  test('sees the management plane settings read-only, and can still save', async ({ page }) => {
+    const loaded = page.waitForResponse((r) => new URL(r.url()).pathname === '/v1/global' && r.request().method() === 'GET');
+    await page.goto('/settings?tab=gateway', { timeout: 60000 });
+    expect((await loaded).status(), 'GET /v1/global').toBe(200);
+
+    await expect(page.getByLabel('Bind Address')).toBeDisabled({ timeout: 20000 });
+    await expect(page.getByLabel(/Allowed IPs/)).toBeDisabled();
+    await expect(page.getByText(/Only an administrator can change this/).first()).toBeVisible();
+
+    const saved = page.waitForResponse((r) => new URL(r.url()).pathname === '/v1/global' && r.request().method() === 'PUT');
+    await page.getByRole('button', { name: 'Save Gateway Config' }).click();
+    const res = await saved;
+    expect(res.status(), `an operator's unchanged save: ${await res.text()}`).toBe(200);
+  });
+
   test('can manage WAF rules but NOT users', async ({ page }) => {
     await page.goto('/security-center', { timeout: 60000 });
     await page.getByRole('tab', { name: /WAF Rules/i }).click();

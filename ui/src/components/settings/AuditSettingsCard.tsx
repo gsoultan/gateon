@@ -16,6 +16,8 @@ import {
 import { IconHistory, IconFingerprint, IconArchive } from "@tabler/icons-react";
 import type { GlobalConfig, AuditConfig } from "../../types/gateon";
 import { StoredSecretInput, type SecretReplaceConfirm } from "./StoredSecretInput";
+import { useAdminOnlySetting } from "../../hooks/usePermissions";
+import { AdminOnlyNote } from "./adminOnly/AdminOnlyNote";
 
 // generateSignatureKey returns a cryptographically-random 256-bit key as hex,
 // matching the backend's audit.GenerateSignatureKey format.
@@ -47,8 +49,9 @@ interface AuditSettingsCardProps {
 export const AuditSettingsCard: React.FC<AuditSettingsCardProps> = ({
   config,
   onChange,
-  disabled,
+  disabled: formDisabled,
 }) => {
+  const { disabled, locked } = useAdminOnlySetting(!!formDisabled);
   const audit = config.audit || { enabled: false, signEntries: false };
 
   const updateAudit = (value: Partial<AuditConfig>) => {
@@ -87,6 +90,7 @@ export const AuditSettingsCard: React.FC<AuditSettingsCardProps> = ({
             size="lg"
           />
         </Group>
+        <AdminOnlyNote locked={locked} />
 
         {audit.enabled && (
           <>

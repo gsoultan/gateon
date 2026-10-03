@@ -5,6 +5,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"google.golang.org/grpc/codes"
@@ -15,6 +16,7 @@ import (
 	"github.com/gsoultan/gateon/internal/alerting"
 	"github.com/gsoultan/gateon/internal/audit"
 	"github.com/gsoultan/gateon/internal/auth"
+	"github.com/gsoultan/gateon/internal/authz/globalbound"
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/config/storedsecret"
 	"github.com/gsoultan/gateon/internal/logger"
@@ -146,12 +148,8 @@ func (s *ApiService) UpdateGlobalConfig(ctx context.Context, req *gateonv1.Updat
 		return &gateonv1.UpdateGlobalConfigResponse{Success: false}, nil
 	}
 	stored := s.Globals.Get(ctx)
-	KeepOmittedSections(req.Config, stored)
-	// Every credential the caller read back as the placeholder, and sent back,
-	// is the stored one again; one it cannot be is refused, naming it. This is
-	// the save path REST, Connect and gRPC share. See ADR 0028.
-	if err := storedsecret.Restore(req.Config, stored); err != nil {
-		return &gateonv1.UpdateGlobalConfigResponse{Success: false}, status.Error(codes.InvalidArgument, err.Error())
+	if err := s.prepareGlobalUpdate(ctx, req.Config, stored); err != nil {
+		return &gateonv1.UpdateGlobalConfigResponse{Success: false}, err
 	}
 	rotated, err := s.rotateSessionKey(req.Config, stored)
 	if err != nil {
@@ -165,9 +163,13 @@ func (s *ApiService) UpdateGlobalConfig(ctx context.Context, req *gateonv1.Updat
 		a.SignatureKey = audit.GenerateSignatureKey()
 	}
 
+	recordChange := s.auditRecordSettingsChange(ctx, stored, req.Config)
 	if err := s.Globals.Update(ctx, req.Config); err != nil {
 		if rotated {
 			s.restoreSessionKey(stored)
+		}
+		if recordChange {
+			s.logAudit(ctx, "update_failed", "audit_config", "The audit settings change above was not saved")
 		}
 		return &gateonv1.UpdateGlobalConfigResponse{Success: false}, err
 	}
@@ -255,4 +257,92 @@ func (s *ApiService) applyGlobalConfig(c *gateonv1.GlobalConfig) {
 	if s.EbpfManager != nil && c.Ebpf != nil {
 		_ = s.EbpfManager.SetPortKnockingSequence(c.Ebpf.KnockingSequence)
 	}
+}
+
+// prepareGlobalUpdate turns an update into the configuration it proposes and
+// decides whether the caller may store it: omitted sections kept, every
+// placeholder the caller sent back restored to the stored secret, and then the
+// administrator-only rule of ADR 0040 applied to the result. Nothing is in
+// force yet when it refuses.
+func (s *ApiService) prepareGlobalUpdate(ctx context.Context, update, stored *gateonv1.GlobalConfig) error {
+	KeepOmittedSections(update, stored)
+	// Every credential the caller read back as the placeholder, and sent back,
+	// is the stored one again; one it cannot be is refused, naming it. This is
+	// the save path REST, Connect and gRPC share. See ADR 0028.
+	if err := storedsecret.Restore(update, stored); err != nil {
+		return status.Error(codes.InvalidArgument, err.Error())
+	}
+	// After Restore, so a secret sent back as the placeholder compares equal
+	// to the one stored; before the session key is rotated, which would put
+	// a refused change in force.
+	return s.authorizeGlobalSave(ctx, stored, update)
+}
+
+// authorizeGlobalSave refuses, as PermissionDenied naming the fields, a save
+// by a caller who is not an administrator that changes a setting which
+// decides who can reach or sign in to the management plane, whom the gateway
+// trusts, or what record is kept of either. See ADR 0040.
+func (s *ApiService) authorizeGlobalSave(ctx context.Context, stored, proposed *gateonv1.GlobalConfig) error {
+	claims, present := callerClaims(ctx)
+	caller := globalbound.Caller{
+		Claims:        claims,
+		ClaimsPresent: present,
+		// The condition the management plane authenticates on (needsAuth in
+		// internal/server): with it false the plane is open by configuration.
+		AuthEnforced: stored.GetAuth().GetEnabled() && auth.Available(s.Auth),
+	}
+	change := globalbound.Change{Stored: stored, View: config.WithSecretReferences(s.Globals, stored), Proposed: proposed}
+	if err := globalbound.Authorize(caller, change); err != nil {
+		return status.Error(codes.PermissionDenied, err.Error())
+	}
+	return nil
+}
+
+// auditRecordSettingsChange writes an audit entry for a change to the audit
+// settings -- the audit section or the audit log's retention -- and reports
+// whether it wrote one. It runs before the change is stored or applied, under
+// the settings still in force, so switching audit off is the last thing the
+// audit log records rather than something it never sees.
+func (s *ApiService) auditRecordSettingsChange(ctx context.Context, stored, proposed *gateonv1.GlobalConfig) bool {
+	changes := globalbound.RecordChanges(globalbound.Change{
+		Stored: stored, View: config.WithSecretReferences(s.Globals, stored), Proposed: proposed,
+	})
+	if len(changes) == 0 {
+		return false
+	}
+	s.logAudit(ctx, "update", "audit_config", "Changing audit settings: "+globalbound.DescribeRecordChanges(changes))
+	return true
+}
+
+// errorMessage is err's text without the gRPC status prefix, for the writers
+// that answer a refusal in a response message rather than as an error.
+func errorMessage(err error) string {
+	return status.Convert(err).Message()
+}
+
+// errGlobalStoreUnavailable is answered by an internal writer with no store.
+var errGlobalStoreUnavailable = errors.New("global configuration store not available")
+
+// editGlobal applies edit to a copy of the stored configuration and stores the
+// result, under the same administrator-only rule as UpdateGlobalConfig.
+//
+// The fixed-purpose writers here (a recommendation, the ClamAV mode) used to
+// edit the registry's live configuration in place and then store that same
+// pointer: the stored and the proposed configuration were one object, so no
+// comparison between them could see a change, and the edit reached the running
+// gateway before the save succeeded or failed.
+func (s *ApiService) editGlobal(ctx context.Context, edit func(*gateonv1.GlobalConfig)) error {
+	if s.Globals == nil {
+		return errGlobalStoreUnavailable
+	}
+	stored := s.Globals.Get(ctx)
+	proposed, ok := proto.Clone(stored).(*gateonv1.GlobalConfig)
+	if !ok || proposed == nil {
+		proposed = &gateonv1.GlobalConfig{}
+	}
+	edit(proposed)
+	if err := s.authorizeGlobalSave(ctx, stored, proposed); err != nil {
+		return err
+	}
+	return s.Globals.Update(ctx, proposed)
 }

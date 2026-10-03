@@ -11,6 +11,7 @@ import (
 	"sync"
 
 	"github.com/gsoultan/gateon/internal/config"
+	"github.com/gsoultan/gateon/internal/deadline"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware/security/identity"
 	"github.com/gsoultan/gateon/internal/syncutil"
@@ -342,6 +343,9 @@ type Deps struct {
 	GlobalStore      config.GlobalConfigStore
 	SharedServers    sync.Map // map[string]*sharedHTTPDispatcher
 	Phantom          PhantomCore
+	// ManagementTimeouts are the management listener's per-request bounds;
+	// nil is defaultManagementTimeouts, which is what production runs.
+	ManagementTimeouts *deadline.RequestTimeouts
 }
 
 // RateLimiter provides per-key rate limiting middleware.

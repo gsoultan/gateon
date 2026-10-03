@@ -50,6 +50,18 @@ type ProxyHandler struct {
 	healthCheckClient   *http.Client
 	tlsConfig           *tls.Config
 	StripCORS           bool
+	// upgradeHeaderTimeout is how long a backend has to answer an upgrade;
+	// 0 is backendResponseHeaderTimeout, which production runs.
+	upgradeHeaderTimeout time.Duration
+	// sessions recognises a management session token in Authorization, so it
+	// is not forwarded either; nil forwards Authorization as sent.
+	sessions SessionVerifier
+}
+
+// SessionVerifier is the management plane's token check, as the proxy needs
+// it: does this token grant a dashboard session? auth.Holder satisfies it.
+type SessionVerifier interface {
+	VerifyToken(token string) (any, error)
 }
 
 // NewProxyHandler creates a ProxyHandler from route and ServiceStore (DIP).

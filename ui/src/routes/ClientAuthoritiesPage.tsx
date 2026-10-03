@@ -10,9 +10,13 @@ import { apiFetch, getApiErrorMessage } from '../hooks/useGateon'
 import { usePermissions } from '../hooks/usePermissions'
 import { useGlobalConfigDraft } from '../hooks/useGlobalConfigDraft'
 import { ConfirmDeleteModal } from '../components/ConfirmDelete'
+import { AdminOnlyNote } from '../components/settings/adminOnly/AdminOnlyNote'
 
 export default function ClientAuthoritiesPage() {
-  const { canUploadCerts } = usePermissions()
+  const { canUploadCerts: canWriteCerts, canChangeSecurityBoundary } = usePermissions()
+  // The CAs a client certificate is trusted from are administrator-only (ADR
+  // 0040): the gateway refuses an operator's change to them.
+  const canUploadCerts = canWriteCerts && canChangeSecurityBoundary
   // Nothing may be saved until the gateway's config has been read: see
   // useGlobalConfigDraft for what saving the placeholder did.
   const { config, setConfig, status, loadError, retry } = useGlobalConfigDraft()
@@ -177,6 +181,7 @@ export default function ClientAuthoritiesPage() {
           <Button leftSection={<IconPlus size={16} />} onClick={startAdd} disabled={!canEdit}>Add CA</Button>
         )}
       </Group>
+      <AdminOnlyNote locked={canWriteCerts && !canChangeSecurityBoundary} />
 
       {status === 'failed' && (
         <Alert color="red" variant="light" radius="md" icon={<IconAlertTriangle size={16} />} title="Client authorities could not be loaded">

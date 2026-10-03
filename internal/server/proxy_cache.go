@@ -57,6 +57,9 @@ type ProxyCache struct {
 	// carries, with the IDs that carry it, so Sync warns when that changes
 	// rather than every thirty seconds. At most one entry per route.
 	sharedLabels map[string]string
+	// sessions is the management plane's token check, handed to every proxy
+	// handler so a management session token is never forwarded (ADR 0041).
+	sessions proxy.SessionVerifier
 }
 
 // defaultRefusalRetry bounds how long a route stays refused after the
@@ -211,6 +214,7 @@ func (c *ProxyCache) compile(rt *gateonv1.Route) (http.Handler, *proxy.ProxyHand
 	pHandler := proxy.NewProxyHandlerBuilder(rt, c.serviceStore, nil).
 		SetTransportConfig(transportCfg).
 		SetStripCORS(stripCORS).
+		SetSessionVerifier(c.sessions).
 		Build()
 
 	h := router.ApplyRouteMiddlewares(pHandler, rt, c.redisClient, c.mwStore, c.globalStore, c.ebpfManager, c.reputation)

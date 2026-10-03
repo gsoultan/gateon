@@ -75,6 +75,17 @@ func newBreakerRig(t *testing.T, cfg CircuitBreakerConfig) *breakerRig {
 	clock := newBreakerClock()
 	cfg.RouteID = t.Name()
 	cfg.now = clock.Now
+	// The breaker lives in the process-wide cbStates under the test's name.
+	// Left there, a second run of the test (-count=2) met the circuit the
+	// first run opened, on a fresh fake clock that never reaches its end.
+	t.Cleanup(func() {
+		cbMu.Lock()
+		defer cbMu.Unlock()
+		if s, ok := cbStates[cfg.RouteID]; ok {
+			delete(cbStates, cfg.RouteID)
+			forgetCircuitSeriesLocked(s.route)
+		}
+	})
 	b := &breakerBackend{arrived: make(chan struct{}), release: make(chan struct{})}
 	return &breakerRig{t: t, clock: clock, backend: b, h: CircuitBreaker(cfg)(b)}
 }

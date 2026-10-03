@@ -36,14 +36,27 @@ its password. An administrator resetting another account's password still needs
 only the administrator role.
 
 **Where the token lives.** In the browser it exists only in the HttpOnly,
-`SameSite=Lax` `gateon_session` cookie (`Secure` when served over TLS). It is
+`SameSite=Strict` session cookie: `__Host-gateon_session`, Secure, over TLS, and
+`gateon_session` on plain HTTP, where a browser refuses the prefix. It is
 never written to `localStorage` or `sessionStorage`, and no script on the page
 can read it. Sign-in (`POST /v1/login`, and the second step at
 `POST /v1/auth/2fa/verify`) answers a browser -- any request carrying the
 `Sec-Fetch-Mode` header, which browsers always send and page script can neither
 set nor remove -- with the cookie alone; the token appears in the response body
-only for API and CLI clients, which send `Authorization: Bearer <token>`. Query
-parameters are accepted only for WebSocket and SSE, which cannot set headers.
+only for API and CLI clients, which send `Authorization: Bearer <token>`. A
+query-string token is accepted only on a WebSocket handshake, which cannot set
+headers.
+
+**The session stays with the dashboard** (ADR 0041). The proxy removes the
+session cookie, and a bearer token the management plane accepts, from every
+request it forwards, so no proxied app on the dashboard's host receives it. A
+write to the management API -- sign-in and setup included -- and the `/v1/logs`
+WebSocket handshake are refused when the browser says another page asked for
+them (`Sec-Fetch-Site: same-site` or `cross-site`, or a foreign `Origin`),
+unless that origin is configured in `management.cors.allowedOrigins`. API
+writes must be JSON (or a Connect/gRPC type; multipart only on the two file
+uploads). Management CORS is off unless configured, and every API answer a
+cache could keep (GET, HEAD, POST, Connect) carries `Cache-Control: no-store`.
 
 **Multi-instance deployments.** Binding state is cached per process, and a
 revocation is propagated to the other instances over the Redis channel that

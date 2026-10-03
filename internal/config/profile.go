@@ -6,6 +6,7 @@ package config
 import (
 	"os"
 	"strings"
+	"time"
 )
 
 // Tier is a resource profile preset. It sizes heavy subsystems (correlation
@@ -107,6 +108,27 @@ type TierDefaults struct {
 	// open, so it is bounded by EntryPointMaxConnections, not by the address
 	// space. GATEON_ENTRYPOINT_MAX_CONN_PER_ADDR overrides it; 0 disables it.
 	EntryPointMaxConnPerAddr int
+
+	// MaxHeaderBytes is the most request-header bytes an HTTP listener --
+	// every entrypoint and the management listener, over HTTP/1, HTTP/2 and
+	// HTTP/3 -- buffers for one request; a request past it is refused with 431
+	// (ADR 0042). A connection still sending its header holds up to this much,
+	// and EntryPointMaxConnections such connections are what one tier must
+	// survive, so the product of the two is sized against the tier's memory --
+	// the arithmetic is in the ADR. It used to be 1 MiB everywhere, which at
+	// the minimal tier's 1000 connections is more than the 2 GB host has.
+	// GATEON_MAX_HEADER_BYTES overrides it.
+	MaxHeaderBytes int
+
+	// StreamIdleTimeout and StreamMaxLifetime bound a response that is allowed
+	// to outlive its entrypoint's per-request deadlines: a WebSocket tunnel
+	// once the backend has answered 101, and a response the server answered
+	// as text/event-stream (ADR 0042). Idle ends it when no byte has moved in
+	// either direction for that long; MaxLifetime ends it that long after it
+	// began, however busy. GATEON_STREAM_IDLE_TIMEOUT and
+	// GATEON_STREAM_MAX_LIFETIME override them; 0 disables either.
+	StreamIdleTimeout time.Duration
+	StreamMaxLifetime time.Duration
 }
 
 // NormalizeTier coerces an arbitrary string to a known tier, defaulting to
@@ -165,6 +187,9 @@ func DefaultsFor(tier Tier) TierDefaults {
 			RLLimiterStates:           2000,
 			EntryPointMaxConnections:  1000,
 			EntryPointMaxConnPerAddr:  128,
+			MaxHeaderBytes:            32 << 10, // 32 KiB
+			StreamIdleTimeout:         2 * time.Minute,
+			StreamMaxLifetime:         time.Hour,
 		}
 	case TierEnterprise:
 		return TierDefaults{
@@ -191,6 +216,9 @@ func DefaultsFor(tier Tier) TierDefaults {
 			RLLimiterStates:           100000,
 			EntryPointMaxConnections:  50000,
 			EntryPointMaxConnPerAddr:  1024,
+			MaxHeaderBytes:            64 << 10, // 64 KiB
+			StreamIdleTimeout:         10 * time.Minute,
+			StreamMaxLifetime:         12 * time.Hour,
 		}
 	default: // TierStandard
 		return TierDefaults{
@@ -217,6 +245,9 @@ func DefaultsFor(tier Tier) TierDefaults {
 			RLLimiterStates:           20000,
 			EntryPointMaxConnections:  10000,
 			EntryPointMaxConnPerAddr:  256,
+			MaxHeaderBytes:            32 << 10, // 32 KiB
+			StreamIdleTimeout:         5 * time.Minute,
+			StreamMaxLifetime:         4 * time.Hour,
 		}
 	}
 }

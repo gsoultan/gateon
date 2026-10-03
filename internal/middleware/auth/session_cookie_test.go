@@ -14,17 +14,27 @@ import (
 )
 
 // sessionCookieFrom runs one of the cookie helpers and returns the cookie it
-// set, by parsing the response the way a browser would.
+// set under the name r's session cookie has, by parsing the response the way a
+// browser would.
 func sessionCookieFrom(t *testing.T, r *http.Request, set func(http.ResponseWriter, *http.Request)) *http.Cookie {
+	t.Helper()
+	name := sessionCookieName
+	if request.IsSecure(r) {
+		name = hostSessionCookieName
+	}
+	return namedCookieFrom(t, r, set, name)
+}
+
+func namedCookieFrom(t *testing.T, r *http.Request, set func(http.ResponseWriter, *http.Request), name string) *http.Cookie {
 	t.Helper()
 	rec := httptest.NewRecorder()
 	set(rec, r)
 	for _, c := range rec.Result().Cookies() {
-		if c.Name == sessionCookieName {
+		if c.Name == name {
 			return c
 		}
 	}
-	t.Fatalf("no %s cookie was set; headers: %v", sessionCookieName, rec.Header())
+	t.Fatalf("no %s cookie was set; headers: %v", name, rec.Header())
 	return nil
 }
 
@@ -121,8 +131,11 @@ func TestSessionCookieCarriesItsOtherAttributes(t *testing.T) {
 	if !c.HttpOnly {
 		t.Error("HttpOnly is unset; any stored XSS then reads the admin session")
 	}
-	if c.SameSite != http.SameSiteLaxMode {
-		t.Errorf("SameSite = %v, want Lax", c.SameSite)
+	// Strict, not Lax (ADR 0041): Lax still sends the cookie on a top-level
+	// navigation another site starts, and the dashboard, a single-page app
+	// whose every API call is same-origin, needs it on none.
+	if c.SameSite != http.SameSiteStrictMode {
+		t.Errorf("SameSite = %v, want Strict", c.SameSite)
 	}
 	if c.Path != "/" {
 		t.Errorf("Path = %q, want /", c.Path)

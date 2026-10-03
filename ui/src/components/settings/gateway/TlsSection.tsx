@@ -5,6 +5,7 @@ import { Text, Stack, TextInput, Group, Divider, Switch, Box, Select, MultiSelec
 import { IconShieldLock } from "@tabler/icons-react";
 import type { TlsConfig } from "../../../types/gateon";
 import { ACME_CHALLENGE_NOTE, ACME_CHALLENGE_TYPES } from "../acmeChallenges";
+import { ADMIN_ONLY_REASON, useAdminOnlySetting } from "../../../hooks/usePermissions";
 
 interface TlsSectionProps {
   tls: TlsConfig;
@@ -15,6 +16,8 @@ interface TlsSectionProps {
 // The gateway's own TLS: domains, ACME, protocol versions, client
 // certificates and cipher suites.
 export function TlsSection({ tls, onChange, disabled }: TlsSectionProps) {
+  // Whether client certificates are demanded is administrator-only (ADR 0040).
+  const clientAuth = useAdminOnlySetting(disabled);
   return (
     <Box>
       <Divider
@@ -163,7 +166,8 @@ export function TlsSection({ tls, onChange, disabled }: TlsSectionProps) {
             </Group>
             <Select
               label="Client Authentication"
-              disabled={disabled}
+              description={clientAuth.locked ? ADMIN_ONLY_REASON : undefined}
+              disabled={clientAuth.disabled}
               data={[
                 { label: "No Client Cert", value: "NoClientCert" },
                 {

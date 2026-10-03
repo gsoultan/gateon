@@ -65,8 +65,8 @@ func TestJWKSRouteRebuildsDoNotLeakRefreshers(t *testing.T) {
 	idp := jwksIdP(t, &key.PublicKey, kid)
 
 	cases := map[string]map[string]string{
-		"jwt with jwks_url": {"type": "jwt", "jwks_url": idp.URL + "/jwks"},
-		"oidc":              {"type": "oidc", "issuer": idp.URL},
+		"jwt with jwks_url": {"type": "jwt", "jwks_url": idp.URL + "/jwks", "audience": "api"},
+		"oidc":              {"type": "oidc", "issuer": idp.URL, "audience": "api"},
 	}
 	for name, cfg := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -95,7 +95,7 @@ func TestJWKSRouteRebuildsDoNotLeakRefreshers(t *testing.T) {
 			}
 
 			// And the chain built last still authenticates with that key set.
-			claims := jwt.MapClaims{"sub": "user-1", "exp": time.Now().Add(time.Hour).Unix()}
+			claims := jwt.MapClaims{"sub": "user-1", "aud": "api", "exp": time.Now().Add(time.Hour).Unix()}
 			if cfg["type"] == "oidc" {
 				claims["iss"] = idp.URL
 			}

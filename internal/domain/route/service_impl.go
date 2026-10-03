@@ -14,6 +14,7 @@ import (
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/domain/proxy"
 	"github.com/gsoultan/gateon/internal/logger"
+	"github.com/gsoultan/gateon/internal/router/rule"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
@@ -52,9 +53,8 @@ func (s *serviceImpl) SaveRoute(ctx context.Context, rt *gateonv1.Route) error {
 	if rt.ServiceId == "" {
 		return errors.New("missing service_id")
 	}
-	rtLower := strings.ToLower(rt.Type)
-	if rtLower != "tcp" && rtLower != "udp" && rt.Rule == "" {
-		return errors.New("missing rule (required for http/grpc routes)")
+	if err := ValidateRule(rt); err != nil {
+		return err
 	}
 	if rt.Id == "" {
 		rt.Id = uuid.NewString()
@@ -74,6 +74,33 @@ func (s *serviceImpl) SaveRoute(ctx context.Context, rt *gateonv1.Route) error {
 		return err
 	}
 	s.invalidator.InvalidateRoute(rt.Id)
+	return nil
+}
+
+// ErrInvalidRule is returned for a route whose rule does not parse. The error
+// it wraps says at which character and why.
+var ErrInvalidRule = errors.New("invalid route rule")
+
+// ValidateRule refuses a route whose rule the router could not read in full
+// (ADR 0043). The router used to read such a rule as one with no condition,
+// which matches every request: a typo on one route took the entrypoint's
+// traffic from the routes that did describe it, and with it their auth and
+// WAF. It is checked here, on the save every transport and config import go
+// through, so no writer can store one; the router still treats a stored rule
+// it cannot read as matching nothing.
+//
+// A TCP or UDP route is chosen by its entrypoint, so its rule may be empty;
+// one it does have must still parse, because the HTTP router reads it too.
+func ValidateRule(rt *gateonv1.Route) error {
+	if strings.TrimSpace(rt.GetRule()) == "" {
+		if t := strings.ToLower(rt.GetType()); t == "tcp" || t == "udp" {
+			return nil
+		}
+		return errors.New("missing rule (required for http/grpc routes)")
+	}
+	if _, err := rule.Parse(rt.GetRule()); err != nil {
+		return fmt.Errorf("%w %w", ErrInvalidRule, err)
+	}
 	return nil
 }
 

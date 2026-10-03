@@ -34,6 +34,8 @@ import (
 	"github.com/gsoultan/gateon/internal/syncutil"
 	"github.com/gsoultan/gateon/internal/telemetry/repid"
 	lru "github.com/hashicorp/golang-lru"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 )
 
 // statusMitigated is the stored mitigation-status value meaning the threat was
@@ -922,7 +924,7 @@ func (s *pathStatsStore) getExecutor(ctx context.Context) (queryExecutor, func()
 }
 
 func (s *pathStatsStore) dailyResetLoop() {
-	ticker := time.NewTicker(1 * time.Minute)
+	ticker := time.NewTicker(mitigationEpochLength)
 	defer ticker.Stop()
 
 	// Initial seed - load current daily totals from the database into the
@@ -935,6 +937,7 @@ func (s *pathStatsStore) dailyResetLoop() {
 		case <-s.stopCh:
 			return
 		case <-ticker.C:
+			mitigationEpoch.Add(1)
 			now := time.Now().UTC()
 			day := now.Format("2006-01-02")
 
@@ -2080,8 +2083,21 @@ func IsIPUnmitigated(ip string) bool {
 // IsIPMitigated reports whether ip is shunned now: an operator's block, or an
 // automatic shun that has not lapsed. A lapsed shun is lifted from the moment
 // it lapses, with no sweeper involved: the cache keeps when the shun ends, not
-// that there is one. It runs for every request IPMitigation sees, and the
-// answer for an address with no shun -- nearly all of them -- reads no clock.
+// that there is one. It runs for every request IPMitigation sees.
+//
+// A shun in force is cached until it ends. "Not shunned" is cached for one to
+// two mitigationEpochLength and then read again, so a block another node wrote
+// is enforced here within that time (ADR 0043). It used to be cached until
+// evicted -- and so was the answer to a lookup that failed.
+//
+// A lookup that fails is never cached. The request it was for is served,
+// unless the cache already holds a shun in force for the address: during a
+// database outage the data plane keeps serving, and refusing every address
+// the cache cannot vouch for would turn the outage into a total one -- one a
+// client can provoke wherever load alone produces SQLITE_BUSY. Blocks this
+// node has seen stay enforced, from the cache; a block it has not seen since
+// its last start is enforced from the first lookup after the database is back.
+// The failures are counted in gateon_mitigation_lookup_errors_total.
 func IsIPMitigated(ip string) bool {
 	s := getStore()
 	if s == nil {
@@ -2089,40 +2105,127 @@ func IsIPMitigated(ip string) bool {
 	}
 	if s.unmitigatedCache != nil {
 		if val, ok := s.unmitigatedCache.Get(ip); ok {
-			// Comma-ok: a bare assertion here panics on the request path if
-			// the cache ever holds anything else, and falling through to the
-			// database is the safe answer rather than the fast one.
-			if until, isUntil := val.(shunUntil); isUntil {
-				return until.active()
+			if blocked, fresh := cachedIPAnswer(val); fresh {
+				return blocked
 			}
 		}
 	}
 
-	until := s.readIPShunUntil(ip)
+	until, err := s.readIPShunUntil(ip)
+	if err != nil {
+		mitigationLookupFailed(mitigationLookupIP, err)
+		return false
+	}
 	if s.unmitigatedCache != nil {
-		s.unmitigatedCache.Add(ip, until)
+		s.unmitigatedCache.Add(ip, ipAnswerToCache(until))
 	}
 	return until.active()
+}
+
+// cachedIPAnswer reads what the cache holds for an address: whether it is
+// shunned, and whether the answer may be used without asking the database. A
+// shun that has lapsed, a "not shunned" past its time and anything else are
+// read again. Comma-ok: a bare assertion here panics on the request path.
+func cachedIPAnswer(val any) (blocked, fresh bool) {
+	switch v := val.(type) {
+	case shunUntil:
+		if v.active() {
+			return true, true
+		}
+	case notBlockedUntil:
+		return false, v.fresh()
+	}
+	return false, false
+}
+
+// ipAnswerToCache is what the cache keeps for a shun read from the database:
+// the shun while it is in force, and otherwise a bounded "not shunned".
+func ipAnswerToCache(until shunUntil) any {
+	if until.active() {
+		return until
+	}
+	return notBlocked()
 }
 
 // readIPShunUntil is ip's shun as enforcement needs it: the status and the
 // end, and nothing else, so a timestamp written by an older version that does
 // not scan cannot turn a block off. If the end does not scan, the status
-// decides alone, as it did before shuns lapsed: a block stays a block.
-func (s *pathStatsStore) readIPShunUntil(ip string) shunUntil {
+// decides alone, as it did before shuns lapsed: a block stays a block. An
+// error is returned only when neither read succeeds; it is not an answer.
+func (s *pathStatsStore) readIPShunUntil(ip string) (shunUntil, error) {
 	var r ipShunRow
 	err := s.db.QueryRow(s.dialect.Rebind(QueryReadIPShunEnd), ip).Scan(&r.status, &r.expiresAt)
 	switch {
 	case err == nil:
-		return r.until()
+		return r.until(), nil
 	case errors.Is(err, sql.ErrNoRows):
-		return shunNone
+		return shunNone, nil
 	}
 	var status string
-	if s.db.QueryRow(s.dialect.Rebind(QueryReadIPShunStatus), ip).Scan(&status) == nil && status == statusMitigated {
-		return shunForever
+	statusErr := s.db.QueryRow(s.dialect.Rebind(QueryReadIPShunStatus), ip).Scan(&status)
+	switch {
+	case statusErr == nil && status == statusMitigated:
+		return shunForever, nil
+	case statusErr == nil, errors.Is(statusErr, sql.ErrNoRows):
+		return shunNone, nil
 	}
-	return shunNone
+	return shunNone, errors.Join(err, statusErr)
+}
+
+// A "not blocked" answer -- for an address or a fingerprint -- is trusted for
+// the epoch it was read in and the one after, then read again: between one
+// and two mitigationEpochLength. That bounds how long a block written by
+// another node, or straight to the database, goes unenforced here, at one
+// indexed point read per active client per minute or two. The epoch is an
+// atomic dailyResetLoop advances, so the answer nearly every request gets
+// reads no clock. Not a tunable: shorter buys little, and longer is the
+// staleness this replaces, which had no bound at all.
+const mitigationEpochLength = time.Minute
+
+// mitigationEpoch counts mitigationEpochLength intervals since start.
+var mitigationEpoch atomic.Int64
+
+// notBlockedUntil is a "not blocked" answer as the enforcement caches keep it:
+// the mitigationEpoch it was read in.
+type notBlockedUntil int64
+
+// notBlocked is a "not blocked" answer read now.
+func notBlocked() notBlockedUntil {
+	return notBlockedUntil(mitigationEpoch.Load())
+}
+
+func (n notBlockedUntil) fresh() bool {
+	return mitigationEpoch.Load()-int64(n) <= 1
+}
+
+// The kinds of enforcement lookup, as gateon_mitigation_lookup_errors_total
+// labels them.
+const (
+	mitigationLookupIP   = "ip"
+	mitigationLookupUser = "user"
+)
+
+// MitigationLookupErrorsTotal counts enforcement lookups that could not read
+// the database, by kind ("ip" or "user"). Each is a request decided without
+// it; see IsIPMitigated.
+var MitigationLookupErrorsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+	Name: "gateon_mitigation_lookup_errors_total",
+	Help: "Address and fingerprint block lookups that could not read the database; the request was decided from the cache alone.",
+}, []string{"kind"})
+
+// lastLookupErrorLog is when a failed lookup was last logged, in Unix
+// nanoseconds: an outage fails every lookup, and one line a minute says so.
+var lastLookupErrorLog atomic.Int64
+
+func mitigationLookupFailed(kind string, err error) {
+	MitigationLookupErrorsTotal.WithLabelValues(kind).Inc()
+	now := time.Now().UnixNano()
+	last := lastLookupErrorLog.Load()
+	if now-last < int64(time.Minute) || !lastLookupErrorLog.CompareAndSwap(last, now) {
+		return
+	}
+	logger.Default().LogError("block lookup failed; deciding requests from the cache until the database answers",
+		"kind", kind, "error", err)
 }
 
 // Automatic shuns lapse (ADR 0031). A shun refuses everyone behind an address
@@ -2524,7 +2627,7 @@ func MarkIPUnmitigated(ip string) error {
 	// successfully" while the row still said mitigated -- and once the cache
 	// entry was evicted the block came back on its own.
 	if err == nil && s.unmitigatedCache != nil {
-		s.unmitigatedCache.Add(ip, shunNone)
+		s.unmitigatedCache.Add(ip, notBlocked())
 	}
 	// A release is a ruling on the evidence that earned the shun, so none of
 	// it may count towards another (ADR 0029).
@@ -2624,27 +2727,53 @@ func IsUserMitigated(ja4plus string) bool {
 		return false
 	}
 
-	// 1. Check high-priority 'unmitigated' cache (Manual override / bypass)
+	// 1. An operator's release on this node overrides (MarkUserUnmitigated).
 	if s.unmitigatedCache != nil {
 		if _, ok := s.unmitigatedCache.Get(ja4plus); ok {
 			return false
 		}
 	}
 
-	// 2. Check standard mitigation cache
+	// 2. A cached block is read again every time, so a release on another
+	// node ends it; a cached "not blocked" is trusted for one to two
+	// mitigationEpochLength, so a block written on another node starts within
+	// that (ADR 0043). Comma-ok: a bare assertion panics on the request path.
+	knownBlocked := false
 	if s.userMitigationCache != nil {
 		if val, ok := s.userMitigationCache.Get(ja4plus); ok {
-			res := val.(bool)
-			if res {
-				// DOUBLE CHECK DB if cache says true, to avoid stale blocks after manual unmitigation.
-				goto check_db
+			switch v := val.(type) {
+			case bool:
+				knownBlocked = v
+			case notBlockedUntil:
+				if v.fresh() {
+					return false
+				}
 			}
-			return false
 		}
 	}
 
-check_db:
-	// 3. Check DB for status 'mitigated'
+	mitigated, err := s.readUserMitigated(ja4plus)
+	if err != nil {
+		// Not cached, and not an answer: a block this node holds stays a
+		// block, and anything else is decided for this request alone, as
+		// IsIPMitigated decides it. A failure used to be cached as "not
+		// blocked", over the block, for as long as the entry lived.
+		mitigationLookupFailed(mitigationLookupUser, err)
+		return knownBlocked
+	}
+	if s.userMitigationCache != nil {
+		if mitigated {
+			s.userMitigationCache.Add(ja4plus, true)
+		} else {
+			s.userMitigationCache.Add(ja4plus, notBlocked())
+		}
+	}
+	return mitigated
+}
+
+// readUserMitigated reads whether key is blocked; sql.ErrNoRows is "not
+// blocked", any other error is no answer.
+func (s *pathStatsStore) readUserMitigated(ja4plus string) (bool, error) {
 	// Ties break towards "unmitigated", and that is the whole point of the
 	// second ORDER BY term.
 	//
@@ -2664,12 +2793,13 @@ check_db:
 		LIMIT 1`)
 	var status string
 	err := s.db.QueryRow(query, ja4plus, ja4plus, mitigationCutoff()).Scan(&status)
-	mitigated := err == nil && status == statusMitigated
-
-	if s.userMitigationCache != nil {
-		s.userMitigationCache.Add(ja4plus, mitigated)
+	switch {
+	case err == nil:
+		return status == statusMitigated, nil
+	case errors.Is(err, sql.ErrNoRows):
+		return false, nil
 	}
-	return mitigated
+	return false, err
 }
 
 // unmitigationHoldWindow is how long a manual release of a fingerprint holds
@@ -2834,6 +2964,12 @@ func MarkUserMitigated(ja4plus string, fpType string, reason string, category st
 	if s.userMitigationCache != nil {
 		s.userMitigationCache.Add(ja4plus, true)
 	}
+	// A block ends a release this node is holding: IsUserMitigated consults
+	// the release override first, so one left in place outlived the new block
+	// and the fingerprint read as released until the entry was evicted.
+	if s.unmitigatedCache != nil {
+		s.unmitigatedCache.Remove(ja4plus)
+	}
 }
 
 // MarkUserUnmitigated records that a fingerprint has been manually unmitigated
@@ -2860,9 +2996,9 @@ func MarkUserUnmitigated(ja4plus string) bool {
 		s.unmitigatedCache.Add(ja4plus, true)
 	}
 
-	// 2. FORCEFULLY update standard mitigation cache to 'false'
+	// 2. Replace a cached block with a bounded "not blocked".
 	if s.userMitigationCache != nil {
-		s.userMitigationCache.Add(ja4plus, false)
+		s.userMitigationCache.Add(ja4plus, notBlocked())
 	}
 
 	// 3. Clear from DB and insert an explicit 'unmitigated' marker.

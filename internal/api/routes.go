@@ -5,9 +5,13 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
+	"github.com/gsoultan/gateon/internal/domain/route"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 func (s *ApiService) ListRoutes(ctx context.Context, _ *gateonv1.ListRoutesRequest) (*gateonv1.ListRoutesResponse, error) {
@@ -27,10 +31,20 @@ func (s *ApiService) UpdateRoute(ctx context.Context, req *gateonv1.UpdateRouteR
 	// "" -- which neither transport will delete -- and one with no service was
 	// matched and had no backend to reach. See domain_services.go.
 	if err := s.routeService().SaveRoute(ctx, req.Route); err != nil {
-		return &gateonv1.UpdateRouteResponse{Success: false}, mapBindingRefusal(err)
+		return &gateonv1.UpdateRouteResponse{Success: false}, mapRouteSaveError(err)
 	}
 	s.logAudit(ctx, "update", "route", fmt.Sprintf("Updated route %s", req.Route.Id))
 	return &gateonv1.UpdateRouteResponse{Success: true}, nil
+}
+
+// mapRouteSaveError renders a rule the router cannot read (ADR 0043) as
+// InvalidArgument, with the position and reason, where it used to surface as
+// Unknown; a binding refusal maps as mapBindingRefusal says.
+func mapRouteSaveError(err error) error {
+	if errors.Is(err, route.ErrInvalidRule) {
+		return status.Error(codes.InvalidArgument, err.Error())
+	}
+	return mapBindingRefusal(err)
 }
 
 func (s *ApiService) DeleteRoute(ctx context.Context, req *gateonv1.DeleteRouteRequest) (*gateonv1.DeleteRouteResponse, error) {

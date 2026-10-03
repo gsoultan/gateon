@@ -4,6 +4,8 @@
 import { Text, Stack, TextInput, Group, Divider, Switch, Box } from "@mantine/core";
 import type { RedisConfig } from "../../../types/gateon";
 import { StoredSecretInput } from "../StoredSecretInput";
+import { useAdminOnlySetting } from "../../../hooks/usePermissions";
+import { AdminOnlyNote } from "../adminOnly/AdminOnlyNote";
 
 interface RedisSectionProps {
   redis: RedisConfig;
@@ -14,6 +16,9 @@ interface RedisSectionProps {
 // The Redis connection shared by rate limiting, token revocation and the
 // distributed cache.
 export function RedisSection({ redis, onChange, disabled }: RedisSectionProps) {
+  // Switching Redis on or off is an operator's; choosing the server, which
+  // holds the ACME certificate cache and the revocation store, is not.
+  const server = useAdminOnlySetting(disabled);
   return (
     <Box>
       <Divider
@@ -35,11 +40,12 @@ export function RedisSection({ redis, onChange, disabled }: RedisSectionProps) {
           }
           radius="md"
         />
+        <AdminOnlyNote locked={server.locked} />
         <Group grow>
           <TextInput
             label="Address"
             placeholder="localhost:6379"
-            disabled={disabled || !redis.enabled}
+            disabled={server.disabled || !redis.enabled}
             value={redis.addr || ""}
             onChange={(e) =>
               onChange({ ...redis, addr: e.currentTarget.value })
@@ -49,7 +55,7 @@ export function RedisSection({ redis, onChange, disabled }: RedisSectionProps) {
           <StoredSecretInput
             label="Password"
             clearable
-            disabled={disabled || !redis.enabled}
+            disabled={server.disabled || !redis.enabled}
             value={redis.password}
             onChange={(password) =>
               onChange({ ...redis, password })

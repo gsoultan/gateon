@@ -5,6 +5,8 @@ import { Card, Title, Text, Stack, TextInput, NumberInput, Button, Group, Divide
 import { IconCheck, IconCpu, IconAlertTriangle } from "@tabler/icons-react";
 import type { EbpfConfig } from "../../../types/gateon";
 import { useNetworkInterfaces } from "../../../hooks/useNetworkInterfaces";
+import { useAdminOnlySetting } from "../../../hooks/usePermissions";
+import { AdminOnlyNote } from "../adminOnly/AdminOnlyNote";
 
 interface EbpfSettingsCardProps {
   ebpf: EbpfConfig | undefined;
@@ -20,6 +22,10 @@ interface EbpfSettingsCardProps {
 // while this card is showing.
 export function EbpfSettingsCard({ ebpf, onChange, disabled, canEdit, saving, onSave }: EbpfSettingsCardProps) {
   const { data: netInfo, isError: netInfoError } = useNetworkInterfaces();
+  // The kernel-side management allowlist and port knocking, and switching off
+  // or moving the programs that carry them, are administrator-only (ADR 0040);
+  // the packet filters are not.
+  const mgmt = useAdminOnlySetting(disabled);
   return (
     <Card withBorder shadow="sm" radius="md">
       <Stack gap="md">
@@ -37,12 +43,13 @@ export function EbpfSettingsCard({ ebpf, onChange, disabled, canEdit, saving, on
                 enabled: e.currentTarget.checked,
               })
             }
-            disabled={disabled}
+            disabled={mgmt.disabled}
           />
         </Group>
         <Text size="sm" c="dimmed">
           Offload traffic processing to the Linux kernel for maximum performance.
         </Text>
+        <AdminOnlyNote locked={mgmt.locked} />
 
         {ebpf?.enabled && (
           <Stack gap="sm">
@@ -55,7 +62,7 @@ export function EbpfSettingsCard({ ebpf, onChange, disabled, canEdit, saving, on
                 placeholder="default-route interface"
                 value={ebpf.interface || ""}
                 onChange={(e) => onChange({...ebpf!, interface: e.currentTarget.value})}
-                disabled={disabled}
+                disabled={mgmt.disabled}
               />
             ) : (
               <Select
@@ -76,7 +83,7 @@ export function EbpfSettingsCard({ ebpf, onChange, disabled, canEdit, saving, on
                 onChange={(val) => onChange({...ebpf!, interface: val || ""})}
                 searchable
                 allowDeselect={false}
-                disabled={disabled}
+                disabled={mgmt.disabled}
               />
             )}
             {netInfo?.ebpf?.attached ? (
@@ -135,7 +142,7 @@ export function EbpfSettingsCard({ ebpf, onChange, disabled, canEdit, saving, on
               description="Hide management port until a secret sequence of knocks is received (XDP)."
               checked={ebpf.enableKnocking || false}
               onChange={(e) => onChange({...ebpf!, enableKnocking: e.currentTarget.checked})}
-              disabled={disabled}
+              disabled={mgmt.disabled}
             />
             {ebpf.enableKnocking && (
               <>
@@ -144,7 +151,7 @@ export function EbpfSettingsCard({ ebpf, onChange, disabled, canEdit, saving, on
                   placeholder="8080"
                   value={ebpf.mgmtPort || 8080}
                   onChange={(val) => onChange({...ebpf!, mgmtPort: Number(val)})}
-                  disabled={disabled}
+                  disabled={mgmt.disabled}
                 />
                 <TagsInput
                   label="Knocking Sequence (Ports)"
@@ -152,7 +159,7 @@ export function EbpfSettingsCard({ ebpf, onChange, disabled, canEdit, saving, on
                   placeholder="7000, 8000, 9000"
                   value={(ebpf.knockingSequence || []).map(String)}
                   onChange={(val) => onChange({...ebpf!, knockingSequence: val.map(Number)})}
-                  disabled={disabled}
+                  disabled={mgmt.disabled}
                 />
               </>
             )}
@@ -162,7 +169,7 @@ export function EbpfSettingsCard({ ebpf, onChange, disabled, canEdit, saving, on
               description="Drop packets to the management port at the NIC unless the source is listed below."
               checked={ebpf.enableMgmtWhitelist || false}
               onChange={(e) => onChange({...ebpf!, enableMgmtWhitelist: e.currentTarget.checked})}
-              disabled={disabled}
+              disabled={mgmt.disabled}
             />
             {ebpf.enableMgmtWhitelist && (
               <>
@@ -172,7 +179,7 @@ export function EbpfSettingsCard({ ebpf, onChange, disabled, canEdit, saving, on
                   placeholder="203.0.113.7"
                   value={ebpf.mgmtWhitelistIps || []}
                   onChange={(val) => onChange({...ebpf!, mgmtWhitelistIps: val})}
-                  disabled={disabled}
+                  disabled={mgmt.disabled}
                 />
                 <Alert color="yellow" variant="light">
                   This is enforced before the packet reaches Gateon, so an address that is

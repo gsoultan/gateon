@@ -7,6 +7,8 @@ import type { AuthConfig } from "../../../types/gateon";
 import { StoredSecretInput, type SecretReplaceConfirm } from "../StoredSecretInput";
 import { generateRandomString } from "../../../utils/random";
 import { AuthDatabaseFields } from "./AuthDatabaseFields";
+import { useAdminOnlySetting } from "../../../hooks/usePermissions";
+import { AdminOnlyNote } from "../adminOnly/AdminOnlyNote";
 
 // What saving a new session key does, said before it can be typed. Every
 // session is signed with this key; replacing it is how a key that may have
@@ -29,7 +31,8 @@ interface AuthSectionProps {
 
 // Role-based access control for the control plane: the key that signs every
 // session, and the database the users live in.
-export function AuthSection({ auth, onChange, disabled }: AuthSectionProps) {
+export function AuthSection({ auth, onChange, disabled: formDisabled }: AuthSectionProps) {
+  const { disabled, locked } = useAdminOnlySetting(formDisabled);
   return (
     <Box>
       <Divider
@@ -42,6 +45,7 @@ export function AuthSection({ auth, onChange, disabled }: AuthSectionProps) {
         mb="md"
       />
       <Stack gap="md">
+        <AdminOnlyNote locked={locked} />
         <Switch
           label="Enable Role-Based Access Control (PASETO)"
           checked={auth.enabled || false}

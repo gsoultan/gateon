@@ -51,6 +51,24 @@ func TestSaveEntryPointRequiresAnAddress(t *testing.T) {
 	}
 }
 
+// TestAnEntryPointCannotTakeTheManagementListenersID: the management plane
+// recognises its dedicated listener by the id "management", so a data-plane
+// entrypoint saved under it -- by an operator, over REST, gRPC or config
+// import, all of which save through here -- served the dashboard and the
+// management API on its own public address with allow_public_management off.
+func TestAnEntryPointCannotTakeTheManagementListenersID(t *testing.T) {
+	store := newFakeEPStore()
+	s := NewService(store, nil, nil)
+
+	err := s.SaveEntryPoint(context.Background(), &gateonv1.EntryPoint{Id: "management", Address: "0.0.0.0:80"})
+	if !errors.Is(err, ErrReservedID) {
+		t.Fatalf("an entrypoint named after the management listener was accepted: %v", err)
+	}
+	if len(store.saved) != 0 {
+		t.Error("it was stored anyway")
+	}
+}
+
 // TestSaveEntryPointAssignsAnID covers the create path.
 func TestSaveEntryPointAssignsAnID(t *testing.T) {
 	store := newFakeEPStore()

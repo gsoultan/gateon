@@ -9,31 +9,41 @@ import (
 	"strings"
 
 	"github.com/gsoultan/gateon/internal/logger"
+	"github.com/gsoultan/gateon/internal/server/mgmtorigin"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 	"github.com/rs/cors"
 )
 
-// parseAllowedOrigins returns allowed origins from GATEON_CORS_ORIGINS (comma-separated).
-// Defaults to ["*"] when unset or empty.
-func parseAllowedOrigins(envVar string) []string {
-	originsStr := os.Getenv(envVar)
-	if originsStr == "" && envVar != "GATEON_CORS_ORIGINS" {
-		originsStr = os.Getenv("GATEON_CORS_ORIGINS")
-	}
-	if originsStr == "" {
-		originsStr = "*"
-	}
+// parseAllowedOrigins returns the origins in GATEON_CORS_ORIGINS
+// (comma-separated), or none when it is unset.
+//
+// It used to default to "*". The dashboard is served from the management
+// origin and never needs CORS, so the default granted every site on the web
+// read access to the unauthenticated endpoints and served no one (ADR 0041).
+func parseAllowedOrigins() []string {
 	var origins []string
-	for _, o := range strings.Split(originsStr, ",") {
-		o = strings.TrimSpace(o)
-		if o != "" {
+	for o := range strings.SplitSeq(os.Getenv("GATEON_CORS_ORIGINS"), ",") {
+		if o = strings.TrimSpace(o); o != "" {
 			origins = append(origins, o)
 		}
 	}
-	if len(origins) == 0 {
-		origins = []string{"*"}
-	}
 	return origins
+}
+
+// managementOrigins returns the configured management CORS origins: the
+// config's, or else GATEON_CORS_ORIGINS's.
+func managementOrigins(cfg *gateonv1.ManagementConfig) []string {
+	if cfg != nil && cfg.Cors != nil && len(cfg.Cors.AllowedOrigins) > 0 {
+		return cfg.Cors.AllowedOrigins
+	}
+	return parseAllowedOrigins()
+}
+
+// BuildManagementOrigins returns the policy the management plane's write guard
+// and WebSocket handshake check use: the management origin itself, plus the
+// configured CORS origins. Read once at startup, as BuildManagementCORS is.
+func BuildManagementOrigins(cfg *gateonv1.ManagementConfig) *mgmtorigin.Policy {
+	return mgmtorigin.New(managementOrigins(cfg))
 }
 
 // grpcWebExposedHeaders are the response headers a gRPC-Web client must be able
@@ -69,9 +79,13 @@ func mergeExposedHeaders(configured []string) []string {
 	return out
 }
 
-// BuildManagementCORS returns CORS options for management API from config or env.
+// BuildManagementCORS returns CORS options for management API from config or
+// env, or nil -- no CORS at all -- when no origin is configured.
 func BuildManagementCORS(cfg *gateonv1.ManagementConfig) *cors.Cors {
-	var origins []string
+	origins := managementOrigins(cfg)
+	if len(origins) == 0 {
+		return nil
+	}
 	var allowCreds bool
 	var methods []string
 	var headers []string
@@ -79,7 +93,6 @@ func BuildManagementCORS(cfg *gateonv1.ManagementConfig) *cors.Cors {
 	var maxAge int
 
 	if cfg != nil && cfg.Cors != nil {
-		origins = cfg.Cors.AllowedOrigins
 		allowCreds = cfg.Cors.AllowCredentials
 		methods = cfg.Cors.AllowedMethods
 		headers = cfg.Cors.AllowedHeaders
@@ -92,9 +105,6 @@ func BuildManagementCORS(cfg *gateonv1.ManagementConfig) *cors.Cors {
 		}
 	}
 
-	if len(origins) == 0 {
-		origins = parseAllowedOrigins("GATEON_CORS_ORIGINS")
-	}
 	if !allowCreds {
 		allowCreds, _ = strconv.ParseBool(os.Getenv("GATEON_CORS_ALLOW_CREDENTIALS"))
 	}

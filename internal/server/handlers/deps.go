@@ -13,6 +13,7 @@ import (
 	"github.com/gsoultan/gateon/internal/domain/route"
 	"github.com/gsoultan/gateon/internal/domain/service"
 	"github.com/gsoultan/gateon/internal/domain/tls"
+	"github.com/gsoultan/gateon/internal/server/mgmtorigin"
 	"github.com/gsoultan/gateon/pkg/proxy"
 )
 
@@ -42,4 +43,8 @@ type Deps struct {
 	// the global WAF or advanced-security middlewares, which are injected at
 	// chain-build time in router.ApplyRouteMiddlewares).
 	InvalidateAllProxies func()
+	// MgmtOrigins decides which pages may open the management WebSockets with
+	// the caller's session: the management origin and the configured CORS
+	// origins. Nil allows the management origin only.
+	MgmtOrigins *mgmtorigin.Policy
 }

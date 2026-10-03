@@ -8,7 +8,6 @@ import (
 	"cmp"
 	"context"
 	"net/http"
-	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -26,6 +25,7 @@ import (
 	"github.com/gsoultan/gateon/internal/middleware/transform"
 	"github.com/gsoultan/gateon/internal/redis"
 	"github.com/gsoultan/gateon/internal/request"
+	"github.com/gsoultan/gateon/internal/router/rule"
 	"github.com/gsoultan/gateon/internal/security/reputation"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
@@ -34,296 +34,101 @@ var (
 	ruleCache sync.Map // map[string]Matcher
 )
 
-func GetMatcher(rule string) Matcher {
-	if m, ok := ruleCache.Load(rule); ok {
-		return m.(Matcher)
-	}
-
-	m := parseRule(rule)
-	if actual, loaded := ruleCache.LoadOrStore(rule, m); loaded {
-		return actual.(Matcher)
-	}
-	return m
-}
-
-type Matcher struct {
-	host              string
-	hostNegated       bool
-	hostRegex         *regexp.Regexp
-	hostRegexNegated  bool
-	path              string
-	pathNegated       bool
-	pathPrefix        string
-	pathPrefixNegated bool
-	pathRegex         *regexp.Regexp
-	pathRegexNegated  bool
-	methods           map[string]bool
-	methodsNegated    bool
-	headers           map[string]string // header name -> expected value
-	orParts           []Matcher         // For logical OR at top level
-	negated           bool              // For logical NOT at top level
-}
-
-func parseRule(rule string) Matcher {
-	rule = strings.TrimSpace(rule)
-	if rule == "" {
-		return Matcher{}
-	}
-
-	// Basic negation support. The '!' chain is peeled in a loop, not by
-	// recursing once per '!': a rule is operator input as long as the API body
-	// allows, and a few hundred thousand frames exhaust the goroutine stack,
-	// which is a fatal error no recover can catch -- on the request path and
-	// inside the TLS handshake, where this is parsed.
-	if strings.HasPrefix(rule, "!") {
-		negated := false
-		for strings.HasPrefix(rule, "!") {
-			negated = !negated
-			rule = strings.TrimSpace(rule[1:])
-		}
-		m := parseRule(rule)
-		m.negated = negated
-		return m
-	}
-
-	// Basic OR support (top-level only)
-	if strings.Contains(rule, "||") {
-		// Check if it's really a top-level OR by ensuring we aren't inside parentheses
-		// (very simple heuristic)
-		parts := strings.Split(rule, "||")
-		if len(parts) > 1 {
-			m := Matcher{}
-			for _, p := range parts {
-				m.orParts = append(m.orParts, parseRule(p))
-			}
+// GetMatcher returns the matcher for a rule, parsing it on first use. A rule
+// that does not parse is logged once, when it is first seen, and matches no
+// request: the route save path refuses such a rule, so one reaches here only
+// from a store written before that check or by hand (ADR 0043). It used to
+// parse to a matcher with no condition, which matches every request and took
+// the entrypoint's traffic from the routes that did describe it.
+func GetMatcher(src string) Matcher {
+	if v, ok := ruleCache.Load(src); ok {
+		if m, isMatcher := v.(Matcher); isMatcher {
 			return m
 		}
 	}
-
-	m := Matcher{}
-	for _, q := range []string{"`", "\""} {
-		if idx := strings.Index(rule, "Host("+q); idx >= 0 {
-			m.host = extractValue(rule, "Host("+q, q+")")
-			m.hostNegated = idx > 0 && rule[idx-1] == '!'
-		}
-		if idx := strings.Index(rule, "HostRegexp("+q); idx >= 0 {
-			s := extractValue(rule, "HostRegexp("+q, q+")")
-			if re, err := regexp.Compile(s); err == nil {
-				m.hostRegex = re
-				m.hostRegexNegated = idx > 0 && rule[idx-1] == '!'
-			}
-		}
-		if idx := strings.Index(rule, "PathPrefix("+q); idx >= 0 {
-			m.pathPrefix = extractValue(rule, "PathPrefix("+q, q+")")
-			m.pathPrefixNegated = idx > 0 && rule[idx-1] == '!'
-		}
-		if idx := strings.Index(rule, "Path("+q); idx >= 0 {
-			m.path = extractValue(rule, "Path("+q, q+")")
-			m.pathNegated = idx > 0 && rule[idx-1] == '!'
-		}
-		if idx := strings.Index(rule, "PathRegex("+q); idx >= 0 {
-			s := extractValue(rule, "PathRegex("+q, q+")")
-			if re, err := regexp.Compile(s); err == nil {
-				m.pathRegex = re
-				m.pathRegexNegated = idx > 0 && rule[idx-1] == '!'
-			}
-		}
+	m, err := compileRule(src)
+	actual, loaded := ruleCache.LoadOrStore(src, m)
+	if !loaded && err != nil && strings.TrimSpace(src) != "" {
+		logger.L.LogError("route rule does not parse; every route with this rule matches no request until it is fixed",
+			"rule", truncateRule(src), "error", err)
 	}
-
-	// Methods(`GET`, `POST`) or Methods("GET", "POST")
-	methodsPrefix := ""
-	if strings.Contains(rule, "Methods(`") {
-		methodsPrefix = "Methods(`"
-	} else if strings.Contains(rule, "Methods(\"") {
-		methodsPrefix = "Methods(\""
-	}
-
-	if methodsPrefix != "" {
-		i := strings.Index(rule, methodsPrefix)
-		tail := rule[i+len(methodsPrefix):]
-		// Find the correct end by matching parentheses or the specific suffix
-		end := strings.Index(tail, ")")
-		if end > 0 {
-			inner := strings.TrimSuffix(tail[:end], "\"")
-			inner = strings.TrimSuffix(inner, "`")
-			m.methods = make(map[string]bool)
-			// Split by either `, ` or ", "
-			sep := "`, `"
-			if methodsPrefix == "Methods(\"" {
-				sep = "\", \""
-			}
-			for _, part := range strings.Split(inner, sep) {
-				method := strings.TrimSpace(strings.ToUpper(strings.Trim(part, "`\"")))
-				if method != "" {
-					m.methods[method] = true
-				}
-			}
-		}
-	}
-	// Headers support is complex, let's just add basic support for both quote types
-	for _, q := range []string{"`", "\""} {
-		prefix := "Headers(" + q
-		rulePtr := rule
-		for {
-			idx := strings.Index(rulePtr, prefix)
-			if idx < 0 {
-				break
-			}
-			rest := rulePtr[idx+len(prefix):]
-			qIdx := strings.Index(rest, q)
-			if qIdx < 0 {
-				break
-			}
-			name := rest[:qIdx]
-			rest = strings.TrimLeft(rest[qIdx+1:], " ")
-			if !strings.HasPrefix(rest, ",") {
-				break
-			}
-			rest = strings.TrimLeft(rest[1:], " ")
-			if !strings.HasPrefix(rest, q) {
-				break
-			}
-			rest = rest[1:]
-			endSuffix := q + ")"
-			end := strings.Index(rest, endSuffix)
-			if end < 0 {
-				break
-			}
-			value := rest[:end]
-			if m.headers == nil {
-				m.headers = make(map[string]string)
-			}
-			m.headers[http.CanonicalHeaderKey(name)] = value
-			rulePtr = rest[end+len(endSuffix):]
+	if loaded {
+		if am, isMatcher := actual.(Matcher); isMatcher {
+			return am
 		}
 	}
 	return m
 }
 
+// Matcher is a route's parsed rule.
+type Matcher struct {
+	// expr is nil when the rule does not parse; such a matcher matches nothing.
+	expr *rule.Expr
+}
+
+// compileRule parses a rule. An unreadable rule is a Matcher that matches
+// nothing, with the reason.
+func compileRule(src string) (Matcher, error) {
+	e, err := rule.Parse(src)
+	if err != nil {
+		return Matcher{}, err
+	}
+	return Matcher{expr: e}, nil
+}
+
+func parseRule(src string) Matcher {
+	m, _ := compileRule(src)
+	return m
+}
+
+// truncateRule bounds a rule for a log line; a rule is as long as the API body
+// allows.
+func truncateRule(src string) string {
+	const limit = 256
+	if len(src) <= limit {
+		return src
+	}
+	return src[:limit] + "..."
+}
+
+// Match reports whether r satisfies the rule. A rule that did not parse
+// matches nothing.
 func (m Matcher) Match(r *http.Request) bool {
-	if m.negated {
-		return !m.matchInner(r)
-	}
-	if len(m.orParts) > 0 {
-		for _, part := range m.orParts {
-			if part.Match(r) {
-				return true
-			}
-		}
+	if m.expr == nil {
 		return false
 	}
-	return m.matchInner(r)
+	return m.expr.Match(r, requestHost(r))
 }
 
-func (m Matcher) HasHost() bool {
-	if m.negated {
-		return false // Negated rule might not imply a specific host
-	}
-	if len(m.orParts) > 0 {
-		for _, part := range m.orParts {
-			if part.HasHost() {
-				return true
-			}
-		}
-		return false
-	}
-	return m.host != "" || m.hostRegex != nil
-}
-
-func (m Matcher) matchInner(r *http.Request) bool {
-	host := ""
+// requestHost is the request's host without its port, as the entrypoint
+// resolved it when it did.
+func requestHost(r *http.Request) string {
 	if rs := request.GetRequestState(r); rs != nil && rs.StrippedHost != "" {
-		host = rs.StrippedHost
-	} else {
-		host = httputil.StripPort(r.Host)
+		return rs.StrippedHost
 	}
-
-	if m.host != "" {
-		match := HostMatches(m.host, host)
-		if m.hostNegated {
-			match = !match
-		}
-		if !match {
-			return false
-		}
-	}
-	if m.hostRegex != nil {
-		match := m.hostRegex.MatchString(host)
-		if m.hostRegexNegated {
-			match = !match
-		}
-		if !match {
-			return false
-		}
-	}
-	if m.pathPrefix != "" {
-		match := strings.HasPrefix(r.URL.Path, m.pathPrefix)
-		if m.pathPrefixNegated {
-			match = !match
-		}
-		if !match {
-			return false
-		}
-	}
-	if m.path != "" {
-		match := r.URL.Path == m.path
-		if m.pathNegated {
-			match = !match
-		}
-		if !match {
-			return false
-		}
-	}
-	if m.pathRegex != nil {
-		match := m.pathRegex.MatchString(r.URL.Path)
-		if m.pathRegexNegated {
-			match = !match
-		}
-		if !match {
-			return false
-		}
-	}
-	if len(m.methods) > 0 {
-		match := m.methods[r.Method]
-		// For CORS preflight (OPTIONS), we allow a match if the route supports
-		// the method requested in Access-Control-Request-Method.
-		if !match && r.Method == http.MethodOptions {
-			reqMethod := r.Header.Get("Access-Control-Request-Method")
-			if reqMethod != "" && m.methods[strings.ToUpper(reqMethod)] {
-				match = true
-			}
-		}
-
-		if m.methodsNegated {
-			match = !match
-		}
-		if !match {
-			return false
-		}
-	}
-	for name, want := range m.headers {
-		// Use direct map access to avoid redundant CanonicalMIMEHeaderKey calls in Header.Get
-		values := r.Header[name]
-		if len(values) == 0 || values[0] != want {
-			// For CORS preflight (OPTIONS), we skip header checks as the browser
-			// does not send the actual headers in the preflight request.
-			if r.Method == http.MethodOptions && r.Header.Get("Access-Control-Request-Method") != "" {
-				continue
-			}
-			return false
-		}
-	}
-	return true
+	return httputil.StripPort(r.Host)
 }
 
+// HasHost reports whether the rule holds every request it matches to a host.
+func (m Matcher) HasHost() bool {
+	return m.expr != nil && m.expr.HasHost()
+}
+
+// RequiredHeaders are the headers every match must carry, by canonical name.
 func (m Matcher) RequiredHeaders() map[string]string {
-	return m.headers
+	if m.expr == nil {
+		return nil
+	}
+	return m.expr.RequiredHeaders()
 }
 
 // HostFromRule returns the host part of a rule if it contains Host(`...`), otherwise "".
 // Used by SNI to select certificates for multi-host TLS.
-func HostFromRule(rule string) string {
-	return GetMatcher(rule).host
+func HostFromRule(src string) string {
+	if m := GetMatcher(src); m.expr != nil {
+		return m.expr.Host()
+	}
+	return ""
 }
 
 // RouteHasHostRule returns true if the rule explicitly matches against a host
@@ -462,20 +267,6 @@ func SelectRouteFromSlice(r *http.Request, routes []*gateonv1.Route) *gateonv1.R
 		}
 	}
 	return nil
-}
-
-// extractValue is a helper to pull string literals from rule definitions.
-func extractValue(s, prefix, suffix string) string {
-	start := strings.Index(s, prefix)
-	if start == -1 {
-		return ""
-	}
-	start += len(prefix)
-	end := strings.Index(s[start:], suffix)
-	if end == -1 {
-		return ""
-	}
-	return s[start : start+end]
 }
 
 // RouteHasMiddlewareType returns true if the route has any middleware of the given type.
