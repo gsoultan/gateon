@@ -88,7 +88,7 @@ func TestSecondFactorUnderAnotherSessionKeyIsExplained(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = mgr.Close() })
-	_, _, err = mgr.Authenticate("gina", "correct-horse-battery")
+	_, _, err = mgr.Authenticate("gina", "correct-horse-battery", "203.0.113.5")
 	if !errors.Is(err, auth.ErrTwoFactorRequired) {
 		t.Fatalf("password step: %v", err)
 	}
