@@ -85,10 +85,30 @@ func (f *Factory) IsGRPCRoute() bool {
 	return strings.EqualFold(strings.TrimSpace(f.routeType), "grpc")
 }
 
-// Validate checks that the middleware config is valid without creating the middleware.
+// Validate checks that the middleware config is valid without creating the
+// middleware. It is the save path's check -- REST, gRPC and config import all
+// reach it through the domain service -- so it also refuses what would save a
+// setting that does nothing (checkSave), on top of everything Create refuses.
 func (f *Factory) Validate(m *gateonv1.Middleware) error {
+	if err := f.checkSave(m); err != nil {
+		return err
+	}
 	_, err := f.Create(m, "")
 	return err
+}
+
+// checkSave refuses, at save only, a config whose setting would not do what
+// its label says (ADR 0043, ADR 0046). These are refused at save rather than
+// in Create because a stored config predating the refusal must keep building:
+// each degrades to what it always did -- and is logged -- rather than taking
+// its route out of service on upgrade.
+func (f *Factory) checkSave(m *gateonv1.Middleware) error {
+	cfg := m.GetConfig()
+	switch m.GetType() {
+	case "xfcc":
+		return transform.CheckXFCCSave(cfg)
+	}
+	return nil
 }
 
 func (f *Factory) Create(m *gateonv1.Middleware, routeID string) (Middleware, error) {
