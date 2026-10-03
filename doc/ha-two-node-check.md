@@ -61,6 +61,44 @@ in isolation and is the failure this is meant to catch.
 lines means the adverts are being exchanged but the tie-break is not resolving** —
 check that the two nodes really do have different addresses.
 
+## What the two nodes must share
+
+Electing one master is not enough for the backup to take over as the *same*
+gateway. Two nodes on one database still generate their own session key, audit
+signature key and proof-of-work secret on first start, and keep them -- with
+everything setup writes and every global setting -- in their own
+`global.json`. After a failover a session from the old master is refused, a
+2FA sign-in fails with "stored under a different session key", and the audit
+log may be off (ADR 0056).
+
+So, on both nodes:
+
+1. The same three values in `/etc/default/gateon` (mode 0600, root), next to
+   `GATEON_ENCRYPTION_KEY`:
+
+   ```bash
+   GATEON_SESSION_KEY=<32 characters, the same on both nodes>
+   GATEON_AUDIT_SIGNATURE_KEY=<the same on both nodes>
+   GATEON_POW_SECRET=<the same on both nodes>
+   ```
+
+2. `global.json` naming them rather than holding values of its own. On a new
+   pair, leave the fields out and the environment's are used (and setup writes
+   the references). On a pair that already ran, a `global.json` that names its
+   own value wins and the gateway logs that it is not using the variable; set
+   `auth.paseto_secret` to `$env:GATEON_SESSION_KEY` in Settings on the node
+   whose key you keep (that rotates the key and moves the second factors), and
+   copy that node's `audit.signature_key` value into `GATEON_AUDIT_SIGNATURE_KEY`
+   rather than replacing it, or the stored audit chain stops verifying.
+
+3. Every global-settings change applied to both nodes: copy `global.json` from
+   the node you changed. The global settings are per node until they live in
+   the database; Redis carries session revocations only (ADR 0012), never
+   configuration.
+
+Check it: sign in on the master, stop it, and use the same session on the
+backup once it reports `MASTER`. A 401 means the session keys differ.
+
 ## The other half
 
 Run it again with `GATEON_HA_PRIORITY` differing between the containers: the

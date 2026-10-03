@@ -25,18 +25,27 @@ Gateon {{ .Chart.AppVersion }} installed as {{ include "gateon.fullname" . }}.
    not rotate it out from under your data — but `helm uninstall` plus a fresh
    install is a different key and unreadable secrets.
 {{- end }}
+
+   The same Secret holds the gateway's identity -- session-key,
+   audit-signature-key and pow-secret -- which every start of the pod reads
+   (ADR 0056). Back those up with the encryption key: a new session key signs
+   everyone out and strands every second factor, and a new audit key fails the
+   stored audit chain's verification.
 {{- if not (include "gateon.hasGlobalConfig" .) }}
 
 3. No global.json was supplied, so gateon started on built-in defaults — and the
    built-in default has the WAF switched off. Configure it through the dashboard,
    or set `globalConfig` in values. `kubectl logs` says so at startup too.
 {{- end }}
-{{- if gt (int .Values.replicaCount) 1 }}
+{{- if not .Values.persistence.enabled }}
 
-   Running {{ .Values.replicaCount }} replicas against a shared
-   {{ .Values.externalDatabase.driver }} with Redis. Session revocation
-   propagates over Redis and falls back to a 30s binding TTL if the broker is
-   unreachable, so a disabled account is out within that window either way.
+   persistence.enabled is false: every pod start is on an empty data
+   directory. Global settings saved in the dashboard do not survive a restart
+   (put them in globalConfig); sessions and second factors do.
+   {{- if not .Values.externalDatabase.enabled }} Without
+   externalDatabase the users and routes do not survive either, and first-run
+   setup reopens after every restart.
+   {{- end }}
 {{- end }}
 {{- if .Values.kubernetesIntegration.gatewayAPI }}
 
