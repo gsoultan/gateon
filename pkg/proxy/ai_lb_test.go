@@ -5,6 +5,7 @@ package proxy
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"sync/atomic"
 	"testing"
@@ -164,15 +165,23 @@ func TestAIPredictiveForgetsRemovedTargets(t *testing.T) {
 	}
 }
 
+// healthTransitionRuns numbers the runs of TestEveryPolicyReportsAHealthTransition.
+var healthTransitionRuns atomic.Int64
+
 // TestEveryPolicyReportsAHealthTransition: the dashboard's circuit-breaker
 // feed learns that a target went down or came back from the balancer's
 // SetAlive. Round robin, least-connections and weighted round robin reported
 // it; ai_predictive did not, so its services' outages never appeared there.
+//
+// The event feed is process-wide and outlives a test, so each run names its
+// target afresh: with a fixed name, a second run (-count=2) read the first
+// run's two events beside its own and failed with four.
 func TestEveryPolicyReportsAHealthTransition(t *testing.T) {
 	installProductionPredictor(t)
+	run := healthTransitionRuns.Add(1)
 	for _, policy := range []string{"round_robin", "least_conn", "weighted_round_robin", "ai_predictive"} {
 		t.Run(policy, func(t *testing.T) {
-			target := "http://health-" + policy
+			target := fmt.Sprintf("http://health-%s-%d", policy, run)
 			lb := NewDefaultLoadBalancerFactory().Create(policy, []*gateonv1.Target{{Url: target, Weight: 1}})
 			lb.SetAlive(target, false)
 			lb.SetAlive(target, true)
