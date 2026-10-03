@@ -31,14 +31,30 @@ import { useSecurityPosture } from "../../hooks/useSecurityPosture";
 import { useTableDensity } from "../../hooks/useTableDensity";
 import { getSeverityColor } from "../../utils/security";
 import { safeToFixed, safeFormatDate } from "../../utils/format";
+import { signatureStatus, wafStatus } from "./postureView";
 
 function PostureStatusCards() {
-  const { data: posture } = useSecurityPosture();
-  if (!posture) return null;
+  const { data: posture, isLoading, error } = useSecurityPosture();
+  if (isLoading) {
+    return (
+      <SimpleGrid cols={{ base: 1, sm: 2, lg: 4 }}>
+        {Array(4).fill(0).map((_, i) => (
+          <Skeleton key={i} height={72} radius="md" />
+        ))}
+      </SimpleGrid>
+    );
+  }
+  if (error || !posture) {
+    return (
+      <Alert color="red" icon={<IconAlertTriangle size={16} />}>
+        The protection status could not be loaded.
+      </Alert>
+    );
+  }
 
-  const waf = posture.waf;
   const siem = posture.siem;
-  const sig = posture.signatures;
+  const waf = wafStatus(posture.waf);
+  const sig = signatureStatus(posture.signatures);
 
   return (
     <SimpleGrid cols={{ base: 1, sm: 2, lg: 4 }}>
@@ -48,11 +64,13 @@ function PostureStatusCards() {
             <Text size="xs" c="dimmed" fw={700} tt="uppercase">
               WAF
             </Text>
-            <Badge color={waf.enabled ? "teal" : "gray"} variant="light">
-              {waf.enabled ? "Protecting all routes" : "Disabled"}
-            </Badge>
+            <Tooltip label={waf.detail} multiline w={280}>
+              <Badge color={waf.color} variant="light">
+                {waf.label}
+              </Badge>
+            </Tooltip>
           </Stack>
-          <ThemeIcon color={waf.enabled ? "teal" : "gray"} variant="light" size="lg" radius="md">
+          <ThemeIcon color={waf.color} variant="light" size="lg" radius="md">
             <IconShieldCheck size={20} />
           </ThemeIcon>
         </Group>
@@ -64,11 +82,13 @@ function PostureStatusCards() {
             <Text size="xs" c="dimmed" fw={700} tt="uppercase">
               Signature engine
             </Text>
-            <Badge color={sig.enabled ? "blue" : "gray"} variant="light">
-              {sig.enabled ? `${sig.ruleCount} rules active` : "Disabled"}
-            </Badge>
+            <Tooltip label={sig.detail} multiline w={280}>
+              <Badge color={sig.color} variant="light">
+                {sig.label}
+              </Badge>
+            </Tooltip>
           </Stack>
-          <ThemeIcon color={sig.enabled ? "blue" : "gray"} variant="light" size="lg" radius="md">
+          <ThemeIcon color={sig.color} variant="light" size="lg" radius="md">
             <IconRadar2 size={20} />
           </ThemeIcon>
         </Group>

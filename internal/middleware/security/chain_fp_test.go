@@ -326,6 +326,11 @@ func TestChainHarnessCanFail(t *testing.T) {
 	resetChainState(t)
 
 	c := sessionClient{name: "doomed", ja4Plus: "ja4-negative-control", ip: "203.0.113.99"}
+	// Reputation is process-wide and resetChainState does not clear it, so a
+	// second run (-count=2) met the zero score the first run gave this client
+	// and failed at the clean-client check. Reset it here and after.
+	telemetry.ResetReputation(repid.For(c.ja4Plus, c.ip))
+	t.Cleanup(func() { telemetry.ResetReputation(repid.For(c.ja4Plus, c.ip)) })
 	h := unconditionalChain(t, "chain-fp-negative")
 
 	if got := serveAs(h, c, "/"); got != http.StatusOK {

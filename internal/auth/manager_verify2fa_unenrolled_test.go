@@ -17,7 +17,7 @@ import (
 // derived from that empty key validates against every such account.
 func TestVerify2FARefusesAccountWithNoEnrolledSecret(t *testing.T) {
 	m := newTestManager(t)
-	id := createUser(t, m, "alice", "s3cret-pass")
+	id := createUser(t, m, "alice", "s3cret-passphrase")
 
 	code, err := totp.GenerateCode("", time.Now())
 	if err != nil {

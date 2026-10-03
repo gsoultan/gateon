@@ -30,6 +30,14 @@ func main() {
 		_, _ = w.Write([]byte("<html><body>Synology DSM</body></html>"))
 	})
 
+	// A plain-text IP reputation feed, as a feed provider serves one, for the
+	// spec that proves a listed address is refused (ADR 0044). Documentation
+	// ranges only, so nothing a real client uses is listed.
+	http.HandleFunc("/reputation-feed.txt", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = w.Write([]byte("# e2e feed\n192.0.2.66\n198.51.100.0/24\n"))
+	})
+
 	http.HandleFunc("/grpc", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/grpc")
 		w.Header().Set("Trailer", "grpc-status")

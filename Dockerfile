@@ -88,6 +88,10 @@ ENV CGO_ENABLED=0
 ARG TARGETOS TARGETARCH VERSION
 RUN GOOS=$TARGETOS GOARCH=$TARGETARCH \
     go build -trimpath -ldflags="-s -w -X main.Version=${VERSION}" -o /out/gateon ./cmd/gateon
+# The data directory the runtime stage hands to the nonroot user. distroless
+# has no shell to mkdir and chown with, so it is made here and copied over
+# with its owner.
+RUN mkdir -p /out/var-lib-gateon && chmod 0700 /out/var-lib-gateon
 
 # ---- Stage 3: runtime -------------------------------------------------------
 FROM gcr.io/distroless/static-debian12:nonroot
@@ -106,18 +110,35 @@ LABEL org.opencontainers.image.title="Gateon" \
 # gateway does not over-subscribe host cores under a CPU limit. Default to the
 # balanced resource profile; override GATEON_PROFILE / GOMEMLIMIT at deploy time.
 ENV GATEON_PROFILE=standard
-# Config lives at /etc/gateon. Without these the process resolves every config
-# file relative to its working directory — "/" in a scratch image — so an
-# operator who mounts /etc/gateon/global.json gets a gateway that silently
-# starts on built-in defaults, and the built-in default has the WAF switched
-# off. Naming the paths makes a missing mount a startup error instead.
-ENV GATEON_CONFIG_DIR=/etc/gateon \
-    GLOBAL_CONFIG_FILE=/etc/gateon/global.json \
+# State lives on the data volume, /var/lib/gateon: the SQLite database, the
+# trace store, the setup token -- and global.json, which first-run setup and
+# every save of global settings write. It used to be /etc/gateon/global.json,
+# which this image did not have and the Helm chart mounts read-only, so setup
+# could not complete in either ("read-only file system"); see ADR 0049.
+#
+# /etc/gateon is where an operator mounts configuration: a global.json there
+# seeds the one on the volume the first time the volume has none
+# (GATEON_GLOBAL_CONFIG_SEED) and is not read again, and the route, service,
+# entrypoint, middleware and TLS-option files seed a fresh database. Naming
+# every path keeps a missing mount from silently resolving against "/".
+#
+# To keep managing global.json as a mounted file instead (read-only, GitOps),
+# set GLOBAL_CONFIG_FILE=/etc/gateon/global.json; the dashboard then cannot
+# save global settings, and setup must have been done elsewhere.
+ENV GATEON_DATA_DIR=/var/lib/gateon \
+    GLOBAL_CONFIG_FILE=/var/lib/gateon/global.json \
+    GATEON_GLOBAL_CONFIG_SEED=/etc/gateon/global.json \
+    GATEON_CONFIG_DIR=/etc/gateon \
     ROUTES_FILE=/etc/gateon/routes.json \
     SERVICES_FILE=/etc/gateon/services.json \
     ENTRYPOINTS_FILE=/etc/gateon/entrypoints.json \
     MIDDLEWARES_FILE=/etc/gateon/middlewares.json \
     TLS_OPTIONS_FILE=/etc/gateon/tls_options.json
+# Owned by nonroot (65532), so a named volume mounted here -- which starts as
+# a copy of this directory -- is writable by the gateway. Run with
+#   docker run -v gateon-data:/var/lib/gateon -p 8080:8080 gateon
+# or the state, global.json included, goes with the container.
+COPY --from=builder --chown=65532:65532 /out/var-lib-gateon /var/lib/gateon
 WORKDIR /var/lib/gateon
 COPY --from=builder /out/gateon /usr/local/bin/gateon
 EXPOSE 8080

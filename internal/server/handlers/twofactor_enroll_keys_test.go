@@ -19,7 +19,7 @@ type enrollingAuth struct {
 	auth.Service
 }
 
-func (enrollingAuth) EnrollPending2FA(_, _ string) (string, string, []string, string, error) {
+func (enrollingAuth) EnrollPending2FA(_, _, _ string) (string, string, []string, string, error) {
 	return "JBSWY3DPEHPK3PXP", "data:image/png;base64,QR", []string{"recovery-1", "recovery-2"}, "user-1", nil
 }
 

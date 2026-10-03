@@ -34,7 +34,7 @@ func TestBotManagement_Challenge(t *testing.T) {
 	if rr.Code != http.StatusForbidden {
 		t.Errorf("expected 403 for initial request, got %d. Body: %s", rr.Code, rr.Body.String())
 	}
-	if !strings.Contains(rr.Body.String(), "Security Challenge") {
+	if !strings.Contains(rr.Body.String(), "Checking your browser") {
 		t.Errorf("expected challenge in body. Got: %q", rr.Body.String())
 	}
 

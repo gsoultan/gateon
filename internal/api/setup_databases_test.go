@@ -83,7 +83,7 @@ func TestSetupSavesTheDatabasesTheWizardChose(t *testing.T) {
 		t.Fatalf("open the chosen database: %v", err)
 	}
 	t.Cleanup(func() { _ = mgr.Close() })
-	if _, _, err := mgr.Authenticate("admin", "first-password"); err != nil {
+	if _, _, err := mgr.Authenticate("admin", "first-password", ""); err != nil {
 		t.Errorf("the administrator is not in the chosen database: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "gateon.db")); err == nil {

@@ -5,6 +5,7 @@ package handlers
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -22,6 +23,7 @@ import (
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware"
 	"github.com/gsoultan/gateon/internal/request"
+	"github.com/gsoultan/gateon/internal/server/readiness"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 	"google.golang.org/grpc/codes"
@@ -94,6 +96,49 @@ func writeSetup2FARefusal(w http.ResponseWriter, r *http.Request, err error) {
 	}
 }
 
+// signInUnavailable is the answer to a sign-in the gateway could not judge.
+const signInUnavailable = "sign-in is unavailable: the gateway could not read its user database; " +
+	"try again shortly (the gateway's log has the reason)"
+
+// writeSignInRefusal answers a failed POST /v1/login. A refusal of the
+// credentials is 401 with its reason. Anything else is the gateway failing,
+// not the caller: with the user database down every sign-in used to answer
+// 401 with the driver's error, which read as a wrong password to the person
+// signing in and named the database to anyone who asked. It is 503, which the
+// dashboard shows as "not ready", and the error goes to the log.
+func writeSignInRefusal(w http.ResponseWriter, err error) {
+	if errors.Is(err, auth.ErrInvalidCredentials) || errors.Is(err, auth.ErrAccountLocked) ||
+		errors.Is(err, auth.ErrAccountDisabled) {
+		WriteHTTPError(w, http.StatusUnauthorized, err.Error())
+		return
+	}
+	logger.L.LogError("sign-in failed: the user database could not be read", "error", err)
+	WriteHTTPError(w, http.StatusServiceUnavailable, signInUnavailable)
+}
+
+// secondFactorUnreadable is the answer when an account's stored second factor
+// does not decrypt under the session key in force.
+const secondFactorUnreadable = "this account's two-factor secret cannot be read by this gateway: it was stored " +
+	"under a different session key, which is what restoring the database with another global.json does. " +
+	"An administrator can restore the matching global.json (or set GATEON_PREVIOUS_SESSION_KEY and restart), " +
+	"or reset this account's two-factor authentication"
+
+// writeSecondFactorFailure answers a 2FA verification that failed for a
+// reason other than the code. It used to write the error itself, which for a
+// database restored under another key was "failed to decrypt secret: cipher:
+// message authentication failed" -- true, and no help to anyone.
+func writeSecondFactorFailure(w http.ResponseWriter, id string, err error) {
+	if errors.Is(err, auth.ErrSecretUndecryptable) {
+		logger.L.LogError("a 2FA sign-in failed: the account's second factor does not decrypt under the "+
+			"session key in global.json", "user_id", id)
+		WriteHTTPError(w, http.StatusInternalServerError, secondFactorUnreadable)
+		return
+	}
+	logger.L.LogError("2FA verification failed", "user_id", id, "error", err)
+	WriteHTTPError(w, http.StatusInternalServerError,
+		"two-factor verification could not be completed (the gateway's log has the reason)")
+}
+
 // writeServiceRefusal answers an error ApiService returned with the HTTP status
 // its gRPC code stands for. The service's message is passed on only for the
 // codes it writes messages for callers under -- a refusal, not a failure; an
@@ -110,6 +155,14 @@ func writeServiceRefusal(w http.ResponseWriter, err error) {
 		WriteHTTPError(w, http.StatusTooManyRequests, st.Message())
 	case codes.AlreadyExists:
 		WriteHTTPError(w, http.StatusConflict, st.Message())
+	// A refusal each, not a failure; they read as 500 (ADR 0050's token and
+	// audit-verification answers were the first to use them over REST).
+	case codes.NotFound:
+		WriteHTTPError(w, http.StatusNotFound, st.Message())
+	case codes.FailedPrecondition:
+		WriteHTTPError(w, http.StatusBadRequest, st.Message())
+	case codes.Unavailable:
+		WriteHTTPError(w, http.StatusServiceUnavailable, st.Message())
 	default:
 		logger.L.LogError("management request failed", "error", err)
 		WriteHTTPError(w, http.StatusInternalServerError, "the request could not be completed")
@@ -470,17 +523,36 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 	// 200 on /readyz means an orchestrator cannot tell a healthy gateway from
 	// one whose telemetry never opened, so it routes production traffic to a
 	// blind instance and completes the rollout past it.
+	//
+	// Beyond the telemetry store it reports every entrypoint listener that did
+	// not bind and a configuration database that does not answer (ADR 0049):
+	// a gateway whose :443 is held by another process, or whose user database
+	// is down, is alive but must not be sent traffic.
 	mux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
 		var notReady []string
 		if !telemetry.PathStatsStoreReady() {
 			notReady = append(notReady, "telemetry store")
 		}
+		notReady = append(notReady, readiness.NotReady()...)
 		if len(notReady) > 0 {
 			w.WriteHeader(http.StatusServiceUnavailable)
-			_, _ = w.Write([]byte("not ready: " + strings.Join(notReady, ", ")))
+			_, _ = w.Write([]byte("not ready: " + strings.Join(notReady, "; ")))
 			return
 		}
+		// Serving, but something is failing: a full trace disk drops traces,
+		// an unreachable configuration database stops sign-in and writes. The
+		// proxy still answers, so the instance stays in rotation (a 503 here
+		// would make a degraded single-node gateway a down one) and the body
+		// and the gauges say what is wrong.
+		degraded := readiness.Degraded()
+		if r := telemetry.TraceStoreNotReady(); r != "" {
+			degraded = append(degraded, r)
+		}
 		w.WriteHeader(http.StatusOK)
+		if len(degraded) > 0 {
+			_, _ = w.Write([]byte("ready, degraded: " + strings.Join(degraded, "; ")))
+			return
+		}
 		_, _ = w.Write([]byte("ready"))
 	})
 	mux.HandleFunc("GET /v1/setup/required", func(w http.ResponseWriter, r *http.Request) {
@@ -678,7 +750,7 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 				audit.Log(r.Context(), req.Id, "2fa_failed", "auth", "Invalid 2FA code", request.ClientAddr(r))
 				WriteHTTPError(w, wrongCodeStatus(isLoginStep), err.Error())
 			default:
-				WriteHTTPError(w, http.StatusInternalServerError, err.Error())
+				writeSecondFactorFailure(w, req.Id, err)
 			}
 			return
 		}
@@ -728,7 +800,7 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 			WriteHTTPError(w, http.StatusBadRequest, "invalid json")
 			return
 		}
-		secret, qr, recovery, id, err := d.AuthManager.EnrollPending2FA(req.Username, req.Password)
+		secret, qr, recovery, id, err := d.AuthManager.EnrollPending2FA(req.Username, req.Password, request.ClientAddr(r))
 		if err != nil {
 			switch {
 			case errors.Is(err, auth.ErrAccountLocked):
@@ -764,7 +836,7 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 				logger.SecurityEvent("auth_failure", r, "invalid_credentials")
 				audit.Log(r.Context(), req.Username, "login_failed", "auth", "Invalid credentials", request.ClientAddr(r))
 			}
-			WriteHTTPError(w, http.StatusUnauthorized, err.Error())
+			writeSignInRefusal(w, err)
 			return
 		}
 
@@ -915,4 +987,72 @@ func handleLogout(d *Deps) http.HandlerFunc {
 		}
 		_ = json.NewEncoder(w).Encode(map[string]bool{"success": true})
 	}
+}
+
+// credentialAPI is what the scrape-credential and audit-verification
+// handlers need of ApiService (ADR 0050).
+type credentialAPI interface {
+	ListApiTokens(ctx context.Context, req *gateonv1.ListApiTokensRequest) (*gateonv1.ListApiTokensResponse, error)
+	CreateApiToken(ctx context.Context, req *gateonv1.CreateApiTokenRequest) (*gateonv1.CreateApiTokenResponse, error)
+	RevokeApiToken(ctx context.Context, req *gateonv1.RevokeApiTokenRequest) (*gateonv1.RevokeApiTokenResponse, error)
+	VerifyAuditChain(ctx context.Context, req *gateonv1.VerifyAuditChainRequest) (*gateonv1.VerifyAuditChainResponse, error)
+}
+
+// registerCredentialHandlers serves the REST twins of the scrape-credential
+// RPCs and of VerifyAuditChain. Each checks the permission its RPC is mapped
+// to, and ApiService then requires an administrator, as it does for users.
+func registerCredentialHandlers(mux *http.ServeMux, svc credentialAPI) {
+	mux.HandleFunc("GET /v1/api-tokens", func(w http.ResponseWriter, r *http.Request) {
+		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceUsers) {
+			return
+		}
+		page, pageSize, _ := ParsePagination(r)
+		resp, err := svc.ListApiTokens(r.Context(), &gateonv1.ListApiTokensRequest{Page: page, PageSize: pageSize})
+		writeServiceAnswer(w, resp, err)
+	})
+	mux.HandleFunc("POST /v1/api-tokens", func(w http.ResponseWriter, r *http.Request) {
+		if !RequirePermission(w, r, auth.ActionWrite, auth.ResourceUsers) {
+			return
+		}
+		var req gateonv1.CreateApiTokenRequest
+		if !DecodeProtoRequest(w, r, &req) {
+			return
+		}
+		resp, err := svc.CreateApiToken(r.Context(), &req)
+		writeServiceAnswer(w, resp, err)
+	})
+	mux.HandleFunc("DELETE /v1/api-tokens/{id}", func(w http.ResponseWriter, r *http.Request) {
+		if !RequirePermission(w, r, auth.ActionWrite, auth.ResourceUsers) {
+			return
+		}
+		resp, err := svc.RevokeApiToken(r.Context(), &gateonv1.RevokeApiTokenRequest{Id: r.PathValue("id")})
+		writeServiceAnswer(w, resp, err)
+	})
+	mux.HandleFunc("GET /v1/audit/verify", func(w http.ResponseWriter, r *http.Request) {
+		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceDiagnostics) {
+			return
+		}
+		q := r.URL.Query()
+		resp, err := svc.VerifyAuditChain(r.Context(), &gateonv1.VerifyAuditChainRequest{
+			From: q.Get("from"), To: q.Get("to"), AfterId: q.Get("afterId"),
+			Limit: boundedInt32(q.Get("limit"), audit.MaxVerifyLimit),
+		})
+		writeServiceAnswer(w, resp, err)
+	})
+}
+
+// writeServiceAnswer writes an ApiService answer as protojson, or its refusal
+// with the status writeServiceRefusal gives it.
+func writeServiceAnswer(w http.ResponseWriter, resp proto.Message, err error) {
+	w.Header().Set("Content-Type", "application/json")
+	if err != nil {
+		writeServiceRefusal(w, err)
+		return
+	}
+	data, mErr := ProtojsonOptions().Marshal(resp)
+	if mErr != nil {
+		WriteHTTPError(w, http.StatusInternalServerError, "the answer could not be encoded")
+		return
+	}
+	_, _ = w.Write(data)
 }

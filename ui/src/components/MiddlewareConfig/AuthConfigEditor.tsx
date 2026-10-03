@@ -72,6 +72,13 @@ function BasicUsersEditor({ value, onChange }: { value: string; onChange: (value
   );
 }
 
+/** The auth types whose tokens carry an ID (jti) a revocation list can name. */
+const offersRevocation = (type: string | undefined) => type === "jwt" || type === "paseto" || type === "oidc";
+
+const REVOCATION_HELP =
+  "Refuse a token whose jti is listed in Redis (key revoked_jti:<jti>). Needs Redis configured for this " +
+  "gateway; the save is refused without it. A token with no jti cannot be revoked.";
+
 function AudienceFields({ config, updateConfig }: { config: Record<string, string>; updateConfig: (key: string, value: string) => void }) {
   const anyAudience = config.allow_any_audience === "true";
   return (
@@ -111,27 +118,36 @@ export function AuthConfigEditor({ config, onChange }: AuthConfigEditorProps) {
           checked={config.dry_run === "true"}
           onChange={(e) => updateConfig("dry_run", e.currentTarget.checked ? "true" : "false")}
         />
-        {(config.type === "jwt" || config.type === "paseto" || config.type === "oidc") && (
+        {offersRevocation(config.type) && (
           <Switch
             label="Enable Revocation"
-            description="Check Redis for revoked tokens (JTI)"
+            description={REVOCATION_HELP}
             checked={config.enable_revocation === "true"}
             onChange={(e) => updateConfig("enable_revocation", e.currentTarget.checked ? "true" : "false")}
           />
         )}
       </Group>
+      {offersRevocation(config.type) && config.enable_revocation === "true" && (
+        <TextInput
+          label="Revocation Key Prefix"
+          description="A token is refused while the Redis key <prefix><jti> exists."
+          placeholder="revoked_jti:"
+          value={config.revocation_prefix || ""}
+          onChange={(e) => updateConfig("revocation_prefix", e.currentTarget.value)}
+        />
+      )}
 
       <Group grow>
         <TextInput
           label="Required Scopes"
-          description="Comma-separated scopes (e.g. read, write)"
+          description="Separated by commas or spaces; a token needs every one."
           placeholder="read, write"
           value={config.required_scopes || ""}
           onChange={(e) => updateConfig("required_scopes", e.currentTarget.value)}
         />
         <TextInput
           label="Required Roles"
-          description="Comma-separated roles (e.g. admin, editor)"
+          description="Separated by commas (a role may contain spaces); a token needs every one."
           placeholder="admin, editor"
           value={config.required_roles || ""}
           onChange={(e) => updateConfig("required_roles", e.currentTarget.value)}
@@ -305,8 +321,8 @@ export function AuthConfigEditor({ config, onChange }: AuthConfigEditorProps) {
           />
           <TextInput
             label="Token Type Hint (optional)"
-            description="accessToken or refreshToken"
-            placeholder="accessToken"
+            description="access_token or refresh_token (RFC 7662)"
+            placeholder="access_token"
             value={config.token_type_hint || ""}
             onChange={(e) =>
               updateConfig("token_type_hint", e.currentTarget.value)

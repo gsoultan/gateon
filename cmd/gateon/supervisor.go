@@ -276,7 +276,9 @@ func (s *securitySupervisor) reconcileEbpf(cfg *gateonv1.EbpfConfig) {
 	}
 	if missing := missingPrivileges(); len(missing) > 0 {
 		logger.L.LogError("eBPF is enabled but this process lacks the capabilities to load it; keeping it "+
-			"disabled. Grant them to the service. In a container, run as uid 0 with every other "+
+			"disabled. Grant them to the service: under the packaged systemd unit, link "+
+			"/usr/share/gateon/systemd/ebpf-ha.conf into /etc/systemd/system/gateon.service.d/ and restart "+
+			"(doc/services.md). In a container, run as uid 0 with every other "+
 			"capability dropped: Docker and Kubernetes give added capabilities only to uid 0.",
 			"missing", missing)
 		return

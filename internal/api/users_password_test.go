@@ -26,7 +26,7 @@ func ownAccount(t *testing.T) (*ApiService, context.Context, string) {
 		t.Fatalf("NewManager: %v", err)
 	}
 	t.Cleanup(func() { _ = m.Close() })
-	u := &gateonv1.User{Username: "alice", Password: "right-pass", Role: auth.RoleAdmin}
+	u := &gateonv1.User{Username: "alice", Password: "right-passphrase", Role: auth.RoleAdmin}
 	if err := m.UpsertUser(u); err != nil {
 		t.Fatalf("UpsertUser: %v", err)
 	}
@@ -48,11 +48,11 @@ func TestChangePasswordRPCAsksForTheCurrentPassword(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			svc, ctx, id := ownAccount(t)
-			_, err := svc.ChangePassword(ctx, &gateonv1.ChangePasswordRequest{Id: id, Password: "new-pass", CurrentPassword: tc.current})
+			_, err := svc.ChangePassword(ctx, &gateonv1.ChangePasswordRequest{Id: id, Password: "new-passphrase", CurrentPassword: tc.current})
 			if status.Code(err) != tc.want {
 				t.Errorf("err = %v, want code %s", err, tc.want)
 			}
-			if _, _, err := svc.Auth.Authenticate("alice", "right-pass"); err != nil {
+			if _, _, err := svc.Auth.Authenticate("alice", "right-passphrase", ""); err != nil {
 				t.Errorf("the password changed anyway: %v", err)
 			}
 		})
@@ -64,9 +64,9 @@ func TestChangePasswordRPCAsksForTheCurrentPassword(t *testing.T) {
 func TestChangePasswordRPCLocksLikeSignIn(t *testing.T) {
 	svc, ctx, id := ownAccount(t)
 	for range auth.MaxFailedAttempts {
-		_, _ = svc.ChangePassword(ctx, &gateonv1.ChangePasswordRequest{Id: id, Password: "new-pass", CurrentPassword: "wrong-pass"})
+		_, _ = svc.ChangePassword(ctx, &gateonv1.ChangePasswordRequest{Id: id, Password: "new-passphrase", CurrentPassword: "wrong-pass"})
 	}
-	_, err := svc.ChangePassword(ctx, &gateonv1.ChangePasswordRequest{Id: id, Password: "new-pass", CurrentPassword: "right-pass"})
+	_, err := svc.ChangePassword(ctx, &gateonv1.ChangePasswordRequest{Id: id, Password: "new-passphrase", CurrentPassword: "right-passphrase"})
 	if status.Code(err) != codes.ResourceExhausted {
 		t.Errorf("err = %v, want ResourceExhausted", err)
 	}
@@ -75,11 +75,11 @@ func TestChangePasswordRPCLocksLikeSignIn(t *testing.T) {
 // TestChangePasswordRPCWithTheCurrentPassword pins the path the fix keeps.
 func TestChangePasswordRPCWithTheCurrentPassword(t *testing.T) {
 	svc, ctx, id := ownAccount(t)
-	resp, err := svc.ChangePassword(ctx, &gateonv1.ChangePasswordRequest{Id: id, Password: "new-pass", CurrentPassword: "right-pass"})
+	resp, err := svc.ChangePassword(ctx, &gateonv1.ChangePasswordRequest{Id: id, Password: "new-passphrase", CurrentPassword: "right-passphrase"})
 	if err != nil || !resp.GetSuccess() {
 		t.Fatalf("resp = %v, err = %v", resp, err)
 	}
-	if _, _, err := svc.Auth.Authenticate("alice", "new-pass"); err != nil {
+	if _, _, err := svc.Auth.Authenticate("alice", "new-passphrase", ""); err != nil {
 		t.Errorf("the new password does not sign in: %v", err)
 	}
 }
@@ -95,14 +95,14 @@ func TestUpdateUserRPCCannotSetTheCallersPassword(t *testing.T) {
 		u    *gateonv1.User
 		want codes.Code
 	}{
-		{&gateonv1.User{Id: id, Username: "alice", Role: auth.RoleAdmin, Password: "new-pass"}, codes.PermissionDenied},
-		{&gateonv1.User{Id: "fresh-id", Username: "alice", Role: auth.RoleAdmin, Password: "new-pass"}, codes.AlreadyExists},
+		{&gateonv1.User{Id: id, Username: "alice", Role: auth.RoleAdmin, Password: "new-passphrase"}, codes.PermissionDenied},
+		{&gateonv1.User{Id: "fresh-id", Username: "alice", Role: auth.RoleAdmin, Password: "new-passphrase"}, codes.AlreadyExists},
 	} {
 		if _, err := svc.UpdateUser(ctx, &gateonv1.UpdateUserRequest{User: tc.u}); status.Code(err) != tc.want {
 			t.Errorf("UpdateUser(id %q) err = %v, want %s", tc.u.GetId(), err, tc.want)
 		}
 	}
-	if _, _, err := svc.Auth.Authenticate("alice", "right-pass"); err != nil {
+	if _, _, err := svc.Auth.Authenticate("alice", "right-passphrase", ""); err != nil {
 		t.Errorf("the password changed anyway: %v", err)
 	}
 }

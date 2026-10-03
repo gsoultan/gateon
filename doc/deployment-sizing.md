@@ -90,13 +90,19 @@ requests in flight against a 2s backend.
 | Variable | Default | Effect |
 | :--- | :--- | :--- |
 | `GATEON_PROFILE` | `standard` | Tier: `minimal`, `standard`, `enterprise`. Sizes correlation tracking, trace sampling, CMS sketches, Pebble cache and retention. Wins over the stored config so a container can pin its footprint. |
-| `GATEON_MEMORY_LIMIT` | unset | Soft memory limit (`512MiB`, `1GiB`, or raw bytes) applied via `debug.SetMemoryLimit`. Makes the GC work harder rather than letting the process grow. `GOMEMLIMIT` is honoured natively too. |
+| `GATEON_MEMORY_LIMIT` | 85% of the cgroup's `memory.max`, else unset | Soft memory limit (`512MiB`, `1GiB`, or raw bytes) applied via `debug.SetMemoryLimit`. Makes the GC work harder rather than letting the process grow. `GOMEMLIMIT` is honoured natively too. With neither set, it is derived from a cgroup v2 memory limit when there is one -- the packaged unit's `MemoryMax=90%`, a container's `--memory`. |
+| `GATEON_TRACE_STORE_MAX_MB` | 256 / 2048 / 20480 by profile | The most disk the live trace store's tables may take; past it the oldest traces are evicted whatever their age. The write-ahead log adds up to a few memtables (about 16 MiB on `standard`). Trace writes also stop while the disk has less free than a twentieth of it (at least four memtables, at most 1 GiB). See [storage-retention.md](storage-retention.md). |
+| `GATEON_ACCESS_LOG_MAX_PER_SECOND` | 50 / 100 / 200 by profile | The most access-log lines written in one second across the gateway; `0` lifts it. Keeps the access log under journald's default rate limit (10000 lines in 30 s), past which journald drops the service's ERRORs and security events too. A WARN once a minute says how many were left out. |
 | `GOMAXPROCS` | from cgroup | Go 1.25+ derives this from cgroup CPU bandwidth, so a container with a CPU limit is usually already correct. Set it explicitly if not. |
 | `GOGC` | `100` | Standard Go GC tuning. Lower trades CPU for memory. |
 
 On a 2 GB host, set `GATEON_MEMORY_LIMIT` to around **1536MiB** rather than the
 full 2 GB: the limit governs the Go runtime, and the kernel, the container
-runtime and any sidecar still need the difference.
+runtime and any sidecar still need the difference. The packaged systemd unit
+does this for you: `MemoryMax=90%` is ~1.8 GiB on that host, and gateon takes
+85% of it, ~1.5 GiB, as its soft limit unless `GATEON_MEMORY_LIMIT` or
+`GOMEMLIMIT` says otherwise. The startup log's `gomemlimit_bytes` shows what is
+in force.
 
 `minimal` exists for hosts smaller than the target — it disables correlation
 tracking and trace storage, the two subsystems whose cost scales with traffic

@@ -61,9 +61,12 @@ nfpms:
     contents:
       - src: packaging/gateon.service
         dst: /lib/systemd/system/gateon.service
-      - src: packaging/gateon-service.xml
-        dst: /etc/gateon/gateon-service.xml
-        type: config
+      # Not active: the drop-in that grants eBPF and HA their capabilities,
+      # for an operator to link into gateon.service.d (ADR 0049).
+      - src: packaging/ebpf-ha.conf
+        dst: /usr/share/gateon/systemd/ebpf-ha.conf
+        file_info:
+          mode: 0644
       # 0750, as `gateon install` and scripts/postinstall.sh set it: the
       # directory holds global.json. internal/install's tests hold all three
       # to the same mode.
@@ -71,9 +74,16 @@ nfpms:
         type: dir
         file_info:
           mode: 0750
+    # preinstall records whether the service was enabled and running before an
+    # upgrade; postinstall and (rpm) posttrans leave it that way; postremove
+    # stops and disables it only on removal (review F11).
     scripts:
+      preinstall: scripts/preinstall.sh
       postinstall: scripts/postinstall.sh
       postremove: scripts/postremove.sh
+    rpm:
+      scripts:
+        posttrans: scripts/posttrans.sh
 
 snapshot:
   version_template: "{{ .Tag }}-next"

@@ -170,14 +170,14 @@ func TestSecondStepWithAnotherAccountsChallengeIsRefused(t *testing.T) {
 	root := enrolRoot(c)
 
 	// bob is anyone who knows their own password and has a second step owed.
-	bob := &gateonv1.User{Username: "bob", Password: "bobs-password", Role: auth.RoleViewer}
+	bob := &gateonv1.User{Username: "bob", Password: "the-other-accounts-pw", Role: auth.RoleViewer}
 	if err := mgr.UpsertUser(bob); err != nil {
 		t.Fatal(err)
 	}
 	if err := mgr.SetTwoFactorPending(bob.Id, true); err != nil {
 		t.Fatal(err)
 	}
-	bobs := c.login("bob", "bobs-password")
+	bobs := c.login("bob", "the-other-accounts-pw")
 	if !bobs.TwoFactorSetupRequired || bobs.TwoFactorChallenge == "" {
 		t.Fatalf("bob's sign-in did not answer setup-required with a challenge: %+v", bobs)
 	}
@@ -267,18 +267,18 @@ func TestPasswordThenChallengeThenCodeSignsIn(t *testing.T) {
 func TestMandatedEnrolmentSignsInWithTheLoginChallenge(t *testing.T) {
 	h, mgr, _ := buildManagementHandler(t)
 	c := mgmtClient{t: t, h: h}
-	carol := &gateonv1.User{Username: "carol", Password: "carols-password", Role: auth.RoleOperator}
+	carol := &gateonv1.User{Username: "carol", Password: "her-own-passphrase", Role: auth.RoleOperator}
 	if err := mgr.UpsertUser(carol); err != nil {
 		t.Fatal(err)
 	}
 	if err := mgr.SetTwoFactorPending(carol.Id, true); err != nil {
 		t.Fatal(err)
 	}
-	answer := c.login("carol", "carols-password")
+	answer := c.login("carol", "her-own-passphrase")
 	if !answer.TwoFactorSetupRequired || answer.TwoFactorChallenge == "" {
 		t.Fatalf("mandated sign-in did not answer setup-required with a challenge: %+v", answer)
 	}
-	rr := c.do(http.MethodPost, "/v1/auth/2fa/enroll", `{"username":"carol","password":"carols-password"}`, "")
+	rr := c.do(http.MethodPost, "/v1/auth/2fa/enroll", `{"username":"carol","password":"her-own-passphrase"}`, "")
 	if rr.Code != http.StatusOK {
 		t.Fatalf("enroll: status %d: %s", rr.Code, rr.Body.String())
 	}

@@ -53,7 +53,7 @@ func TestSecurityPostureUsesProvider(t *testing.T) {
 			return &SecurityPostureReport{
 				Version:     "v-test",
 				GeneratedAt: time.Now(),
-				WAF:         WAFPosture{Enabled: true, AutoUpdate: true},
+				WAF:         WAFPosture{Enabled: true, CustomRulesFromDisk: true},
 				ClamAV:      ClamAVPosture{Enabled: true, Installed: true},
 				FIM:         fimStatus,
 			}
@@ -70,7 +70,7 @@ func TestSecurityPostureUsesProvider(t *testing.T) {
 		want bool
 	}{
 		{"waf enabled", report.WAF.Enabled, true},
-		{"waf auto-update", report.WAF.AutoUpdate, true},
+		{"waf custom rules from disk", report.WAF.CustomRulesFromDisk, true},
 		{"clamav enabled", report.ClamAV.Enabled, true},
 		{"clamav installed", report.ClamAV.Installed, true},
 	}

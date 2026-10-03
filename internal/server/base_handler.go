@@ -146,6 +146,10 @@ func CreateBaseHandler(
 				writeAuthUnavailable(w, r)
 				return
 			}
+			// A scrape credential on /metrics, and only there (ADR 0050).
+			if serveScrape(w, r, deps.Auth, finalInternal) {
+				return
+			}
 			// Require Authorization header; accepts auth token in URL for WebSockets/SSE.
 			authInternal.ServeHTTP(w, r)
 			return

@@ -81,6 +81,17 @@ func liveMemoryBudget() memoryBudget {
 	}
 }
 
+// CgroupMemoryLimit is the memory.max of this process's cgroup v2, and false
+// when it has none, it is "max", or it cannot be read -- cgroup v1 included.
+func CgroupMemoryLimit() (uint64, bool) {
+	self, err := os.ReadFile("/proc/self/cgroup")
+	if err != nil {
+		return 0, false
+	}
+	_, limit, ok := cgroupV2FromProc(string(self), "/sys/fs/cgroup").read()
+	return limit, ok
+}
+
 // goRuntimeInUse is the memory the Go memory limit is enforced against: all
 // memory the runtime has mapped, less what it has returned to the OS.
 func goRuntimeInUse() uint64 {

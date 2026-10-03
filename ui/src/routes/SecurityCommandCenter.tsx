@@ -278,19 +278,6 @@ export default function SecurityCommandCenter() {
     void loadGlobalConfig();
   }, [loadGlobalConfig]);
 
-  const securityScore = React.useMemo(() => {
-    if (!metrics) return 100;
-    const base = 100;
-    const activeSuspicious = Number(metrics.activeSuspiciousSessions ?? (metrics as any)?.active_suspicious_sessions ?? 0);
-    const activeUnverified = Number(metrics.activeUnverifiedClients ?? (metrics as any)?.active_unverified_clients ?? 0);
-    const activeAnomalyAvg = Number(metrics.activeAnomalyScoreAverage ?? (metrics as any)?.active_anomaly_score_average ?? 0);
-    const penalty = (activeSuspicious * 2) + (activeUnverified * 0.5) + (activeAnomalyAvg * 0.1);
-    const score = Math.max(Math.round(base - penalty), 0);
-    return isNaN(score) ? 100 : score;
-  }, [metrics]);
-
-  const scoreColor = securityScore > 85 ? 'teal' : securityScore > 65 ? 'blue' : securityScore > 40 ? 'orange' : 'red';
-
   const threatTypeData = React.useMemo(() => {
     if (!metrics?.security?.topThreatTypes) return [];
     return metrics.security.topThreatTypes.map((t: any) => ({
@@ -431,8 +418,6 @@ export default function SecurityCommandCenter() {
           <Tabs.Panel value="overview">
             <OverviewTab 
               metrics={metrics ?? null}
-              securityScore={securityScore}
-              scoreColor={scoreColor}
               threatTypeData={threatTypeData}
               totalThreats={totalThreats}
             />

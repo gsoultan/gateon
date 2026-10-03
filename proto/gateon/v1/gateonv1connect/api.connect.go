@@ -177,6 +177,18 @@ const (
 	// ApiServiceDeleteWafRuleProcedure is the fully-qualified name of the ApiService's DeleteWafRule
 	// RPC.
 	ApiServiceDeleteWafRuleProcedure = "/gateon.v1.ApiService/DeleteWafRule"
+	// ApiServiceListApiTokensProcedure is the fully-qualified name of the ApiService's ListApiTokens
+	// RPC.
+	ApiServiceListApiTokensProcedure = "/gateon.v1.ApiService/ListApiTokens"
+	// ApiServiceCreateApiTokenProcedure is the fully-qualified name of the ApiService's CreateApiToken
+	// RPC.
+	ApiServiceCreateApiTokenProcedure = "/gateon.v1.ApiService/CreateApiToken"
+	// ApiServiceRevokeApiTokenProcedure is the fully-qualified name of the ApiService's RevokeApiToken
+	// RPC.
+	ApiServiceRevokeApiTokenProcedure = "/gateon.v1.ApiService/RevokeApiToken"
+	// ApiServiceVerifyAuditChainProcedure is the fully-qualified name of the ApiService's
+	// VerifyAuditChain RPC.
+	ApiServiceVerifyAuditChainProcedure = "/gateon.v1.ApiService/VerifyAuditChain"
 )
 
 // ApiServiceClient is a client for the gateon.v1.ApiService service.
@@ -236,6 +248,13 @@ type ApiServiceClient interface {
 	CreateWafRule(context.Context, *connect.Request[v1.CreateWafRuleRequest]) (*connect.Response[v1.CreateWafRuleResponse], error)
 	UpdateWafRule(context.Context, *connect.Request[v1.UpdateWafRuleRequest]) (*connect.Response[v1.UpdateWafRuleResponse], error)
 	DeleteWafRule(context.Context, *connect.Request[v1.DeleteWafRuleRequest]) (*connect.Response[v1.DeleteWafRuleResponse], error)
+	// Scrape credentials (ADR 0050). Administrators only.
+	ListApiTokens(context.Context, *connect.Request[v1.ListApiTokensRequest]) (*connect.Response[v1.ListApiTokensResponse], error)
+	CreateApiToken(context.Context, *connect.Request[v1.CreateApiTokenRequest]) (*connect.Response[v1.CreateApiTokenResponse], error)
+	RevokeApiToken(context.Context, *connect.Request[v1.RevokeApiTokenRequest]) (*connect.Response[v1.RevokeApiTokenResponse], error)
+	// VerifyAuditChain checks the audit log's HMAC chain over a bounded window
+	// (ADR 0050). Administrators only.
+	VerifyAuditChain(context.Context, *connect.Request[v1.VerifyAuditChainRequest]) (*connect.Response[v1.VerifyAuditChainResponse], error)
 }
 
 // NewApiServiceClient constructs a client for the gateon.v1.ApiService service. By default, it uses
@@ -567,6 +586,30 @@ func NewApiServiceClient(httpClient connect.HTTPClient, baseURL string, opts ...
 			connect.WithSchema(apiServiceMethods.ByName("DeleteWafRule")),
 			connect.WithClientOptions(opts...),
 		),
+		listApiTokens: connect.NewClient[v1.ListApiTokensRequest, v1.ListApiTokensResponse](
+			httpClient,
+			baseURL+ApiServiceListApiTokensProcedure,
+			connect.WithSchema(apiServiceMethods.ByName("ListApiTokens")),
+			connect.WithClientOptions(opts...),
+		),
+		createApiToken: connect.NewClient[v1.CreateApiTokenRequest, v1.CreateApiTokenResponse](
+			httpClient,
+			baseURL+ApiServiceCreateApiTokenProcedure,
+			connect.WithSchema(apiServiceMethods.ByName("CreateApiToken")),
+			connect.WithClientOptions(opts...),
+		),
+		revokeApiToken: connect.NewClient[v1.RevokeApiTokenRequest, v1.RevokeApiTokenResponse](
+			httpClient,
+			baseURL+ApiServiceRevokeApiTokenProcedure,
+			connect.WithSchema(apiServiceMethods.ByName("RevokeApiToken")),
+			connect.WithClientOptions(opts...),
+		),
+		verifyAuditChain: connect.NewClient[v1.VerifyAuditChainRequest, v1.VerifyAuditChainResponse](
+			httpClient,
+			baseURL+ApiServiceVerifyAuditChainProcedure,
+			connect.WithSchema(apiServiceMethods.ByName("VerifyAuditChain")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -625,6 +668,10 @@ type apiServiceClient struct {
 	createWafRule         *connect.Client[v1.CreateWafRuleRequest, v1.CreateWafRuleResponse]
 	updateWafRule         *connect.Client[v1.UpdateWafRuleRequest, v1.UpdateWafRuleResponse]
 	deleteWafRule         *connect.Client[v1.DeleteWafRuleRequest, v1.DeleteWafRuleResponse]
+	listApiTokens         *connect.Client[v1.ListApiTokensRequest, v1.ListApiTokensResponse]
+	createApiToken        *connect.Client[v1.CreateApiTokenRequest, v1.CreateApiTokenResponse]
+	revokeApiToken        *connect.Client[v1.RevokeApiTokenRequest, v1.RevokeApiTokenResponse]
+	verifyAuditChain      *connect.Client[v1.VerifyAuditChainRequest, v1.VerifyAuditChainResponse]
 }
 
 // GetStatus calls gateon.v1.ApiService.GetStatus.
@@ -892,6 +939,26 @@ func (c *apiServiceClient) DeleteWafRule(ctx context.Context, req *connect.Reque
 	return c.deleteWafRule.CallUnary(ctx, req)
 }
 
+// ListApiTokens calls gateon.v1.ApiService.ListApiTokens.
+func (c *apiServiceClient) ListApiTokens(ctx context.Context, req *connect.Request[v1.ListApiTokensRequest]) (*connect.Response[v1.ListApiTokensResponse], error) {
+	return c.listApiTokens.CallUnary(ctx, req)
+}
+
+// CreateApiToken calls gateon.v1.ApiService.CreateApiToken.
+func (c *apiServiceClient) CreateApiToken(ctx context.Context, req *connect.Request[v1.CreateApiTokenRequest]) (*connect.Response[v1.CreateApiTokenResponse], error) {
+	return c.createApiToken.CallUnary(ctx, req)
+}
+
+// RevokeApiToken calls gateon.v1.ApiService.RevokeApiToken.
+func (c *apiServiceClient) RevokeApiToken(ctx context.Context, req *connect.Request[v1.RevokeApiTokenRequest]) (*connect.Response[v1.RevokeApiTokenResponse], error) {
+	return c.revokeApiToken.CallUnary(ctx, req)
+}
+
+// VerifyAuditChain calls gateon.v1.ApiService.VerifyAuditChain.
+func (c *apiServiceClient) VerifyAuditChain(ctx context.Context, req *connect.Request[v1.VerifyAuditChainRequest]) (*connect.Response[v1.VerifyAuditChainResponse], error) {
+	return c.verifyAuditChain.CallUnary(ctx, req)
+}
+
 // ApiServiceHandler is an implementation of the gateon.v1.ApiService service.
 type ApiServiceHandler interface {
 	GetStatus(context.Context, *connect.Request[v1.GetStatusRequest]) (*connect.Response[v1.GetStatusResponse], error)
@@ -949,6 +1016,13 @@ type ApiServiceHandler interface {
 	CreateWafRule(context.Context, *connect.Request[v1.CreateWafRuleRequest]) (*connect.Response[v1.CreateWafRuleResponse], error)
 	UpdateWafRule(context.Context, *connect.Request[v1.UpdateWafRuleRequest]) (*connect.Response[v1.UpdateWafRuleResponse], error)
 	DeleteWafRule(context.Context, *connect.Request[v1.DeleteWafRuleRequest]) (*connect.Response[v1.DeleteWafRuleResponse], error)
+	// Scrape credentials (ADR 0050). Administrators only.
+	ListApiTokens(context.Context, *connect.Request[v1.ListApiTokensRequest]) (*connect.Response[v1.ListApiTokensResponse], error)
+	CreateApiToken(context.Context, *connect.Request[v1.CreateApiTokenRequest]) (*connect.Response[v1.CreateApiTokenResponse], error)
+	RevokeApiToken(context.Context, *connect.Request[v1.RevokeApiTokenRequest]) (*connect.Response[v1.RevokeApiTokenResponse], error)
+	// VerifyAuditChain checks the audit log's HMAC chain over a bounded window
+	// (ADR 0050). Administrators only.
+	VerifyAuditChain(context.Context, *connect.Request[v1.VerifyAuditChainRequest]) (*connect.Response[v1.VerifyAuditChainResponse], error)
 }
 
 // NewApiServiceHandler builds an HTTP handler from the service implementation. It returns the path
@@ -1276,6 +1350,30 @@ func NewApiServiceHandler(svc ApiServiceHandler, opts ...connect.HandlerOption) 
 		connect.WithSchema(apiServiceMethods.ByName("DeleteWafRule")),
 		connect.WithHandlerOptions(opts...),
 	)
+	apiServiceListApiTokensHandler := connect.NewUnaryHandler(
+		ApiServiceListApiTokensProcedure,
+		svc.ListApiTokens,
+		connect.WithSchema(apiServiceMethods.ByName("ListApiTokens")),
+		connect.WithHandlerOptions(opts...),
+	)
+	apiServiceCreateApiTokenHandler := connect.NewUnaryHandler(
+		ApiServiceCreateApiTokenProcedure,
+		svc.CreateApiToken,
+		connect.WithSchema(apiServiceMethods.ByName("CreateApiToken")),
+		connect.WithHandlerOptions(opts...),
+	)
+	apiServiceRevokeApiTokenHandler := connect.NewUnaryHandler(
+		ApiServiceRevokeApiTokenProcedure,
+		svc.RevokeApiToken,
+		connect.WithSchema(apiServiceMethods.ByName("RevokeApiToken")),
+		connect.WithHandlerOptions(opts...),
+	)
+	apiServiceVerifyAuditChainHandler := connect.NewUnaryHandler(
+		ApiServiceVerifyAuditChainProcedure,
+		svc.VerifyAuditChain,
+		connect.WithSchema(apiServiceMethods.ByName("VerifyAuditChain")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/gateon.v1.ApiService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case ApiServiceGetStatusProcedure:
@@ -1384,6 +1482,14 @@ func NewApiServiceHandler(svc ApiServiceHandler, opts ...connect.HandlerOption) 
 			apiServiceUpdateWafRuleHandler.ServeHTTP(w, r)
 		case ApiServiceDeleteWafRuleProcedure:
 			apiServiceDeleteWafRuleHandler.ServeHTTP(w, r)
+		case ApiServiceListApiTokensProcedure:
+			apiServiceListApiTokensHandler.ServeHTTP(w, r)
+		case ApiServiceCreateApiTokenProcedure:
+			apiServiceCreateApiTokenHandler.ServeHTTP(w, r)
+		case ApiServiceRevokeApiTokenProcedure:
+			apiServiceRevokeApiTokenHandler.ServeHTTP(w, r)
+		case ApiServiceVerifyAuditChainProcedure:
+			apiServiceVerifyAuditChainHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -1603,4 +1709,20 @@ func (UnimplementedApiServiceHandler) UpdateWafRule(context.Context, *connect.Re
 
 func (UnimplementedApiServiceHandler) DeleteWafRule(context.Context, *connect.Request[v1.DeleteWafRuleRequest]) (*connect.Response[v1.DeleteWafRuleResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gateon.v1.ApiService.DeleteWafRule is not implemented"))
+}
+
+func (UnimplementedApiServiceHandler) ListApiTokens(context.Context, *connect.Request[v1.ListApiTokensRequest]) (*connect.Response[v1.ListApiTokensResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gateon.v1.ApiService.ListApiTokens is not implemented"))
+}
+
+func (UnimplementedApiServiceHandler) CreateApiToken(context.Context, *connect.Request[v1.CreateApiTokenRequest]) (*connect.Response[v1.CreateApiTokenResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gateon.v1.ApiService.CreateApiToken is not implemented"))
+}
+
+func (UnimplementedApiServiceHandler) RevokeApiToken(context.Context, *connect.Request[v1.RevokeApiTokenRequest]) (*connect.Response[v1.RevokeApiTokenResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gateon.v1.ApiService.RevokeApiToken is not implemented"))
+}
+
+func (UnimplementedApiServiceHandler) VerifyAuditChain(context.Context, *connect.Request[v1.VerifyAuditChainRequest]) (*connect.Response[v1.VerifyAuditChainResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gateon.v1.ApiService.VerifyAuditChain is not implemented"))
 }

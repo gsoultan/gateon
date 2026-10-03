@@ -54,6 +54,13 @@ ADRs follow a lightweight [MADR](https://adr.github.io/madr/)-style format:
 | [0041](./0041-the-dashboard-session-stays-with-the-dashboard.md) | The dashboard session stays with the dashboard | Accepted |
 | [0042](./0042-a-stream-is-what-the-server-answered-and-every-listener-bounds-what-a-client-holds.md) | A stream is what the server answered, and every listener bounds what one client can hold | Accepted |
 | [0043](./0043-a-setting-that-saves-does-what-it-says-or-is-refused.md) | A setting that saves does what it says, or is refused | Accepted |
+| [0044](./0044-a-waf-geo-or-reputation-switch-does-what-it-says.md) | A WAF, geo or reputation switch does what it says, or says why not | Accepted |
+| [0045](./0045-a-challenge-proves-work-not-a-human.md) | A challenge proves work, not a human | Accepted |
+| [0046](./0046-auth-cors-and-client-identity-settings-do-what-they-say.md) | Auth, CORS and client-identity settings do what they say, or are refused | Accepted |
+| [0047](./0047-a-backend-the-dashboard-shows-is-a-backend-the-gateway-checks.md) | A backend the dashboard shows is a backend the gateway checks, weighs and reports truthfully | Accepted |
+| [0048](./0048-a-dashboard-number-is-computed-from-what-runs-or-not-shown.md) | A dashboard number is computed from what runs, or not shown | Accepted |
+| [0049](./0049-a-gateway-that-cannot-do-its-job-says-so-and-its-telemetry-cannot-take-it-down.md) | A gateway that cannot do its job says so, and its telemetry cannot take it down | Accepted |
+| [0050](./0050-machines-get-a-scoped-token-and-a-stranger-cannot-lock-the-owner-out.md) | Machines get a scoped token, the audit log is kept and checked, and a stranger cannot lock the owner out | Accepted |
 
 ## Conventions
 

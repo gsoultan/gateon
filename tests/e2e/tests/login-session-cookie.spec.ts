@@ -22,7 +22,7 @@ test('a browser sign-in gets the session only as the HttpOnly cookie', async ({ 
     (r) => new URL(r.url()).pathname === '/v1/login' && r.request().method() === 'POST',
   );
   await page.getByPlaceholder('Enter your username').fill('admin');
-  await page.getByPlaceholder('••••••••').fill('password123');
+  await page.getByPlaceholder('••••••••').fill('e2e-horse-battery-42');
   await page.getByRole('button', { name: /Continue to Dashboard/i }).click();
 
   const res = await loginResponse;

@@ -23,6 +23,11 @@ import { IconPlus, IconTrash } from "@tabler/icons-react";
 import { apiFetch, getCloudflareIPs } from "../../hooks/useGateon";
 import { StoredSecretInput } from "../settings/StoredSecretInput";
 import { WAF_APP_PROFILES } from "../../types/gateon";
+import { BROWSER_HEADER_CHECK_HELP, JS_CHALLENGE_HELP } from "./botManagementCopy";
+import { ClientAddressNote } from "./RatelimitConfigEditor";
+import { tlsBindingProblem, xfccProblem } from "./middlewareConfigProblems";
+import { ipListError } from "./ipList";
+import { routeSwitchOn, useEffectiveWaf, type EffectiveWaf } from "../../hooks/useEffectiveWaf";
 
 interface EditorProps {
   config: Record<string, string>;
@@ -30,40 +35,74 @@ interface EditorProps {
 }
 
 export function WAFConfigEditor({ config, updateConfig }: EditorProps) {
-  const isEnabled = (key: string) => config[key] !== "false";
+  const effective = useEffectiveWaf();
+  return (
+    <WAFConfigFields
+      config={config}
+      updateConfig={updateConfig}
+      global={effective.data?.global}
+      globalUnreadable={effective.isError}
+    />
+  );
+}
+
+interface WAFConfigFieldsProps extends EditorProps {
+  /** What the global WAF runs, from GET /v1/waf/effective; undefined while loading. */
+  global: EffectiveWaf | undefined;
+  globalUnreadable: boolean;
+}
+
+// The route WAF form. The switches show the gateway's merge rule (ADR 0044): a
+// key this route sets wins, a key it leaves out is what the global WAF runs,
+// so an untouched switch reads as the route will actually run it.
+export function WAFConfigFields({ config, updateConfig, global, globalUnreadable }: WAFConfigFieldsProps) {
+  const globalOn = global !== undefined && global.mode !== "off";
+  const isEnabled = (key: string) => routeSwitchOn(config, key, global).on;
+  const from = (key: string, text: string) =>
+    routeSwitchOn(config, key, global).inherited ? `${text} (as the global WAF runs it)` : text;
   const toggle = (key: string, val: boolean) => updateConfig(key, val ? "true" : "false");
+  const auditOnly =
+    config.audit_only !== undefined && config.audit_only.trim() !== ""
+      ? config.audit_only.trim().toLowerCase() === "true"
+      : globalOn && global?.mode === "audit_only";
 
   return (
     <Stack gap="md">
       <Text size="xs" c="dimmed">
-        The OWASP Core Rule Set is switched on for the whole gateway in Settings
-        under Global WAF Settings; the controls below tune it for this route.
+        {globalOn
+          ? "The global WAF is on. On a route with this middleware it is replaced by this WAF, which starts from what the global WAF runs: a switch you leave alone is inherited, and one you change adds to or narrows protection on this route only."
+          : "The global WAF is off, so this WAF is the only one on its routes. Switch the global WAF on in Settings under Global WAF Settings to protect every route."}
       </Text>
+      {globalUnreadable && (
+        <Text size="xs" c="red">
+          Could not read the global WAF, so untouched switches show the route defaults.
+        </Text>
+      )}
 
       <Divider label="Protection Categories" labelPosition="center" />
       <Group grow>
         <Stack gap="xs">
           <Switch
             label="SQL Injection"
-            description="Detects common SQL injection attacks"
+            description={from("sqli", "Detects common SQL injection attacks")}
             checked={isEnabled("sqli")}
             onChange={(e) => toggle("sqli", e.currentTarget.checked)}
           />
           <Switch
             label="Cross-Site Scripting (XSS)"
-            description="Detects XSS injection attempts"
+            description={from("xss", "Detects XSS injection attempts")}
             checked={isEnabled("xss")}
             onChange={(e) => toggle("xss", e.currentTarget.checked)}
           />
           <Switch
             label="Local/Remote File Inclusion"
-            description="Detects LFI/RFI attacks"
+            description={from("lfi", "Detects LFI/RFI attacks")}
             checked={isEnabled("lfi")}
             onChange={(e) => toggle("lfi", e.currentTarget.checked)}
           />
           <Switch
             label="Remote Code Execution"
-            description="Detects RCE and shell commands"
+            description={from("rce", "Detects RCE and shell commands")}
             checked={isEnabled("rce")}
             onChange={(e) => toggle("rce", e.currentTarget.checked)}
           />
@@ -71,37 +110,37 @@ export function WAFConfigEditor({ config, updateConfig }: EditorProps) {
         <Stack gap="xs">
           <Switch
             label="Scanner Detection"
-            description="Blocks known vulnerability scanners"
+            description={from("scanner", "Blocks known vulnerability scanners")}
             checked={isEnabled("scanner")}
             onChange={(e) => toggle("scanner", e.currentTarget.checked)}
           />
           <Switch
             label="Protocol Enforcement"
-            description="Enforces strict HTTP protocol compliance"
+            description={from("protocol", "Enforces strict HTTP protocol compliance")}
             checked={isEnabled("protocol")}
             onChange={(e) => toggle("protocol", e.currentTarget.checked)}
           />
           <Switch
             label="PHP Injection"
-            description="Detects PHP-specific injection attacks"
+            description={from("php", "Detects PHP-specific injection attacks")}
             checked={isEnabled("php")}
             onChange={(e) => toggle("php", e.currentTarget.checked)}
           />
           <Switch
             label="NodeJS Attacks"
-            description="Detects NodeJS-specific injection attacks"
+            description={from("nodejs", "Detects NodeJS-specific injection attacks")}
             checked={isEnabled("nodejs")}
             onChange={(e) => toggle("nodejs", e.currentTarget.checked)}
           />
           <Switch
             label="Java Injection"
-            description="Detects Java-specific injection attacks"
+            description={from("java", "Detects Java-specific injection attacks")}
             checked={isEnabled("java")}
             onChange={(e) => toggle("java", e.currentTarget.checked)}
           />
           <Switch
             label="WordPress Protection"
-            description="Detects WP-specific attacks and probes"
+            description={from("wordpress", "Detects WP-specific attacks and probes")}
             checked={isEnabled("wordpress")}
             onChange={(e) => toggle("wordpress", e.currentTarget.checked)}
           />
@@ -112,38 +151,35 @@ export function WAFConfigEditor({ config, updateConfig }: EditorProps) {
       <Group grow align="start">
         <Stack gap="xs">
           <Switch
-            label="IP Reputation"
-            description="Block requests from known malicious IPs"
-            checked={config.ip_reputation === "true"}
-            onChange={(e) => updateConfig("ip_reputation", e.currentTarget.checked ? "true" : "false")}
-          />
-          <Switch
-            label="DOS Protection"
-            description="Basic HTTP-level DOS protection rules"
-            checked={config.dos_protection === "true"}
-            onChange={(e) => updateConfig("dos_protection", e.currentTarget.checked ? "true" : "false")}
+            label="Behavioural Reputation"
+            description={from(
+              "ip_reputation",
+              "Refuse clients whose reputation here has fallen below 20. Threat-feed listings are refused on every route by Settings > Advanced Security > IP Reputation, with or without this",
+            )}
+            checked={isEnabled("ip_reputation")}
+            onChange={(e) => toggle("ip_reputation", e.currentTarget.checked)}
           />
           <Switch
             label="Malware Detection"
-            description="Detect common malware and web shell patterns"
-            checked={config.malware_detection === "true"}
-            onChange={(e) => updateConfig("malware_detection", e.currentTarget.checked ? "true" : "false")}
+            description={from("malware_detection", "Detect common malware and web shell patterns")}
+            checked={isEnabled("malware_detection")}
+            onChange={(e) => toggle("malware_detection", e.currentTarget.checked)}
           />
           <Switch
             label="Ransomware Detection"
-            description="Detect ransomware file extension uploads"
-            checked={config.ransomware_detection === "true"}
-            onChange={(e) => updateConfig("ransomware_detection", e.currentTarget.checked ? "true" : "false")}
+            description={from("ransomware_detection", "Detect ransomware file extension uploads")}
+            checked={isEnabled("ransomware_detection")}
+            onChange={(e) => toggle("ransomware_detection", e.currentTarget.checked)}
           />
         </Stack>
         <Stack gap="xs">
           <Switch
             label="Data Loss Prevention (DLP)"
-            description="Detect card numbers, credentials and stack traces leaking in responses"
-            checked={config.dlp === "true"}
-            onChange={(e) => updateConfig("dlp", e.currentTarget.checked ? "true" : "false")}
+            description={from("dlp", "Detect card numbers, credentials and stack traces leaking in responses")}
+            checked={isEnabled("dlp")}
+            onChange={(e) => toggle("dlp", e.currentTarget.checked)}
           />
-          {config.dlp === "true" && (
+          {isEnabled("dlp") && (
             <Select
               label="When a leak is found"
               description="Roll out in stages: watch first, then redact, then block once the false-positive rate is known."
@@ -201,7 +237,7 @@ export function WAFConfigEditor({ config, updateConfig }: EditorProps) {
         <NumberInput
           label="Paranoia Level"
           description="CRS paranoia 1-4. Higher = stricter."
-          value={parseInt(config.paranoia_level) || 1}
+          value={parseInt(config.paranoia_level) || (globalOn ? (global?.paranoiaLevel ?? 1) : 1)}
           onChange={(val) => updateConfig("paranoia_level", (val ?? 1).toString())}
           min={1}
           max={4}
@@ -286,21 +322,15 @@ export function WAFConfigEditor({ config, updateConfig }: EditorProps) {
       </Stack>
 
       <Divider label="Advanced" labelPosition="center" />
-      <Switch
-        label="Trust Cloudflare Headers"
-        description="Use CF-Connecting-IP for WAF REMOTE_ADDR"
-        checked={config.trust_cloudflare_headers === "true"}
-        onChange={(e) =>
-          updateConfig(
-            "trust_cloudflare_headers",
-            e.currentTarget.checked ? "true" : "false"
-          )
-        }
-      />
+      {/*
+        No "Trust Cloudflare Headers" here: the client address is resolved once,
+        from the global setting only an administrator may change, and a route
+        WAF value that disagrees is refused (ADR 0044, 0046).
+      */}
       <Switch
         label="Audit Only"
-        description="Log matched rules but do not block requests (SecRuleEngine DetectionOnly)"
-        checked={config.audit_only === "true"}
+        description="Record matched rules and block nothing on this route."
+        checked={auditOnly}
         onChange={(e) =>
           updateConfig("audit_only", e.currentTarget.checked ? "true" : "false")
         }
@@ -349,20 +379,20 @@ export function BotManagementConfigEditor({ config, updateConfig }: EditorProps)
   return (
     <Stack gap="md">
       <Switch
-        label="Browser Integrity Check"
-        description="Verify request is from a legitimate browser using Sec-Fetch-* headers"
+        label="Browser Header Check"
+        description={BROWSER_HEADER_CHECK_HELP}
         checked={isEnabled("enable_browser_integrity")}
         onChange={(e) => toggle("enable_browser_integrity", e.currentTarget.checked)}
       />
       <Switch
-        label="JS Challenge"
-        description="Serve a non-interactive JS challenge to verify browser capability"
+        label="JavaScript Challenge"
+        description={JS_CHALLENGE_HELP}
         checked={isEnabled("enable_js_challenge")}
         onChange={(e) => toggle("enable_js_challenge", e.currentTarget.checked)}
       />
       <NumberInput
         label="Challenge Timeout"
-        description="How long a solved challenge remains valid (seconds). Default: 3600"
+        description="How long a passed challenge admits the same address and browser (seconds). Default: 3600"
         value={parseInt(config.challenge_timeout) || 3600}
         onChange={(val) => updateConfig("challenge_timeout", (val ?? 3600).toString())}
         min={60}
@@ -511,17 +541,7 @@ export function GeoIPConfigEditor({ config, updateConfig }: EditorProps) {
         styles={{ input: { minHeight: 60 } }}
         clearable
       />
-      <Switch
-        label="Trust Cloudflare Headers"
-        description="Use CF-Connecting-IP for client IP"
-        checked={config.trust_cloudflare_headers === "true"}
-        onChange={(e) =>
-          updateConfig(
-            "trust_cloudflare_headers",
-            e.currentTarget.checked ? "true" : "false"
-          )
-        }
-      />
+      <ClientAddressNote />
     </Stack>
   );
 }
@@ -581,9 +601,21 @@ export function XFCCConfigEditor({ config, updateConfig }: EditorProps) {
       <Text size="sm">Extract and forward client certificate details to backend services via X-Forwarded-Client-Cert header.</Text>
       <Switch
         label="Forward By"
+        description="Name this gateway in By=, Envoy's URI SAN of the proxy's own certificate."
         checked={config.forward_by === "true"}
         onChange={(e) => updateConfig("forward_by", e.currentTarget.checked ? "true" : "false")}
       />
+      {config.forward_by === "true" && (
+        <TextInput
+          label="By (this gateway's URI)"
+          description="The URI this gateway forwards as By=, usually the URI SAN of its certificate."
+          placeholder="spiffe://example.org/gateway"
+          required
+          value={config.by || ""}
+          error={xfccProblem(config)}
+          onChange={(e) => updateConfig("by", e.currentTarget.value)}
+        />
+      )}
       <Switch
         label="Forward Hash"
         checked={config.forward_hash === "true"}
@@ -603,6 +635,34 @@ export function XFCCConfigEditor({ config, updateConfig }: EditorProps) {
         label="Forward DNS"
         checked={config.forward_dns === "true"}
         onChange={(e) => updateConfig("forward_dns", e.currentTarget.checked ? "true" : "false")}
+      />
+    </Stack>
+  );
+}
+
+export function TLSBindingConfigEditor({ config, updateConfig }: EditorProps) {
+  return (
+    <Stack gap="md">
+      <Text size="sm">
+        Binds the backend's session cookie to the client certificate of the TLS connection it was issued on. The
+        session is then refused from any other certificate, from a connection without one, and over plain HTTP.
+        Needs a TLS entrypoint that asks clients for a certificate; saving it on a route served without TLS is
+        refused.
+      </Text>
+      <TextInput
+        label="Session Cookie Name"
+        description="The cookie your backend sets for a signed-in session."
+        placeholder="session"
+        value={config.cookie_name || ""}
+        onChange={(e) => updateConfig("cookie_name", e.currentTarget.value)}
+      />
+      <StoredSecretInput
+        label="Binding Secret"
+        description="32+ characters, the same on every gateway serving the route. Changing it ends every bound session."
+        required
+        value={config.secret || ""}
+        error={tlsBindingProblem(config)}
+        onChange={(v) => updateConfig("secret", v)}
       />
     </Stack>
   );
@@ -641,6 +701,7 @@ export function IPFilterConfigEditor({ config, updateConfig }: EditorProps) {
         placeholder="10.0.0.0/8, 192.168.1.1"
         value={splitTags(config.allow_list)}
         onChange={(val) => updateConfig("allow_list", joinTags(val))}
+        error={ipListError(splitTags(config.allow_list))}
         styles={{ input: { minHeight: 60 } }}
         clearable
       />
@@ -660,20 +721,11 @@ export function IPFilterConfigEditor({ config, updateConfig }: EditorProps) {
         placeholder="10.0.0.100, 192.168.0.0/24"
         value={splitTags(config.deny_list)}
         onChange={(val) => updateConfig("deny_list", joinTags(val))}
+        error={ipListError(splitTags(config.deny_list))}
         styles={{ input: { minHeight: 60 } }}
         clearable
       />
-      <Switch
-        label="Trust Cloudflare Headers"
-        description="Use CF-Connecting-IP when behind Cloudflare"
-        checked={config.trust_cloudflare_headers === "true"}
-        onChange={(e) =>
-          updateConfig(
-            "trust_cloudflare_headers",
-            e.currentTarget.checked ? "true" : "false"
-          )
-        }
-      />
+      <ClientAddressNote />
     </Stack>
   );
 }

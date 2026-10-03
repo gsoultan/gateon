@@ -10,15 +10,21 @@ import (
 	"time"
 
 	"github.com/gsoultan/gateon/internal/config"
+	"github.com/gsoultan/gateon/internal/domain/entrypoint"
+	"github.com/gsoultan/gateon/internal/domain/middleware"
+	"github.com/gsoultan/gateon/internal/domain/route"
 	"github.com/gsoultan/gateon/internal/ebpf"
 	"github.com/gsoultan/gateon/internal/logger"
 	wafmw "github.com/gsoultan/gateon/internal/middleware/security/waf"
 	"github.com/gsoultan/gateon/internal/security"
 	"github.com/gsoultan/gateon/internal/security/fim"
+	"github.com/gsoultan/gateon/internal/security/posture"
 	"github.com/gsoultan/gateon/internal/security/siem"
 	"github.com/gsoultan/gateon/internal/security/yara"
+	epserver "github.com/gsoultan/gateon/internal/server/entrypoint"
 	"github.com/gsoultan/gateon/internal/server/handlers"
 	"github.com/gsoultan/gateon/internal/syncutil"
+	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
 // Environment variables controlling File Integrity Monitoring. FIM is opt-in:
@@ -91,43 +97,110 @@ func parseDuration(raw string) time.Duration {
 	return d
 }
 
+// postureDeps is what the posture report reads: the live subsystem managers,
+// and the stores the router builds route chains from.
+type postureDeps struct {
+	version     string
+	globalStore config.GlobalConfigStore
+	clamav      *security.ClamAVManager
+	waf         *wafmw.WAFUpdater
+	fimScanner  *fim.Scanner
+	ebpf        ebpf.Manager
+	routes      route.Service
+	middlewares middleware.Service
+	entryPoints entrypoint.Service
+}
+
 // newPostureProvider builds the GET /v1/security/posture report provider. It
 // captures the live subsystem managers so each request reflects current state.
-func newPostureProvider(
-	version string,
-	globalStore config.GlobalConfigStore,
-	clamav *security.ClamAVManager,
-	waf *wafmw.WAFUpdater,
-	fimScanner *fim.Scanner,
-	ebpfManager ebpf.Manager,
-) handlers.SecurityPostureProvider {
+func newPostureProvider(d postureDeps) handlers.SecurityPostureProvider {
 	return func(ctx context.Context) *handlers.SecurityPostureReport {
+		pc := postureConfig(ctx, d)
+		cov := posture.Coverage(pc)
 		report := &handlers.SecurityPostureReport{
-			Version:     version,
+			Version:     d.version,
 			GeneratedAt: time.Now(),
-			WAF:         wafPosture(ctx, globalStore, waf),
-			ClamAV:      clamavPosture(ctx, globalStore, clamav),
-			Signatures: handlers.SignaturePosture{
-				Enabled:   true,
-				RuleCount: yara.Default().RuleCount(),
-			},
-			SIEM: siem.CurrentStatus(),
-			Ebpf: ebpfPosture(ctx, globalStore, ebpfManager),
+			WAF:         wafPosture(pc, cov, d.waf),
+			ClamAV:      clamavPosture(ctx, d.globalStore, d.clamav),
+			Signatures:  signaturePosture(cov),
+			SIEM:        siem.CurrentStatus(),
+			Ebpf:        ebpfPosture(ctx, d.globalStore, d.ebpf),
+			Score:       posture.Compute(pc),
 		}
-		if fimScanner != nil {
-			st := fimScanner.Status()
+		if d.fimScanner != nil {
+			st := d.fimScanner.Status()
 			report.FIM = &st
 		}
 		return report
 	}
 }
 
-// wafPosture derives WAF freshness from config + the updater's status file.
-func wafPosture(ctx context.Context, store config.GlobalConfigStore, waf *wafmw.WAFUpdater) handlers.WAFPosture {
-	var p handlers.WAFPosture
-	if gc := store.Get(ctx); gc != nil && gc.Waf != nil {
-		p.Enabled = gc.Waf.GetEnabled()
-		p.AutoUpdate = gc.Waf.GetAutoUpdateRules()
+// postureConfig gathers the configuration the router composes chains from.
+func postureConfig(ctx context.Context, d postureDeps) posture.Config {
+	pc := posture.Config{Global: d.globalStore.Get(ctx)}
+	if d.routes != nil {
+		pc.Routes, _ = d.routes.ListPaginated(ctx, 0, 0, "", nil)
+	}
+	if d.middlewares != nil {
+		mws, _ := d.middlewares.ListPaginated(ctx, 0, 0, "")
+		pc.Middlewares = make(map[string]*gateonv1.Middleware, len(mws))
+		for _, mw := range mws {
+			pc.Middlewares[mw.GetId()] = mw
+		}
+	}
+	if d.entryPoints != nil {
+		pc.EntryPoints, _ = d.entryPoints.ListPaginated(ctx, 0, 0, "")
+	}
+	// A route WAF's mode as the WAF package builds it, so the coverage the
+	// Security Hub shows and the engine that runs agree by construction.
+	pc.RouteWAF = func(cfg map[string]string) posture.Mode {
+		switch wafmw.EffectiveRoute(ctx, cfg, d.globalStore).Mode {
+		case wafmw.ModeAuditOnly:
+			return posture.ModeDetect
+		case wafmw.ModeOff:
+			return posture.ModeOff
+		default:
+			return posture.ModeEnforce
+		}
+	}
+	mgmt := pc.Global.GetManagement()
+	pc.ManagementWorldOpen = epserver.ManagementListenerWorldOpen(mgmt)
+	pc.PublicManagement = managementOnEveryEntrypoint(mgmt)
+	return pc
+}
+
+// managementOnEveryEntrypoint mirrors isPublicManagementAllowed for a request
+// on a non-management entrypoint: the env override, the setting, or an
+// allowed_hosts list -- which matches a Host header the client writes, so any
+// client naming one of those hosts reaches the management API.
+func managementOnEveryEntrypoint(mgmt *gateonv1.ManagementConfig) bool {
+	return os.Getenv("GATEON_ALLOW_PUBLIC_MANAGEMENT") == "true" ||
+		mgmt.GetAllowPublicManagement() || len(mgmt.GetAllowedHosts()) > 0
+}
+
+// signaturePosture reports the upload signature engine as the routes run it:
+// it scans only inside a file_security middleware with enable_signature_scan
+// on, so with no such route nothing is scanned, whatever the engine holds.
+func signaturePosture(cov posture.RouteCoverage) handlers.SignaturePosture {
+	p := handlers.SignaturePosture{Routes: cov.SignatureScanning}
+	if p.Routes > 0 {
+		p.Enabled = true
+		p.RuleCount = yara.Default().RuleCount()
+	}
+	return p
+}
+
+// wafPosture reports the WAF's effective mode: the gateway-wide WAF's, and
+// per route, the mode of the WAF that inspects it.
+func wafPosture(pc posture.Config, cov posture.RouteCoverage, waf *wafmw.WAFUpdater) handlers.WAFPosture {
+	w := pc.Global.GetWaf()
+	p := handlers.WAFPosture{
+		Enabled: w.GetEnabled(),
+		Mode:    string(posture.GlobalWAFMode(w)),
+		Routes:  cov,
+		// auto_update_rules was repurposed: nothing downloads rules any more,
+		// and the flag only loads a rules directory already on disk.
+		CustomRulesFromDisk: w.GetEnabled() && w.GetAutoUpdateRules(),
 	}
 	if waf != nil {
 		p.LastUpdated = waf.LastUpdated()

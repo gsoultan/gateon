@@ -21,7 +21,7 @@ import (
 	"github.com/pquerna/otp/totp"
 )
 
-const stepUpPassword = "right-pass"
+const stepUpPassword = "right-passphrase"
 
 // stepUpFixture is the real 2FA stack behind POST /v1/auth/2fa/setup: the
 // handler, ApiService and an auth.Manager on a throwaway SQLite database.
@@ -91,7 +91,8 @@ func TestTwoFactorSetupRefusesAMissingPassword(t *testing.T) {
 // TestTwoFactorSetupCountsWrongPasswordsLikeSignIn: a wrong password is
 // refused -- with 403, which the dashboard does not read as "signed out" --
 // and counted, so the prompt cannot be used to guess the password past the
-// lockout; after the limit even the right one is refused.
+// lockout; after the limit even the right one is refused. The lock is the
+// prompt's own, not the sign-in's (ADR 0050).
 func TestTwoFactorSetupCountsWrongPasswordsLikeSignIn(t *testing.T) {
 	f := newStepUpFixture(t)
 	for i := range auth.MaxFailedAttempts {
@@ -106,8 +107,8 @@ func TestTwoFactorSetupCountsWrongPasswordsLikeSignIn(t *testing.T) {
 		t.Errorf("right password on a locked account: status %d, want 429: %s", rr.Code, rr.Body.String())
 	}
 	assertNothingDisclosed(t, rr)
-	if _, _, err := f.m.Authenticate("alice", stepUpPassword); !errors.Is(err, auth.ErrAccountLocked) {
-		t.Errorf("sign-in after %d wrong step-up passwords: err = %v, want ErrAccountLocked", auth.MaxFailedAttempts, err)
+	if _, _, err := f.m.Authenticate("alice", stepUpPassword, ""); err != nil {
+		t.Errorf("sign-in after %d wrong step-up passwords: err = %v, want a session: the prompt locks itself, not the sign-in (ADR 0050)", auth.MaxFailedAttempts, err)
 	}
 }
 
@@ -167,11 +168,11 @@ func TestTwoFactorSetupRefusedKeepsTheOwnersFactor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GenerateCode: %v", err)
 	}
-	_, _, signIn := f.m.Authenticate("alice", stepUpPassword)
+	_, _, signIn := f.m.Authenticate("alice", stepUpPassword, "")
 	if ok, _, _, err := f.m.Verify2FA(auth.ChallengeFrom(signIn), f.id, code); !ok || err != nil {
 		t.Errorf("the owner's authenticator stopped verifying: ok=%v err=%v", ok, err)
 	}
-	if _, _, err := f.m.Authenticate("alice", stepUpPassword); !errors.Is(err, auth.ErrTwoFactorRequired) {
+	if _, _, err := f.m.Authenticate("alice", stepUpPassword, ""); !errors.Is(err, auth.ErrTwoFactorRequired) {
 		t.Errorf("sign-in no longer asks for the second factor: err = %v", err)
 	}
 }

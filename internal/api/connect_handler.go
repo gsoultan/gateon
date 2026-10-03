@@ -61,6 +61,40 @@ func (h *ConnectHandler) GetAuditArchive(ctx context.Context, req *connect.Reque
 	return connect.NewResponse(res), nil
 }
 
+func (h *ConnectHandler) VerifyAuditChain(ctx context.Context, req *connect.Request[gateonv1.VerifyAuditChainRequest]) (*connect.Response[gateonv1.VerifyAuditChainResponse], error) {
+	res, err := h.s.VerifyAuditChain(ctx, req.Msg)
+	if err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(res), nil
+}
+
+// --- Scrape credentials (ADR 0050) ---
+
+func (h *ConnectHandler) ListApiTokens(ctx context.Context, req *connect.Request[gateonv1.ListApiTokensRequest]) (*connect.Response[gateonv1.ListApiTokensResponse], error) {
+	res, err := h.s.ListApiTokens(ctx, req.Msg)
+	if err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(res), nil
+}
+
+func (h *ConnectHandler) CreateApiToken(ctx context.Context, req *connect.Request[gateonv1.CreateApiTokenRequest]) (*connect.Response[gateonv1.CreateApiTokenResponse], error) {
+	res, err := h.s.CreateApiToken(ctx, req.Msg)
+	if err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(res), nil
+}
+
+func (h *ConnectHandler) RevokeApiToken(ctx context.Context, req *connect.Request[gateonv1.RevokeApiTokenRequest]) (*connect.Response[gateonv1.RevokeApiTokenResponse], error) {
+	res, err := h.s.RevokeApiToken(ctx, req.Msg)
+	if err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(res), nil
+}
+
 // --- Diagnostics & Threats ---
 
 func (h *ConnectHandler) GetDiagnostics(ctx context.Context, req *connect.Request[gateonv1.GetDiagnosticsRequest]) (*connect.Response[gateonv1.GetDiagnosticsResponse], error) {

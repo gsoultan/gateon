@@ -226,14 +226,28 @@ fi
 # list or an auth secret that the dashboard displays and the gateway does not
 # enforce. No compiler sees it, because both sides are string literals in
 # different languages.
+#
+# This check only matches spellings. Whether a key that IS read does anything is
+# asked by `go run ./scripts/checkconfig`: a key read into a struct field nothing
+# consults fails its dead-sink check, and a key with no row in the effect
+# registry (internal/middleware/dashboard_key_effects_test.go, which flips the
+# key and requires a different response) fails its effects check (ADR 0048).
+# A mention is not a use; T38 was this check passing over five inert switches.
+#
+# Keys are collected from updateConfig("k", ...) and toggle("k", ...) across
+# line breaks -- the line-by-line grep this used to be missed every key written
+# through toggle() (the WAF categories) or on the line after the call.
 # ---------------------------------------------------------------------------
 note "6/13  Dashboard middleware config keys match the Go readers"
 mw_editors="ui/src/components/MiddlewareConfig"
 if [ -d "$mw_editors" ]; then
-	go_keys=$(grep -rhoE '\["[A-Za-z0-9_]+"\]' internal/middleware/ 2>/dev/null |
-		tr -d '["]' | sort -u)
-	ui_keys=$(grep -rhoE 'updateConfig\(\s*"[A-Za-z0-9_]+"' "$mw_editors" 2>/dev/null |
-		sed -E 's/.*"([A-Za-z0-9_]+)"/\1/' | sort -u)
+	go_keys=$( {
+		grep -rhoE '\["[A-Za-z0-9_]+"\]' internal/middleware/ 2>/dev/null | tr -d '["]'
+		grep -rhoE '\.Get\("[a-z0-9_]+"' internal/middleware/ 2>/dev/null | sed -E 's/.*"([a-z0-9_]+)"/\1/'
+	} | sort -u)
+	ui_keys=$(find "$mw_editors" -name '*.tsx' ! -name '*.test.tsx' -exec cat {} + |
+		perl -0777 -ne 'while (/\b(?:updateConfig|toggle)\(\s*"([A-Za-z0-9_]+)"/g) { print "$1\n" }' |
+		sort -u)
 
 	# Only camelCase keys are reported: a key with no Go reader at all may
 	# legitimately belong to a middleware whose parser this grep cannot see,

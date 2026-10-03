@@ -5,11 +5,17 @@ package traffic
 
 import (
 	"fmt"
-	"net/http"
 
 	"github.com/gsoultan/gateon/internal/middleware/kind"
 )
 
+// NewInflightReq caps concurrent requests: per client address by default
+// (per_ip, 429 when that address is at the cap), or in total for the route the
+// middleware is attached to with per_ip=false (503 when the route is at it).
+//
+// per_ip=false used to key the count on the request's Host, which the client
+// writes, so every distinct Host got its own allowance and the cap the
+// dashboard labelled "Max Concurrent Requests" held for nobody (ADR 0047).
 func NewInflightReq(cfg map[string]string) (kind.Middleware, error) {
 	amount, err := kind.ParseIntStrict(cfg["amount"], 0)
 	if err != nil {
@@ -22,9 +28,8 @@ func NewInflightReq(cfg map[string]string) (kind.Middleware, error) {
 	if err != nil {
 		return nil, kind.CfgError("per_ip", cfg["per_ip"], err)
 	}
-	keyFunc := PerIP
 	if !perIP {
-		keyFunc = func(r *http.Request) string { return r.Host }
+		return MaxConnections(amount), nil
 	}
-	return MaxConnectionsPerIP(amount, keyFunc), nil
+	return MaxConnectionsPerIP(amount, PerIP), nil
 }

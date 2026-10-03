@@ -148,8 +148,11 @@ func TestReleasePackageShipsTheConfigDirectoryPrivate(t *testing.T) {
 	}
 }
 
-// serviceCapabilities is every capability the unit may hold (ADR 0019).
-var serviceCapabilities = []string{"CAP_NET_BIND_SERVICE", "CAP_BPF", "CAP_NET_ADMIN"}
+// serviceCapabilities is every capability the unit holds by default (ADR 0019,
+// ADR 0049): CAP_NET_BIND_SERVICE alone. CAP_BPF and CAP_NET_ADMIN, which
+// eBPF and HA's virtual IP need and nothing else does, are in the drop-in
+// packaging/ebpf-ha.conf -- see TestTheEbpfDropInGrantsWhatEbpfAndHANeed.
+var serviceCapabilities = []string{"CAP_NET_BIND_SERVICE"}
 
 // unitDirective returns the value of every `key=` line in unit.
 func unitDirective(unit, key string) []string {
@@ -212,5 +215,100 @@ func TestPostinstallCreatesTheInstallersAccount(t *testing.T) {
 	}
 	if strings.Contains(script, "root:root") {
 		t.Error("postinstall.sh still gives a directory to root:root, which locks the service out of it")
+	}
+}
+
+// dropInCapabilities is what packaging/ebpf-ha.conf adds: what loading and
+// attaching the programs needs (internal/ebpf.missingCapabilities) and what
+// HA's `ip addr` needs to move the virtual IP.
+var dropInCapabilities = []string{"CAP_BPF", "CAP_NET_ADMIN"}
+
+// TestTheEbpfDropInGrantsWhatEbpfAndHANeed: the unit stopped granting CAP_BPF
+// and CAP_NET_ADMIN by default (review F8: a compromise of the proxy got
+// interface, route and firewall control while eBPF and HA were both off). The
+// drop-in that turns them back on must grant exactly those, raise the memlock
+// limit old kernels charge BPF maps to, and allow bpf(2), which
+// @system-service leaves out.
+func TestTheEbpfDropInGrantsWhatEbpfAndHANeed(t *testing.T) {
+	t.Parallel()
+
+	dropIn := repoFile(t, "packaging", "ebpf-ha.conf")
+	for _, key := range []string{"AmbientCapabilities", "CapabilityBoundingSet"} {
+		got := unitDirective(dropIn, key)
+		if len(got) != 1 {
+			t.Fatalf("ebpf-ha.conf: %d %s= lines, want exactly one", len(got), key)
+		}
+		caps := strings.Fields(got[0])
+		slices.Sort(caps)
+		if want := slices.Sorted(slices.Values(dropInCapabilities)); !slices.Equal(caps, want) {
+			t.Errorf("ebpf-ha.conf: %s=%s, want exactly %v", key, got[0], want)
+		}
+	}
+	for _, want := range []string{"LimitMEMLOCK=infinity", "SystemCallFilter=bpf"} {
+		if !strings.Contains(dropIn, want) {
+			t.Errorf("ebpf-ha.conf is missing %q", want)
+		}
+	}
+}
+
+// hardening is the sandboxing both units carry (review F8). None of it is
+// needed by the gateway; what eBPF and HA need on top is in the drop-in.
+var hardening = []string{
+	"NoNewPrivileges=true", "ProtectSystem=strict", "ProtectHome=true", "PrivateTmp=true",
+	"PrivateDevices=true", "ProtectKernelTunables=true", "ProtectKernelModules=true",
+	"ProtectKernelLogs=true", "ProtectControlGroups=true", "ProtectClock=true", "ProtectHostname=true",
+	"RestrictNamespaces=true", "RestrictRealtime=true", "RestrictSUIDSGID=true", "LockPersonality=true",
+	"RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK", "SystemCallArchitectures=native",
+	"SystemCallFilter=@system-service", "SystemCallErrorNumber=EPERM",
+	// The ceiling gateon derives its Go soft limit from.
+	"MemoryMax=90%",
+	// Where GATEON_ENCRYPTION_KEY goes: a root-owned 0600 file, not an
+	// Environment= line any local account can read with systemctl show.
+	"EnvironmentFile=-/etc/default/gateon",
+	"Environment=GATEON_DATA_DIR=",
+}
+
+func TestUnitsCarryTheHardening(t *testing.T) {
+	t.Parallel()
+
+	units := map[string]string{
+		"the unit gateon install writes": renderSystemdUnit("/usr/local/bin/gateon"),
+		"packaging/gateon.service":       repoFile(t, "packaging", "gateon.service"),
+	}
+	for name, unit := range units {
+		for _, want := range hardening {
+			if !strings.Contains(unit, want) {
+				t.Errorf("%s is missing %q", name, want)
+			}
+		}
+		if strings.Contains(unit, "%!") {
+			t.Errorf("%s has a formatting error: %s", name, unit)
+		}
+		if strings.Contains(unit, "gateon/gateon") {
+			t.Errorf("%s points its Documentation= at the wrong repository", name)
+		}
+		for _, line := range strings.Split(unit, "\n") {
+			if strings.HasPrefix(strings.TrimSpace(line), "Environment=") && strings.Contains(line, "ENCRYPTION_KEY") {
+				t.Errorf("%s sets the encryption key in an Environment= line: %s", name, line)
+			}
+		}
+	}
+}
+
+// TestThePackagesShipNoWindowsFileAndTheDropIn: the WinSW XML is a Windows
+// service wrapper's config and was shipped into /etc/gateon as a Linux
+// conffile (review F11); the eBPF/HA drop-in is what the unit now tells the
+// operator to link.
+func TestThePackagesShipNoWindowsFileAndTheDropIn(t *testing.T) {
+	t.Parallel()
+
+	for _, file := range []string{".goreleaser.yaml", "nfpm.yaml"} {
+		cfg := repoFile(t, file)
+		if strings.Contains(cfg, "gateon-service.xml") {
+			t.Errorf("%s still ships the Windows service XML", file)
+		}
+		if !strings.Contains(cfg, "/usr/share/gateon/systemd/ebpf-ha.conf") {
+			t.Errorf("%s does not ship the eBPF/HA drop-in", file)
+		}
 	}
 }

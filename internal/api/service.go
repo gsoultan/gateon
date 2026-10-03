@@ -166,6 +166,20 @@ func (s *ApiService) logAudit(ctx context.Context, action, resource, details str
 	audit.Log(ctx, userID, action, resource, details, ip)
 }
 
+// callerAddr is the address a sign-in is counted against (ADR 0050): the
+// client address the entrypoint resolved under the operator's trust setting,
+// or else the transport peer. "" when neither is known, which the lockout
+// treats as one shared source.
+func callerAddr(ctx context.Context) string {
+	if rs := request.GetRequestStateFromContext(ctx); rs != nil && rs.ClientRemoteAddr != "" {
+		return rs.ClientRemoteAddr
+	}
+	if p, ok := peer.FromContext(ctx); ok && p.Addr != nil {
+		return p.Addr.String()
+	}
+	return ""
+}
+
 func (s *ApiService) InstallClamav(ctx context.Context, req *gateonv1.InstallClamavRequest) (*gateonv1.InstallClamavResponse, error) {
 	if s.ClamAVManager == nil {
 		return &gateonv1.InstallClamavResponse{Success: false, Message: "ClamAV manager not initialized"}, nil
@@ -378,7 +392,8 @@ func (s *ApiService) bindingGuard() *routebind.Guard {
 }
 
 func (s *ApiService) routeService() route.Service {
-	return route.NewService(s.Routes, s.invalidator(), logger.Default(), s.bindingGuard())
+	return route.NewService(s.Routes, s.invalidator(), logger.Default(), s.bindingGuard(),
+		route.NewTLSBindingCheck(s.Middlewares, s.EntryPoints))
 }
 
 func (s *ApiService) serviceService() service.Service {

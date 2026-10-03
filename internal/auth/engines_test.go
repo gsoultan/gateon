@@ -71,7 +71,7 @@ func (e engineManager) create(t *testing.T, username, password, role string) str
 // signIn returns a session token for username, failing the test if there is none.
 func (e engineManager) signIn(t *testing.T, username, password string) string {
 	t.Helper()
-	token, _, err := e.m.Authenticate(username, password)
+	token, _, err := e.m.Authenticate(username, password, "")
 	if err != nil || token == "" {
 		t.Fatalf("signing in as %s: token %q, err %v", username, token, err)
 	}

@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	"github.com/gsoultan/gateon/internal/auth"
+	"github.com/gsoultan/gateon/internal/security/posture"
 	"github.com/gsoultan/gateon/internal/server/entrypoint"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	gtls "github.com/gsoultan/gateon/internal/tls"
@@ -76,7 +77,7 @@ func registerAIAdvisoryHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Dep
 		if globals := svc.GetGlobals(); globals != nil {
 			cfg = globals.Get(r.Context())
 		}
-		resp := analyzeConfig(r.Context(), cfg, routeWAFCoverage(r.Context(), d))
+		resp := analyzeConfig(r.Context(), cfg, routeWAFCoverage(r.Context(), d, cfg))
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(resp)
 	})
@@ -99,7 +100,7 @@ func registerAIAdvisoryHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Dep
 
 // analyzeConfig runs the deterministic hardening ruleset over the gateway config
 // and recent threat telemetry, returning prioritized recommendations. routes
-// says how many routes run a WAF of their own.
+// counts the enabled routes by the mode of the WAF that inspects each.
 func analyzeConfig(ctx context.Context, cfg *gateonv1.GlobalConfig, routes wafCoverage) aiAnalysisResponse {
 	if cfg == nil {
 		return aiAnalysisResponse{
@@ -112,6 +113,7 @@ func analyzeConfig(ctx context.Context, cfg *gateonv1.GlobalConfig, routes wafCo
 	insights := make([]aiInsight, 0, 12)
 	insights = append(insights, tlsInsights(cfg.GetTls())...)
 	insights = append(insights, wafInsights(cfg.GetWaf(), routes)...)
+	insights = append(insights, botInsights(routes)...)
 	insights = append(insights, managementExposureInsights(cfg.GetManagement())...)
 	insights = append(insights, auditInsights(cfg.GetAudit())...)
 	insights = append(insights, detectionInsights(cfg)...)
@@ -142,69 +144,102 @@ func tlsInsights(tlsCfg *gateonv1.TlsConfig) []aiInsight {
 	}}
 }
 
-// wafCoverage is how many enabled routes attach a WAF middleware of their own.
-type wafCoverage struct{ covered, total int }
+// wafCoverage counts the enabled HTTP routes by the mode of the WAF that
+// inspects each one.
+type wafCoverage = posture.RouteCoverage
 
-// routeWAFCoverage counts the enabled routes that attach a "waf" middleware:
-// the router gives those their own WAF instead of the gateway-wide one, so with
-// the global WAF off they are still filtered.
-func routeWAFCoverage(ctx context.Context, d *Deps) wafCoverage {
-	var c wafCoverage
+// routeWAFCoverage counts the enabled routes by what inspects them. A route
+// that attaches a "waf" middleware runs that WAF instead of the gateway-wide
+// one, in that middleware's mode -- so a route-level audit-only WAF on a
+// gateway whose global WAF enforces is a route nothing blocks for.
+func routeWAFCoverage(ctx context.Context, d *Deps, global *gateonv1.GlobalConfig) wafCoverage {
 	if d == nil || d.RouteService == nil || d.MwService == nil {
-		return c
+		return wafCoverage{}
 	}
 	routes, _ := d.RouteService.ListPaginated(ctx, 0, 0, "", nil)
-	for _, rt := range routes {
-		if rt.GetDisabled() {
-			continue
-		}
-		c.total++
-		if routeAttachesWAF(ctx, d, rt) {
-			c.covered++
-		}
+	mws, _ := d.MwService.ListPaginated(ctx, 0, 0, "")
+	byID := make(map[string]*gateonv1.Middleware, len(mws))
+	for _, mw := range mws {
+		byID[mw.GetId()] = mw
 	}
-	return c
+	return posture.Coverage(posture.Config{Global: global, Routes: routes, Middlewares: byID})
 }
 
-func routeAttachesWAF(ctx context.Context, d *Deps, rt *gateonv1.Route) bool {
-	for _, id := range rt.GetMiddlewares() {
-		if mw, ok := d.MwService.GetMiddleware(ctx, strings.TrimSpace(id)); ok && mw.GetType() == "waf" {
-			return true
-		}
-	}
-	return false
-}
-
-// wafInsights reports on the WAF the router actually runs: the gateway-wide one
-// when it is on, and otherwise the WAF middlewares routes attach themselves.
+// wafInsights reports on the WAFs the router actually runs, in the mode each
+// runs in: the gateway-wide one for routes without their own, and the route's
+// own WAF middleware otherwise.
 //
 // It used to read only the global toggle, so a gateway whose every route runs
-// its own WAF was told, as its top critical finding, that no WAF was active.
-func wafInsights(waf *gateonv1.WafConfig, routes wafCoverage) []aiInsight {
-	switch {
-	case waf.GetEnabled():
-		return globalWAFInsights(waf)
-	case routes.total > 0 && routes.covered == routes.total:
-		return nil
-	case routes.covered > 0:
-		return []aiInsight{{
-			Title: fmt.Sprintf("Web Application Firewall covers %d of %d routes", routes.covered, routes.total),
-			Description: fmt.Sprintf("The gateway-wide WAF is off and only %d of %d routes attach a WAF middleware of their own, "+
-				"so requests to the other %d reach their backends unfiltered.", routes.covered, routes.total, routes.total-routes.covered),
-			Severity:        insightWarning,
-			Category:        categorySecurity,
-			Recommendation:  "Attach a WAF middleware to the remaining routes, or enable the gateway-wide WAF, which covers every route without one.",
-			SuggestedConfig: wafEnableSuggestion,
-		}}
-	default:
-		return []aiInsight{{
-			Title:           "Web Application Firewall is disabled",
-			Description:     "No WAF is active, so common OWASP attacks (SQLi, XSS, RCE, path traversal) reach your backends unfiltered.",
-			Severity:        insightCritical,
-			Category:        categorySecurity,
-			Recommendation:  "Enable the WAF middleware with the OWASP Core Rule Set on internet-facing routes.",
-			SuggestedConfig: wafEnableSuggestion,
-		}}
+// its own WAF was told, as its top critical finding, that no WAF was active;
+// and it never read audit_only, so a WAF that blocks nothing produced no
+// finding at all (T12).
+func wafInsights(waf *gateonv1.WafConfig, cov wafCoverage) []aiInsight {
+	if cov.Total == 0 {
+		cov = wafCoverage{Total: 1}
+		switch posture.GlobalWAFMode(waf) {
+		case posture.ModeEnforce:
+			cov.Enforcing = 1
+		case posture.ModeDetect:
+			cov.Detecting = 1
+		default:
+			cov.Off = 1
+		}
+	}
+	if cov.Off == cov.Total {
+		return []aiInsight{wafDisabledInsight()}
+	}
+	var out []aiInsight
+	if cov.Detecting > 0 {
+		out = append(out, wafAuditOnlyInsight(cov))
+	}
+	if cov.Off > 0 {
+		out = append(out, wafPartialInsight(cov))
+	}
+	if waf.GetEnabled() {
+		out = append(out, globalWAFInsights(waf)...)
+	}
+	return out
+}
+
+func wafDisabledInsight() aiInsight {
+	return aiInsight{
+		Title:           "Web Application Firewall is disabled",
+		Description:     "No WAF is active, so common OWASP attacks (SQLi, XSS, RCE, path traversal) reach your backends unfiltered.",
+		Severity:        insightCritical,
+		Category:        categorySecurity,
+		Recommendation:  "Enable the WAF middleware with the OWASP Core Rule Set on internet-facing routes.",
+		SuggestedConfig: wafEnableSuggestion,
+	}
+}
+
+// wafAuditOnlyInsight: an audit-only WAF records an attack and forwards it.
+// Critical when it is all there is, since then nothing is blocked anywhere.
+func wafAuditOnlyInsight(cov wafCoverage) aiInsight {
+	severity := insightWarning
+	if cov.Enforcing == 0 {
+		severity = insightCritical
+	}
+	return aiInsight{
+		Title: fmt.Sprintf("Web Application Firewall is detecting only (audit) on %d of %d routes", cov.Detecting, cov.Total),
+		Description: fmt.Sprintf("On %d of %d routes the WAF runs audit-only: it records the attacks it matches "+
+			"and forwards them to the backend. Nothing is blocked there.", cov.Detecting, cov.Total),
+		Severity: severity,
+		Category: categorySecurity,
+		Recommendation: "Review the would-block counts on the Security Hub overview, then turn audit-only off " +
+			"(globally, or on the route's WAF middleware, which replaces the global WAF on that route).",
+		SuggestedConfig: "waf:\n  audit_only: false",
+	}
+}
+
+func wafPartialInsight(cov wafCoverage) aiInsight {
+	return aiInsight{
+		Title: fmt.Sprintf("Web Application Firewall covers %d of %d routes", cov.Total-cov.Off, cov.Total),
+		Description: fmt.Sprintf("%d of %d routes run no WAF, so requests to them reach their backends unfiltered.",
+			cov.Off, cov.Total),
+		Severity:        insightWarning,
+		Category:        categorySecurity,
+		Recommendation:  "Attach a WAF middleware to the remaining routes, or enable the gateway-wide WAF, which covers every route without one.",
+		SuggestedConfig: wafEnableSuggestion,
 	}
 }
 
@@ -233,16 +268,30 @@ func globalWAFInsights(waf *gateonv1.WafConfig) []aiInsight {
 			Recommendation: "Enable WAF DoS protection (and consider eBPF/XDP rate limiting) on public entrypoints.",
 		})
 	}
-	if !waf.GetBotManagement().GetEnabled() {
-		out = append(out, aiInsight{
-			Title:          "Bot management is disabled",
-			Description:    "Automated scrapers and credential-stuffing bots are not being challenged.",
-			Severity:       insightInfo,
-			Category:       categorySecurity,
-			Recommendation: "Enable bot management with a JS/browser-integrity challenge for sensitive routes.",
-		})
-	}
 	return out
+}
+
+// botInsights reports which routes carry a bot_management middleware. It used
+// to read the global bot-management switch, which only supplies defaults to
+// that middleware and protects no route that lacks it, so "enabled" there was
+// counted as coverage nobody had.
+func botInsights(cov wafCoverage) []aiInsight {
+	if cov.Total == 0 || cov.BotManagement == cov.Total {
+		return nil
+	}
+	title := "Bot management covers no route"
+	if cov.BotManagement > 0 {
+		title = fmt.Sprintf("Bot management covers %d of %d routes", cov.BotManagement, cov.Total)
+	}
+	return []aiInsight{{
+		Title: title,
+		Description: fmt.Sprintf("%d of %d routes carry no bot management middleware, so automated scrapers "+
+			"and credential-stuffing bots reach them unchallenged. The global bot settings are only defaults "+
+			"for that middleware.", cov.Total-cov.BotManagement, cov.Total),
+		Severity:       insightInfo,
+		Category:       categorySecurity,
+		Recommendation: "Attach a bot management middleware to sensitive routes (logins, forms, APIs).",
+	}}
 }
 
 func auditInsights(audit *gateonv1.AuditConfig) []aiInsight {
@@ -282,7 +331,7 @@ func detectionInsights(cfg *gateonv1.GlobalConfig) []aiInsight {
 	if !cfg.GetAnomalyDetection().GetEnabled() {
 		out = append(out, aiInsight{
 			Title:          "Anomaly detection is disabled",
-			Description:    "Behavioral anomalies (brute force, exploit probing, impossible travel) are not being flagged.",
+			Description:    "Behavioral anomalies (brute force, exploit probing, WAF-block bursts) are not being flagged or shunned.",
 			Severity:       insightInfo,
 			Category:       categorySecurity,
 			Recommendation: "Enable anomaly detection so the correlation engine can raise incidents.",

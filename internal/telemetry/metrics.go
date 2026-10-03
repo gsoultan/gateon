@@ -109,6 +109,53 @@ var RequestFailuresTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 	Help: "Total number of failed requests by route and reason.",
 }, []string{"route", "reason"})
 
+// RequestOutcomesTotal counts every HTTP request exactly once, by what
+// became of it: "forwarded" (every middleware on its route passed it to the
+// backend), "refused" (the gateway answered it with an error before any
+// backend saw it: a WAF or IP-filter deny, a rate limit, a mitigation, no
+// route) or "answered" (the gateway answered it itself without an error: a
+// redirect, a challenge page, a cached response).
+//
+// It is the mitigation funnel's baseline (ADR 0048). gateon_requests_total
+// cannot be: a proxied request is recorded under its entrypoint's label and
+// its route's, so summing it counted every request twice, and nothing in it
+// says whether the backend was reached. One fixed label, three values.
+var RequestOutcomesTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+	Name: "gateon_request_outcomes_total",
+	Help: "HTTP requests by outcome (forwarded, refused, answered), each counted once.",
+}, []string{labelOutcome})
+
+// labelOutcome names the outcome label.
+const labelOutcome = "outcome"
+
+// Request outcome labels and their pre-resolved series, so recording one is a
+// single atomic add on the request path.
+const (
+	OutcomeForwarded = "forwarded"
+	OutcomeRefused   = "refused"
+	OutcomeAnswered  = "answered"
+)
+
+var (
+	requestsForwarded = RequestOutcomesTotal.WithLabelValues(OutcomeForwarded)
+	requestsRefused   = RequestOutcomesTotal.WithLabelValues(OutcomeRefused)
+	requestsAnswered  = RequestOutcomesTotal.WithLabelValues(OutcomeAnswered)
+)
+
+// RecordRequestOutcome counts one finished request: forwarded when its route
+// handed it to the backend, otherwise refused for an error status and
+// answered for any other.
+func RecordRequestOutcome(forwarded bool, status int) {
+	switch {
+	case forwarded:
+		requestsForwarded.Inc()
+	case status >= 400:
+		requestsRefused.Inc()
+	default:
+		requestsAnswered.Inc()
+	}
+}
+
 // MiddlewareRateLimitRejectedTotal counts requests rejected by rate limiter.
 var MiddlewareRateLimitRejectedTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 	Name: "gateon_middleware_ratelimit_rejected_total",

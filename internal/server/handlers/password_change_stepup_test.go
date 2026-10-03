@@ -30,10 +30,10 @@ func (f stepUpFixture) as(t *testing.T, method, path, body string) *httptest.Res
 // other password the test used.
 func (f stepUpFixture) assertPassword(t *testing.T, username, want, not string) {
 	t.Helper()
-	if _, _, err := f.m.Authenticate(username, want); err != nil {
+	if _, _, err := f.m.Authenticate(username, want, ""); err != nil {
 		t.Errorf("%s cannot sign in with %q: %v", username, want, err)
 	}
-	if _, _, err := f.m.Authenticate(username, not); !errors.Is(err, auth.ErrInvalidCredentials) {
+	if _, _, err := f.m.Authenticate(username, not, ""); !errors.Is(err, auth.ErrInvalidCredentials) {
 		t.Errorf("%s signing in with %q: err = %v, want ErrInvalidCredentials", username, not, err)
 	}
 }
@@ -53,8 +53,9 @@ func TestOwnPasswordChangeRefusesAMissingCurrentPassword(t *testing.T) {
 
 // TestOwnPasswordChangeCountsWrongPasswordsLikeSignIn: a wrong current
 // password is refused with 403 -- not 401, which the dashboard reads as "signed
-// out" -- and counted against the sign-in lockout, after which even the right
-// one is refused.
+// out" -- and counted, after which even the right one is refused. The lock is
+// the prompt's own: a session in hostile hands cannot use it to lock the owner
+// out of signing in (ADR 0050).
 func TestOwnPasswordChangeCountsWrongPasswordsLikeSignIn(t *testing.T) {
 	f := newStepUpFixture(t)
 	body := `{"id":"` + f.id + `","password":"` + newPassword + `","currentPassword":"wrong-pass"}`
@@ -67,8 +68,8 @@ func TestOwnPasswordChangeCountsWrongPasswordsLikeSignIn(t *testing.T) {
 	if rr := f.as(t, http.MethodPost, "/v1/users/password", right); rr.Code != http.StatusTooManyRequests {
 		t.Errorf("right password on a locked account: status %d, want 429: %s", rr.Code, rr.Body.String())
 	}
-	if _, _, err := f.m.Authenticate("alice", stepUpPassword); !errors.Is(err, auth.ErrAccountLocked) {
-		t.Errorf("sign-in after %d wrong current passwords: err = %v, want ErrAccountLocked", auth.MaxFailedAttempts, err)
+	if _, _, err := f.m.Authenticate("alice", stepUpPassword, ""); err != nil {
+		t.Errorf("sign-in after %d wrong current passwords: err = %v, want a session: the prompt locks itself, not the sign-in (ADR 0050)", auth.MaxFailedAttempts, err)
 	}
 }
 
@@ -87,7 +88,7 @@ func TestOwnPasswordChangeWithTheCurrentPasswordWorks(t *testing.T) {
 // none.
 func TestAdminResetOfAnotherAccountKeepsTodaysRule(t *testing.T) {
 	f := newStepUpFixture(t)
-	bob := &gateonv1.User{Username: "bob", Password: "bobs-pass", Role: auth.RoleViewer}
+	bob := &gateonv1.User{Username: "bob", Password: "the-other-accounts-pw", Role: auth.RoleViewer}
 	if err := f.m.UpsertUser(bob); err != nil {
 		t.Fatalf("UpsertUser: %v", err)
 	}
@@ -95,7 +96,7 @@ func TestAdminResetOfAnotherAccountKeepsTodaysRule(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status %d, want 200: %s", rr.Code, rr.Body.String())
 	}
-	f.assertPassword(t, "bob", newPassword, "bobs-pass")
+	f.assertPassword(t, "bob", newPassword, "the-other-accounts-pw")
 }
 
 // TestEditingYourselfCannotSetYourPassword: PUT /v1/users writes a password
@@ -121,7 +122,7 @@ func TestEditingYourselfCannotSetYourPassword(t *testing.T) {
 	f.assertPassword(t, "alice", stepUpPassword, newPassword)
 
 	// Setting someone else's password as their administrator is unchanged.
-	bob := &gateonv1.User{Username: "bob", Password: "bobs-pass", Role: auth.RoleViewer}
+	bob := &gateonv1.User{Username: "bob", Password: "the-other-accounts-pw", Role: auth.RoleViewer}
 	if err := f.m.UpsertUser(bob); err != nil {
 		t.Fatalf("UpsertUser: %v", err)
 	}
@@ -129,5 +130,5 @@ func TestEditingYourselfCannotSetYourPassword(t *testing.T) {
 	if rr := f.as(t, http.MethodPut, "/v1/users", body); rr.Code != http.StatusOK {
 		t.Fatalf("editing bob: status %d, want 200: %s", rr.Code, rr.Body.String())
 	}
-	f.assertPassword(t, "bob", newPassword, "bobs-pass")
+	f.assertPassword(t, "bob", newPassword, "the-other-accounts-pw")
 }

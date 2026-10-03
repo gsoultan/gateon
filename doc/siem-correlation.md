@@ -155,16 +155,23 @@ escalating responses so legitimate heavy traffic is not knocked offline:
 
 ### What the allowlist covers
 
-Sources matching `GATEON_MITIGATION_ALLOWLIST` are exempt from **every active
-mitigation gateon applies**:
+Sources matching `GATEON_MITIGATION_ALLOWLIST` are exempt from the active
+mitigations that act on an address's history:
 
 | | |
 | :-- | :-- |
 | Reputation blocker | no 403, whatever the score |
+| IP reputation feed | a listed address is served (ADR 0044) |
+| Address blocks and shuns | recorded, not enforced, here or in the kernel (ADRs 0032, 0035) |
 | Honeypot | trap hits are recorded, the address is not banned |
 | Tarpit | no progressive delay |
 | Proof-of-work | no challenge |
 | Correlated incidents | no reputation degradation, no eBPF shun |
+
+The **JavaScript challenge** (bot management) is not on that list: it is a
+property of the route, not a judgement on the address, so an allowlisted client
+is challenged like any other on a route that carries it (ADR 0045). If a trusted
+client cannot run JavaScript, give it a route without the challenge.
 
 Accepts both CIDRs and bare addresses (`203.0.113.0/24, 198.51.100.7`), IPv4 and
 IPv6. A v4-mapped IPv6 address matches its IPv4 prefix, because it is the same

@@ -6,6 +6,7 @@ import { Alert, Button, Group, PasswordInput, Stack } from "@mantine/core";
 import { useForm } from "@mantine/form";
 import { IconAlertCircle } from "@tabler/icons-react";
 import { changeOwnPassword, resetPassword } from "./passwordChange";
+import { PASSWORD_RULE, passwordPolicyError } from "./passwordPolicy";
 
 interface ChangePasswordFormProps {
   userId: string;
@@ -32,7 +33,8 @@ export const ChangePasswordForm: React.FC<ChangePasswordFormProps> = ({
     initialValues: { currentPassword: "", password: "", confirmPassword: "" },
     validate: {
       currentPassword: (value) => (own && value.length === 0 ? "Enter your current password" : null),
-      password: (value) => (value.length < 6 ? "Password must be at least 6 characters" : null),
+      // The gateway's rule (ADR 0050); it also refuses common passwords.
+      password: (value) => passwordPolicyError(value),
       confirmPassword: (value, values) => (value !== values.password ? "Passwords do not match" : null),
     },
   });
@@ -68,6 +70,7 @@ export const ChangePasswordForm: React.FC<ChangePasswordFormProps> = ({
         <PasswordInput
           label="New password"
           placeholder="Enter new password"
+          description={PASSWORD_RULE}
           autoComplete="new-password"
           required
           {...form.getInputProps("password")}

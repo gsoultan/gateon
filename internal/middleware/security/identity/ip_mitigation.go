@@ -9,6 +9,7 @@ import (
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/middleware/kind"
 	"github.com/gsoultan/gateon/internal/request"
+	"github.com/gsoultan/gateon/internal/security/reputation"
 	"github.com/gsoultan/gateon/internal/telemetry"
 )
 
@@ -30,31 +31,45 @@ func IPMitigation() kind.Middleware {
 			}
 
 			if AddressBlocked(ip) {
-				// The shun refused this, not a credential check. Counted as a
-				// refused attempt, a shunned address's own POSTs would renew
-				// its shun from the shun's refusals once it lapsed (ADR 0031).
-				request.MarkRefused(r, request.RefusalMitigation)
-				w.WriteHeader(http.StatusForbidden)
-				_, _ = w.Write([]byte("Forbidden: IP Shunned by Security Policy"))
-
-				// Record threat for visibility in dashboard
-				telemetry.RecordSecurityThreat(telemetry.RecordSecurityThreatWithJA4(r, telemetry.SecurityThreat{
-					Type:        "ip_mitigation",
-					SourceIP:    ip,
-					Category:    "threat_intel",
-					Severity:    kind.SeverityHigh,
-					ActionTaken: kind.ActionBlocked,
-					Details:     "Request blocked due to mitigated IP (IP Shunning)",
-					RequestURI:  r.URL.RequestURI(),
-					Method:      r.Method,
-					UserAgent:   r.UserAgent(),
-				}))
+				refuseBlockedAddress(w, r, ip)
 				return
 			}
 
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// refuseBlockedAddress answers 403 for an address AddressBlocked refuses, and
+// records which list refused it.
+func refuseBlockedAddress(w http.ResponseWriter, r *http.Request, ip string) {
+	// The block refused this, not a credential check. Counted as a refused
+	// attempt, a shunned address's own POSTs would renew its shun from the
+	// shun's refusals once it lapsed (ADR 0031).
+	request.MarkRefused(r, request.RefusalMitigation)
+	threat := telemetry.SecurityThreat{
+		Type:        "ip_mitigation",
+		SourceIP:    ip,
+		Category:    "threat_intel",
+		Severity:    kind.SeverityHigh,
+		ActionTaken: kind.ActionBlocked,
+		Details:     "Request blocked due to mitigated IP (IP Shunning)",
+		RequestURI:  r.URL.RequestURI(),
+		Method:      r.Method,
+		UserAgent:   r.UserAgent(),
+	}
+	body := "Forbidden: IP Shunned by Security Policy"
+	if !telemetry.IsIPMitigated(ip) {
+		// Not on the mitigation list, so a feed listed it. The type stays
+		// a mitigation type so the refusal is never evidence towards an
+		// escalation (escalateMitigation), and the threat carries no score,
+		// so it moves no reputation.
+		threat.Details = "Request blocked: the address is listed by an IP reputation feed"
+		body = "Forbidden: Address Listed by an IP Reputation Feed"
+	}
+	w.WriteHeader(http.StatusForbidden)
+	_, _ = w.Write([]byte(body))
+	telemetry.RecordSecurityThreat(telemetry.RecordSecurityThreatWithJA4(r, threat))
 }
 
 // AddressBlocked reports whether a client at ip is refused by the IP
@@ -71,8 +86,16 @@ func IPMitigation() kind.Middleware {
 // IsIPMitigated reads the database when its cache has no answer for ip, so a
 // caller that must not wait, such as an accept loop, asks from somewhere that
 // can.
+//
+// A threat-feed listing (reputation.Listed) is refused here as well, so the
+// feed switch -- "block known malicious actors" -- is enforced on every
+// entrypoint and route by the decision that already refuses blocked
+// addresses, under the same exemption. It used to be enforced only by a WAF
+// rule behind a second switch, and refused no one without it (truth T3, ADR
+// 0044). The feed is asked second and without a lock; with no feed loaded it
+// costs an atomic load.
 func AddressBlocked(ip string) bool {
-	return ip != "" && telemetry.IsIPMitigated(ip) && !exemptFromEnforcement(ip)
+	return ip != "" && (telemetry.IsIPMitigated(ip) || reputation.Listed(ip)) && !exemptFromEnforcement(ip)
 }
 
 // unmitigatedPaths are fetched by browsers and crawlers without a user ever

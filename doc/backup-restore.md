@@ -37,6 +37,23 @@ and cannot verify a challenge it issued.
 password manager or a secrets manager, not the backup volume. A key kept next to
 the ciphertext it opens is not protecting anything.
 
+**Under systemd, give it to the service in `/etc/default/gateon`**, which the
+packaged unit reads with `EnvironmentFile=` before it drops to the `gateon`
+account. Keep that file `root:root` and `0600`:
+
+```bash
+install -m 0600 -o root -g root /dev/null /etc/default/gateon
+echo 'GATEON_ENCRYPTION_KEY=<the key>' >> /etc/default/gateon
+systemctl restart gateon
+```
+
+Do **not** put it in an `Environment=` line, in the unit or in a `systemctl
+edit` drop-in: every local account can read those with
+`systemctl show gateon -p Environment`. (`LoadCredential=` is the other safe
+place, if you already manage systemd credentials; gateon reads the variable, so
+an `ExecStart=` wrapper would have to export it.) In Kubernetes the chart takes
+it from a Secret.
+
 **Check it is actually taking effect.** A key shorter than 16 characters is
 rejected and secrets are written in **cleartext** instead:
 
@@ -57,11 +74,15 @@ Paths below use `$DATA_DIR` and `$CONFIG_DIR`, which resolve in this order:
 - **`$DATA_DIR`** — `GATEON_DATA_DIR`, else `GATEON_STATE_DIR`, else
   `/var/lib/gateon` if it exists (Linux), else the working directory.
 - **The global config file** is `GLOBAL_CONFIG_FILE` if set, and otherwise
-  `global.json` **relative to the working directory**. Note it is used as given
-  rather than searched for, so `GATEON_CONFIG_DIR` does not move it — that
-  variable steers other lookups. The packaged systemd unit sets
-  `GLOBAL_CONFIG_FILE=/etc/gateon/global.json`, so a deb/rpm install has it
-  there; a container or a hand-run binary has it wherever the process started.
+  `global.json` in the config directory: `GATEON_CONFIG_DIR`, else
+  `/etc/gateon` if it exists (Linux), else the working directory. So
+  `GATEON_CONFIG_DIR` does move it. The packaged systemd unit sets
+  `GLOBAL_CONFIG_FILE=/etc/gateon/global.json`; the container image and the
+  Helm chart set `/var/lib/gateon/global.json`, on the data volume, where setup
+  can write it (a `global.json` mounted at `/etc/gateon` only seeds it, once).
+- **A SQLite database named by a relative path** — the default `gateon.db`
+  included — is in `$DATA_DIR`. Before ADR 0049 it was resolved against the
+  working directory, which was `$DATA_DIR` only under the packaged unit.
 
 If you are unsure which file is live, gateon logs `path` and `config_dir` at
 startup when the file is missing, and the running config is whatever
@@ -71,7 +92,7 @@ startup when the file is missing, and the running config is whatever
 | # | What | Where | Losing it costs you |
 | :-- | :--- | :--- | :--- |
 | 1 | Encryption key | `GATEON_ENCRYPTION_KEY` (environment) | every encrypted secret, permanently |
-| 2 | Global config | `$GLOBAL_CONFIG_FILE`, else `./global.json` | all global settings: WAF, tiers, auth, TLS, telemetry |
+| 2 | Global config | `$GLOBAL_CONFIG_FILE`, else `$CONFIG_DIR/global.json` | all global settings: WAF, tiers, auth, TLS, telemetry -- and `auth.paseto_secret`, the session key every user's two-factor secret is encrypted under |
 | 3 | Config database | `$DATA_DIR/gateon.db` (SQLite default) or the external DSN | routes, services, entrypoints, middlewares, users, API keys, audit log. Not ACME certificates: those are item 4 or Redis, and the `acme_certs` table migration 6 created has never been written to |
 | 4 | Certificates | `$DATA_DIR/certs/` (or `GATEON_TLS_CACHE_DIR`) | uploaded certificates, and the ACME cache when Redis is not configured — a restore re-issues from Let's Encrypt and can hit rate limits |
 | 5 | Audit archives | `$DATA_DIR/audit/` | compliance history: WAF audit logs and the compressed archives the retention job writes |
@@ -142,14 +163,29 @@ immediately after.
    beside it — they belong to the database you replaced, not the one you restored.
 5. **Start gateon** and work through the verification below.
 
+A gateway whose `global.json` says it was set up (`auth.enabled`) refuses to
+start if its SQLite database is not there, or if the database it opens has no
+administrator, and says so. It used to create an empty database and reopen
+first-run setup -- a restore that missed the database, or a data volume that
+did not mount, looked like a fresh install to whoever reached the port first.
+
 ### Restoring onto a different host
 
-Two things that surprise people:
+Three things that surprise people:
 
 **Sessions do not survive**, and should not. Session tokens are signed with
 `auth.paseto_secret`; if the restored host has a different one, every existing
 token is refused. That is correct behaviour, not a restore failure — everyone
 signs in again.
+
+**The database and `global.json` are a pair.** Every user's two-factor secret
+is encrypted under the session key, `auth.paseto_secret`, in `global.json`.
+Restore the database with a different `global.json` -- a fresh install's, or
+another host's -- and the passwords still work but no 2FA account can complete
+sign-in: the second step answers that the secret "was stored under a different
+session key". Restore the `global.json` taken with the database; or, if the key
+changed deliberately, set `GATEON_PREVIOUS_SESSION_KEY` to the old one for one
+start, which re-encrypts the second factors under the new key.
 
 **Check what the config says about addresses.** `global.json` carries the
 management entrypoint's bind address and allowlist. Restoring a production config
@@ -170,12 +206,11 @@ missing.
 | A TLS route serves without re-issuing | `certs/` restored (item 4) |
 | Send a request that your WAF blocks | The chain is built from restored config, not defaults |
 
-**The first check is the one that matters most**, because it is the only one that
-fails specifically when the encryption key is wrong. Everything else can pass
-against a config whose secrets are unopenable ciphertext — the gateway starts,
-serves the dashboard's login page, and refuses every credential. If sign-in
-fails after a restore and the password is definitely right, suspect the key
-before you suspect the database.
+**A wrong or missing encryption key stops the gateway at startup**, with a
+message naming the field it could not decrypt -- it does not start and refuse
+every credential, as this page used to say. If it starts, the key is right.
+The first check is still the one that matters most: with a 2FA account it is
+also the one that proves the database and `global.json` belong together.
 
 Test a restore onto a scratch host on a schedule. An untested backup and no
 backup differ only in how long it takes to find out.

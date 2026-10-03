@@ -169,3 +169,10 @@ func (lb *AIPredictiveLB) SetAlive(url string, alive bool) {
 func (lb *AIPredictiveLB) RecordLatency(url string, latency float64) {
 	lb.strategy.RecordLatency(url, latency)
 }
+
+func (lb *AIPredictiveLB) states() []*targetState {
+	if ptr := lb.targetsPtr.Load(); ptr != nil {
+		return *ptr
+	}
+	return nil
+}

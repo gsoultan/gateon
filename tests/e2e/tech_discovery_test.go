@@ -37,7 +37,7 @@ func TestTechDiscovery(t *testing.T) {
 	}
 	err = authMgr.UpsertUser(&gateonv1.User{
 		Username: "admin",
-		Password: "password123",
+		Password: "e2e-horse-battery-42",
 		Role:     "admin",
 	})
 	authMgr.Close()
@@ -113,7 +113,7 @@ func TestTechDiscovery(t *testing.T) {
 	// 4.5 Login to get token
 	loginResp, err := client.Login(context.Background(), &gateonv1.LoginRequest{
 		Username: "admin",
-		Password: "password123",
+		Password: "e2e-horse-battery-42",
 	})
 	if err != nil {
 		t.Fatalf("Login failed: %v", err)

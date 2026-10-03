@@ -37,20 +37,23 @@ already-filtered traffic:
   upgrade an OIDC/JWKS middleware without an audience stops serving until you
   set one, see [upgrading.md](upgrading.md)).
 
-**Still open in every release so far.** Work around these:
+**Known limits of the current code.** None of these is a silent no-op any
+more -- each is stated where it applies -- but plan around them:
 
-- **Do not rely on**, without first proving it on your own traffic: blocked
-  countries without a MaxMind database, the IP reputation feed, a per-route WAF
-  on top of the global WAF, the JavaScript challenge and proof-of-work, or the
-  dashboard's posture percentage and mitigation funnel.
-- **Give every health check an explicit path**; the default "Auto" with no path
-  never ejects a dead backend.
-- **Watch the disk.** Trace storage is bounded by age, not size. Lower trace
-  retention or sampling on a small disk, and alert on free space.
-- **Use the package or tarball, not the container image or Helm chart**, whose
-  read-only configuration directory stops first-run setup completing.
-- **Turn audit logging on** (it is off by default) and keep the off-host copy
-  section 5 describes.
+- **Lockout and revocation are per instance.** In an HA pair each node counts
+  failed sign-ins on its own, and token revocation needs Redis (a middleware
+  with revocation on and no Redis refuses to build). There is no revoke API yet.
+- **A target that has just died gets 502s** until its second failed health check
+  (up to about 35 s); there is no passive ejection.
+- **Existing installs keep their audit setting.** Setup turns audit on for new
+  installs; an existing one with audit off logs a warning at start. Turn it on
+  and keep the off-host copy section 5 describes.
+- **The global WAF's category switches are read-only.** Narrow a category on a
+  route WAF; the gateway-wide equivalent needs a configuration change still to
+  come.
+- **A challenge raises the cost of automation; it does not prove a human.**
+  Clients that cannot run JavaScript are refused on challenged routes, and the
+  challenge has no allowlist.
 
 This section shrinks as fixes ship; [upgrading.md](upgrading.md) records each.
 
@@ -82,12 +85,13 @@ package's `daemon-reload` picks them up.
 # 1. Secrets, readable by root only. systemd reads this file before dropping
 #    to the gateon account, so the account never needs to read it.
 sudo install -d -m 0755 /etc/systemd/system/gateon.service.d
-sudo install -m 0600 /dev/null /etc/gateon.env
-sudoedit /etc/gateon.env
+sudo install -m 0600 /dev/null /etc/default/gateon
+sudoedit /etc/default/gateon
 ```
 
 ```sh
-# /etc/gateon.env
+# /etc/default/gateon  (the unit reads it; root-only, never an Environment= line,
+# which any local user can read with `systemctl show`)
 # 32+ random characters; `openssl rand -base64 48`. Store a copy OFF this host:
 # without it, a restored backup cannot decrypt its secrets (backup-restore.md).
 GATEON_ENCRYPTION_KEY=...
@@ -98,7 +102,6 @@ GATEON_ENCRYPTION_KEY=...
 ```ini
 # /etc/systemd/system/gateon.service.d/production.conf
 [Service]
-EnvironmentFile=/etc/gateon.env
 # Management on loopback only; reach it through a tunnel or a proxy you run.
 Environment=GATEON_MANAGEMENT_BIND=127.0.0.1
 Environment=GATEON_MANAGEMENT_ALLOWED_IPS=127.0.0.1,::1
@@ -110,7 +113,13 @@ Environment=GATEON_MEMORY_LIMIT=1536MiB
 If your scraper or admin network must reach the management port directly, bind
 to that interface and list exactly those addresses in
 `GATEON_MANAGEMENT_ALLOWED_IPS` instead of using loopback. The allowlist also
-governs `/metrics`, so the scraper's address belongs in it.
+governs `/metrics`, so the scraper's address belongs in it. Check the list
+before you restart: an entry that is not an address or CIDR is not refused yet,
+and a list with only typos locks the dashboard out.
+
+The unit holds only `CAP_NET_BIND_SERVICE`. If you turn on eBPF or HA, link the
+shipped drop-in first (`/usr/share/gateon/systemd/ebpf-ha.conf`, see
+[upgrading.md](upgrading.md)); without it they refuse to start and say why.
 
 If gateon sits behind a load balancer or Cloudflare, set
 `GATEON_TRUSTED_PROXIES` (and `GATEON_TRUST_CLOUDFLARE_HEADERS` for Cloudflare)
@@ -146,8 +155,8 @@ Open a tunnel (`ssh -L 8080:127.0.0.1:8080 host`) and browse to
 `/var/lib/gateon/setup-token`, which is deleted once setup completes. (If you
 set `GATEON_SETUP_TOKEN`, the log names that variable instead of printing it.)
 
-- Use a long, unique administrator password and enrol 2FA (on v1.0.0, see
-  Known issues first).
+- Use a long, unique administrator password (12 characters at least, which
+  the gateway now enforces) and enrol 2FA (on v1.0.0, see Known issues first).
 - Create day-to-day accounts as **operator** or **viewer**. Keep administrators
   to the people who would also hold root on the host: an administrator can bind
   credential-carrying middlewares to routes (ADR 0038) and read audit logs.
@@ -185,45 +194,39 @@ through the dashboard over references unless you need rotation.
 
 ## 5. Monitoring and alerts
 
-`/metrics` is on the management entrypoint and requires a signed-in session, so
-the scraper needs both an address in the management allowlist and a credential.
-Gateon has no long-lived service credential yet, and a session lasts eight
-hours, so until it does, give the scraper its own **viewer** account and refresh
-its token on a timer:
+`/metrics` is on the management entrypoint, so the scraper's address must be in
+the management allowlist, and it needs a credential: an API token with the
+`metrics:read` scope. As an administrator, open **API Tokens** in the dashboard,
+create a token named after the scraper (one per scraper, so revoking one does not
+cut off the others), and copy it when it is shown -- it is shown once and only its
+hash is kept. Put it in a file only Prometheus can read:
 
 ```sh
-# /usr/local/bin/gateon-metrics-token  (run every 4 hours by a systemd timer)
-#!/bin/sh
-set -eu
-umask 077
-jq -n --arg u metrics --rawfile p /etc/gateon-metrics.pw \
-   '{username:$u, password:($p|rtrimstr("\n"))}' |
-curl -fsS -H 'Content-Type: application/json' --data-binary @- \
-   http://127.0.0.1:8080/v1/login |
-jq -er .token > /var/lib/prometheus/gateon.token.new
-chown prometheus /var/lib/prometheus/gateon.token.new
-mv /var/lib/prometheus/gateon.token.new /var/lib/prometheus/gateon.token
+install -m 0400 -o prometheus /dev/stdin /etc/prometheus/gateon.token   # paste, then Ctrl-D
 ```
 
 ```yaml
 # prometheus.yml
 - job_name: gateon
   authorization:
-    credentials_file: /var/lib/prometheus/gateon.token
+    credentials_file: /etc/prometheus/gateon.token
   static_configs:
     - targets: ["127.0.0.1:8080"]
 ```
 
-The viewer account cannot change anything, but it can read what any viewer can
-in the dashboard, so give it a long random password, keep that file root-only,
-and do not enrol it in 2FA (the script cannot answer a code). Expect a scrape
-gap if the timer stops: the `GateonDown` alert below will say so.
+The token reads `/metrics` and nothing else: it is refused on every other path and
+is never a dashboard session. It does not expire unless you gave it an expiry;
+revoke it under **API Tokens** if the file leaks, and the next scrape is refused --
+the `GateonDown` alert below will say so. The dashboard shows when each token was
+last used, to the minute.
 
 Probe `/healthz` (the process is alive) and `/readyz` on the same port; neither
-needs a credential. Know what `/readyz` does **not** cover: it reports `503`
-only while the telemetry store is not open. A listener that failed to bind, or
-a configuration database that is down, still answers `200`, so alert on traffic
-and errors as well, not on readiness alone.
+needs a credential. `/readyz` answers `503` only when the instance cannot serve:
+its telemetry store did not open, or an entrypoint listener did not bind (named
+in the body). When it serves but something is failing -- the trace disk is
+nearly full, the configuration database does not answer -- it answers `200
+ready, degraded: ...`, so a load balancer keeps a working proxy in rotation.
+Alert on the degradation through its gauges, below.
 
 Minimum alert set, as Prometheus rules. Tune the thresholds to your baseline
 after the first week; these are starting points.
@@ -263,6 +266,15 @@ groups:
   - alert: GateonAuthFailureSpike
     expr: sum(rate(gateon_middleware_auth_failures_total[5m])) > 5
     for: 10m
+  - alert: GateonConfigDatabaseDown
+    expr: gateon_config_db_up == 0
+    for: 2m
+  - alert: GateonEntrypointNotListening
+    expr: gateon_entrypoint_up == 0
+    for: 1m
+  - alert: GateonTracesDropped
+    expr: increase(gateon_trace_dropped_total[15m]) > 0
+    for: 15m
   - alert: GateonManyShuns
     expr: gateon_active_shunned_entities_total > 500
     for: 10m

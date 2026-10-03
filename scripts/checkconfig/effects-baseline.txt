@@ -1,0 +1,122 @@
+# Dashboard middleware keys with no row yet in the effect registry,
+# internal/middleware/dashboard_key_effects_test.go. Adopted 2026-10-03
+# (ADR 0048) as debt: the gate fails on a NEW key with neither, and says so when
+# a key here gains a row (delete the line then).
+#
+# A line here means "not proven to do anything", not "broken". Lines marked
+# INERT name a finding that says the key does nothing today; they are here only
+# because the fix belongs to another change in flight -- when it lands, give the
+# key a row instead.
+#
+# Format: key [# note]
+
+address
+algorithm
+allow_any_audience
+allow_countries
+allow_credentials
+allowed_headers
+allowed_methods
+allowed_mime_types
+amount
+anomaly_threshold
+app_profiles
+attempts
+audience
+audit_log_path
+audit_log_relevant_only
+auth_request_headers
+auth_response_headers
+blocked_mime_types
+body_limit
+challenge_timeout
+clamav_addr
+client_id
+client_secret
+content_type
+db_path
+deny_countries
+disable_entropy
+dlp
+dlp_action
+dry_run
+enable_browser_integrity
+enable_clamav
+enable_js_challenge
+enable_revocation  # real since ADR 0046 but needs Redis, which this harness does not run; proven in internal/middleware/auth revocation tests
+entropy_threshold
+error_template
+excluded_content_types
+exposed_headers
+force_sts_header
+forward_body
+forward_dns
+forward_hash
+forward_uri
+hashed
+header
+included_content_types
+introspection_url
+ip_reputation
+issuer
+jwks_url
+malware_detection
+max_age
+max_body_kb
+max_body_size
+max_entries
+max_file_size
+methods
+min_response_body_bytes
+paranoia_level
+password
+path
+paths
+pattern
+prefix
+prefixes
+preserve_request_method
+preset
+proto
+protocol  # WAF category switch, real since ADR 0044; no probe in the registry yet
+ransomware_detection
+realm
+redirect_url
+regex
+replacement
+request_body_limit
+request_replace
+request_search
+requests_per_minute  # its effect is over time; the burst row proves the limiter, traffic tests prove the rate
+required_roles
+required_scopes
+response_body_limit
+response_replace
+response_search
+route
+schema
+scopes
+secret
+secret_key
+ssrf_protection
+status_codes
+storage
+strategy
+sts_include_subdomains
+sts_preload
+sts_seconds
+tls_insecure_skip_verify
+token_type_hint
+trust_forward_header
+ttl_seconds
+type
+username
+users
+wordpress  # WAF category switch, real since ADR 0044; no probe in the registry yet
+cookie_name  # tls_binding: the effect is a Set-Cookie on a TLS session, which the registry probe does not record; proven by TestTLSBindingBindsTheIssuedSessionToTheClientCertificate
+revocation_prefix  # needs Redis, which this harness does not run; proven by TestRevokedTokenIsRefusedByEveryTypeThatOffersRevocation
+error_threshold  # circuit_breaker: state is per route across builds, so the registry's two builds share it; proven by TestBreakerJudgesAWindowOnlyOnceItHoldsMinRequests
+min_requests  # circuit_breaker: as error_threshold; proven by TestAnUnsetMinimumDoesNotOpenOnOneFailure
+sleep_window  # circuit_breaker: time-based; proven by TestFailedProbeReopensForAFullSleepWindow and TestRetryAfterIsTheTimeLeftInTheSleepWindow
+window_size  # circuit_breaker: time-based; proven by TestBreakerJudgesAWindowOnlyOnceItHoldsMinRequests
+per_ip  # inflightreq: differs only under concurrent requests, which the registry probe does not send; proven by TestInflightTotalCapIsATotal and TestInflightPerAddressIsPerAddress

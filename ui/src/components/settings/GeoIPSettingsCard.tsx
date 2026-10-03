@@ -27,16 +27,20 @@ import { COUNTRIES } from "../../utils/countries";
 import { getCountryFlag } from "../../utils/format";
 import { StoredSecretInput } from "./StoredSecretInput";
 
+/** What the global country lists do now, from the gateway (ADR 0044). */
+type GeofenceState = "off" | "active" | "block_list_inactive" | "allow_list_refusing_all";
+
 interface GeoIPStatus {
   exists: boolean;
   path: string;
   info: string;
+  geofence?: { state: GeofenceState; reason: string };
 }
 
 interface GeoIPSettingsCardProps {
   config: GeoIPConfig;
   onChange: (config: GeoIPConfig) => void;
-  onSave?: () => void;
+  onSave?: () => void | Promise<void>;
   saving?: boolean;
   disabled?: boolean;
 }
@@ -191,7 +195,10 @@ export function GeoIPSettingsCard({ config, onChange, onSave, saving, disabled }
 
         {!status?.exists && (
           <Alert color="orange" icon={<IconAlertCircle size={16} />}>
-            GeoIP database is missing. Trace points will not be shown on the map unless a database is provided or auto-update is configured with a license key.
+            GeoIP database is missing. Country geofencing cannot place any client in a country
+            without one, so country lists cannot be saved, and trace points will not be shown on
+            the map. Upload a MaxMind GeoLite2 City or Country database below, or set a licence key
+            and update from MaxMind.
           </Alert>
         )}
 
@@ -321,9 +328,15 @@ export function GeoIPSettingsCard({ config, onChange, onSave, saving, disabled }
 
           <Divider label="Country Geofencing" labelPosition="center" />
 
+          <GeofenceAlert geofence={status?.geofence} />
+
           <MultiSelect
             label="Blocked Countries"
-            description="Select countries to block. Request from these countries will be denied."
+            description={
+              status?.exists
+                ? "Select countries to block. Requests from these countries will be denied."
+                : "Select countries to block. Needs a GeoIP database: without one, no client can be placed in a country and a list cannot be saved."
+            }
             placeholder="Select countries"
             data={COUNTRIES}
             value={config.blockedCountries || []}
@@ -367,7 +380,16 @@ export function GeoIPSettingsCard({ config, onChange, onSave, saving, disabled }
 
           {onSave && (
             <Group justify="flex-end" mt="md">
-              <Button onClick={onSave} loading={saving} size="sm" disabled={disabled}>
+              <Button
+                onClick={async () => {
+                  await onSave();
+                  // What the lists now do depends on what was saved.
+                  await fetchStatus();
+                }}
+                loading={saving}
+                size="sm"
+                disabled={disabled}
+              >
                 Save GeoIP Settings
               </Button>
             </Group>
@@ -375,5 +397,28 @@ export function GeoIPSettingsCard({ config, onChange, onSave, saving, disabled }
         </Stack>
       </Stack>
     </Card>
+  );
+}
+
+// What the saved country lists do now, as the gateway reports it. A geofence
+// with no database either refuses no one or refuses everyone, and saying
+// "saved" there is how the control came to look in force when it was not.
+function GeofenceAlert({ geofence }: { geofence: GeoIPStatus["geofence"] }) {
+  if (!geofence || geofence.state === "off") return null;
+  if (geofence.state === "active") {
+    return (
+      <Text size="xs" c="dimmed">
+        Country lists are enforced on every HTTP entrypoint.
+      </Text>
+    );
+  }
+  const title =
+    geofence.state === "allow_list_refusing_all"
+      ? "Country geofencing refuses every request"
+      : "Country block list is not enforced";
+  return (
+    <Alert color="red" icon={<IconAlertCircle size={16} />} title={title}>
+      {geofence.reason}
+    </Alert>
   );
 }

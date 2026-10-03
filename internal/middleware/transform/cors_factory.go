@@ -4,6 +4,7 @@
 package transform
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 
@@ -62,7 +63,42 @@ func CORSConfigFromMap(cfg map[string]string) (CORSConfig, error) {
 		MaxAge:           maxAge,
 	}
 
-	return ApplyCORSPreset(cfg, base), nil
+	policy := ApplyCORSPreset(cfg, base)
+	// An empty origin list grants no origin. rs/cors reads empty as every
+	// origin, so a cors middleware whose Allowed Origins was left blank let any
+	// site in, while the same blank field under "Restricted" let none (ADR
+	// 0046). "*" says every origin, and is what the Permissive preset lists.
+	if len(policy.AllowedOrigins) == 0 {
+		policy.DenyAllOrigins = true
+	}
+	return policy, nil
+}
+
+// errWildcardCredentials refuses credentials with origin "*" at save.
+var errWildcardCredentials = errors.New("allow_credentials is on with origin \"*\": browsers refuse a " +
+	"credentialed response that allows every origin, so credentials would do nothing; name the origins " +
+	"that may send credentials, or turn Allow Credentials off")
+
+// CheckCORSSave refuses a cors or grpcweb config that would save Allow
+// Credentials with origin "*" (ADR 0046). At runtime the pair is served
+// without credentials (corsCredentials), which is all a browser would honour;
+// a save is told instead of quietly getting less than it asked for.
+func CheckCORSSave(cfg map[string]string) error {
+	if IsBackendCORS(cfg) {
+		return nil
+	}
+	creds, err := kind.ParseBoolStrict(cfg["allow_credentials"], false)
+	if err != nil {
+		return kind.CfgError("allow_credentials", cfg["allow_credentials"], err)
+	}
+	policy := ApplyCORSPreset(cfg, CORSConfig{
+		AllowedOrigins:   kind.ParseListStrict(cfg["allowed_origins"]),
+		AllowCredentials: creds,
+	})
+	if policy.AllowCredentials && hasWildcardOrigin(policy.AllowedOrigins) {
+		return kind.CfgError("allow_credentials", "true", errWildcardCredentials)
+	}
+	return nil
 }
 
 // CORSDecision reports what the CORS middleware built from a raw config map
@@ -151,9 +187,15 @@ func EvaluateCORS(cfg map[string]string, r *http.Request) (CORSDecision, error) 
 // what was typed. Display only -- no verdict is derived from it, which is why
 // restating the library's defaults here cannot reintroduce the drift.
 func corsEffectivePolicy(cfg CORSConfig) CORSConfig {
-	if len(cfg.AllowedOrigins) == 0 {
+	switch {
+	case cfg.DenyAllOrigins:
+		cfg.AllowedOrigins = []string{}
+	case len(cfg.AllowedOrigins) == 0:
+		// A CORSConfig built by hand rather than from a config map.
 		cfg.AllowedOrigins = []string{"*"}
 	}
+	// AllowCredentials stays as configured, so Diagnostics can still tell an
+	// operator that credentials with "*" are not sent (corsCredentials).
 	if len(cfg.AllowedMethods) == 0 {
 		cfg.AllowedMethods = []string{http.MethodGet, http.MethodPost, http.MethodHead}
 	}

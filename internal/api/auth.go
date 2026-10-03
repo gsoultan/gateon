@@ -17,7 +17,7 @@ func (s *ApiService) Login(ctx context.Context, req *gateonv1.LoginRequest) (*ga
 	if !auth.Available(s.Auth) {
 		return &gateonv1.LoginResponse{}, nil
 	}
-	token, user, err := s.Auth.Authenticate(req.Username, req.Password)
+	token, user, err := s.Auth.Authenticate(req.Username, req.Password, callerAddr(ctx))
 	if err != nil {
 		// The password was right and a second factor is owed. No session: the
 		// answer carries the challenge the second step requires, which is not

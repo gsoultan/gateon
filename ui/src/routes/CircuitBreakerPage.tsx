@@ -67,8 +67,10 @@ export default function CircuitBreakerPage() {
             Circuit Breaker
           </Title>
           <Text c="dimmed" size="sm" fw={500}>
-            Monitor circuit states across route targets. CLOSED = healthy,
-            OPEN = failing, HALF-OPEN = testing recovery.
+            Monitor circuit states across route targets. CLOSED = receiving
+            traffic; OPEN = out of rotation, because its health check failed or
+            the route's circuit breaker is open; HALF-OPEN = the breaker is
+            testing recovery.
           </Text>
         </div>
         <Group gap="md">

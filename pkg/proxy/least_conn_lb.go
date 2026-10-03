@@ -111,3 +111,10 @@ func (lb *LeastConnLB) GetStats() []TargetStats {
 func (lb *LeastConnLB) RecordLatency(url string, latency float64) {
 	// LeastConnLB doesn't use latency for balancing.
 }
+
+func (lb *LeastConnLB) states() []*targetState {
+	if ptr := lb.targetsPtr.Load(); ptr != nil {
+		return *ptr
+	}
+	return nil
+}

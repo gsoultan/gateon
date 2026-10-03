@@ -17,11 +17,9 @@ import (
 // quietStore builds a store as NewIPReputationStore does, minus the background
 // refresh its constructor starts, so the test decides when every load happens.
 func quietStore(urls ...string) *IPReputationStore {
-	return &IPReputationStore{
-		badIPs: make(map[string]float64),
-		trie:   newIPTrie(),
-		config: &gateonv1.IPReputationConfig{Enabled: true, FeedUrls: urls},
-	}
+	s := &IPReputationStore{config: &gateonv1.IPReputationConfig{Enabled: true, FeedUrls: urls}}
+	s.index.Store(newFeedIndex())
+	return s
 }
 
 // feedBlocks is the predicate the WAF's feed rule applies: listed, and at or

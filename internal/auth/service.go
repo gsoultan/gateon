@@ -4,6 +4,7 @@
 package auth
 
 import (
+	"github.com/gsoultan/gateon/internal/auth/apitoken"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
@@ -11,7 +12,14 @@ import (
 // It is implemented by Manager.
 type Service interface {
 	IsSetupDone() bool
-	Authenticate(username, password string) (string, *gateonv1.User, error)
+	// Authenticate checks a password sign-in from source, the caller's address,
+	// under the lockout of ADR 0050: failures are counted per account and source
+	// prefix, and per account, and neither locks the owner out from a source the
+	// account has signed in from before.
+	Authenticate(username, password, source string) (string, *gateonv1.User, error)
+	// APITokens is the scrape-credential store (ADR 0050), or nil when there is
+	// no database yet.
+	APITokens() *apitoken.Store
 	VerifyToken(token string) (any, error)
 	ListUsers(page, pageSize int32, search string) ([]*gateonv1.User, int32, error)
 	UpsertUser(u *gateonv1.User) error
@@ -51,7 +59,7 @@ type Service interface {
 	//
 	// The Enrolment carries the challenge Verify2FA requires to finish it.
 	Setup2FA(id, password string) (Enrolment, error)
-	EnrollPending2FA(username, password string) (string, string, []string, string, error)
+	EnrollPending2FA(username, password, source string) (string, string, []string, string, error)
 	// Verify2FA checks a code for account id, given the challenge that proves
 	// the password step -- from Authenticate's SecondStepError or Setup2FA --
 	// and issues a session. See ADR 0039.

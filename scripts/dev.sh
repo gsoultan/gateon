@@ -9,7 +9,7 @@
 # and boots gateon with every config file wired up. Everything it creates lives
 # under dev/.data/ and is torn down on exit.
 #
-#   Dashboard : http://localhost:8080   (login: admin / password123)
+#   Dashboard : http://localhost:8080   (login: admin / gateon-dev-passphrase)
 #   Proxy     : http://localhost:8000   (the sample routes)
 #
 # Usage:
@@ -175,7 +175,7 @@ cat <<BANNER
 ────────────────────────────────────────────────────────────────────
   gateon dev is starting
 
-  Dashboard   http://localhost:8080     (login: admin / password123)
+  Dashboard   http://localhost:8080     (login: admin / gateon-dev-passphrase)
   Proxy       http://localhost:8000
   Database    ${DB_LABEL}
 

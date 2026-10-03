@@ -28,8 +28,8 @@ func TestPowIsNotDisabledByARequestPath(t *testing.T) {
 	// A path that IsInternalPath matches by prefix, on an ordinary route.
 	r := httptest.NewRequest(http.MethodGet, "http://x/v1/global/anything", nil)
 	r.RemoteAddr = "203.0.113.9:5555"
-	// powTestThreshold sits above the neutral score, so an unknown client is
-	// challenged -- the same device the other PoW tests use.
+	// powTestThreshold sits below the neutral threat score, so an unknown
+	// client is challenged -- the same device the other PoW tests use.
 
 	h.ServeHTTP(httptest.NewRecorder(), r)
 

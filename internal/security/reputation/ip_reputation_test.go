@@ -23,7 +23,7 @@ func TestIPReputationStore_IsBad(t *testing.T) {
 	store := NewIPReputationStore(cfg)
 
 	// Test with manual entry
-	store.badIPs["1.2.3.4"] = 1.0
+	store.SetIPScore("1.2.3.4", 1.0)
 
 	bad, score := store.IsBad("1.2.3.4")
 	assert.True(t, bad)
@@ -41,7 +41,7 @@ func TestIPReputationStore_CIDRMatch(t *testing.T) {
 
 	// Test IPv4 CIDR
 	prefix, _ := netip.ParsePrefix("192.168.1.0/24")
-	store.trie.insert(prefix, 1.0)
+	insertPrefix(store, prefix, 1.0)
 
 	bad, score := store.IsBad("192.168.1.50")
 	assert.True(t, bad)
@@ -52,7 +52,7 @@ func TestIPReputationStore_CIDRMatch(t *testing.T) {
 
 	// Test IPv6 CIDR
 	prefix6, _ := netip.ParsePrefix("2001:db8::/32")
-	store.trie.insert(prefix6, 0.8)
+	insertPrefix(store, prefix6, 0.8)
 
 	bad, score = store.IsBad("2001:db8::1")
 	assert.True(t, bad)
@@ -60,6 +60,15 @@ func TestIPReputationStore_CIDRMatch(t *testing.T) {
 
 	bad, _ = store.IsBad("2001:db9::1")
 	assert.False(t, bad)
+}
+
+// insertPrefix adds a prefix to the store's index in place. Test-only: the
+// index is immutable once published, and these tests read it from the test's
+// own goroutine.
+func insertPrefix(s *IPReputationStore, p netip.Prefix, score float64) {
+	idx := s.index.Load()
+	idx.trie.insert(p, score)
+	idx.entries++
 }
 
 func BenchmarkIPTrie_Lookup(b *testing.B) {

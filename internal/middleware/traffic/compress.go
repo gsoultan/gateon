@@ -41,7 +41,7 @@ type CompressConfig struct {
 	MinResponseBodyBytes int      // Minimum body size to compress; 0 = use default 1024
 	ExcludedContentTypes []string // Content-Types to never compress
 	IncludedContentTypes []string // If non-empty, only compress these; mutually exclusive with Excluded
-	MaxBufferBytes       int      // Max response size to buffer; 0 = default 10MB
+	MaxBufferBytes       int      // A response declaring a longer body is not compressed; 0 = default 10MB
 	Algorithm            string   // Compression algorithm: auto (default), gzip, br
 }
 
@@ -87,6 +87,10 @@ func CompressWithConfig(cfg CompressConfig) kind.Middleware {
 	if minBytes <= 0 {
 		minBytes = defaultMinResponseBodyBytes
 	}
+	maxBytes := cfg.MaxBufferBytes
+	if maxBytes <= 0 {
+		maxBytes = defaultMaxBufferBytes
+	}
 	algorithm := normalizeCompressionAlgorithm(cfg.Algorithm)
 	excluded := parseContentTypes(cfg.ExcludedContentTypes)
 	included := parseContentTypes(cfg.IncludedContentTypes)
@@ -120,6 +124,7 @@ func CompressWithConfig(cfg CompressConfig) kind.Middleware {
 				ResponseWriter: w,
 				encoding:       encoding,
 				minBytes:       minBytes,
+				maxBytes:       maxBytes,
 				excluded:       excluded,
 				included:       included,
 				status:         http.StatusOK,
@@ -135,6 +140,11 @@ type compressWriter struct {
 	http.ResponseWriter
 	encoding string
 	minBytes int
+	// maxBytes is max_buffer_bytes: a response that declares a longer body
+	// goes out uncompressed. The dashboard offered the setting and the factory
+	// read it into CompressConfig, where nothing looked at it (found by the
+	// config-fed dead-field check, ADR 0048).
+	maxBytes int
 	excluded map[string]bool
 	included map[string]bool
 
@@ -148,6 +158,8 @@ type compressWriter struct {
 	// undecided when the handler returns, or one whose declared length is.
 	// Either goes out as it is.
 	undersized bool
+	// oversized marks a body whose declared length is over maxBytes.
+	oversized bool
 }
 
 func (w *compressWriter) WriteHeader(status int) {
@@ -178,6 +190,7 @@ func (w *compressWriter) WriteHeader(status int) {
 	// response was compressed however small.
 	if n, err := strconv.ParseInt(w.ResponseWriter.Header().Get("Content-Length"), 10, 64); err == nil {
 		w.undersized = n < int64(w.minBytes)
+		w.oversized = n > int64(w.maxBytes)
 		w.decide()
 	}
 }
@@ -206,7 +219,7 @@ func (w *compressWriter) Write(b []byte) (int, error) {
 // not a success, or has an excluded, unlisted, gRPC or SSE content type.
 func (w *compressWriter) shouldCompress() bool {
 	h := w.Header()
-	if w.undersized || h.Get("Content-Encoding") != "" || w.status >= 300 ||
+	if w.undersized || w.oversized || h.Get("Content-Encoding") != "" || w.status >= 300 ||
 		w.status == http.StatusNoContent || w.status == http.StatusNotModified {
 		return false
 	}

@@ -36,7 +36,7 @@ func sessionKeyFixture(t *testing.T) (*ApiService, *auth.Manager, string, string
 	if err := m.UpsertUser(&gateonv1.User{Username: "admin", Password: "correct-horse-battery", Role: auth.RoleAdmin}); err != nil {
 		t.Fatal(err)
 	}
-	token, _, err := m.Authenticate("admin", "correct-horse-battery")
+	token, _, err := m.Authenticate("admin", "correct-horse-battery", "")
 	if err != nil {
 		t.Fatal(err)
 	}

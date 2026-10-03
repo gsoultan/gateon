@@ -13,10 +13,10 @@ import (
 
 func TestAuthenticateRejectsDisabledAccount(t *testing.T) {
 	m := newTestManager(t)
-	id := createUser(t, m, "mallory", "pw-123456")
+	id := createUser(t, m, "mallory", "pw-123456-long")
 
 	// A normal login works before disabling.
-	if _, _, err := m.Authenticate("mallory", "pw-123456"); err != nil {
+	if _, _, err := m.Authenticate("mallory", "pw-123456-long", ""); err != nil {
 		t.Fatalf("expected successful login before disable, got %v", err)
 	}
 
@@ -25,7 +25,7 @@ func TestAuthenticateRejectsDisabledAccount(t *testing.T) {
 	}
 
 	// Correct password must still be rejected once disabled.
-	token, _, err := m.Authenticate("mallory", "pw-123456")
+	token, _, err := m.Authenticate("mallory", "pw-123456-long", "")
 	if !errors.Is(err, ErrAccountDisabled) {
 		t.Fatalf("expected ErrAccountDisabled, got %v", err)
 	}
@@ -37,20 +37,20 @@ func TestAuthenticateRejectsDisabledAccount(t *testing.T) {
 	if err := m.SetUserDisabled(id, false); err != nil {
 		t.Fatalf("SetUserDisabled(false): %v", err)
 	}
-	if _, _, err := m.Authenticate("mallory", "pw-123456"); err != nil {
+	if _, _, err := m.Authenticate("mallory", "pw-123456-long", ""); err != nil {
 		t.Fatalf("expected login to succeed after re-enable, got %v", err)
 	}
 }
 
 func TestAuthenticateSignalsPending2FASetup(t *testing.T) {
 	m := newTestManager(t)
-	id := createUser(t, m, "nina", "pw-123456")
+	id := createUser(t, m, "nina", "pw-123456-long")
 
 	if err := m.SetTwoFactorPending(id, true); err != nil {
 		t.Fatalf("SetTwoFactorPending: %v", err)
 	}
 
-	token, user, err := m.Authenticate("nina", "pw-123456")
+	token, user, err := m.Authenticate("nina", "pw-123456-long", "")
 	if !errors.Is(err, ErrTwoFactorSetupRequired) {
 		t.Fatalf("expected ErrTwoFactorSetupRequired, got %v", err)
 	}
@@ -68,17 +68,17 @@ func TestAuthenticateSignalsPending2FASetup(t *testing.T) {
 
 func TestEnrollPending2FACompletesAndClearsPending(t *testing.T) {
 	m := newTestManager(t)
-	id := createUser(t, m, "oscar", "pw-123456")
+	id := createUser(t, m, "oscar", "pw-123456-long")
 	if err := m.SetTwoFactorPending(id, true); err != nil {
 		t.Fatalf("SetTwoFactorPending: %v", err)
 	}
 
 	// Wrong password must not start enrollment (and must not leak a secret).
-	if _, _, _, _, err := m.EnrollPending2FA("oscar", "wrong"); !errors.Is(err, ErrInvalidCredentials) {
+	if _, _, _, _, err := m.EnrollPending2FA("oscar", "wrong", ""); !errors.Is(err, ErrInvalidCredentials) {
 		t.Fatalf("expected ErrInvalidCredentials for bad password, got %v", err)
 	}
 
-	secret, _, _, enrollID, err := m.EnrollPending2FA("oscar", "pw-123456")
+	secret, _, _, enrollID, err := m.EnrollPending2FA("oscar", "pw-123456-long", "")
 	if err != nil {
 		t.Fatalf("EnrollPending2FA: %v", err)
 	}
@@ -112,18 +112,18 @@ func TestEnrollPending2FACompletesAndClearsPending(t *testing.T) {
 	}
 
 	// Next login now takes the normal 2FA code-challenge path.
-	if _, _, err := m.Authenticate("oscar", "pw-123456"); !errors.Is(err, ErrTwoFactorRequired) {
+	if _, _, err := m.Authenticate("oscar", "pw-123456-long", ""); !errors.Is(err, ErrTwoFactorRequired) {
 		t.Fatalf("expected ErrTwoFactorRequired after enrollment, got %v", err)
 	}
 }
 
 func TestEnrollPendingRejectedWhenNotPending(t *testing.T) {
 	m := newTestManager(t)
-	createUser(t, m, "peggy", "pw-123456")
+	createUser(t, m, "peggy", "pw-123456-long")
 
 	// No pending flag set: the unauthenticated enroll path must refuse, so it
 	// can't be abused to (re)generate a TOTP secret for an arbitrary account.
-	if _, _, _, _, err := m.EnrollPending2FA("peggy", "pw-123456"); !errors.Is(err, ErrInvalidCredentials) {
+	if _, _, _, _, err := m.EnrollPending2FA("peggy", "pw-123456-long", ""); !errors.Is(err, ErrInvalidCredentials) {
 		t.Fatalf("expected ErrInvalidCredentials when not pending, got %v", err)
 	}
 }

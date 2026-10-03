@@ -18,18 +18,18 @@ import (
 // as 409 -- and the existing account left as it was.
 func TestUpdateUserRPCRefusesATakenUsername(t *testing.T) {
 	svc, ctx, _ := ownAccount(t)
-	bob := &gateonv1.User{Username: "bob", Password: "bobs-pass", Role: auth.RoleViewer}
+	bob := &gateonv1.User{Username: "bob", Password: "the-other-accounts-pw", Role: auth.RoleViewer}
 	if err := svc.Auth.UpsertUser(bob); err != nil {
 		t.Fatalf("UpsertUser: %v", err)
 	}
 
 	_, err := svc.UpdateUser(ctx, &gateonv1.UpdateUserRequest{
-		User: &gateonv1.User{Username: "bob", Password: "takeover-pass", Role: auth.RoleAdmin},
+		User: &gateonv1.User{Username: "bob", Password: "takeover-passphrase", Role: auth.RoleAdmin},
 	})
 	if status.Code(err) != codes.AlreadyExists {
 		t.Errorf("Add User under a taken username: err = %v, want code AlreadyExists", err)
 	}
-	if _, _, err := svc.Auth.Authenticate("bob", "bobs-pass"); err != nil {
+	if _, _, err := svc.Auth.Authenticate("bob", "the-other-accounts-pw", ""); err != nil {
 		t.Errorf("bob's password was replaced: %v", err)
 	}
 	users, _, err := svc.Auth.ListUsers(0, 10, "bob")

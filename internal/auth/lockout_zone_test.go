@@ -69,18 +69,22 @@ func assertLockoutWindow(t *testing.T, dsn, zone string) {
 	defer func() { _ = m.Close() }()
 
 	username := fmt.Sprintf("lockout-%s-%d", filepath.Base(zone), time.Now().UnixNano())
-	if err := m.UpsertUser(&gateonv1.User{Username: username, Password: "right-password", Role: RoleViewer}); err != nil {
+	u := &gateonv1.User{Username: username, Password: "right-password", Role: RoleViewer}
+	if err := m.UpsertUser(u); err != nil {
 		t.Fatalf("UpsertUser: %v", err)
 	}
 	defer func() { _, _ = m.DB().Exec(m.Dialect().Rebind("DELETE FROM users WHERE username = ?"), username) }()
 
+	// The stored lock is the re-authentication prompt's and the second
+	// factor's since ADR 0050; the sign-in form's is kept in memory.
+	const next = "a-new-passphrase"
 	for range MaxFailedAttempts {
-		if _, _, err := m.Authenticate(username, "wrong-password"); !errors.Is(err, ErrInvalidCredentials) {
+		if err := m.ChangeOwnPassword(u.Id, "wrong-password", next); !errors.Is(err, ErrInvalidCredentials) {
 			t.Fatalf("wrong password: got %v, want ErrInvalidCredentials", err)
 		}
 	}
-	if _, _, err := m.Authenticate(username, "right-password"); !errors.Is(err, ErrAccountLocked) {
-		t.Errorf("in %s the account was not locked after %d failures: Authenticate = %v",
+	if err := m.ChangeOwnPassword(u.Id, "right-password", next); !errors.Is(err, ErrAccountLocked) {
+		t.Errorf("in %s the account was not locked after %d failures: ChangeOwnPassword = %v",
 			zone, MaxFailedAttempts, err)
 	}
 

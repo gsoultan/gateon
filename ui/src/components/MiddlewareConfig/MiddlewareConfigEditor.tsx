@@ -17,6 +17,7 @@ import {
   IconCode,
 } from "@tabler/icons-react";
 import { KeyValueList } from "./KeyValueList";
+import { corsProblem } from "./middlewareConfigProblems";
 import { RatelimitConfigEditor } from "./RatelimitConfigEditor";
 import { AuthConfigEditor } from "./AuthConfigEditor";
 import { HeadersConfigEditor } from "./HeadersConfigEditor";
@@ -27,6 +28,7 @@ import {
   HMACConfigEditor,
   FileSecurityConfigEditor,
   XFCCConfigEditor,
+  TLSBindingConfigEditor,
   PolicyConfigEditor,
   IPFilterConfigEditor,
   BotManagementConfigEditor,
@@ -40,6 +42,7 @@ import {
   BufferingConfigEditor,
   InFlightReqConfigEditor,
   CacheConfigEditor,
+  CircuitBreakerConfigEditor,
 } from "./TrafficConfigEditors";
 import {
   RewriteConfigEditor,
@@ -80,6 +83,9 @@ export function MiddlewareConfigEditor({
 
     case "buffering":
       return <BufferingConfigEditor config={config} updateConfig={updateConfig} />;
+
+    case "circuit_breaker":
+      return <CircuitBreakerConfigEditor config={config} updateConfig={updateConfig} />;
 
     case "auth":
       return <AuthConfigEditor config={config} onChange={onChange} />;
@@ -228,8 +234,8 @@ export function MiddlewareConfigEditor({
             }
           />
           <NumberInput
-            label="Max Buffer (bytes)"
-            description="Responses larger than this bypass compression (stream through). Default: 10MB"
+            label="Max Compressed Size (bytes)"
+            description="A response that declares a larger body (Content-Length) is sent uncompressed. Default: 10MB"
             value={
               parseInt(config.max_buffer_bytes) || 10 * 1024 * 1024
             }
@@ -384,7 +390,7 @@ export function MiddlewareConfigEditor({
             placeholder="*, https://example.com"
             value={splitGrpcTags(config.allowed_origins)}
             onChange={(val) => updateConfig("allowed_origins", joinGrpcTags(val))}
-            description="CORS allowed origins for gRPC-Web requests."
+            description="Origins allowed to call gRPC-Web; empty allows every origin without credentials, as before. * allows every origin."
             styles={{ input: { minHeight: 60 } }}
             clearable
           />
@@ -397,6 +403,8 @@ export function MiddlewareConfigEditor({
             />
             <Switch
               label="Allow Credentials"
+              description="Cookies and Authorization; needs named origins, never *."
+              error={corsProblem(config)}
               checked={config.allow_credentials === "true"}
               onChange={(e) =>
                 updateConfig(
@@ -455,6 +463,9 @@ export function MiddlewareConfigEditor({
 
     case "xfcc":
       return <XFCCConfigEditor config={config} updateConfig={updateConfig} />;
+
+    case "tls_binding":
+      return <TLSBindingConfigEditor config={config} updateConfig={updateConfig} />;
 
     case "policy":
       return <PolicyConfigEditor config={config} onChange={onChange} />;

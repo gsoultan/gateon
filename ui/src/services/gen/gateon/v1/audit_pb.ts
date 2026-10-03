@@ -13,7 +13,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file gateon/v1/audit.proto.
  */
 export const file_gateon_v1_audit: GenFile = /*@__PURE__*/
-  fileDesc("ChVnYXRlb24vdjEvYXVkaXQucHJvdG8SCWdhdGVvbi52MSKUAQoIQXVkaXRMb2cSCgoCaWQYASABKAkSDwoHdXNlcl9pZBgCIAEoCRIOCgZhY3Rpb24YAyABKAkSEAoIcmVzb3VyY2UYBCABKAkSDwoHZGV0YWlscxgFIAEoCRIRCgl0aW1lc3RhbXAYBiABKAkSEgoKaXBfYWRkcmVzcxgHIAEoCRIRCglzaWduYXR1cmUYCCABKAkiVgoUTGlzdEF1ZGl0TG9nc1JlcXVlc3QSDQoFbGltaXQYASABKAUSDAoEcGFnZRgCIAEoBRIRCglwYWdlX3NpemUYAyABKAUSDgoGc2VhcmNoGAQgASgJInAKFUxpc3RBdWRpdExvZ3NSZXNwb25zZRIhCgRsb2dzGAEgAygLMhMuZ2F0ZW9uLnYxLkF1ZGl0TG9nEhMKC3RvdGFsX2NvdW50GAIgASgFEgwKBHBhZ2UYAyABKAUSEQoJcGFnZV9zaXplGAQgASgFIhoKGExpc3RBdWRpdEFyY2hpdmVzUmVxdWVzdCJGChlMaXN0QXVkaXRBcmNoaXZlc1Jlc3BvbnNlEikKCGFyY2hpdmVzGAEgAygLMhcuZ2F0ZW9uLnYxLkF1ZGl0QXJjaGl2ZSJCCgxBdWRpdEFyY2hpdmUSEAoIZmlsZW5hbWUYASABKAkSDAoEc2l6ZRgCIAEoAxISCgpjcmVhdGVkX2F0GAMgASgJIioKFkdldEF1ZGl0QXJjaGl2ZVJlcXVlc3QSEAoIZmlsZW5hbWUYASABKAkiPAoXR2V0QXVkaXRBcmNoaXZlUmVzcG9uc2USIQoEbG9ncxgBIAMoCzITLmdhdGVvbi52MS5BdWRpdExvZ0KVAQoNY29tLmdhdGVvbi52MUIKQXVkaXRQcm90b1ABWjNnaXRodWIuY29tL2dzb3VsdGFuL2dhdGVvbi9wcm90by9nYXRlb24vdjE7Z2F0ZW9udjGiAgNHWFiqAglHYXRlb24uVjHKAglHYXRlb25cVjHiAhVHYXRlb25cVjFcR1BCTWV0YWRhdGHqAgpHYXRlb246OlYxYgZwcm90bzM");
+  fileDesc("ChVnYXRlb24vdjEvYXVkaXQucHJvdG8SCWdhdGVvbi52MSKUAQoIQXVkaXRMb2cSCgoCaWQYASABKAkSDwoHdXNlcl9pZBgCIAEoCRIOCgZhY3Rpb24YAyABKAkSEAoIcmVzb3VyY2UYBCABKAkSDwoHZGV0YWlscxgFIAEoCRIRCgl0aW1lc3RhbXAYBiABKAkSEgoKaXBfYWRkcmVzcxgHIAEoCRIRCglzaWduYXR1cmUYCCABKAkiVgoUTGlzdEF1ZGl0TG9nc1JlcXVlc3QSDQoFbGltaXQYASABKAUSDAoEcGFnZRgCIAEoBRIRCglwYWdlX3NpemUYAyABKAUSDgoGc2VhcmNoGAQgASgJInAKFUxpc3RBdWRpdExvZ3NSZXNwb25zZRIhCgRsb2dzGAEgAygLMhMuZ2F0ZW9uLnYxLkF1ZGl0TG9nEhMKC3RvdGFsX2NvdW50GAIgASgFEgwKBHBhZ2UYAyABKAUSEQoJcGFnZV9zaXplGAQgASgFIhoKGExpc3RBdWRpdEFyY2hpdmVzUmVxdWVzdCJGChlMaXN0QXVkaXRBcmNoaXZlc1Jlc3BvbnNlEikKCGFyY2hpdmVzGAEgAygLMhcuZ2F0ZW9uLnYxLkF1ZGl0QXJjaGl2ZSJCCgxBdWRpdEFyY2hpdmUSEAoIZmlsZW5hbWUYASABKAkSDAoEc2l6ZRgCIAEoAxISCgpjcmVhdGVkX2F0GAMgASgJIioKFkdldEF1ZGl0QXJjaGl2ZVJlcXVlc3QSEAoIZmlsZW5hbWUYASABKAkiPAoXR2V0QXVkaXRBcmNoaXZlUmVzcG9uc2USIQoEbG9ncxgBIAMoCzITLmdhdGVvbi52MS5BdWRpdExvZyJUChdWZXJpZnlBdWRpdENoYWluUmVxdWVzdBIMCgRmcm9tGAEgASgJEgoKAnRvGAIgASgJEhAKCGFmdGVyX2lkGAMgASgJEg0KBWxpbWl0GAQgASgFIkAKD0F1ZGl0Q2hhaW5CcmVhaxIKCgJpZBgBIAEoCRIRCgl0aW1lc3RhbXAYAiABKAkSDgoGcmVhc29uGAMgASgJIq0BChhWZXJpZnlBdWRpdENoYWluUmVzcG9uc2USDgoGaW50YWN0GAEgASgIEg8KB2NoZWNrZWQYAiABKAUSLwoLZmlyc3RfYnJlYWsYAyABKAsyGi5nYXRlb24udjEuQXVkaXRDaGFpbkJyZWFrEhUKDW5leHRfYWZ0ZXJfaWQYBCABKAkSEAoIY29tcGxldGUYBSABKAgSFgoObGFzdF90aW1lc3RhbXAYBiABKAlClQEKDWNvbS5nYXRlb24udjFCCkF1ZGl0UHJvdG9QAVozZ2l0aHViLmNvbS9nc291bHRhbi9nYXRlb24vcHJvdG8vZ2F0ZW9uL3YxO2dhdGVvbnYxogIDR1hYqgIJR2F0ZW9uLlYxygIJR2F0ZW9uXFYx4gIVR2F0ZW9uXFYxXEdQQk1ldGFkYXRh6gIKR2F0ZW9uOjpWMWIGcHJvdG8z");
 
 /**
  * @generated from message gateon.v1.AuditLog
@@ -221,4 +221,128 @@ export type GetAuditArchiveResponse = Message<"gateon.v1.GetAuditArchiveResponse
  */
 export const GetAuditArchiveResponseSchema: GenMessage<GetAuditArchiveResponse> = /*@__PURE__*/
   messageDesc(file_gateon_v1_audit, 7);
+
+/**
+ * VerifyAuditChainRequest asks for the audit log's HMAC chain to be checked,
+ * oldest first, over a window of at most limit entries. A window starts at
+ * `from` (RFC 3339; "" is the beginning of the log) or, to continue, after
+ * after_id -- the next_after_id an earlier answer gave. `to` (RFC 3339; "" is
+ * now) ends the range either way.
+ *
+ * @generated from message gateon.v1.VerifyAuditChainRequest
+ */
+export type VerifyAuditChainRequest = Message<"gateon.v1.VerifyAuditChainRequest"> & {
+  /**
+   * @generated from field: string from = 1;
+   */
+  from: string;
+
+  /**
+   * @generated from field: string to = 2;
+   */
+  to: string;
+
+  /**
+   * @generated from field: string after_id = 3;
+   */
+  afterId: string;
+
+  /**
+   * limit caps the entries this call checks; 0 is the default (1000) and
+   * anything over 5000 is 5000.
+   *
+   * @generated from field: int32 limit = 4;
+   */
+  limit: number;
+};
+
+/**
+ * Describes the message gateon.v1.VerifyAuditChainRequest.
+ * Use `create(VerifyAuditChainRequestSchema)` to create a new message.
+ */
+export const VerifyAuditChainRequestSchema: GenMessage<VerifyAuditChainRequest> = /*@__PURE__*/
+  messageDesc(file_gateon_v1_audit, 8);
+
+/**
+ * AuditChainBreak is the first entry the chain does not account for.
+ *
+ * @generated from message gateon.v1.AuditChainBreak
+ */
+export type AuditChainBreak = Message<"gateon.v1.AuditChainBreak"> & {
+  /**
+   * @generated from field: string id = 1;
+   */
+  id: string;
+
+  /**
+   * @generated from field: string timestamp = 2;
+   */
+  timestamp: string;
+
+  /**
+   * @generated from field: string reason = 3;
+   */
+  reason: string;
+};
+
+/**
+ * Describes the message gateon.v1.AuditChainBreak.
+ * Use `create(AuditChainBreakSchema)` to create a new message.
+ */
+export const AuditChainBreakSchema: GenMessage<AuditChainBreak> = /*@__PURE__*/
+  messageDesc(file_gateon_v1_audit, 9);
+
+/**
+ * @generated from message gateon.v1.VerifyAuditChainResponse
+ */
+export type VerifyAuditChainResponse = Message<"gateon.v1.VerifyAuditChainResponse"> & {
+  /**
+   * intact is true when every entry checked is signed and chained to the one
+   * before it.
+   *
+   * @generated from field: bool intact = 1;
+   */
+  intact: boolean;
+
+  /**
+   * @generated from field: int32 checked = 2;
+   */
+  checked: number;
+
+  /**
+   * first_break is set when intact is false.
+   *
+   * @generated from field: gateon.v1.AuditChainBreak first_break = 3;
+   */
+  firstBreak?: AuditChainBreak | undefined;
+
+  /**
+   * next_after_id continues the range in the next call; "" when complete or
+   * broken.
+   *
+   * @generated from field: string next_after_id = 4;
+   */
+  nextAfterId: string;
+
+  /**
+   * complete is true when the range has no entries left to check.
+   *
+   * @generated from field: bool complete = 5;
+   */
+  complete: boolean;
+
+  /**
+   * last_timestamp is the newest entry checked, "" when none was.
+   *
+   * @generated from field: string last_timestamp = 6;
+   */
+  lastTimestamp: string;
+};
+
+/**
+ * Describes the message gateon.v1.VerifyAuditChainResponse.
+ * Use `create(VerifyAuditChainResponseSchema)` to create a new message.
+ */
+export const VerifyAuditChainResponseSchema: GenMessage<VerifyAuditChainResponse> = /*@__PURE__*/
+  messageDesc(file_gateon_v1_audit, 10);
 

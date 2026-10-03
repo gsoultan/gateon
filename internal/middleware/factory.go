@@ -85,10 +85,86 @@ func (f *Factory) IsGRPCRoute() bool {
 	return strings.EqualFold(strings.TrimSpace(f.routeType), "grpc")
 }
 
-// Validate checks that the middleware config is valid without creating the middleware.
+// Validate checks that the middleware config is valid without creating the
+// middleware. It is the save path's check -- REST, gRPC and config import all
+// reach it through the domain service -- so it also refuses what would save a
+// setting that does nothing (checkSave), on top of everything Create refuses.
 func (f *Factory) Validate(m *gateonv1.Middleware) error {
+	if err := f.checkSave(m); err != nil {
+		return err
+	}
 	_, err := f.Create(m, "")
 	return err
+}
+
+// checkSave refuses, at save only, a config whose setting would not do what
+// its label says (ADR 0043, ADR 0046). These are refused at save rather than
+// in Create because a stored config predating the refusal must keep building:
+// each degrades to what it always did -- and is logged -- rather than taking
+// its route out of service on upgrade.
+func (f *Factory) checkSave(m *gateonv1.Middleware) error {
+	cfg := m.GetConfig()
+	switch m.GetType() {
+	case "xfcc":
+		return transform.CheckXFCCSave(cfg)
+	case "cors":
+		return transform.CheckCORSSave(cfg)
+	case "grpcweb":
+		return transform.CheckCORSSave(cfg)
+	case "ratelimit":
+		if err := f.checkClientTrust(cfg); err != nil {
+			return err
+		}
+		return traffic.CheckRateLimitSave(cfg, f.redisClient != nil)
+	case "ipfilter":
+		return f.checkClientTrust(cfg)
+	case "geoip":
+		return f.checkClientTrust(cfg)
+	}
+	return nil
+}
+
+// checkClientTrust refuses a per-middleware trust_cloudflare_headers that
+// disagrees with the gateway's Cloudflare trust (ADR 0046).
+//
+// The switch was never honoured: the entrypoint resolves the client address
+// once, under the global setting, and every middleware reads that answer
+// (invariant 8). Making it real would let a middleware believe a header the
+// resolver does not -- two answers to "who is the client" on one request, and a
+// trust boundary moved by whoever may edit a middleware rather than by an
+// administrator (ADR 0040). So the decision stays global; a value that agrees
+// with it saves (an export re-imported, a config written before this), and one
+// that does not is refused with the setting that decides.
+func (f *Factory) checkClientTrust(cfg map[string]string) error {
+	v := strings.TrimSpace(cfg["trust_cloudflare_headers"])
+	if v == "" {
+		return nil
+	}
+	want, err := kind.ParseBoolStrict(v, false)
+	if err != nil {
+		return kind.CfgError("trust_cloudflare_headers", v, err)
+	}
+	global := f.trustCloudflare()
+	if want == global {
+		return nil
+	}
+	state := "off"
+	if global {
+		state = "on"
+	}
+	return kind.CfgError("trust_cloudflare_headers", v, fmt.Errorf("which client address to believe is decided "+
+		"once for every middleware, by Settings > Trust Cloudflare Headers (waf.trust_cloudflare_headers, or "+
+		"GATEON_TRUST_CLOUDFLARE_HEADERS), which is %s on this gateway; a middleware cannot override it. "+
+		"Remove trust_cloudflare_headers here, and change the global setting if it is wrong", state))
+}
+
+// trustCloudflare is the gateway's Cloudflare trust, read from the factory's
+// global store when it has one.
+func (f *Factory) trustCloudflare() bool {
+	if f.globalStore == nil {
+		return config.EffectiveTrustCloudflare()
+	}
+	return config.TrustCloudflare(f.globalStore.Get(context.Background()).GetWaf())
 }
 
 func (f *Factory) Create(m *gateonv1.Middleware, routeID string) (Middleware, error) {
@@ -305,11 +381,7 @@ func (f *Factory) Create(m *gateonv1.Middleware, routeID string) (Middleware, er
 	case "file_security":
 		return f.createFileSecurity(cfg)
 	case "tls_binding":
-		cookieName := cfg["cookie_name"]
-		if cookieName == "" {
-			cookieName = "session"
-		}
-		return identity.TlsBinding(cookieName), nil
+		return identity.NewTLSBinding(cfg)
 	case "security_headers":
 		preset, err := kind.ParseSecurityHeadersPreset(cfg["preset"])
 		if err != nil {

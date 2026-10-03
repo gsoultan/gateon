@@ -76,7 +76,7 @@ var grpcWebExposedHeaders = []string{
 // grpcWebCORSOptions resolves the CORS policy for a gRPC-Web route. Nothing in
 // it depends on a request, so it runs when the chain is built.
 func grpcWebCORSOptions(cfg []CORSConfig) cors.Options {
-	if len(cfg) == 0 || len(cfg[0].AllowedOrigins) == 0 {
+	if len(cfg) == 0 || (len(cfg[0].AllowedOrigins) == 0 && !cfg[0].DenyAllOrigins) {
 		// With no origins named, any origin may call, as since v1.5.0 -- but
 		// without credentials. This echoed the caller's Origin back together
 		// with Access-Control-Allow-Credentials: true, the one combination a
@@ -101,9 +101,14 @@ func grpcWebCORSOptions(cfg []CORSConfig) cors.Options {
 		AllowedMethods:   defaultCORSMethods(),
 		AllowedHeaders:   []string{"*"},
 		ExposedHeaders:   grpcWebExposedHeaders,
-		AllowCredentials: c.AllowCredentials,
+		AllowCredentials: corsCredentials(c),
 		MaxAge:           c.MaxAge,
 		Debug:            c.Debug,
+	}
+	if c.DenyAllOrigins {
+		// "Restricted" grants no origin. It fell into the branch above and
+		// granted every one, as rs/cors reads an empty list.
+		o.AllowOriginFunc = func(string) bool { return false }
 	}
 	if len(c.AllowedMethods) > 0 {
 		o.AllowedMethods = c.AllowedMethods

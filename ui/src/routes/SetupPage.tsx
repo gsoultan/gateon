@@ -44,6 +44,7 @@ import { notifications } from "@mantine/notifications";
 import { useClipboard } from "@mantine/hooks";
 import { useIsMobile } from "../hooks/useMobile";
 import { generateRandomString } from "../utils/random";
+import { PASSWORD_RULE, passwordPolicyError } from "../components/passwordPolicy";
 import type { DatabaseConfig, SetupRequest } from "../types/gateon";
 
 const WIZARD_STEPS = 6; // Admin, Security, Database, Logging, Management, Review
@@ -225,7 +226,8 @@ export default function SetupPage() {
     validate: {
       setupToken: (value) => (!value.trim() ? "The setup token is required" : null),
       adminUsername: (value) => (value.length < 3 ? "Username too short" : null),
-      adminPassword: (val) => (val.length < 8 ? "Password must be at least 8 characters" : null),
+      // The gateway's rule (ADR 0050); it also refuses common passwords.
+      adminPassword: (val, values) => passwordPolicyError(val, values.adminUsername),
       confirmPassword: (val, values) => (val !== values.adminPassword ? "Passwords do not match" : null),
       pasetoSecret: (val) => (val.length !== 32 ? "Secret must be exactly 32 characters" : null),
       managementBind: (val) => (!val ? "Bind address is required" : null),
@@ -387,6 +389,7 @@ export default function SetupPage() {
                         <PasswordInput
                           label="Password"
                           placeholder="••••••••"
+                          description={PASSWORD_RULE}
                           required
                           size="md"
                           leftSection={<IconLock size={rem(18)} stroke={1.5} />}

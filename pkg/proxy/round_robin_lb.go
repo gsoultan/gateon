@@ -11,23 +11,45 @@ import (
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
-// RoundRobinLB implements simple round-robin load balancing.
+// RoundRobinLB rotates through its targets in proportion to their weights.
+//
+// It ignored weights, and round robin is the default policy, so the Weight the
+// service form shows on every target ("Higher weight = more traffic") was saved
+// and did nothing: weights 1:2:6 gave 30/30/30 (ADR 0047). Equal weights --
+// what the form saves unless someone changes one -- are plain rotation, as
+// before. Weighted round robin is the same balancer (WeightedRoundRobinLB).
+//
+// The pick is one atomic increment and one slice index while the target it
+// lands on is alive. The smooth order is computed when the targets change, on
+// the configuration path, never per request.
 type RoundRobinLB struct {
-	targetsPtr atomic.Pointer[[]*targetState]
-	current    uint64
+	set     atomic.Pointer[rrSet]
+	current uint64
 	// skipped counts the turns that fell on a dead target, and spreads them
 	// over the live ones in their own rotation.
 	skipped uint64
 	mu      sync.Mutex
 }
 
+// rrSet is one target list and the order it is served in, swapped together so
+// a pick never indexes one list with the other's order.
+type rrSet struct {
+	targets []*targetState
+	// shares are the targets' effective weights: their own when any target
+	// carries one, and 1 each when none does.
+	shares []int32
+	// order is the smooth weighted schedule, nil when it would be longer than
+	// maxScheduleLen; picks then walk the shares instead.
+	order []uint32
+}
+
 func NewRoundRobinLB(urls []string) *RoundRobinLB {
-	targets := make([]*targetState, len(urls))
+	targets := make([]*gateonv1.Target, len(urls))
 	for i, u := range urls {
-		targets[i] = newTargetState(u, 1)
+		targets[i] = &gateonv1.Target{Url: u, Weight: 1}
 	}
 	lb := &RoundRobinLB{}
-	lb.targetsPtr.Store(&targets)
+	lb.UpdateWeightedTargets(targets)
 	return lb
 }
 
@@ -40,69 +62,66 @@ func (lb *RoundRobinLB) Next() string {
 }
 
 func (lb *RoundRobinLB) NextState() *targetState {
-	ptr := lb.targetsPtr.Load()
-	if ptr == nil {
-		return nil
-	}
-	targets := *ptr
-
-	if len(targets) == 0 {
+	set := lb.set.Load()
+	if set == nil || len(set.targets) == 0 {
 		return nil
 	}
 	n := atomic.AddUint64(&lb.current, 1) - 1
-	if t := targets[n%uint64(len(targets))]; t.alive.Load() {
+	if len(set.order) == 0 {
+		return set.pickLive(n)
+	}
+	if t := set.targets[set.order[n%uint64(len(set.order))]]; t.alive.Load() {
 		return t
 	}
-	return lb.nextAliveFor(targets)
+	return set.pickLive(atomic.AddUint64(&lb.skipped, 1) - 1)
 }
 
-// nextAliveFor picks a live target for a turn that fell on a dead one. It used
-// to scan forward to the next live target, which gave a dead target's whole
-// share to its neighbour: one of three down left the next one serving twice
-// what the other did, and two of four down left one serving three quarters.
-// The skipped turns take their own rotation over the live targets instead.
-func (lb *RoundRobinLB) nextAliveFor(targets []*targetState) *targetState {
-	alive := 0
-	for _, t := range targets {
-		if t.alive.Load() {
-			alive++
+// pickLive returns the live target that turn k lands on when turns are dealt
+// over the live targets in proportion to their shares.
+//
+// It used to scan forward to the next live target, which gave a dead target's
+// whole share to its neighbour: one of three down left the next one serving
+// twice what the other did. Nil when no target with a share is alive.
+func (s *rrSet) pickLive(k uint64) *targetState {
+	var total uint64
+	for i, t := range s.targets {
+		if s.shares[i] > 0 && t.alive.Load() {
+			total += uint64(s.shares[i])
 		}
 	}
-	if alive == 0 {
+	if total == 0 {
 		return nil
 	}
-	k := (atomic.AddUint64(&lb.skipped, 1) - 1) % uint64(alive)
-	for _, t := range targets {
-		if !t.alive.Load() {
+	k %= total
+	for i, t := range s.targets {
+		if s.shares[i] <= 0 || !t.alive.Load() {
 			continue
 		}
-		if k == 0 {
+		if k < uint64(s.shares[i]) {
 			return t
 		}
-		k--
+		k -= uint64(s.shares[i])
 	}
-	return nil // a target died between the count and the pick
+	return nil // a target died between the sum and the walk
 }
 
 func (lb *RoundRobinLB) UpdateWeightedTargets(targets []*gateonv1.Target) {
 	lb.mu.Lock()
 	defer lb.mu.Unlock()
-	newTargets := make([]*targetState, len(targets))
+	states := make([]*targetState, len(targets))
 	for i, t := range targets {
-		newTargets[i] = newTargetStateFromTarget(t)
+		states[i] = newTargetStateFromTarget(t)
 	}
-	lb.targetsPtr.Store(&newTargets)
+	shares := effectiveShares(targets)
+	lb.set.Store(&rrSet{targets: states, shares: shares, order: smoothSchedule(shares)})
 }
 
 func (lb *RoundRobinLB) SetAlive(url string, alive bool) {
-	// alive is atomic in targetState, but we might need to find the target.
-	// We don't need a lock to find and update because the slice itself is atomic,
-	// and targetState.alive is atomic.
-	ptr := lb.targetsPtr.Load()
-	if ptr == nil {
+	set := lb.set.Load()
+	if set == nil {
 		return
 	}
-	for _, t := range *ptr {
+	for _, t := range set.targets {
 		if t.url == url {
 			if t.alive.Load() != alive {
 				state := telemetry.CircuitClosed
@@ -118,18 +137,24 @@ func (lb *RoundRobinLB) SetAlive(url string, alive bool) {
 }
 
 func (lb *RoundRobinLB) GetStats() []TargetStats {
-	ptr := lb.targetsPtr.Load()
-	if ptr == nil {
+	set := lb.set.Load()
+	if set == nil {
 		return nil
 	}
-	targets := *ptr
-	stats := make([]TargetStats, len(targets))
-	for i, t := range targets {
+	stats := make([]TargetStats, len(set.targets))
+	for i, t := range set.targets {
 		stats[i] = targetStatsFromState(t)
 	}
 	return stats
 }
 
 func (lb *RoundRobinLB) RecordLatency(url string, latency float64) {
-	// RoundRobinLB doesn't use latency for balancing.
+	// Round robin does not use latency for balancing.
+}
+
+func (lb *RoundRobinLB) states() []*targetState {
+	if set := lb.set.Load(); set != nil {
+		return set.targets
+	}
+	return nil
 }

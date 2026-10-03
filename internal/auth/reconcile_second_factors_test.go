@@ -143,7 +143,7 @@ func TestThePreviousKeyNeverVerifiesASession(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "auth.db")
 	old := managerWithKey(t, dbPath, testSymmetricKey)
 	createUser(t, old, "erin", "correct-horse-battery")
-	token, _, err := old.Authenticate("erin", "correct-horse-battery")
+	token, _, err := old.Authenticate("erin", "correct-horse-battery", "")
 	if err != nil {
 		t.Fatal(err)
 	}

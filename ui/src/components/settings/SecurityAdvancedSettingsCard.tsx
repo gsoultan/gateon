@@ -241,7 +241,7 @@ export const SecurityAdvancedSettingsCard: React.FC<SecurityAdvancedSettingsCard
                   />
                   <NumberInput
                     label="Score Threshold"
-                    description="Start tarpitting when IP threat score exceeds this. Recommended: 7.0."
+                    description="Start tarpitting when a client's threat score (100 minus its reputation; a new client has 0) reaches this. Recommended: 7.0."
                     value={security.tarpit?.scoreThreshold}
                     onChange={(val) => updateSection("tarpit", { scoreThreshold: val })}
                     disabled={disabled}
@@ -261,7 +261,9 @@ export const SecurityAdvancedSettingsCard: React.FC<SecurityAdvancedSettingsCard
                     <Text fw={500}>PoW Challenge</Text>
                   </Group>
                   <Text size="xs" c="dimmed">
-                    Force clients to solve a computational puzzle to mitigate Layer 7 DDoS and scraping.
+                    Clients whose threat score is above the threshold must solve a computational puzzle before they
+                    are served. Browsers solve it automatically and are let through for 10 minutes; API clients get a
+                    429 naming the puzzle. It raises the cost of abuse; it does not prove a visitor is human.
                   </Text>
                 </Stack>
                 <Switch
@@ -283,7 +285,7 @@ export const SecurityAdvancedSettingsCard: React.FC<SecurityAdvancedSettingsCard
                   />
                   <NumberInput
                     label="Score Threshold"
-                    description="Serve challenge when IP threat score exceeds this. Recommended: 5.0."
+                    description="Serve the challenge when a client's threat score (100 minus its reputation; a new client has 0) exceeds this. Recommended: 5.0."
                     value={security.pow?.scoreThreshold}
                     onChange={(val) => updateSection("pow", { scoreThreshold: val })}
                     disabled={disabled}
@@ -306,7 +308,9 @@ export const SecurityAdvancedSettingsCard: React.FC<SecurityAdvancedSettingsCard
                     <Text fw={500}>IP Reputation</Text>
                   </Group>
                   <Text size="xs" c="dimmed">
-                    Sync with global threat feeds to block known malicious actors.
+                    Sync with threat feeds and refuse the addresses they list, on every
+                    entrypoint and route, with or without a WAF. Loopback and addresses in
+                    GATEON_MITIGATION_ALLOWLIST are never refused.
                   </Text>
                 </Stack>
                 <Switch
@@ -336,7 +340,7 @@ export const SecurityAdvancedSettingsCard: React.FC<SecurityAdvancedSettingsCard
                     />
                     <NumberInput
                       label="Block Threshold"
-                      description="Minimum score to block. Recommended: 80.0."
+                      description="A feed listing scores 100, so any threshold up to 100 refuses it. Above 100 the feeds load and refuse no one. Recommended: 80."
                       value={security.ipReputation?.blockThreshold}
                       onChange={(val) => updateSection("ipReputation", { blockThreshold: val })}
                       disabled={disabled}
@@ -518,24 +522,22 @@ export const SecurityAdvancedSettingsCard: React.FC<SecurityAdvancedSettingsCard
                     <Text fw={500}>TLS Session Binding</Text>
                   </Group>
                   <Text size="xs" c="dimmed">
-                    Bind application sessions to TLS connections to prevent hijacking.
+                    Retired. Bind sessions per route with a TLS Binding middleware: it ties the session cookie to
+                    the client certificate and needs a shared secret, which this switch never had.
                   </Text>
                 </Stack>
+                {/* Only turning it off is offered: it does nothing, and the gateway refuses turning it on. */}
                 <Switch
-                  checked={security.tlsBinding?.enabled}
+                  aria-label="TLS Session Binding (retired)"
+                  checked={!!security.tlsBinding?.enabled}
                   onChange={(e) => updateSection("tlsBinding", { enabled: e.currentTarget.checked })}
-                  disabled={disabled}
+                  disabled={disabled || !security.tlsBinding?.enabled}
                 />
               </Group>
               {security.tlsBinding?.enabled && (
-                <TextInput
-                  label="Cookie Name"
-                  description="The name of the session cookie to bind. Recommended: session, authToken, or your app's session ID."
-                  placeholder="session"
-                  value={security.tlsBinding?.cookieName || ""}
-                  onChange={(e) => updateSection("tlsBinding", { cookieName: e.currentTarget.value })}
-                  disabled={disabled}
-                />
+                <Text size="xs" c="orange">
+                  This switch is on and has no effect. Turn it off; it no longer refuses or binds anything.
+                </Text>
               )}
             </Stack>
           </Paper>

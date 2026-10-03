@@ -22,8 +22,9 @@ func TestApplyCORSPreset(t *testing.T) {
 				if len(got.AllowedOrigins) != 1 || got.AllowedOrigins[0] != "*" {
 					t.Errorf("expected allowed origins [*], got %v", got.AllowedOrigins)
 				}
-				if !got.AllowCredentials {
-					t.Error("expected allow credentials to be true")
+				// "*" with credentials is refused by browsers (ADR 0046).
+				if got.AllowCredentials {
+					t.Error("permissive grants origin \"*\"; it must not also allow credentials")
 				}
 				if got.MaxAge != 86400 {
 					t.Errorf("expected max age 86400, got %d", got.MaxAge)
@@ -48,9 +49,10 @@ func TestApplyCORSPreset(t *testing.T) {
 				if got.MaxAge != 3600 {
 					t.Errorf("expected max age 3600, got %d", got.MaxAge)
 				}
-				// Still gets other permissive values
-				if !got.AllowCredentials {
-					t.Error("expected allow credentials to be true")
+				// Still gets other permissive values; credentials stay off
+				// unless asked for, now that the preset's are.
+				if got.AllowCredentials {
+					t.Error("expected allow credentials to stay off")
 				}
 			},
 		},

@@ -6,15 +6,26 @@ package db
 import (
 	"fmt"
 	"net/url"
+	"path/filepath"
+	"strings"
 
+	"github.com/gsoultan/gateon/internal/config"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
+// defaultSQLiteFile is the management database when the config names none.
+const defaultSQLiteFile = "gateon.db"
+
 // AuthDatabaseURL returns the database URL from AuthConfig.
 // Prefers database_config (builds URL); else database_url; else sqlite_path.
+// A relative SQLite path is taken inside config.DataDir (see ResolveSQLitePath).
 func AuthDatabaseURL(auth *gateonv1.AuthConfig) string {
+	return ResolveSQLitePath(authDatabaseURL(auth), config.DataDir())
+}
+
+func authDatabaseURL(auth *gateonv1.AuthConfig) string {
 	if auth == nil {
-		return "gateon.db"
+		return defaultSQLiteFile
 	}
 	if url := BuildURLFromConfig(auth.DatabaseConfig); url != "" {
 		return url
@@ -25,7 +36,71 @@ func AuthDatabaseURL(auth *gateonv1.AuthConfig) string {
 	if auth.SqlitePath != "" {
 		return auth.SqlitePath
 	}
-	return "gateon.db"
+	return defaultSQLiteFile
+}
+
+// ResolveSQLitePath returns databaseURL with a relative SQLite file path made
+// relative to dir instead of to the working directory. Anything else -- a
+// server URL, an absolute path, ":memory:", a "file:" URI or a path carrying
+// its own query -- comes back unchanged.
+//
+// A relative path used to be opened against whatever directory the process
+// started in. The packaged unit sets WorkingDirectory to the data directory, so
+// it happened to work there; the tarball, a hand-run binary, a container whose
+// WORKDIR differed, or a custom unit got a fresh, empty gateon.db (and a fresh
+// trace store beside it), and first-run setup reopened on a configured gateway
+// with every route and user apparently gone. The data directory is the answer
+// the rest of the gateway already gives to "where does state live", so it is
+// the answer here. Where config.DataDir has no better answer it returns ".",
+// which leaves a development checkout exactly where it was.
+func ResolveSQLitePath(databaseURL, dir string) string {
+	prefix, path, ok := splitSQLite(strings.TrimSpace(databaseURL))
+	if !ok || !relativeSQLiteFile(path) {
+		return databaseURL
+	}
+	return prefix + filepath.Join(dir, path)
+}
+
+// SQLiteFile is the file a SQLite database URL opens, and false for any other
+// engine and for a database that is not a plain file (":memory:", a "file:"
+// URI).
+func SQLiteFile(databaseURL string) (string, bool) {
+	_, path, ok := splitSQLite(strings.TrimSpace(databaseURL))
+	if !ok || path == "" || strings.HasPrefix(path, ":") || strings.ContainsAny(path, "?\x00") {
+		return "", false
+	}
+	if len(path) >= 5 && strings.EqualFold(path[:5], "file:") {
+		return "", false
+	}
+	return path, true
+}
+
+// splitSQLite separates a SQLite URL into its scheme prefix ("", "sqlite:" or
+// "sqlite://") and its path. ok is false for any other engine.
+func splitSQLite(u string) (prefix, path string, ok bool) {
+	for _, p := range []string{"sqlite://", "sqlite:"} {
+		if rest, found := strings.CutPrefix(u, p); found {
+			return p, rest, true
+		}
+	}
+	if strings.Contains(u, "://") {
+		return "", "", false
+	}
+	return "", u, true
+}
+
+// relativeSQLiteFile reports whether path is a plain relative file name that
+// ResolveSQLitePath should move into the data directory.
+func relativeSQLiteFile(path string) bool {
+	switch {
+	case path == "", strings.HasPrefix(path, ":"), filepath.IsAbs(path):
+		return false
+	case strings.ContainsAny(path, "?\x00"):
+		return false
+	case len(path) >= 5 && strings.EqualFold(path[:5], "file:"):
+		return false
+	}
+	return true
 }
 
 // AuditDatabaseURL returns the database URL used for audit/logging storage.
@@ -37,7 +112,7 @@ func AuditDatabaseURL(audit *gateonv1.AuditConfig, auth *gateonv1.AuthConfig) st
 			return url
 		}
 		if audit.DatabaseUrl != "" {
-			return audit.DatabaseUrl
+			return ResolveSQLitePath(audit.DatabaseUrl, config.DataDir())
 		}
 	}
 	return AuthDatabaseURL(auth)
@@ -52,9 +127,9 @@ func BuildURLFromConfig(cfg *gateonv1.DatabaseConfig) string {
 	case "sqlite":
 		path := cfg.SqlitePath
 		if path == "" {
-			path = "gateon.db"
+			path = defaultSQLiteFile
 		}
-		return path
+		return ResolveSQLitePath(path, config.DataDir())
 	case "postgres", "postgresql":
 		port := cfg.Port
 		if port <= 0 {

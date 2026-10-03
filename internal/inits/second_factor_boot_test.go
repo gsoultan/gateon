@@ -70,11 +70,17 @@ func TestBootMovesSecondFactorsFromThePreviousSessionKey(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = m.Close() })
 
-	code, err := totp.GenerateCode(secret, time.Now())
+	// The code is for an instant the manager is told is now, so how long the
+	// sign-in and the second step take -- seconds of production-cost bcrypt,
+	// many times that on a loaded host under -race -- cannot move it out of
+	// its window. It was generated for the wall clock, which could.
+	at := time.Now()
+	m.SetClock(func() time.Time { return at })
+	code, err := totp.GenerateCode(secret, at)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, _, signIn := m.Authenticate("gina", "correct-horse-battery")
+	_, _, signIn := m.Authenticate("gina", "correct-horse-battery", "")
 	ok, token, _, err := m.Verify2FA(auth.ChallengeFrom(signIn), id, code)
 	if err != nil || !ok || token == "" {
 		t.Fatalf("after a restart with a changed key, and the previous key given, the second factor does not verify: ok=%v err=%v",

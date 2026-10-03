@@ -15,6 +15,7 @@ import (
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/config/storedsecret"
 	"github.com/gsoultan/gateon/internal/logger"
+	"github.com/gsoultan/gateon/internal/middleware/security"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
@@ -131,10 +132,19 @@ func registerGeoIPHandlers(mux *http.ServeMux, globalReg config.GlobalConfigStor
 		}
 
 		exists, path, info := telemetry.GetGeoIPStatus()
+		// What the global country lists do now: enforced, or -- with no
+		// database -- refusing no one or everyone (ADR 0044). The settings
+		// card shows it, so a geofence that cannot work says so there.
+		var geo *gateonv1.GeoIPConfig
+		if globalReg != nil {
+			geo = globalReg.Get(r.Context()).GetGeoip()
+		}
+		state, reason := security.GeoFenceState(geo, telemetry.GeoIPLoaded())
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"exists": exists,
-			"path":   path,
-			"info":   info,
+			"exists":   exists,
+			"path":     path,
+			"info":     info,
+			"geofence": map[string]string{"state": state, "reason": reason},
 		})
 	})
 

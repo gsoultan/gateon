@@ -511,13 +511,9 @@ func ApplyRouteMiddlewares(h http.Handler, rt *gateonv1.Route, redisClient redis
 			if adv.Entropy != nil && adv.Entropy.Enabled {
 				chain = append(chain, security.Entropy(adv.Entropy.Threshold, routeLabel))
 			}
-			// TLS Binding
-			if adv.TlsBinding != nil && adv.TlsBinding.Enabled {
-				cookieName := adv.TlsBinding.CookieName
-				if cookieName == "" {
-					cookieName = "session"
-				}
-				chain = append(chain, identity.TlsBinding(cookieName))
+			// The global TLS Session Binding switch is retired (ADR 0046).
+			if adv.TlsBinding.GetEnabled() {
+				warnGlobalTLSBindingRetired()
 			}
 		}
 	}
@@ -594,4 +590,22 @@ func withMatchedRoute(rt *gateonv1.Route) middleware.Middleware {
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// globalTLSBindingRetired logs, once per process, that the global TLS Session
+// Binding switch does nothing (ADR 0046). It applied the tls_binding check to
+// every route with no secret to bind with: nothing could issue a binding, so
+// over TLS every request carrying the cookie was refused, and over plain HTTP
+// nothing happened. Binding needs a shared secret and client certificates,
+// which only a per-route tls_binding middleware can carry, so the switch is no
+// longer applied -- dropping a refusal that protected nothing -- and enabling
+// it is refused at save.
+var globalTLSBindingRetired sync.Once
+
+func warnGlobalTLSBindingRetired() {
+	globalTLSBindingRetired.Do(func() {
+		logger.L.LogWarn("security_advanced.tls_binding is enabled and does nothing: the global TLS Session " +
+			"Binding switch is retired; add a tls_binding middleware (with a secret) to the routes that need it, " +
+			"on an entrypoint that asks for client certificates, and turn the switch off")
+	})
 }

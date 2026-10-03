@@ -179,7 +179,11 @@ export type MitigationFunnel = {
   botBlocked: number;
   fileSecurityBlocked: number;
   deceptionBlocked: number;
+  mitigationBlocked: number;
   advancedSecurityBlocked: number;
+  otherRefused: number;
+  refused: number;
+  answered: number;
   totalMitigated: number;
   allowed: number;
   serverErrors: number;

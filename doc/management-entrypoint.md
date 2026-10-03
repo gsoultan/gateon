@@ -8,8 +8,9 @@ In many reverse proxies, adding a new entrypoint (e.g., for port 443) might disa
 
 The management entrypoint is:
 1. **Dedicated**: It only serves the Gateon Dashboard and the internal API. It never handles proxy traffic for your user-defined routes.
-2. **Persistent**: It starts automatically on the port specified at launch (default `8080`) and remains active regardless of any custom entrypoints you add or remove in the UI.
-3. **Hardened**: It includes built-in security layers to prevent unauthorized access.
+2. **Persistent**: It starts automatically on the management port (default `8080`; `GATEON_MANAGEMENT_PORT` or `management.port`) and remains active regardless of any custom entrypoints you add or remove in the UI.
+3. **Required**: If it cannot bind -- the port is taken by another process or an earlier instance -- the gateway exits with an error naming the address, so a service manager restarts it. It used to log the failure and run on with no management plane, which systemd could not tell from a healthy gateway.
+4. **Hardened**: It includes built-in security layers to prevent unauthorized access.
 
 ## Security Features
 
@@ -49,17 +50,25 @@ already your boundary, restrict it.
 
 Three layers set the bind address and allowlist. Later entries win:
 
-1. **Built-in fallback** — `127.0.0.1` and `127.0.0.1,::1`. These apply only
-   when `global.json` has no `management` block, i.e. before first setup.
-2. **`global.json`** — `management.bind` and `management.allowed_ips`. A fresh
-   install writes `0.0.0.0` and `["0.0.0.0/0", "::/0"]` here, which is why the
-   effective default is open rather than loopback.
-3. **Environment** — `GATEON_MANAGEMENT_BIND` and
+1. **Built-in defaults** — `0.0.0.0`, port `8080` and `["0.0.0.0/0", "::/0"]`.
+   These are what a gateway runs on **before first setup**, when there is no
+   `global.json` yet: the setup wizard is reachable from every network the host
+   is on. Setup itself needs the setup token from the startup log or the
+   data directory (ADR 0021), so a stranger who reaches it first cannot finish
+   it -- but the port is open, and the startup warning below says so.
+2. **`global.json`** — `management.bind`, `management.port` and
+   `management.allowed_ips`. Setup writes the defaults above here unless the
+   wizard is given others.
+3. **Environment** — `GATEON_MANAGEMENT_BIND`, `GATEON_MANAGEMENT_PORT` and
    `GATEON_MANAGEMENT_ALLOWED_IPS` override both.
+
+The code also has a last-resort fallback of `127.0.0.1` and `127.0.0.1,::1`,
+used only when a `global.json` has a `management` block with the bind or
+allowlist left empty. It is not what a fresh install gets.
 
 So setting only the environment variables is enough to lock the port down, and
 editing `global.json` is enough to lock it down persistently — but leaving both
-alone does **not** give you a loopback-only listener.
+alone does **not** give you a loopback-only listener, before setup or after.
 
 ## Configuration
 
@@ -73,7 +82,27 @@ same as the built-in fallback, because setup writes a wider value into
 | `GATEON_MANAGEMENT_BIND` | `0.0.0.0` | The IP address the management server binds to. Set to `127.0.0.1` to restrict it to the local machine. |
 | `GATEON_MANAGEMENT_ALLOWED_IPS` | `0.0.0.0/0,::/0` (unrestricted) | A comma-separated list of IP addresses or CIDR blocks allowed to connect to the management port. Set this to your admin network. |
 | `GATEON_MANAGEMENT_HOST` | unset | Restrict the management entrypoint to a specific `Host` header, e.g. `gateon.example.com`. |
-| `PORT` | `8080` | The port used by the management entrypoint (shared with the default startup configuration). |
+| `GATEON_MANAGEMENT_PORT` | `8080` | The port the management entrypoint listens on. Overrides `management.port`. |
+
+`PORT` does **not** move the management listener: the built-in configuration
+and every `global.json` setup writes carry `management.port`, which wins over
+it. Earlier versions of this page and of the systemd unit said otherwise. Use
+`GATEON_MANAGEMENT_PORT`.
+
+## Readiness
+
+`/healthz` answers whether the process is alive; `/readyz` whether it should be
+sent traffic. `/readyz` answers `503` with the reasons, separated by `;`, when:
+
+- the telemetry store did not open, or the trace store has stopped writing
+  because its disk is nearly full (`trace store paused: ...`) or filled while
+  it was writing (`trace store stopped: ...`);
+- an entrypoint could not bind its address (`entrypoint websecure could not
+  listen on :443: ...`) -- the gateway keeps serving its other entrypoints, and
+  `gateon_entrypoint_up{entrypoint}` is `0` for that one;
+- the configuration database does not answer
+  (`configuration database unreachable`); `gateon_config_db_up` is `0`, and a
+  sign-in answers `503` rather than the `401` of a wrong password.
 
 ## Recommended Setup with Cloudflare Tunnel
 

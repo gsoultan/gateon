@@ -33,10 +33,10 @@ func (e engineManager) assertAccount(t *testing.T, username, id, role, password 
 	if len(found) != 1 || found[0].Id != id || found[0].Role != role {
 		t.Errorf("accounts named %s: %v, want one with id %s and role %s", username, found, id, role)
 	}
-	if _, _, err := e.m.Authenticate(username, password); err != nil {
+	if _, _, err := e.m.Authenticate(username, password, ""); err != nil {
 		t.Errorf("%s no longer signs in with its own password: %v", username, err)
 	}
-	if _, _, err := e.m.Authenticate(username, takeoverPassword); !errors.Is(err, ErrInvalidCredentials) {
+	if _, _, err := e.m.Authenticate(username, takeoverPassword, ""); !errors.Is(err, ErrInvalidCredentials) {
 		t.Errorf("the refused write's password opens %s: err %v", username, err)
 	}
 }
@@ -75,14 +75,14 @@ func TestRenamingOntoATakenNameIsRefused(t *testing.T) {
 	onEveryEngine(t, func(t *testing.T, e engineManager) {
 		alice, bob := e.name("alice"), e.name("bob")
 		aliceID := e.create(t, alice, "alices-password", RoleViewer)
-		bobID := e.create(t, bob, "bobs-password", RoleOperator)
+		bobID := e.create(t, bob, "the-other-accounts-pw", RoleOperator)
 
 		err := e.m.UpsertUser(&gateonv1.User{Id: bobID, Username: alice, Password: takeoverPassword, Role: RoleAdmin})
 		if !errors.Is(err, ErrUsernameTaken) {
 			t.Errorf("renaming bob onto alice: err %v, want ErrUsernameTaken", err)
 		}
 		e.assertAccount(t, alice, aliceID, RoleViewer, "alices-password")
-		e.assertAccount(t, bob, bobID, RoleOperator, "bobs-password")
+		e.assertAccount(t, bob, bobID, RoleOperator, "the-other-accounts-pw")
 	})
 }
 
@@ -133,7 +133,7 @@ func TestRacingCreatesForOneNameMakeOneAccount(t *testing.T) {
 		var wg sync.WaitGroup
 		for i := range racers {
 			wg.Go(func() {
-				u := &gateonv1.User{Username: name, Password: "password-" + strconv.Itoa(i), Role: RoleViewer}
+				u := &gateonv1.User{Username: name, Password: "racing-passphrase-" + strconv.Itoa(i), Role: RoleViewer}
 				errs[i] = e.m.UpsertUser(u)
 				ids[i] = u.Id
 			})

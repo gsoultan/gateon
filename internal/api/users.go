@@ -7,8 +7,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/gsoultan/gateon/internal/auth"
+	"github.com/gsoultan/gateon/internal/auth/apitoken"
+	"github.com/gsoultan/gateon/internal/auth/passpolicy"
 	"github.com/gsoultan/gateon/internal/logger"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 	"google.golang.org/grpc/codes"
@@ -57,6 +60,10 @@ func (s *ApiService) UpdateUser(ctx context.Context, req *gateonv1.UpdateUserReq
 		// nothing was written. AlreadyExists is 409 over REST.
 		if errors.Is(err, auth.ErrUsernameTaken) {
 			return nil, status.Error(codes.AlreadyExists, auth.ErrUsernameTaken.Error())
+		}
+		// A refusal too: the password policy (ADR 0050), named, 400 over REST.
+		if errors.Is(err, passpolicy.ErrWeak) {
+			return nil, status.Error(codes.InvalidArgument, err.Error())
 		}
 		return &gateonv1.UpdateUserResponse{Success: false}, err
 	}
@@ -116,18 +123,28 @@ func (s *ApiService) ChangePassword(ctx context.Context, req *gateonv1.ChangePas
 	// the password for whatever id the request named -- the check skipped by
 	// exactly the caller it could not identify. requireAdmin, ten lines below,
 	// denies on that same condition.
+	//
+	// And no caller at all is refused too. "No claims" used to mean "auth is
+	// off, anything goes", so with authentication switched off -- or on any
+	// path that reached here without a credential -- an anonymous request reset
+	// the administrator's password by id (M3, ADR 0050). A password change acts
+	// for an authenticated caller or not at all, whatever the transport and
+	// whatever the deployment's authentication setting.
 	claims, present := callerClaims(ctx)
-	if present && (claims == nil || (claims.Role != auth.RoleAdmin && claims.ID != req.Id)) {
+	if !present || claims == nil || (claims.Role != auth.RoleAdmin && claims.ID != req.Id) {
 		return nil, status.Error(codes.PermissionDenied, "cannot change password for another user")
 	}
 
 	// Your own password needs the one you have now: see auth.Manager.ChangeOwnPassword.
 	// An administrator resetting another account keeps today's rule.
-	if present && claims.ID == req.Id {
+	if claims.ID == req.Id {
 		if err := s.changeOwnPassword(ctx, req); err != nil {
 			return nil, err
 		}
 	} else if err := s.Auth.ChangePassword(req.Id, req.Password); err != nil {
+		if errors.Is(err, passpolicy.ErrWeak) {
+			return nil, status.Error(codes.InvalidArgument, err.Error())
+		}
 		return &gateonv1.ChangePasswordResponse{Success: false}, err
 	}
 	s.logAudit(ctx, "change_password", "user", fmt.Sprintf("Changed password for user %s", req.Id))
@@ -148,6 +165,8 @@ func (s *ApiService) changeOwnPassword(ctx context.Context, req *gateonv1.Change
 	switch {
 	case err == nil:
 		return nil
+	case errors.Is(err, passpolicy.ErrWeak):
+		return status.Error(codes.InvalidArgument, err.Error())
 	case errors.Is(err, auth.ErrInvalidCredentials):
 		s.logAudit(ctx, "change_password_refused", "user", fmt.Sprintf("Wrong current password for user %s", req.Id))
 		return status.Error(codes.PermissionDenied, "the current password is incorrect")
@@ -167,4 +186,94 @@ func (s *ApiService) requireAdmin(ctx context.Context) error {
 		return status.Error(codes.PermissionDenied, "admin role required")
 	}
 	return nil
+}
+
+// errNoTokenStore answers the token RPCs before there is a database.
+var errNoTokenStore = status.Error(codes.Unavailable, "api tokens are unavailable until setup has run")
+
+// tokenStore is the scrape-credential store, for an administrator only.
+func (s *ApiService) tokenStore(ctx context.Context) (*apitoken.Store, error) {
+	if err := s.requireAdmin(ctx); err != nil {
+		return nil, err
+	}
+	if !auth.Available(s.Auth) || s.Auth.APITokens() == nil {
+		return nil, errNoTokenStore
+	}
+	return s.Auth.APITokens(), nil
+}
+
+// ListApiTokens lists the scrape credentials, without their secrets (ADR 0050).
+func (s *ApiService) ListApiTokens(ctx context.Context, req *gateonv1.ListApiTokensRequest) (*gateonv1.ListApiTokensResponse, error) {
+	store, err := s.tokenStore(ctx)
+	if err != nil {
+		return nil, err
+	}
+	tokens, total, err := store.List(ctx, int(req.GetPage()), int(req.GetPageSize()))
+	if err != nil {
+		return nil, err
+	}
+	out := &gateonv1.ListApiTokensResponse{
+		TotalCount: int32(total), //nolint:gosec // at most apitoken.MaxActive
+		Page:       req.GetPage(),
+		PageSize:   req.GetPageSize(),
+	}
+	for _, t := range tokens {
+		out.Tokens = append(out.Tokens, apiTokenProto(t))
+	}
+	return out, nil
+}
+
+// CreateApiToken issues a scrape credential and returns its secret, once.
+func (s *ApiService) CreateApiToken(ctx context.Context, req *gateonv1.CreateApiTokenRequest) (*gateonv1.CreateApiTokenResponse, error) {
+	store, err := s.tokenStore(ctx)
+	if err != nil {
+		return nil, err
+	}
+	claims, _ := callerClaims(ctx)
+	tok, secret, err := store.Create(ctx, apitoken.CreateParams{
+		Name: req.GetName(), Scopes: req.GetScopes(), CreatedBy: claims.Username, TTLDays: int(req.GetTtlDays()),
+	})
+	switch {
+	case errors.Is(err, apitoken.ErrBadRequest):
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	case errors.Is(err, apitoken.ErrTooMany):
+		return nil, status.Error(codes.ResourceExhausted, err.Error())
+	case err != nil:
+		return nil, err
+	}
+	s.logAudit(ctx, "create", "api_token", fmt.Sprintf("Created API token %s (%s) with scopes %v", tok.ID, tok.Name, tok.Scopes))
+	return &gateonv1.CreateApiTokenResponse{Token: apiTokenProto(tok), Secret: secret}, nil
+}
+
+// RevokeApiToken deletes a scrape credential; it stops working at once.
+func (s *ApiService) RevokeApiToken(ctx context.Context, req *gateonv1.RevokeApiTokenRequest) (*gateonv1.RevokeApiTokenResponse, error) {
+	store, err := s.tokenStore(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := store.Revoke(ctx, req.GetId()); err != nil {
+		if errors.Is(err, apitoken.ErrNotFound) {
+			return nil, status.Error(codes.NotFound, err.Error())
+		}
+		return nil, err
+	}
+	s.logAudit(ctx, "revoke", "api_token", "Revoked API token "+req.GetId())
+	return &gateonv1.RevokeApiTokenResponse{Success: true}, nil
+}
+
+func apiTokenProto(t apitoken.Token) *gateonv1.ApiToken {
+	out := &gateonv1.ApiToken{
+		Id: t.ID, Name: t.Name, Hint: t.Hint, CreatedBy: t.CreatedBy,
+		CreatedAt: t.CreatedAt.UTC().Format(time.RFC3339),
+	}
+	for _, sc := range t.Scopes {
+		out.Scopes = append(out.Scopes, string(sc))
+	}
+	if !t.LastUsedAt.IsZero() {
+		out.LastUsedAt = t.LastUsedAt.UTC().Format(time.RFC3339)
+	}
+	if !t.ExpiresAt.IsZero() {
+		out.ExpiresAt = t.ExpiresAt.UTC().Format(time.RFC3339)
+	}
+	return out
 }

@@ -48,6 +48,12 @@ func (s *serviceImpl) GetService(ctx context.Context, id string) (*gateonv1.Serv
 
 // SaveService validates, assigns ID if needed, persists, and invalidates affected route proxies.
 func (s *serviceImpl) SaveService(ctx context.Context, svc *gateonv1.Service) error {
+	if svc == nil {
+		return fmt.Errorf("%w: missing service", ErrInvalidService)
+	}
+	if err := validateService(svc); err != nil {
+		return err
+	}
 	if svc.Id == "" {
 		svc.Id = uuid.NewString()
 	}

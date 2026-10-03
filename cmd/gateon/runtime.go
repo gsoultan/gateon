@@ -4,6 +4,7 @@
 package main
 
 import (
+	"math"
 	"os"
 	"runtime"
 	"runtime/debug"
@@ -11,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/gsoultan/gateon/internal/logger"
+	"github.com/gsoultan/gateon/internal/resource"
 )
 
 // tuneRuntime applies container-aware runtime settings for a low-footprint,
@@ -24,8 +26,11 @@ import (
 // Memory: Go natively honors the GOMEMLIMIT env var. For convenience we also
 // accept GATEON_MEMORY_LIMIT (e.g. "512MiB", "1GiB", or a raw byte count) and
 // apply it as a soft limit via debug.SetMemoryLimit. A soft limit makes the GC
-// work harder to stay under the ceiling instead of being OOM-killed. It is
-// opt-in: set it too low and the GC can thrash, so we leave it unset by default.
+// work harder to stay under the ceiling instead of being OOM-killed. With
+// neither set, and a cgroup memory limit in force -- the packaged unit's
+// MemoryMax, a container's --memory -- the soft limit is derived from it
+// (cgroupMemoryLimitShare). Without that the GC did not know the ceiling was
+// there until the kernel OOM-killed the process at it.
 //
 // GC target: GATEON_GOGC overrides the GC percentage (lower = less memory, more
 // CPU; higher = more memory, less CPU). Go also honors the GOGC env var natively;
@@ -45,6 +50,10 @@ func tuneRuntime() {
 		} else {
 			logger.L.LogWarn("invalid GATEON_MEMORY_LIMIT, ignoring", "value", v)
 		}
+	} else if limit, ok := derivedMemoryLimit(os.Getenv, resource.CgroupMemoryLimit); ok {
+		debug.SetMemoryLimit(limit)
+		logger.L.LogInfo("Go memory limit derived from the cgroup memory limit; set GATEON_MEMORY_LIMIT to choose it",
+			"gomemlimit_bytes", limit)
 	}
 
 	logger.L.LogInfo("runtime tuned",
@@ -53,6 +62,27 @@ func tuneRuntime() {
 		"gomemlimit_bytes", debug.SetMemoryLimit(-1),
 		"gogc_env", os.Getenv("GOGC"),
 	)
+}
+
+// cgroupMemoryLimitShare is the share of a cgroup memory limit the derived Go
+// soft limit takes: the rest is the stacks, the allocator's metadata and what
+// is mapped outside the heap, which the cgroup counts and GOMEMLIMIT does not.
+// Under the packaged unit's MemoryMax=90% on the 2 GB target it gives ~1.5 GiB,
+// what doc/deployment-sizing.md recommends.
+const cgroupMemoryLimitShare = 85
+
+// derivedMemoryLimit is the soft limit to apply when the operator set none:
+// cgroupMemoryLimitShare percent of the cgroup's memory.max, and false when
+// GOMEMLIMIT is set (the runtime already applied it) or there is no limit.
+func derivedMemoryLimit(getenv func(string) string, cgroupLimit func() (uint64, bool)) (int64, bool) {
+	if strings.TrimSpace(getenv("GOMEMLIMIT")) != "" {
+		return 0, false
+	}
+	limit, ok := cgroupLimit()
+	if !ok || limit == 0 || limit > math.MaxInt64 {
+		return 0, false
+	}
+	return int64(limit / 100 * cgroupMemoryLimitShare), true
 }
 
 // parseByteSize parses a byte count with an optional binary (Ki/Mi/Gi/Ti) or

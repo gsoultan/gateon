@@ -20,6 +20,7 @@ import (
 	"github.com/gsoultan/gateon/internal/middleware/security"
 	"github.com/gsoultan/gateon/internal/middleware/security/identity"
 	"github.com/gsoultan/gateon/internal/middleware/traffic"
+	"github.com/gsoultan/gateon/internal/server/readiness"
 	"github.com/gsoultan/gateon/internal/syncutil"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
@@ -209,9 +210,12 @@ func (e *httpEntrypoint) startHTTP3(h http.Handler) http.Handler {
 	// the server accepts from is the one that holds the entrypoint's limit.
 	ln, err := quic.ListenAddrEarly(addr, http3.ConfigureTLSConfig(e.tlsConfig), h3Server.QUICConfig.Clone())
 	if err != nil {
-		logger.L.LogError("HTTP/3 listen failed", "error", err, "addr", addr)
+		logger.L.LogError("HTTP/3 listen failed; the entrypoint is not serving HTTP/3 and /readyz reports it",
+			"error", err, "addr", addr, "ep", e.ep.Id)
+		readiness.ListenerFailed(e.ep.Id, "udp "+addr, err)
 		return h
 	}
+	readiness.ListenerBound(e.ep.Id, "udp "+addr)
 	if e.deps.ShutdownRegistry != nil {
 		e.deps.ShutdownRegistry.Register(func(ctx context.Context) error {
 			err := h3Server.Close()
@@ -299,9 +303,12 @@ func (e *httpEntrypoint) serveTCP(server *http.Server) {
 	addr := e.ep.Address
 	l, err := net.Listen("tcp", addr)
 	if err != nil {
-		logger.L.LogError("HTTP/S listen failed", "error", err, "addr", addr)
+		logger.L.LogError("HTTP/S listen failed; the entrypoint is not serving and /readyz reports it",
+			"error", err, "addr", addr, "ep", e.ep.Id)
+		readiness.ListenerFailed(e.ep.Id, addr, err)
 		return
 	}
+	readiness.ListenerBound(e.ep.Id, addr)
 	if e.deps.Phantom != nil {
 		l = e.deps.Phantom.OptimizeListener(l)
 	}

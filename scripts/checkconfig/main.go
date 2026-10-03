@@ -34,6 +34,7 @@ package main
 import (
 	"fmt"
 	"go/ast"
+	"go/token"
 	"go/types"
 	"os"
 	"path/filepath"
@@ -45,8 +46,10 @@ import (
 )
 
 const (
-	protoDir     = "proto/gateon/v1"
-	baselinePath = "scripts/checkconfig/baseline.txt"
+	protoDir          = "proto/gateon/v1"
+	baselinePath      = "scripts/checkconfig/baseline.txt"
+	sinksBaselinePath = "scripts/checkconfig/sinks-baseline.txt"
+	modulePath        = "github.com/gsoultan/gateon"
 )
 
 // Only *Config messages are checked. Request/response types are wire contracts
@@ -129,7 +132,7 @@ const protoPkgPath = "github.com/gsoultan/gateon/proto/gateon/v1"
 // flag a dead Enabled; "Password" is read for auth while RedisConfig.password is
 // dropped on the floor. A check that reports "ok" for config nothing reads is the
 // very failure it exists to catch, one level up.
-func readSelections() (map[string]map[string]bool, error) {
+func readSelections(sinks *sinkFacts, values *valueFacts) (map[string]map[string]bool, error) {
 	out := map[string]map[string]bool{}
 	// Build constraints hide readers: internal/ebpf/manager_linux.go is
 	// //go:build linux, so loading only the host platform on a Mac reports every
@@ -138,6 +141,7 @@ func readSelections() (map[string]map[string]bool, error) {
 	for _, goos := range []string{"linux", "darwin"} {
 		cfg := &packages.Config{
 			Mode: packages.NeedName | packages.NeedSyntax | packages.NeedTypes | packages.NeedTypesInfo,
+			Fset: token.NewFileSet(),
 			// Tests excluded: a field exercised only by a test is still wired to
 			// no behaviour, which is the condition being detected.
 			Tests: false,
@@ -155,6 +159,8 @@ func readSelections() (map[string]map[string]bool, error) {
 			}
 			for _, file := range pkg.Syntax {
 				recordSelections(file, pkg.TypesInfo, out)
+				recordSinks(pkg.Fset, file, pkg.TypesInfo, sinks)
+				recordValues(pkg.PkgPath, file, pkg.TypesInfo, values)
 			}
 		}
 	}
@@ -213,7 +219,9 @@ func loadBaseline(path string) (map[string]bool, error) {
 		return nil, err
 	}
 	for _, line := range strings.Split(string(raw), "\n") {
-		if line = strings.TrimSpace(line); line != "" && !strings.HasPrefix(line, "#") {
+		// A trailing "# note" is allowed; the key is what precedes it.
+		line, _, _ = strings.Cut(line, "#")
+		if line = strings.TrimSpace(line); line != "" {
 			out[line] = true
 		}
 	}
@@ -226,17 +234,28 @@ func main() {
 		fmt.Fprintf(os.Stderr, "checkconfig: reading schema: %v\n", err)
 		os.Exit(2)
 	}
-	selections, err := readSelections()
+	sinks, values := newSinkFacts(), newValueFacts()
+	selections, err := readSelections(sinks, values)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "checkconfig: loading packages: %v\n", err)
 		os.Exit(2)
 	}
+	failed := checkFields(fields, selections)
+	failed = checkSinks(sinks) || failed
+	failed = checkValues(values) || failed
+	failed = checkEffects() || failed
+	if failed {
+		os.Exit(1)
+	}
+}
+
+// checkFields reports proto *Config fields no Go selects; true when one is new.
+func checkFields(fields []protoField, selections map[string]map[string]bool) bool {
 	baseline, err := loadBaseline(baselinePath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "checkconfig: reading baseline: %v\n", err)
 		os.Exit(2)
 	}
-
 	var unread, fixed []string
 	for _, f := range fields {
 		// Read only if selected on its own message type, by field or by getter.
@@ -257,7 +276,7 @@ func main() {
 	}
 	if len(unread) == 0 {
 		fmt.Printf("ok - every config field outside the baseline is read by Go (%d checked)\n", len(fields))
-		return
+		return false
 	}
 	fmt.Fprintf(os.Stderr, "\nconfig fields that nothing reads:\n")
 	for _, u := range unread {
@@ -268,5 +287,46 @@ A field that exists in the proto and is rendered by the dashboard but is read by
 no Go code is a control wired to nothing. Either read it, remove it (reserving
 the tag), or add it to %s with a note saying why.
 `, baselinePath)
-	os.Exit(1)
+	return true
+}
+
+// checkSinks reports struct fields filled from configuration and read by
+// nothing; true when one is outside the baseline.
+func checkSinks(sinks *sinkFacts) bool {
+	baseline, err := loadBaseline(sinksBaselinePath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "checkconfig: reading sinks baseline: %v\n", err)
+		os.Exit(2)
+	}
+	dead := sinks.deadSinks()
+	var fresh []string
+	for name, at := range dead {
+		if !baseline[name] {
+			fresh = append(fresh, fmt.Sprintf("%s (set from config at %s)", name, at))
+		}
+	}
+	var fixed []string
+	for name := range baseline {
+		if _, still := dead[name]; !still {
+			fixed = append(fixed, name)
+		}
+	}
+	sort.Strings(fresh)
+	sort.Strings(fixed)
+	for _, k := range fixed {
+		fmt.Printf("  note - %s is no longer a dead sink; delete it from %s\n", k, sinksBaselinePath)
+	}
+	if len(fresh) == 0 {
+		fmt.Printf("ok - every config-fed struct field outside the baseline is read (%d written from config)\n", len(sinks.writes))
+		return false
+	}
+	fmt.Fprintf(os.Stderr, "\nstruct fields set from configuration that nothing reads:\n")
+	for _, u := range fresh {
+		fmt.Fprintf(os.Stderr, "  %s\n", u)
+	}
+	fmt.Fprintf(os.Stderr, `
+The setting is read -- into a field no code consults, so it changes nothing.
+Use the field, remove the setting, or add it to %s with a note saying why.
+`, sinksBaselinePath)
+	return true
 }

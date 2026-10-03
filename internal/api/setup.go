@@ -9,7 +9,9 @@ import (
 	"fmt"
 	"slices"
 
+	"github.com/gsoultan/gateon/internal/audit"
 	"github.com/gsoultan/gateon/internal/auth"
+	"github.com/gsoultan/gateon/internal/auth/passpolicy"
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/db"
 	"github.com/gsoultan/gateon/internal/logger"
@@ -63,6 +65,12 @@ func (s *ApiService) Setup(ctx context.Context, req *gateonv1.SetupRequest) (*ga
 	if !s.SetupToken.Matches(req.GetSetupToken()) {
 		return &gateonv1.SetupResponse{Success: false, Error: auth.ErrSetupTokenRequired.Error()}, nil
 	}
+	// Before anything is written: a refused password must not leave databases
+	// chosen or an auth manager installed behind it (ADR 0050). UpsertUser
+	// checks again; this is so nothing has happened when it would refuse.
+	if err := passpolicy.Check(req.AdminPassword, req.AdminUsername); err != nil {
+		return &gateonv1.SetupResponse{Success: false, Error: err.Error()}, nil
+	}
 	// After the guard, never before it: this writes the auth and audit
 	// databases, and on a configured gateway that would let an unauthenticated
 	// caller point both at a server it controls.
@@ -70,46 +78,27 @@ func (s *ApiService) Setup(ctx context.Context, req *gateonv1.SetupRequest) (*ga
 		return &gateonv1.SetupResponse{Success: false, Error: err.Error()}, nil
 	}
 
+	// Setup is all or nothing (review finding M13). It used to create the
+	// administrator and install the auth service, then fail to write the
+	// config -- a read-only or missing config directory -- and answer failure
+	// with both still in place. Where global.json already existed, the
+	// administrator alone closed setup for good, over a config that had
+	// neither the session key nor auth.enabled. A failure now undoes what
+	// this call did, so setup stays open and a retry starts clean.
+	prevAuth, installed := s.Auth, false
 	if !auth.Available(s.Auth) {
 		if err := s.installAuthManager(ctx, req.PasetoSecret); err != nil {
 			return &gateonv1.SetupResponse{Success: false, Error: err.Error()}, nil
 		}
+		installed = true
 	}
-
-	// 1. Create/Update Admin User
-	admin := &gateonv1.User{
-		Username: req.AdminUsername,
-		Password: req.AdminPassword,
-		Role:     auth.RoleAdmin,
-	}
-	if existing, _, _ := s.Auth.ListUsers(0, 1000, admin.Username); len(existing) > 0 {
-		if i := slices.IndexFunc(existing, func(u *gateonv1.User) bool { return u.Username == admin.Username }); i >= 0 {
-			admin.Id = existing[i].Id
-		}
-	}
-	if err := s.Auth.UpsertUser(admin); err != nil {
+	createdID, err := s.upsertSetupAdmin(req)
+	if err != nil {
+		s.undoSetup(prevAuth, installed, "")
 		return &gateonv1.SetupResponse{Success: false, Error: "failed to create admin: " + err.Error()}, nil
 	}
-
-	// 2. Update Global Config (Paseto Secret and Management Settings)
-	conf := s.Globals.Get(ctx)
-	if conf.Auth == nil {
-		conf.Auth = &gateonv1.AuthConfig{}
-	}
-	conf.Auth.PasetoSecret = req.PasetoSecret
-	conf.Auth.Enabled = true
-
-	if conf.Management == nil {
-		conf.Management = &gateonv1.ManagementConfig{}
-	}
-	if req.ManagementBind != "" {
-		conf.Management.Bind = req.ManagementBind
-	}
-	if req.ManagementPort != "" {
-		conf.Management.Port = req.ManagementPort
-	}
-
-	if err := s.Globals.Update(ctx, conf); err != nil {
+	if err := s.saveSetupConfig(ctx, req); err != nil {
+		s.undoSetup(prevAuth, installed, createdID)
 		return &gateonv1.SetupResponse{Success: false, Error: "failed to update config: " + err.Error()}, nil
 	}
 
@@ -126,6 +115,104 @@ func (s *ApiService) Setup(ctx context.Context, req *gateonv1.SetupRequest) (*ga
 	s.SetupToken.Retire()
 
 	return &gateonv1.SetupResponse{Success: true}, nil
+}
+
+// upsertSetupAdmin creates the administrator Setup asks for, or takes over the
+// account of that name, and returns the id when this call created it.
+func (s *ApiService) upsertSetupAdmin(req *gateonv1.SetupRequest) (string, error) {
+	admin := &gateonv1.User{
+		Username: req.AdminUsername,
+		Password: req.AdminPassword,
+		Role:     auth.RoleAdmin,
+	}
+	if existing, _, _ := s.Auth.ListUsers(0, 1000, admin.Username); len(existing) > 0 {
+		if i := slices.IndexFunc(existing, func(u *gateonv1.User) bool { return u.Username == admin.Username }); i >= 0 {
+			admin.Id = existing[i].Id
+		}
+	}
+	existed := admin.Id != ""
+	if err := s.Auth.UpsertUser(admin); err != nil {
+		return "", err
+	}
+	if existed {
+		return "", nil
+	}
+	return admin.Id, nil
+}
+
+// saveSetupConfig writes the session key, auth.enabled and the management
+// settings Setup chose to the global config.
+func (s *ApiService) saveSetupConfig(ctx context.Context, req *gateonv1.SetupRequest) error {
+	conf, ok := proto.Clone(s.Globals.Get(ctx)).(*gateonv1.GlobalConfig)
+	if !ok || conf == nil {
+		conf = &gateonv1.GlobalConfig{}
+	}
+	if conf.Auth == nil {
+		conf.Auth = &gateonv1.AuthConfig{}
+	}
+	conf.Auth.PasetoSecret = req.PasetoSecret
+	conf.Auth.Enabled = true
+	if conf.Management == nil {
+		conf.Management = &gateonv1.ManagementConfig{}
+	}
+	if req.ManagementBind != "" {
+		conf.Management.Bind = req.ManagementBind
+	}
+	if req.ManagementPort != "" {
+		conf.Management.Port = req.ManagementPort
+	}
+	recordFromTheStart(conf)
+	if err := s.Globals.Update(ctx, conf); err != nil {
+		return err
+	}
+	// The saved audit settings take effect now, so Setup's own entry below is
+	// the first one recorded and signed.
+	audit.UpdateConfig(conf.Audit)
+	return nil
+}
+
+// undoSetup takes back what a failed Setup did: the administrator it created
+// and the auth service it installed, so the gateway is as it was before the
+// call -- setup still open, the token still valid.
+func (s *ApiService) undoSetup(prev auth.Service, installed bool, createdID string) {
+	if createdID != "" {
+		if err := s.Auth.DeleteUser(createdID); err != nil {
+			logger.L.LogError("setup failed and the administrator it created could not be removed", "error", err)
+		}
+	}
+	if !installed {
+		return
+	}
+	installedSvc := s.Auth
+	if h, ok := s.Auth.(*auth.Holder); ok && h != nil {
+		installedSvc = h.Get()
+		h.Set(nil)
+	} else {
+		s.Auth = prev
+	}
+	if c, ok := installedSvc.(interface{ Close() error }); ok {
+		_ = c.Close()
+	}
+}
+
+// recordFromTheStart turns the audit log on, signed, for an install being set
+// up (ADR 0050). It was off by default, so a default install recorded nothing
+// -- sign-ins, user changes, configuration changes -- and the chain its
+// entries would have formed was never there to verify. Setup is the one moment
+// that is unambiguously a new install: a stored "enabled": false is not
+// written to global.json (it is the zero value), so an existing install that
+// chose to switch audit off cannot be told from one that never chose, and is
+// left as it is. An administrator can switch it off afterwards; that change is
+// itself recorded.
+func recordFromTheStart(conf *gateonv1.GlobalConfig) {
+	if conf.Audit == nil {
+		conf.Audit = &gateonv1.AuditConfig{}
+	}
+	conf.Audit.Enabled = true
+	conf.Audit.SignEntries = true
+	if conf.Audit.SignatureKey == "" {
+		conf.Audit.SignatureKey = audit.GenerateSignatureKey()
+	}
 }
 
 // errPersistSetupDatabases is what a caller sees when the chosen databases
@@ -211,7 +298,7 @@ func chosenDatabase(databaseURL string, cfg *gateonv1.DatabaseConfig) (string, *
 // Extracted from Setup because the nesting there had grown past the point where
 // the interesting line — the Holder swap — was visible at a glance.
 func (s *ApiService) installAuthManager(ctx context.Context, pasetoSecret string) error {
-	databaseURL := "gateon.db"
+	databaseURL := db.AuthDatabaseURL(nil)
 	if s.Globals != nil {
 		if conf := s.Globals.Get(ctx); conf != nil && conf.Auth != nil {
 			databaseURL = db.AuthDatabaseURL(conf.Auth)

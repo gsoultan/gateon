@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
 // SPDX-License-Identifier: MIT
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   Card,
   Title,
@@ -52,6 +52,7 @@ import { queryClient } from "../queryClient";
 import { ConfirmDeleteModal } from "../components/ConfirmDelete";
 import { notifyError, notifySuccess } from "../utils/notify";
 import { userSaveRefusalMessage } from "../components/userSaveMessages";
+import { PASSWORD_RULE, passwordPolicyError } from "../components/passwordPolicy";
 
 export default function UsersPage() {
   const [search, setSearch] = useState("");
@@ -74,6 +75,10 @@ export default function UsersPage() {
   const token = useAuthStore((state) => state.token);
   const logout = useAuthStore((state) => state.logout);
   const navigate = useNavigate();
+  // Read by the form's validation, which may keep the closure of the first
+  // render: whether the open form is an edit is decided at submit, not then.
+  const editingRef = useRef<User | null>(null);
+  editingRef.current = editingUser;
 
   const form = useForm({
     initialValues: {
@@ -84,6 +89,10 @@ export default function UsersPage() {
     validate: {
       username: (value: string) =>
         value.length < 2 ? "Username is too short" : null,
+      // A new account needs a password the gateway will accept (ADR 0050);
+      // an edit sends none and keeps the one it has.
+      password: (value: string, values: { username: string }) =>
+        editingRef.current ? null : passwordPolicyError(value, values.username),
       role: (value: string) => (!value ? "Role is required" : null),
     },
   });
@@ -192,7 +201,7 @@ export default function UsersPage() {
 
       // A taken username is refused (409) and nothing is written; say so in
       // the dashboard's words and keep the form open to pick another name.
-      const refusal = userSaveRefusalMessage(res.status);
+      const refusal = userSaveRefusalMessage(res.status, !!values.password);
       if (refusal) {
         notifyError(null, { title: "Could not save user", message: refusal });
         return;
@@ -558,6 +567,7 @@ export default function UsersPage() {
               <PasswordInput
                 label="Password"
                 placeholder="Enter password"
+                description={PASSWORD_RULE}
                 required
                 {...form.getInputProps("password")}
               />

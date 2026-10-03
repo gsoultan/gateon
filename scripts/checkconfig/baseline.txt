@@ -43,11 +43,31 @@
 # so setting enabled=false leaves it on.
 
 
+# --- TlsBindingConfig ---
+# The global "TLS Session Binding" switch is retired (ADR 0046): it had no
+# secret to bind with, so it could only refuse sessions. `enabled` is still
+# read -- turning it on is refused and one left on is logged -- but nothing
+# reads cookie_name any more. Remove the message (reserving its tags) the next
+# time security_advanced's proto is changed.
+TlsBindingConfig.cookie_name
+
 # --- TlsConfig ---
 # auto_redirect: an operator who asked for HTTP-to-HTTPS redirection
 # did not get it. Security-adjacent.
 
 # --- WafConfig ---
+# java, nodejs, php, protocol, ransomware_detection: the GLOBAL WAF's category
+# booleans. The global WAF runs every family and ignores them on purpose: with
+# no presence and omitempty storage, an untouched switch and a switched-off one
+# both store false, and honouring them would strip detection from every install
+# that never set them (ADR 0044). The dashboard no longer offers them; it shows
+# what runs from GET /v1/waf/effective. They were "read" only by the copy into a
+# route WAF that T7 removed. Needs a field recording an explicit "off".
+WafConfig.java
+WafConfig.nodejs
+WafConfig.php
+WafConfig.protocol
+WafConfig.ransomware_detection
 # rules_url: the updater cannot be pointed at a mirror or private
 # ruleset. update_interval_hours: the WafConfig one is dead; the identically
 # named IPReputationConfig field is what is actually read.

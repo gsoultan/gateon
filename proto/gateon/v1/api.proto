@@ -82,6 +82,15 @@ service ApiService {
   rpc CreateWafRule(CreateWafRuleRequest) returns (CreateWafRuleResponse);
   rpc UpdateWafRule(UpdateWafRuleRequest) returns (UpdateWafRuleResponse);
   rpc DeleteWafRule(DeleteWafRuleRequest) returns (DeleteWafRuleResponse);
+
+  // Scrape credentials (ADR 0050). Administrators only.
+  rpc ListApiTokens(ListApiTokensRequest) returns (ListApiTokensResponse);
+  rpc CreateApiToken(CreateApiTokenRequest) returns (CreateApiTokenResponse);
+  rpc RevokeApiToken(RevokeApiTokenRequest) returns (RevokeApiTokenResponse);
+
+  // VerifyAuditChain checks the audit log's HMAC chain over a bounded window
+  // (ADR 0050). Administrators only.
+  rpc VerifyAuditChain(VerifyAuditChainRequest) returns (VerifyAuditChainResponse);
 }
 
 message RunDeepScanRequest {}

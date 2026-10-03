@@ -14,7 +14,7 @@ setup('authenticate admin', async ({ page }) => {
   
   await page.goto('/login');
   await page.getByPlaceholder('Enter your username').fill('admin');
-  await page.getByPlaceholder('••••••••').fill('password123');
+  await page.getByPlaceholder('••••••••').fill('e2e-horse-battery-42');
   await page.getByRole('button', { name: /Continue to Dashboard/i }).click();
 
   // Wait for dashboard to load

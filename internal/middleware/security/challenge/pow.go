@@ -9,7 +9,6 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
-	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -87,78 +86,93 @@ func powKey(secret string) []byte {
 type powChallenge struct {
 	key        []byte
 	difficulty int
+	routeID    string
 }
 
-// Pow checks if a client needs to solve a cryptographic challenge.
+// Pow challenges a client whose threat score exceeds threshold to solve a
+// proof of work before its request reaches the origin.
 func Pow(difficulty int, threshold float64, secret string, routeID string) kind.Middleware {
-	pc := powChallenge{key: powKey(secret), difficulty: difficulty}
+	pc := powChallenge{key: powKey(secret), difficulty: difficulty, routeID: routeID}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Skip for gateon's own traffic, if difficulty is 0, or for an
-			// allowlisted source. A proof-of-work challenge is an active
-			// mitigation: it costs the client a round trip and CPU, and an API
-			// client or monitoring probe the operator has vouched for cannot
-			// solve one at all.
-			//
-			// The first test used to be kind.IsInternalPath(r.URL.Path), which
-			// matches gateon's management paths by *prefix* -- /v1/routes,
-			// /v1/global, /v1/security and so on. On a proxy route those are
-			// not gateon's paths, they are the upstream's, so on a catch-all
-			// route a client disabled the challenge by prefixing their request
-			// path. RequestState.IsManagement is set by the entrypoint from
-			// which listener accepted the connection, which is not something a
-			// request can claim.
-			rs := request.GetRequestState(r)
-			isManagement := rs != nil && rs.IsManagement
-			if isManagement || difficulty <= 0 ||
-				mitigation.IsAllowlisted(telemetry.ClientIPOf(r)) {
-				next.ServeHTTP(w, r)
-				return
-			}
-
 			// Scoped to the client's network, not the browser class: a challenge
 			// served because someone else's score is bad is a false positive that
 			// costs every user of that browser a round trip.
-			repID := telemetry.GetReputationID(r)
-			score := telemetry.GetReputationScore(repID)
-
-			// If reputation is below threshold, require PoW.
-			if score < threshold {
-				if r.Header.Get(PowHeaderSolution) != "" && r.Header.Get(PowNonceHeader) != "" {
-					if pc.verify(r) {
-						// Solution correct, proceed.
-						next.ServeHTTP(w, r)
-						return
-					}
-					// Invalid solution - record as a threat
-					kind.RecordThreat(r, kind.Threat{
-						Type:        "pow_invalid_solution",
-						Score:       10.0,
-						Details:     "Invalid PoW solution provided",
-						RouteID:     routeID,
-						Category:    categoryBot,
-						Severity:    kind.SeverityMedium,
-						ActionTaken: kind.ActionChallenged,
-					})
-				}
-
-				// Otherwise, serve challenge.
-				kind.RecordThreat(r, kind.Threat{
-					Type:        "pow_challenge_issued",
-					Score:       1.0,
-					Details:     "PoW challenge issued due to low reputation",
-					RouteID:     routeID,
-					Category:    categoryBot,
-					Severity:    kind.SeverityLow,
-					ActionTaken: kind.ActionChallenged,
-				})
-				pc.serve(w, r)
+			if pc.exempt(r) ||
+				!threatExceeds(telemetry.GetReputationScore(telemetry.GetReputationID(r)), threshold) {
+				next.ServeHTTP(w, r)
 				return
 			}
-
-			next.ServeHTTP(w, r)
+			pc.challengeOrPass(next, w, r)
 		})
 	}
+}
+
+// exempt skips gateon's own traffic, a difficulty of 0, and an allowlisted
+// source. A proof-of-work challenge is an active mitigation: it costs the
+// client a round trip and CPU, and an API client or monitoring probe the
+// operator has vouched for cannot solve one at all.
+//
+// The first test used to be kind.IsInternalPath(r.URL.Path), which matches
+// gateon's management paths by *prefix* -- /v1/routes, /v1/global,
+// /v1/security and so on. On a proxy route those are not gateon's paths, they
+// are the upstream's, so on a catch-all route a client disabled the challenge
+// by prefixing their request path. RequestState.IsManagement is set by the
+// entrypoint from which listener accepted the connection, which is not
+// something a request can claim.
+func (c powChallenge) exempt(r *http.Request) bool {
+	rs := request.GetRequestState(r)
+	return (rs != nil && rs.IsManagement) || c.difficulty <= 0 ||
+		mitigation.IsAllowlisted(telemetry.ClientIPOf(r))
+}
+
+// challengeOrPass serves a client that must prove work: through with a
+// current pass or a correct solution, otherwise a challenge.
+func (c powChallenge) challengeOrPass(next http.Handler, w http.ResponseWriter, r *http.Request) {
+	if c.hasPass(r) {
+		next.ServeHTTP(w, r)
+		return
+	}
+	if r.Header.Get(PowHeaderSolution) != "" && r.Header.Get(PowNonceHeader) != "" {
+		if c.verify(r) {
+			telemetry.MiddlewareBotManagementTotal.WithLabelValues(c.routeID, "pow_challenge_solved").Inc()
+			c.setPass(w, r)
+			next.ServeHTTP(w, r)
+			return
+		}
+		kind.RecordThreat(r, kind.Threat{
+			Type:        "pow_invalid_solution",
+			Score:       10.0,
+			Details:     "Invalid PoW solution provided",
+			RouteID:     c.routeID,
+			Category:    categoryBot,
+			Severity:    kind.SeverityMedium,
+			ActionTaken: kind.ActionChallenged,
+		})
+	}
+	// Counted, not recorded as a threat. Serving a challenge is the gateway's
+	// action, not evidence: the signal that lowered the score is already on
+	// record. As a threat it was a second signal type for the correlator and
+	// a "challenged" action for escalation, so one blocked attack and one
+	// challenge made a critical incident that zeroed the score, and the
+	// reputation blocker refused the client before it could solve anything
+	// (ADR 0045).
+	telemetry.MiddlewareBotManagementTotal.WithLabelValues(c.routeID, "pow_challenge_served").Inc()
+	c.serve(w, r)
+}
+
+// threatExceeds reports whether a client whose reputation is reputation must
+// solve a proof of work at threshold: when its threat score, 100 - reputation,
+// exceeds the threshold. That is what the setting's label says, and the scale
+// the tarpit beside it uses (ADR 0045).
+//
+// It used to challenge when the reputation itself was below the threshold. At
+// the recommended 5 that meant a reputation under 5, which the reputation
+// blocker refuses before this runs and which penalties of 50 step over, so
+// proof-of-work challenged nobody. Strictly greater, so that a threshold left
+// at 0 challenges every client with any penalty rather than every client.
+func threatExceeds(reputation, threshold float64) bool {
+	return 100-reputation > threshold
 }
 
 // id builds the challenge identifier: unix seconds, a hash of the requesting
@@ -215,112 +229,4 @@ func (c powChallenge) verify(r *http.Request) bool {
 	hashHex := hex.EncodeToString(sum[:])
 	return strings.HasPrefix(hashHex, strings.Repeat("0", c.difficulty)) &&
 		hashHex == r.Header.Get(PowHeaderSolution)
-}
-
-// issuedChallenge is one challenge handed to one client: the id it must
-// answer, the salt and difficulty it is told, and the CSP nonce for the page
-// that solves it. Grouped so the two writers take a receiver rather than four
-// positional arguments of which three are strings.
-type issuedChallenge struct {
-	id         string
-	salt       string
-	difficulty int
-	nonce      string
-}
-
-// powChallengePage is the browser fallback: a page whose script solves the
-// challenge and retries with the answer in headers.
-//
-// #nosec G705 -- its three sinks (the CSP nonce attribute, a JS string literal
-// and the body text) all receive constrained alphabets: nonce is standard
-// base64, id is [0-9a-f-] by construction in powChallenge.id, and difficulty
-// is an int. None can carry a quote or an angle bracket. See id for why the
-// client fingerprint is hashed before it reaches any of them.
-const powChallengePage = `<html>
-<head><title>Security Check - Gateon</title></head>
-<body style="font-family: sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; background: #f4f4f9;">
-	<div style="background: white; padding: 2rem; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); text-align: center; max-width: 400px;">
-		<h2 style="color: #333;">Security Check</h2>
-		<p style="color: #666;">Your connection exhibits unusual patterns. Please wait while we verify your browser...</p>
-		<div id="loader" style="margin: 20px auto; border: 4px solid #f3f3f3; border-top: 4px solid #3498db; border-radius: 50%%; width: 30px; height: 30px; animation: spin 2s linear infinite;"></div>
-		<script nonce="%s">
-			async function solve() {
-				const id = "%s";
-				const difficulty = %d;
-				const target = "0".repeat(difficulty);
-				let nonce = 0;
-				while (true) {
-					const val = id + nonce;
-					const msgUint8 = new TextEncoder().encode(val);
-					const hashBuffer = await crypto.subtle.digest('SHA-256', msgUint8);
-					const hashArray = Array.from(new Uint8Array(hashBuffer));
-					const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-					if (hashHex.startsWith(target)) {
-						fetch(window.location.href, {
-							headers: {
-								'X-Gateon-Pow-ID': id,
-								'X-Gateon-Pow-Nonce': nonce.toString(),
-								'X-Gateon-Pow-Solution': hashHex
-							}
-						}).then(res => {
-							if (res.ok) window.location.reload();
-						});
-						break;
-					}
-					nonce++;
-					if (nonce %% 1000 === 0) await new Promise(r => setTimeout(r, 0));
-				}
-			}
-			solve();
-		</script>
-		<style>@keyframes spin { 0%% { transform: rotate(0deg); } 100%% { transform: rotate(360deg); } }</style>
-	</div>
-</body>
-</html>`
-
-// wantsJSON reports whether the caller is an XHR or fetch rather than a
-// navigation, and so wants a machine-readable challenge.
-func wantsJSON(r *http.Request) bool {
-	return r.Header.Get("X-Requested-With") == "XMLHttpRequest" ||
-		strings.Contains(r.Header.Get(kind.HeaderAccept), "application/json")
-}
-
-// writeJSON answers an XHR caller with the challenge as JSON.
-func (ch issuedChallenge) writeJSON(w http.ResponseWriter) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusTooManyRequests)
-	// #nosec G705 -- constrained alphabets only; see powChallengePage.
-	fmt.Fprintf(w, `{"error":"proof_of_work_required","challenge_id":"%s","salt":"%s","difficulty":%d}`,
-		ch.id, ch.salt, ch.difficulty)
-}
-
-// writePage answers a browser with the page that solves the challenge.
-func (ch issuedChallenge) writePage(w http.ResponseWriter) {
-	w.Header().Set("Content-Type", "text/html")
-	w.Header().Set("Content-Security-Policy",
-		fmt.Sprintf("default-src 'self'; script-src 'self' 'nonce-%s'; style-src 'self' 'unsafe-inline';", ch.nonce))
-	w.WriteHeader(http.StatusTooManyRequests)
-	// #nosec G705 -- constrained alphabets only; see powChallengePage.
-	fmt.Fprintf(w, powChallengePage, ch.nonce, ch.id, ch.difficulty)
-}
-
-// serve issues a challenge: headers plus a JSON body for XHR callers, or a
-// page whose script solves it for browsers.
-func (c powChallenge) serve(w http.ResponseWriter, r *http.Request) {
-	ch := issuedChallenge{
-		id:         c.id(time.Now().Unix(), r),
-		salt:       strconv.FormatInt(time.Now().UnixNano(), 36),
-		difficulty: c.difficulty,
-		nonce:      kind.GenerateNonce(),
-	}
-
-	w.Header().Set(PowHeaderID, ch.id)
-	w.Header().Set(PowHeaderChallenge, ch.salt)
-	w.Header().Set("X-Gateon-Pow-Difficulty", strconv.Itoa(ch.difficulty))
-
-	if wantsJSON(r) {
-		ch.writeJSON(w)
-		return
-	}
-	ch.writePage(w)
 }

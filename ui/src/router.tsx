@@ -34,6 +34,7 @@ const TLSOptionsPage = lazy(() => import("./routes/TLSOptionsPage"));
 const SettingsPage = lazy(() => import("./routes/SettingsPage"));
 const ProfilePage = lazy(() => import("./routes/ProfilePage"));
 const UsersPage = lazy(() => import("./routes/UsersPage"));
+const ApiTokensPage = lazy(() => import("./routes/ApiTokensPage"));
 const CircuitBreakerPage = lazy(() => import("./routes/CircuitBreakerPage"));
 const DocsPage = lazy(() => import("./routes/DocsPage"));
 const LoginPage = lazy(() => import("./routes/LoginPage"));
@@ -214,6 +215,12 @@ const usersRoute = createRoute({
   component: () => <UsersPage />,
 });
 
+const apiTokensRoute = createRoute({
+  getParentRoute: () => authenticatedRoute,
+  path: "/api-tokens",
+  component: () => <ApiTokensPage />,
+});
+
 const circuitBreakerRoute = createRoute({
   getParentRoute: () => authenticatedRoute,
   path: "/circuit-breaker",
@@ -307,6 +314,7 @@ const routeTree = rootRoute.addChildren([
     settingsRoute,
     profileRoute,
     usersRoute,
+    apiTokensRoute,
     topologyRoute,
     securityCommandCenterRoute,
     clamavRoute,

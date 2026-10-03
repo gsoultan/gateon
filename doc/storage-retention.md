@@ -40,6 +40,40 @@ Categories left at `0` fall back to the global default. The prune loop:
    `auto_vacuum=INCREMENTAL`) and `PRAGMA wal_checkpoint(TRUNCATE)` to shrink the
    WAL file.
 
+### The trace store's size budget and the disk under it
+
+Age alone did not bound the trace store: at about 1.1 KB a request, seven days
+at an average of 100 requests a second is some 66 GB, and an attacker sending
+more decided how much more. Since ADR 0049 two bounds hold it whatever the age
+of its traces:
+
+- **A size budget**, per profile -- 256 MiB on `minimal` (whose store is closed
+  anyway), 2 GiB on `standard`, 20 GiB on `enterprise` -- or
+  `GATEON_TRACE_STORE_MAX_MB`. Checked every 30 seconds and by the hourly
+  prune: past it, the oldest traces are evicted until the store's tables are at
+  four fifths of it, and an INFO line says how far it went. This does not wait
+  for the trace archive: an hour evicted before the archive copied it is logged
+  at WARN. The write-ahead log adds up to a few memtables on top (about 16 MiB
+  on `standard`). `gateon_trace_store_bytes` and `gateon_trace_store_max_bytes`
+  show where it stands.
+- **A free-space floor** on the disk it lives on: a twentieth of the disk, at
+  least four memtables and at most 1 GiB. Below it trace writes stop -- the
+  data plane is unaffected -- each dropped trace is counted in
+  `gateon_trace_dropped_total{reason="disk_full"}`, an ERROR line says so once a
+  minute, and `/readyz` answers `503` with `trace store paused: disk nearly full`.
+  Writes resume once the free space is half as much again above the floor.
+
+If the disk fills anyway -- something else filled it between checks -- Pebble's
+retries back off (one attempt a second, doubling to thirty) instead of looping
+at two cores, and a write that fails on the full disk stops the trace store for
+the life of the process (`trace store stopped` in `/readyz`) instead of exiting
+it, which is what it used to do. Free the space and restart.
+
+The budget means traffic, not retention, decides how far back traces go on a
+busy gateway: 2 GiB is about 1.9 million requests, five hours at 100 requests a
+second. Raise `GATEON_TRACE_STORE_MAX_MB`, or turn on the trace archive, if you
+need more history than that.
+
 ### Expected disk usage
 
 Disk footprint is dominated by the access-log traces (one Pebble entry per

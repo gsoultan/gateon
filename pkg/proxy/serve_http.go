@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/gsoultan/gateon/internal/auth/apitoken"
 	"github.com/gsoultan/gateon/internal/logger"
 	mwauth "github.com/gsoultan/gateon/internal/middleware/auth"
 	"github.com/gsoultan/gateon/internal/request"
@@ -21,7 +22,9 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	state := h.lb.NextState()
 	if state == nil || state.url == "" {
-		http.Error(w, "no targets available for service", http.StatusBadGateway)
+		// 503, not 502: no backend was asked, so none answered badly. Every
+		// target is out of rotation (or the service has none).
+		http.Error(w, "no healthy targets available for service", http.StatusServiceUnavailable)
 		return
 	}
 
@@ -73,10 +76,21 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // Without a session cookie or a PASETO bearer token this allocates nothing.
 func (h *ProxyHandler) withholdManagementCredentials(r *http.Request) {
 	mwauth.StripSessionCookie(r.Header)
+	authorization := r.Header.Get("Authorization")
+	if authorization == "" {
+		return
+	}
+	// A gateway API token (ADR 0050) is withheld by its shape: its prefix is
+	// gateon's own, so no app's credential has it, and recognising it needs no
+	// lookup on the request path.
+	if _, ok := apitoken.BearerToken(authorization); ok {
+		r.Header.Del("Authorization")
+		return
+	}
 	if h.sessions == nil {
 		return
 	}
-	token, ok := pasetoLocalBearer(r.Header.Get("Authorization"))
+	token, ok := pasetoLocalBearer(authorization)
 	if !ok {
 		return
 	}

@@ -11,6 +11,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gsoultan/gateon/internal/config"
@@ -162,24 +163,63 @@ type geoIPGlobalState struct {
 	blocked map[string]struct{}
 	allowed map[string]struct{}
 	mu      sync.RWMutex
+
+	// dbLoaded reports whether a country database is loaded
+	// (telemetry.GeoIPLoaded). lastWarn is when the geofence last said it
+	// could not be evaluated, in Unix seconds.
+	dbLoaded func() bool
+	lastWarn atomic.Int64
 }
 
 func (s *geoIPGlobalState) update(newCfg *gateonv1.GlobalConfig) {
 	if newCfg == nil || newCfg.Geoip == nil {
 		return
 	}
-	blocked := make(map[string]struct{}, len(newCfg.Geoip.BlockedCountries))
-	for _, c := range newCfg.Geoip.BlockedCountries {
-		blocked[strings.ToUpper(c)] = struct{}{}
-	}
-	allowed := make(map[string]struct{}, len(newCfg.Geoip.AllowedCountries))
-	for _, c := range newCfg.Geoip.AllowedCountries {
-		allowed[strings.ToUpper(c)] = struct{}{}
-	}
+	blocked := countrySet(newCfg.Geoip.BlockedCountries)
+	allowed := countrySet(newCfg.Geoip.AllowedCountries)
 	s.mu.Lock()
 	s.blocked = blocked
 	s.allowed = allowed
 	s.mu.Unlock()
+}
+
+// countrySet normalises a country list the way the save validates it, so an
+// entry saved as " us" matches the "US" a lookup returns.
+func countrySet(codes []string) map[string]struct{} {
+	set := make(map[string]struct{}, len(codes))
+	for _, c := range codes {
+		set[normalizeCountry(c)] = struct{}{}
+	}
+	return set
+}
+
+func normalizeCountry(c string) string { return strings.ToUpper(strings.TrimSpace(c)) }
+
+// geoWarnInterval bounds how often a geofence that cannot be evaluated says so.
+const geoWarnInterval = time.Minute
+
+// warnUnenforceable says, at most once a minute, that a country list is
+// configured and no database can place a client in a country. An allow list
+// then refuses every request (fail closed: "only these countries" cannot be
+// shown of anyone), and a block list refuses no one -- refusing everyone in
+// its place would turn "block CN" into an outage nobody asked for -- so both
+// are said loudly rather than left for the operator to discover (ADR 0044).
+//
+// refusesAll is the decision the geofence made for this request, which with no
+// database -- every client in the unknown country -- is its decision for all.
+func (s *geoIPGlobalState) warnUnenforceable(refusesAll bool) {
+	now := time.Now().Unix()
+	last := s.lastWarn.Load()
+	if now-last < int64(geoWarnInterval/time.Second) || !s.lastWarn.CompareAndSwap(last, now) {
+		return
+	}
+	if refusesAll {
+		logger.L.LogError("global geofence: no GeoIP database is loaded, so the country lists "+
+			"refuse every request", "fix", geoDatabaseHint)
+		return
+	}
+	logger.L.LogError("global geofence: no GeoIP database is loaded, so the country block list "+
+		"refuses no one", "fix", geoDatabaseHint)
 }
 
 // GeoIPGlobalWithResolver is the internal implementation of GeoIPGlobal, allowing for dependency injection in tests.
@@ -188,7 +228,7 @@ func (s *geoIPGlobalState) update(newCfg *gateonv1.GlobalConfig) {
 // context; ctx belongs to whoever is building the chain, so a shutdown during
 // startup cancels the load rather than outliving it.
 func GeoIPGlobalWithResolver(ctx context.Context, globalStore config.GlobalConfigStore, resolver func(string) string) kind.Middleware {
-	state := &geoIPGlobalState{}
+	state := &geoIPGlobalState{dbLoaded: telemetry.GeoIPLoaded}
 	// Initial load
 	state.update(globalStore.Get(ctx))
 
@@ -242,8 +282,13 @@ func serveGlobalGeoIP(state *geoIPGlobalState, globalStore config.GlobalConfigSt
 	state.mu.RLock()
 	_, blocked := state.blocked[country]
 	hasAllowed := len(state.allowed) > 0
+	hasBlocked := len(state.blocked) > 0
 	_, allowed := state.allowed[country]
 	state.mu.RUnlock()
+
+	if (hasAllowed || hasBlocked) && !state.dbLoaded() {
+		state.warnUnenforceable(blocked || (hasAllowed && !allowed))
+	}
 
 	switch {
 	case blocked:

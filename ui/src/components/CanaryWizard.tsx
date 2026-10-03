@@ -162,9 +162,9 @@ export function CanaryWizard({ service, onSuccess }: CanaryWizardProps) {
 
       {!weighted && (
         <Alert color="orange" icon={<IconInfoCircle size={16} />}>
-          This service balances with {service.loadBalancerPolicy || "round robin"}, which ignores
-          target weights, so shifting them would move no traffic. Switch the service to Weighted
-          Round Robin to run a canary.
+          This service balances with {service.loadBalancerPolicy}, which ignores target weights,
+          so shifting them would move no traffic. Switch the service to Round Robin to run a
+          canary.
         </Alert>
       )}
 

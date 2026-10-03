@@ -69,10 +69,10 @@ func TestSetupRefusesToRunAgainOnceAnAdministratorExists(t *testing.T) {
 	if second.Success {
 		t.Errorf("Setup ran a second time on a gateway that already has an administrator")
 	}
-	if _, _, err := mgr.Authenticate("admin", "attacker-password"); !errors.Is(err, auth.ErrInvalidCredentials) {
+	if _, _, err := mgr.Authenticate("admin", "attacker-password", ""); !errors.Is(err, auth.ErrInvalidCredentials) {
 		t.Errorf("the administrator's password was replaced by the second Setup: Authenticate(attacker-password) = %v", err)
 	}
-	if _, _, err := mgr.Authenticate("admin", "first-password"); err != nil {
+	if _, _, err := mgr.Authenticate("admin", "first-password", ""); err != nil {
 		t.Errorf("the original administrator password no longer works: %v", err)
 	}
 }

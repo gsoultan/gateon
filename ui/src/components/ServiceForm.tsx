@@ -25,6 +25,9 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "@tanstack/react-form";
 import { notifications } from "@mantine/notifications";
 import { defaultTlsClientConfig } from "./serviceTlsDefaults";
+import { healthCheckBehaviour, healthCheckProblem, showsWeights, weightsToSave } from "./serviceFormRules";
+
+const isL4Backend = (bt: string | undefined) => bt === "tcp" || bt === "udp";
 
 export function ServiceForm({
   onSuccess,
@@ -161,7 +164,15 @@ export function ServiceForm({
         });
         return;
       }
-      mutation.mutate({ ...value, weightedTargets: targets });
+      const problem = isL4Backend(bt) ? null : healthCheckProblem(value.healthCheckType, value.healthCheckPath);
+      if (problem) {
+        notifications.show({ title: "Validation Error", message: problem, color: "red" });
+        return;
+      }
+      mutation.mutate({
+        ...value,
+        weightedTargets: weightsToSave(targets, value.loadBalancerPolicy, bt),
+      });
     },
   });
 
@@ -563,24 +574,29 @@ export function ServiceForm({
                               />
                             )}
                           />
-                          {!isL4 && (
-                            <form.Field
-                              name={`weightedTargets[${i}].weight`}
-                              children={(weightField: any) => (
-                                <Tooltip label="Higher weight = more traffic.">
-                                  <NumberInput
-                                    label={i === 0 ? "Weight" : "Weight"}
-                                    value={weightField.state.value}
-                                    onBlur={weightField.handleBlur}
-                                    onChange={(v) => weightField.handleChange(Number(v))}
-                                    style={{ flex: 1, minWidth: 80, maxWidth: isL4 ? '100%' : 90 }}
-                                    min={1}
-                                    size="sm"
-                                  />
-                                </Tooltip>
-                              )}
-                            />
-                          )}
+                          <form.Subscribe
+                            selector={(s) => s.values.loadBalancerPolicy}
+                            children={(policy) =>
+                              showsWeights(policy, backendType) ? (
+                                <form.Field
+                                  name={`weightedTargets[${i}].weight`}
+                                  children={(weightField: any) => (
+                                    <Tooltip label="This target's share of traffic, relative to the others. 0 holds it in standby.">
+                                      <NumberInput
+                                        label="Weight"
+                                        value={weightField.state.value}
+                                        onBlur={weightField.handleBlur}
+                                        onChange={(v) => weightField.handleChange(Number(v))}
+                                        style={{ flex: 1, minWidth: 80, maxWidth: 90 }}
+                                        min={0}
+                                        size="sm"
+                                      />
+                                    </Tooltip>
+                                  )}
+                                />
+                              ) : null
+                            }
+                          />
                           <ActionIcon
                             color="red"
                             variant="subtle"
@@ -612,16 +628,16 @@ export function ServiceForm({
                   { label: "Least Connections (TCP)", value: "leastConn" },
                 ]
               : [
-                  { label: "Round Robin", value: "roundRobin" },
-                  { label: "Least Connections", value: "leastConn" },
-                  { label: "Weighted Round Robin", value: "weightedRoundRobin" },
+                  { label: "Round Robin (by weight)", value: "roundRobin" },
+                  { label: "Least Connections (ignores weights)", value: "leastConn" },
+                  { label: "Weighted Round Robin (same as Round Robin)", value: "weightedRoundRobin" },
                 ];
             return (
               <Tooltip
                 label={
                   isL4
-                    ? "Round Robin: rotate targets. Least Connections: prefer least busy (TCP only)."
-                    : "Round Robin: rotate. Least Connections: prefer least busy. Weighted: use target weight."
+                    ? "Round Robin: rotate targets. Least Connections: prefer least busy (TCP only). TCP and UDP services ignore weights."
+                    : "Round Robin: rotate, each target in proportion to its weight. Least Connections: prefer the least busy target; weights are not used."
                 }
               >
                 <div>
@@ -773,7 +789,7 @@ export function ServiceForm({
                     };
 
                     return (
-                      <Tooltip label={isGRPC ? "Optional gRPC service name. Leave empty for the server's default health check." : "HTTP only. Leave empty to disable health checks for this service."}>
+                      <Tooltip label={isGRPC ? "Optional gRPC service name. Leave empty for the server's default health check." : "Leave empty to check each target by connecting to it. A target that fails 2 checks in a row (every 15 s) leaves rotation; 2 good checks bring it back."}>
                         <div>
                           {isGRPC ? (
                             <Autocomplete
@@ -799,9 +815,10 @@ export function ServiceForm({
                           ) : (
                             <TextInput
                               label="Health Check Path"
-                              description="Optional HTTP path for health probes (e.g. /healthz)"
-                              placeholder="/healthz or leave empty"
+                              description={healthCheckBehaviour(healthCheckType, field.state.value, backendType)}
+                              placeholder="/healthz, or empty to check by connecting"
                               value={field.state.value}
+                              error={healthCheckProblem(healthCheckType, field.state.value)}
                               onBlur={field.handleBlur}
                               onChange={(e) => field.handleChange(e.target.value)}
                             />

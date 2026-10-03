@@ -21,9 +21,11 @@ import (
 
 	"github.com/gsoultan/gateon/internal/ai"
 	"github.com/gsoultan/gateon/internal/ebpf"
+	"github.com/gsoultan/gateon/internal/httputil"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware"
 	"github.com/gsoultan/gateon/internal/middleware/security"
+	"github.com/gsoultan/gateon/internal/middleware/security/identity"
 	"github.com/gsoultan/gateon/internal/security/waf"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	"github.com/gsoultan/gateon/internal/telemetry/repid"
@@ -971,11 +973,38 @@ func (s *ApiService) MitigateThreat(ctx context.Context, req *gateonv1.MitigateT
 				"released until that hold expires.", source),
 		}, nil
 	}
+	if isIP {
+		if res := exemptAddressAnswer(source); res != nil {
+			return res, nil
+		}
+	}
 
 	return &gateonv1.MitigateThreatResponse{
 		Success: true,
 		Message: fmt.Sprintf("Source %s successfully mitigated.", source),
 	}, nil
+}
+
+// exemptAddressAnswer is the answer for an address the block list now names
+// but the request path will never refuse: loopback, or one in
+// GATEON_MITIGATION_ALLOWLIST. It asks identity.AddressBlocked, the predicate
+// every listener asks; the read-back above asks only whether the address is
+// listed, which is how 127.0.0.1 was reported "successfully mitigated" while
+// every request from it was served. Nil when the block is enforced.
+func exemptAddressAnswer(ip string) *gateonv1.MitigateThreatResponse {
+	if identity.AddressBlocked(ip) {
+		return nil
+	}
+	why := "it is in GATEON_MITIGATION_ALLOWLIST, whose addresses are never refused"
+	if httputil.IsLoopback(ip) {
+		why = "it is a loopback address, which is never refused (the gateway's own traffic, " +
+			"and every client behind a local proxy that sets no forwarding header)"
+	}
+	return &gateonv1.MitigateThreatResponse{
+		Success: false,
+		Message: fmt.Sprintf("%s was recorded on the block list but is not enforced: %s. "+
+			"Requests from it are still served.", ip, why),
+	}
 }
 
 func (s *ApiService) RemoveMitigatedThreat(ctx context.Context, req *gateonv1.RemoveMitigatedThreatRequest) (*gateonv1.RemoveMitigatedThreatResponse, error) {

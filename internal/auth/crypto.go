@@ -61,6 +61,11 @@ func encryptSecret(key []byte, plaintext string) (string, error) {
 	return encPrefix + base64.StdEncoding.EncodeToString(ciphertext), nil
 }
 
+// ErrSecretUndecryptable is a stored secret that does not decrypt under the
+// key in force: in practice a second factor written under another session key,
+// which is what restoring the user database with a different global.json does.
+var ErrSecretUndecryptable = errors.New("failed to decrypt secret: it was not encrypted under the current session key")
+
 // decryptSecret reverses encryptSecret. Values without encPrefix are returned
 // as-is to remain backward compatible with previously stored plaintext secrets.
 func decryptSecret(key []byte, stored string) (string, error) {
@@ -90,7 +95,7 @@ func decryptSecret(key []byte, stored string) (string, error) {
 	nonce, ciphertext := raw[:gcm.NonceSize()], raw[gcm.NonceSize():]
 	plaintext, err := gcm.Open(nil, nonce, ciphertext, nil)
 	if err != nil {
-		return "", fmt.Errorf("failed to decrypt secret: %w", err)
+		return "", fmt.Errorf("%w: %w", ErrSecretUndecryptable, err)
 	}
 	return string(plaintext), nil
 }

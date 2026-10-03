@@ -182,6 +182,21 @@ func getCBState(key, label string, now time.Time) *circuitBreakerState {
 	return s
 }
 
+// CircuitStateOf reports the state of the breaker kept under key -- a route's
+// ID -- and whether there is one. The dashboard's per-target rows read it: they
+// showed only what the health check concluded, so a route whose breaker was
+// open, refusing every request with 503, still read CLOSED (ADR 0047). An open
+// breaker past its sleep window reads OPEN until the next request probes it.
+func CircuitStateOf(key string) (telemetry.CircuitState, bool) {
+	cbMu.Lock()
+	s, ok := cbStates[key]
+	cbMu.Unlock()
+	if !ok {
+		return "", false
+	}
+	return cbPhase(s.phase.Load()).circuitState(), true
+}
+
 // RetainCircuitBreakers forgets every breaker whose key -- its route's ID --
 // is not in live, along with its state gauge. Without it a route deleted
 // while its circuit was open would count as an open circuit on the dashboard

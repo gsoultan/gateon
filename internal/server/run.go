@@ -6,6 +6,7 @@ package server
 import (
 	"context"
 	"crypto/tls"
+	"database/sql"
 	"net/http"
 	"os"
 	"time"
@@ -34,6 +35,7 @@ import (
 	"github.com/gsoultan/gateon/internal/security/waf"
 	"github.com/gsoultan/gateon/internal/server/entrypoint"
 	"github.com/gsoultan/gateon/internal/server/handlers"
+	"github.com/gsoultan/gateon/internal/server/readiness"
 	"github.com/gsoultan/gateon/internal/syncutil"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	gtls "github.com/gsoultan/gateon/internal/tls"
@@ -167,7 +169,8 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 	// service) that carries one; it runs inside the domain saves, so REST,
 	// Connect/gRPC and config-import are all covered (ADR 0038).
 	bindingGuard := routebind.NewGuard(s.RouteStore, s.ServiceStore, s.MwStore)
-	routeService := route.NewService(s.RouteStore, proxyInvalidator, s.Logger, bindingGuard)
+	routeService := route.NewService(s.RouteStore, proxyInvalidator, s.Logger, bindingGuard,
+		route.NewTLSBindingCheck(s.MwStore, s.EpStore))
 	serviceService := service.NewService(s.ServiceStore, s.RouteStore, proxyInvalidator, s.Logger, bindingGuard)
 	epService := dentrypoint.NewService(s.EpStore, proxyInvalidator, s.Logger)
 
@@ -231,7 +234,11 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 		Version:            s.Version,
 		StartTime:          s.StartTime(),
 		RouteStatsProvider: s.GetRouteStats,
-		SecurityPosture:    newPostureProvider(s.Version, s.GlobalStore, clamavManager, wafUpdater, fimScanner, s.EbpfManager),
+		SecurityPosture: newPostureProvider(postureDeps{
+			version: s.Version, globalStore: s.GlobalStore, clamav: clamavManager, waf: wafUpdater,
+			fimScanner: fimScanner, ebpf: s.EbpfManager,
+			routes: routeService, middlewares: mwService, entryPoints: epService,
+		}),
 		InvalidateAllProxies: func() {
 			s.InvalidateRouteProxies(func(*gateonv1.Route) bool { return true })
 		},
@@ -281,7 +288,15 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 		pCore = s.Phantom
 	}
 
-	entrypoint.StartServers(s.EpStore, s.Port, baseHandler, internalAPI, tlsConfig, s.TLSManager, &wg, shutdownReg, entrypoint.WrapL4Resolver(l4Resolver), mgmtConfig, s.GlobalStore, pCore)
+	// The configuration database is watched for /readyz and gateon_config_db_up
+	// from before the listeners open, so the first probe already knows.
+	wg.Go(func() { readiness.WatchDatabase(ctx, configDatabasePinger(s.AuthManager)) })
+	//nolint:contextcheck // listeners stop through shutdownReg, not a context; StartServers takes none.
+	if err := entrypoint.StartServers(s.EpStore, s.Port, baseHandler, internalAPI, tlsConfig, s.TLSManager, &wg, shutdownReg, entrypoint.WrapL4Resolver(l4Resolver), mgmtConfig, s.GlobalStore, pCore); err != nil {
+		// Exits non-zero, so a service manager restarts the gateway rather than
+		// leaving it running with no management plane.
+		logger.Fatal("refusing to run without a management plane", "error", err)
+	}
 	// Initialize metrics subsystem
 	telemetry.InitStartTime()
 	registerTelemetryProviders(s)
@@ -301,7 +316,10 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 	certInfos := collectCertInfos(ctx, s, s.TLSManager)
 	telemetry.StartTLSCertMonitor(certInfos, metricsStop)
 
-	logger.L.LogInfo("Gateon API Gateway started", "port", s.Port)
+	// No port here: the management listener logged its own address, and
+	// s.Port is only its last fallback -- naming it said "started" on a port
+	// nothing listened on.
+	logger.L.LogInfo("Gateon API Gateway started")
 
 	wg.Go(func() {
 		ticker := time.NewTicker(30 * time.Second)
@@ -337,6 +355,26 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 	close(metricsStop)
 	wg.Wait()
 	logger.L.LogInfo("shutdown complete")
+}
+
+// configDatabasePinger pings whichever user database the auth holder holds
+// now -- setup installs one on a first run -- and answers nil while it holds
+// none, since a gateway that has not been set up has no database to lose.
+func configDatabasePinger(svc auth.Service) readiness.Pinger {
+	return func(ctx context.Context) error {
+		if !auth.Available(svc) {
+			return nil
+		}
+		inner := svc
+		if h, ok := svc.(*auth.Holder); ok {
+			inner = h.Get()
+		}
+		withDB, ok := inner.(interface{ DB() *sql.DB })
+		if !ok || withDB.DB() == nil {
+			return nil
+		}
+		return withDB.DB().PingContext(ctx)
+	}
 }
 
 // registerTelemetryProviders points the metrics snapshot at the server's live

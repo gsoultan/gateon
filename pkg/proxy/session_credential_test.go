@@ -179,6 +179,10 @@ func TestGRPCBackendNeverSeesTheManagementSessionCookie(t *testing.T) {
 	}
 }
 
+// apiTokenShaped has the shape of a gateway API token: the prefix and 43
+// base64url characters.
+const apiTokenShaped = "gateon_tok_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+
 // sessionsAccepting accepts one token as a management session and refuses the
 // rest, counting what it was asked.
 type sessionsAccepting struct {
@@ -217,6 +221,9 @@ func TestBackendNeverSeesAManagementBearerToken(t *testing.T) {
 		{"an app's own PASETO token", "Bearer v4.local.APP", "Bearer v4.local.APP", 1},
 		{"a JWT", "Bearer eyJhbGciOi.x.y", "Bearer eyJhbGciOi.x.y", 0},
 		{"basic credentials", "Basic YWxpY2U6cHc=", "Basic YWxpY2U6cHc=", 0},
+		// ADR 0050: a gateway API token is withheld by its shape, with no lookup.
+		{"a gateway API token", "Bearer " + apiTokenShaped, "", 0},
+		{"something merely prefixed like one", "Bearer gateon_tok_short", "Bearer gateon_tok_short", 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			asked = 0

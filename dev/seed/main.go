@@ -23,7 +23,7 @@ import (
 func main() {
 	db := flag.String("db", os.Getenv("GATEON_DEV_DB"), "auth database URL/path")
 	secret := flag.String("secret", os.Getenv("GATEON_DEV_PASETO"), "PASETO secret (exactly 32 chars)")
-	password := flag.String("password", envOr("GATEON_DEV_PASSWORD", "password123"), "password for the seeded accounts")
+	password := flag.String("password", envOr("GATEON_DEV_PASSWORD", "gateon-dev-passphrase"), "password for the seeded accounts")
 	flag.Parse()
 
 	if *db == "" || len(*secret) != 32 {

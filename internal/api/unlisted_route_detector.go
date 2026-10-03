@@ -86,6 +86,9 @@ func (d *UnlistedRouteDetector) Detect(ctx context.Context, data *DiagnosticData
 			continue
 		}
 		honeypot := slices.Contains(honeypots, tr.Path)
+		if !honeypot && refusedBeforeRouting(tr) {
+			continue
+		}
 		key := unlistedKey{path: tr.Path, entrypoint: unroutedEntrypoint(tr.ServiceName), host: tr.Host}
 		if honeypot {
 			key.source = tr.SourceIP
@@ -132,6 +135,25 @@ func isMitigatedOnce(data *DiagnosticData, seen map[string]bool, ip string) bool
 		seen[ip] = m
 	}
 	return m
+}
+
+// refusedBeforeRouting reports whether an entrypoint-labelled trace is a
+// request the gateway refused before it chose a route -- a shunned address, a
+// blocked client build, an entrypoint IP or geo filter. Such a request carries
+// the entrypoint's label like an unrouted one, and it was counted as one: a
+// banned client's requests to routes that exist produced "Request to unlisted
+// route" findings, whose automatic fix offered to create those routes (T25).
+//
+// No route matched is answered 404 (CreateBaseHandler), so any other status
+// means routing never decided; a refusal mark says so outright. A trace with
+// no status recorded predates the field and is judged as before.
+func refusedBeforeRouting(tr *telemetry.TraceRecord) bool {
+	// The status a trace records for "no route matched" (http.NotFound).
+	const unroutedStatus = "404"
+	if tr.Refusal != "" {
+		return true
+	}
+	return tr.Status != "" && tr.Status != unroutedStatus
 }
 
 // unrouted reports whether a trace's service name says no user route matched:

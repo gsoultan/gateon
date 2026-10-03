@@ -13,12 +13,19 @@ const bufferSize = 32 * 1024
 
 type buffer [bufferSize]byte
 
-var bufferPool = &syncBufferPool{
-	pool: sync.Pool{
-		New: func() any {
-			return new(buffer)
+// bufferPool is the proxy's shared copy-buffer pool: the reverse proxy's
+// response copies and both directions of every upgrade tunnel draw from it.
+// A buffer goes back exactly once, after the copy that used it has returned.
+var bufferPool = newBufferPool()
+
+func newBufferPool() *syncBufferPool {
+	return &syncBufferPool{
+		pool: sync.Pool{
+			New: func() any {
+				return new(buffer)
+			},
 		},
-	},
+	}
 }
 
 type syncBufferPool struct {

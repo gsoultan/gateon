@@ -23,6 +23,9 @@ type serviceImpl struct {
 	svcService service.Service
 	logger     logger.Logger
 	lifetime   context.Context
+	// readSignals replaces telemetry.GetServiceGoldenSignals in tests; nil in
+	// production.
+	readSignals func(ctx context.Context, serviceID string) telemetry.GoldenSignals
 }
 
 // NewService creates a new Canary Service. lifetime is the process-lifetime
@@ -78,9 +81,9 @@ func (cs *serviceImpl) checkRunnable(ctx context.Context, req *gateonv1.StartCan
 	if !ok {
 		return fmt.Errorf("%w: service %q not found", ErrNotRunnable, req.ServiceId)
 	}
-	if policy := config.CanonicalLBPolicy(svc.LoadBalancerPolicy); policy != "weighted_round_robin" {
+	if policy := config.CanonicalLBPolicy(svc.LoadBalancerPolicy); policy != "round_robin" && policy != "weighted_round_robin" {
 		return fmt.Errorf("%w: service %q balances with %s, which ignores target weights; "+
-			"switch it to weighted round robin to shift traffic by weight", ErrNotRunnable, svc.Id, policy)
+			"switch it to round robin to shift traffic by weight", ErrNotRunnable, svc.Id, policy)
 	}
 	for _, tw := range req.TargetWeights {
 		for _, t := range svc.WeightedTargets {
@@ -144,6 +147,10 @@ func (cs *serviceImpl) runCanary(ctx context.Context, req *gateonv1.StartCanaryR
 		initialWeights[t.Url] = t.Weight
 	}
 
+	// Each step is judged on its own traffic: the counts at its start are the
+	// baseline its errors are measured against (see stepBreach).
+	prev := cs.signals(ctx, req.ServiceId)
+
 	for i := range int(req.Steps) {
 		// Not time.Sleep. StartCanary detaches this onto the process lifetime and
 		// says it stops at shutdown; a sleep no cancellation can interrupt is what
@@ -158,22 +165,13 @@ func (cs *serviceImpl) runCanary(ctx context.Context, req *gateonv1.StartCanaryR
 		case <-time.After(interval):
 		}
 
-		// Automated Canary Analysis: Evaluate metrics
-		metrics := telemetry.GetServiceGoldenSignals(ctx, req.ServiceId)
-		if (req.MaxErrorRate > 0 && float32(metrics.ErrorRate) > req.MaxErrorRate) ||
-			(req.MaxP99LatencyMs > 0 && metrics.P99LatencyMs > float64(req.MaxP99LatencyMs)) {
-			cs.logger.LogWarn("Canary aborted: safety thresholds exceeded. Rolling back.",
-				"service_id", req.ServiceId,
-				"error_rate", metrics.ErrorRate,
-				"max_error_rate", req.MaxErrorRate,
-				"p99_latency_ms", metrics.P99LatencyMs,
-				"max_p99_latency_ms", req.MaxP99LatencyMs)
-
-			if err := cs.svcService.SaveService(ctx, originalSvc); err != nil {
-				cs.logger.LogError("Canary rollback failed", "error", err, "service_id", req.ServiceId)
-			}
+		// Automated Canary Analysis: judge the step just served.
+		cur := cs.signals(ctx, req.ServiceId)
+		if reason, breached := stepBreach(req, prev, cur); breached {
+			cs.rollBack(ctx, originalSvc, reason)
 			return
 		}
+		prev = cur
 
 		progress := float64(i+1) / float64(req.Steps)
 
@@ -216,6 +214,51 @@ func (cs *serviceImpl) runCanary(ctx context.Context, req *gateonv1.StartCanaryR
 	}
 
 	cs.logger.LogInfo("Canary deployment completed successfully", "service_id", req.ServiceId)
+}
+
+// stepBreach judges one step against the request's limits and says why it
+// failed. The error rate is the step's own: errors over requests since the
+// step began. It was the service's lifetime rate, so a long healthy history
+// diluted a step failing half its requests below any threshold -- 800 earlier
+// requests already pulled a 50%-failing step to 10%. A step that served
+// nothing is not judged on errors. p99 is still read from the service's
+// lifetime latency histogram: a per-step percentile needs the histogram's
+// buckets, which the golden signals do not carry.
+func stepBreach(req *gateonv1.StartCanaryRequest, prev, cur telemetry.GoldenSignals) (string, bool) {
+	if served := cur.RequestsTotal - prev.RequestsTotal; req.MaxErrorRate > 0 && served > 0 {
+		rate := (cur.ErrorsTotal - prev.ErrorsTotal) / served * 100
+		if rate > float64(req.MaxErrorRate) {
+			return fmt.Sprintf("canary rolled back: %.1f%% of this step's %.0f requests failed (max %.1f%%)",
+				rate, served, req.MaxErrorRate), true
+		}
+	}
+	if req.MaxP99LatencyMs > 0 && cur.P99LatencyMs > float64(req.MaxP99LatencyMs) {
+		return fmt.Sprintf("canary rolled back: p99 latency %.0f ms (max %d ms)",
+			cur.P99LatencyMs, req.MaxP99LatencyMs), true
+	}
+	return "", false
+}
+
+// rollBack restores the service as it was before the rollout and says so
+// where the dashboard shows it: the Circuit Breaker page's event timeline,
+// under the service. A rollback was a server log line only, and the wizard's
+// last word was "Canary Started".
+func (cs *serviceImpl) rollBack(ctx context.Context, original *gateonv1.Service, reason string) {
+	cs.logger.LogWarn("Canary aborted: safety thresholds exceeded. Rolling back.",
+		"service_id", original.GetId(), "reason", reason)
+	if err := cs.svcService.SaveService(ctx, original); err != nil {
+		cs.logger.LogError("Canary rollback failed", "error", err, "service_id", original.GetId())
+		reason += "; restoring the original weights FAILED: " + err.Error()
+	}
+	telemetry.RecordCircuitBreakerEvent("service "+original.GetId()+" (canary)", telemetry.CircuitOpen, reason)
+}
+
+// signals reads the service's golden signals; a test may substitute its own.
+func (cs *serviceImpl) signals(ctx context.Context, serviceID string) telemetry.GoldenSignals {
+	if cs.readSignals != nil {
+		return cs.readSignals(ctx, serviceID)
+	}
+	return telemetry.GetServiceGoldenSignals(ctx, serviceID)
 }
 
 // snapshotService deep-copies a service so a failed canary can be rolled back

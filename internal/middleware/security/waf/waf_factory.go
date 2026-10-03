@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"maps"
 	"os"
 	"path/filepath"
@@ -19,6 +20,7 @@ import (
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware/kind"
 	"github.com/gsoultan/gateon/internal/middleware/security"
+	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/security/waf"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 	"google.golang.org/protobuf/proto"
@@ -193,83 +195,179 @@ func hashWAFProto(w *gateonv1.WafConfig) string {
 
 // setIfMissing writes a global default only where the route did not speak. A
 // route that explicitly turned something off must stay off, so every global
-// value goes through here rather than through assignment.
+// value goes through here rather than through assignment. An empty value is
+// missing: the parser reads it as the default, so treating it as a choice
+// would hand the route the route default instead of the global value.
 func setIfMissing(cfg map[string]string, key, val string) {
-	if _, ok := cfg[key]; !ok {
+	if cur, ok := cfg[key]; !ok || strings.TrimSpace(cur) == "" {
 		cfg[key] = val
 	}
 }
 
+// Effective is what a WAF runs, as the dashboard shows it: read from the
+// config the engine is built from, after the tier baseline, the global WAF's
+// fixed choices and a route's inheritance are applied -- never from the raw
+// switches, which is how the global card came to show categories OFF while
+// they were enforced (truth T8) and an audit-only WAF as protecting (T12).
+type Effective struct {
+	// Mode is "enforcing", "audit_only", or "off" when there is no WAF.
+	Mode          string `json:"mode"`
+	ParanoiaLevel int    `json:"paranoiaLevel"`
+	// Categories maps each switch key (sqli, xss, ..., malware_detection) to
+	// whether its rules run.
+	Categories map[string]bool `json:"categories"`
+}
+
+// Mode values for Effective.
+const (
+	ModeEnforcing = "enforcing"
+	ModeAuditOnly = "audit_only"
+	ModeOff       = "off"
+)
+
+// effectiveCategoryKeys are the switches Effective reports, in the order the
+// dashboard lists them. dos_protection is not among them: no rule reads it.
+var effectiveCategoryKeys = []string{
+	keySQLi, keyXSS, keyLFI, keyRCE, keyPHP, keyJava, keyNodeJS, keyScanner, keyProtocol,
+	keyWordPress, keyMalware, keyRansomware, keyDLP, keyIPReputation,
+}
+
+// The route config keys of the WAF's switches, as parseWAFConfig reads them.
+const (
+	keySQLi         = "sqli"
+	keyXSS          = "xss"
+	keyLFI          = "lfi"
+	keyRCE          = "rce"
+	keyPHP          = "php"
+	keyJava         = "java"
+	keyNodeJS       = "nodejs"
+	keyScanner      = "scanner"
+	keyProtocol     = "protocol"
+	keyWordPress    = "wordpress"
+	keyMalware      = "malware_detection"
+	keyRansomware   = "ransomware_detection"
+	keyDLP          = "dlp"
+	keyIPReputation = "ip_reputation"
+)
+
+// EffectiveGlobal reports what the gateway-wide WAF runs on a route with no
+// WAF of its own.
+func EffectiveGlobal(ctx context.Context, store config.GlobalConfigStore) Effective {
+	w := enabledWAF(storedGlobal(ctx, store))
+	if w == nil {
+		return Effective{Mode: ModeOff, Categories: map[string]bool{}}
+	}
+	return summarize(globalWAFConfig(w, resolveWAFTier(w), security.Deps{GlobalStore: store}))
+}
+
+// EffectiveRoute reports what a route WAF with config cfg runs: cfg merged
+// over the global WAF exactly as NewWAF merges it. cfg is not modified.
+func EffectiveRoute(ctx context.Context, cfg map[string]string, store config.GlobalConfigStore) Effective {
+	merged := maps.Clone(cfg)
+	if merged == nil {
+		merged = map[string]string{}
+	}
+	mergeGlobalWAF(merged, enabledWAF(storedGlobal(ctx, store)), security.Deps{GlobalStore: store})
+	return summarize(parseWAFConfig(merged))
+}
+
+func storedGlobal(ctx context.Context, store config.GlobalConfigStore) *gateonv1.GlobalConfig {
+	if store == nil {
+		return nil
+	}
+	return store.Get(ctx)
+}
+
+func summarize(c WAFConfig) Effective {
+	settings := inheritedSettings(c)
+	out := Effective{Mode: ModeEnforcing, ParanoiaLevel: c.ParanoiaLevel, Categories: make(map[string]bool, len(effectiveCategoryKeys))}
+	if c.AuditOnly {
+		out.Mode = ModeAuditOnly
+	}
+	for _, k := range effectiveCategoryKeys {
+		out.Categories[k] = settings[k] == "true"
+	}
+	return out
+}
+
+// enabledGlobalWAF is the gateway-wide WAF config when the global WAF is on,
+// and nil when it is absent or off.
+func enabledGlobalWAF(d security.Deps) *gateonv1.WafConfig {
+	return enabledWAF(storedGlobal(context.TODO(), d.GlobalStore))
+}
+
+// enabledWAF is g's WAF config when it is switched on, and nil otherwise.
+func enabledWAF(g *gateonv1.GlobalConfig) *gateonv1.WafConfig {
+	if g == nil || g.Waf == nil || !g.Waf.Enabled {
+		return nil
+	}
+	return g.Waf
+}
+
 // mergeGlobalWAFDefaults fills unset per-route settings from the gateway-wide
-// WAF config and returns its custom directives. Nothing happens unless the
-// global WAF is both present and enabled.
+// WAF and returns its custom directives. Nothing happens unless the global WAF
+// is both present and enabled.
+//
+// A route with its own WAF skips the global one (router.go), so what the route
+// does not say it inherits -- and it inherits what the global WAF actually
+// runs, not the raw proto booleans. The two differ: NewGlobalWAF turns malware
+// and ransomware detection on whatever malware_detection says, applies the
+// tier's baseline, and ignores the category booleans, whose zero value is
+// "unset" (ADR 0044). Copying the booleans meant attaching a default WAF to a
+// route switched those rules off there: /c99.php went from 403 to 200 (truth
+// T7). A route adds to or narrows the global policy only by saying so: a key
+// it sets wins, a key it leaves out is the global WAF's.
 func mergeGlobalWAFDefaults(cfg map[string]string, d security.Deps) string {
-	if d.GlobalStore == nil {
+	return mergeGlobalWAF(cfg, enabledGlobalWAF(d), d)
+}
+
+// mergeGlobalWAF is mergeGlobalWAFDefaults for an already-read global WAF
+// config w, nil when the global WAF is off.
+func mergeGlobalWAF(cfg map[string]string, w *gateonv1.WafConfig, d security.Deps) string {
+	if w == nil {
 		return ""
 	}
-	global := d.GlobalStore.Get(context.TODO())
-	if global == nil || global.Waf == nil || !global.Waf.Enabled {
-		return ""
+	effective := globalWAFConfig(w, resolveWAFTier(w), d)
+	for key, val := range inheritedSettings(effective) {
+		setIfMissing(cfg, key, val)
 	}
-	// A route with its own WAF skips the global one (router.go), so response
-	// DLP has to be inherited whatever use_crs says, and as the global WAF
-	// actually runs it -- its tier baseline included. Taken only with use_crs
-	// and only from the raw flag, attaching a WAF to a route switched off the
-	// response inspection the global WAF had been giving it.
-	setIfMissing(cfg, "dlp", strconv.FormatBool(globalWAFRunsDLP(global.Waf)))
-	// Cloudflare trust is a fact about where the gateway sits, not a CRS
-	// setting, so it is inherited on the same terms.
-	setIfMissing(cfg, "trust_cloudflare_headers", strconv.FormatBool(config.TrustCloudflare(global.Waf)))
-	if global.Waf.DlpAction != "" {
-		setIfMissing(cfg, "dlp_action", global.Waf.DlpAction)
-	}
-	if global.Waf.UseCrs {
-		applyGlobalCRSDefaults(cfg, global.Waf, d.DataDir)
-	}
-	return global.Waf.CustomDirectives
+	applyGlobalCRSTunables(cfg, w, d.DataDir)
+	return w.CustomDirectives
 }
 
-// globalWAFRunsDLP reports whether NewGlobalWAF inspects responses for data
-// leaks: when DLP is switched on, or when the tier's baseline turns it on.
-func globalWAFRunsDLP(w *gateonv1.WafConfig) bool {
-	return w.GetDlp() || resolveWAFTier(w) == config.TierEnterprise
-}
-
-// applyGlobalCRSDefaults copies the gateway-wide ruleset and tuning settings
-// into a route's config wherever the route left them unset.
-func applyGlobalCRSDefaults(cfg map[string]string, w *gateonv1.WafConfig, dataDir string) {
-	applyGlobalCRSToggles(cfg, w)
-	applyGlobalCRSTunables(cfg, w, dataDir)
-}
-
-// applyGlobalCRSToggles copies the on/off settings, where the proto's zero
-// value and "off" are the same thing.
-func applyGlobalCRSToggles(cfg map[string]string, w *gateonv1.WafConfig) {
-	for key, val := range map[string]bool{
-		"sqli":                          w.Sqli,
-		"xss":                           w.Xss,
-		"lfi":                           w.Lfi,
-		"rce":                           w.Rce,
-		"php":                           w.Php,
-		"scanner":                       w.Scanner,
-		"protocol":                      w.Protocol,
-		"java":                          w.Java,
-		"nodejs":                        w.Nodejs,
-		"wordpress":                     w.Wordpress,
-		"ip_reputation":                 w.IpReputation,
-		"dos_protection":                w.DosProtection,
-		"malware_detection":             w.MalwareDetection,
-		"ransomware_detection":          w.RansomwareDetection,
-		"dlp":                           w.Dlp,
-		"audit_log_relevant_only":       w.AuditLogRelevantOnly,
-		"disable_entropy":               w.DisableEntropy,
-		"enable_body_entropy":           w.EnableBodyEntropy,
-		"enable_fingerprint_validation": w.EnableFingerprintValidation,
-		"enable_confidence_scoring":     w.EnableConfidenceScoring,
-		"audit_only":                    w.AuditOnly,
-	} {
-		setIfMissing(cfg, key, strconv.FormatBool(val))
+// inheritedSettings renders a WAF config as the route config keys parseWAFConfig
+// reads, so that a route parsing them gets the same engine settings. Lists are
+// included only when non-empty, since an empty one and an unset one read the
+// same.
+func inheritedSettings(c WAFConfig) map[string]string {
+	b := strconv.FormatBool
+	out := map[string]string{
+		keySQLi: b(!c.DisableSQLI), keyXSS: b(!c.DisableXSS), keyLFI: b(!c.DisableLFI),
+		keyRCE: b(!c.DisableRCE), keyPHP: b(!c.DisablePHP), keyScanner: b(!c.DisableScanner),
+		keyProtocol: b(!c.DisableProtocol), keyJava: b(!c.DisableJava), keyNodeJS: b(!c.DisableNodeJS),
+		keyWordPress:      b(!c.DisableWordPress),
+		keyIPReputation:   b(c.EnableIPReputation),
+		keyMalware:        b(c.EnableMalwareDetection),
+		keyRansomware:     b(c.EnableRansomwareDetection),
+		keyDLP:            b(c.EnableDLP),
+		"audit_only":      b(c.AuditOnly),
+		"paranoia_level":  strconv.Itoa(c.ParanoiaLevel),
+		"ssrf_protection": b(c.EnableSSRFProtection),
+		// Cloudflare trust is a fact about where the gateway sits.
+		keyTrustCloudflare:              b(c.TrustCloudflare),
+		"audit_log_relevant_only":       b(c.AuditLogRelevantOnly),
+		"disable_entropy":               b(c.DisableEntropy),
+		"enable_body_entropy":           b(c.EnableBodyEntropy),
+		"enable_fingerprint_validation": b(c.EnableFingerprintValidation),
+		"enable_confidence_scoring":     b(c.EnableConfidenceScoring),
 	}
+	if len(c.AppProfiles) > 0 {
+		out["app_profiles"] = strings.Join(c.AppProfiles, ",")
+	}
+	if len(c.Origins) > 0 {
+		out["origins"] = strings.Join(c.Origins, ",")
+	}
+	return out
 }
 
 // applyGlobalCRSTunables copies the settings whose zero value means "not
@@ -309,7 +407,36 @@ func applyGlobalCRSTunables(cfg map[string]string, w *gateonv1.WafConfig, dataDi
 	}
 }
 
+// checkRouteCloudflareTrust refuses a route WAF whose trust_cloudflare_headers
+// disagrees with the gateway's. Who the client is gets decided once, at the
+// entrypoint, from the global setting, which only an administrator may change
+// (ADR 0040); a per-middleware switch either changed nothing (the resolved
+// address wins) or gave one request two answers, and it let anyone who may
+// edit a middleware move a trust boundary. The same rule as every other
+// middleware's switch (ADR 0046). A value that agrees still saves, so an
+// existing config that merely restated the global setting keeps working.
+func checkRouteCloudflareTrust(cfg map[string]string, d security.Deps) error {
+	v := strings.TrimSpace(cfg[keyTrustCloudflare])
+	if v == "" {
+		return nil
+	}
+	global := config.TrustCloudflare(storedGlobal(context.TODO(), d.GlobalStore).GetWaf())
+	if request.ParseTrustCloudflareStrict(v) == global {
+		return nil
+	}
+	return fmt.Errorf("waf: %s=%q disagrees with the gateway's Cloudflare trust (%t). The client address is "+
+		"resolved once, for every middleware, from Settings > Global WAF Settings > Trust Cloudflare IPs/Headers "+
+		"(or GATEON_TRUST_CLOUDFLARE_HEADERS), which only an administrator may change; remove the key from this "+
+		"WAF or set it to match", keyTrustCloudflare, v, global)
+}
+
+// keyTrustCloudflare is the route config key of the Cloudflare trust switch.
+const keyTrustCloudflare = "trust_cloudflare_headers"
+
 func NewWAF(cfg map[string]string, d security.Deps) (kind.Middleware, error) {
+	if err := checkRouteCloudflareTrust(cfg, d); err != nil {
+		return nil, err
+	}
 	globalDirectives := mergeGlobalWAFDefaults(cfg, d)
 
 	grpcMode := d.IsGRPCRoute()

@@ -145,6 +145,16 @@ var apiPermissions = map[string]apiPermission{
 	gateonv1connect.ApiServiceUpdateUserProcedure: writeOn(auth.ResourceUsers),
 	gateonv1connect.ApiServiceDeleteUserProcedure: writeOn(auth.ResourceUsers),
 
+	// Scrape credentials (ADR 0050). Credentials, so the users resource; and
+	// ApiService requires admin on all three, as it does for users.
+	gateonv1connect.ApiServiceListApiTokensProcedure:  readOn(auth.ResourceUsers),
+	gateonv1connect.ApiServiceCreateApiTokenProcedure: writeOn(auth.ResourceUsers),
+	gateonv1connect.ApiServiceRevokeApiTokenProcedure: writeOn(auth.ResourceUsers),
+
+	// Audit chain verification (ADR 0050). A read of the audit log, like
+	// ListAuditLogs; ApiService additionally requires admin.
+	gateonv1connect.ApiServiceVerifyAuditChainProcedure: readOn(auth.ResourceDiagnostics),
+
 	// Diagnostics reads. GET /v1/status, /v1/diagnostics, /v1/audit/*,
 	// /v1/diag/security-threats, /v1/security/reputations, /v1/traces.
 	gateonv1connect.ApiServiceGetStatusProcedure:           readOn(auth.ResourceDiagnostics),

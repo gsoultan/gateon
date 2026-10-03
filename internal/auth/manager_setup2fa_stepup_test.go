@@ -28,7 +28,7 @@ func storedTOTPSecret(t *testing.T, m *Manager, id string) string {
 // password must be refused before anything is generated or stored.
 func TestSetup2FARefusesAWrongPassword(t *testing.T) {
 	m := newTestManager(t)
-	id := createUser(t, m, "grace", "right-pass")
+	id := createUser(t, m, "grace", "right-passphrase")
 
 	e, err := m.Setup2FA(id, "wrong-pass")
 	secret, qr, codes := e.Secret, e.QRCodeURL, e.RecoveryCodes
@@ -43,42 +43,43 @@ func TestSetup2FARefusesAWrongPassword(t *testing.T) {
 	}
 }
 
-// TestSetup2FAWrongPasswordsLockTheAccountLikeSignIn: the step-up is the same
-// first-factor check as sign-in, so it must not be a way to guess the password
-// without the lockout -- and the count is the sign-in form's, not a second one.
-func TestSetup2FAWrongPasswordsLockTheAccountLikeSignIn(t *testing.T) {
+// TestSetup2FAWrongPasswordsLockTheStepUp: the step-up is a first-factor
+// check, so it must not be a way to guess the password without a lockout. It
+// locks the step-up -- reached only with the account's session -- and not the
+// sign-in: a session in hostile hands (script in the dashboard) must not be
+// able to lock the owner out of signing in (ADR 0050).
+func TestSetup2FAWrongPasswordsLockTheStepUp(t *testing.T) {
 	m := newTestManager(t)
-	id := createUser(t, m, "heidi", "right-pass")
+	id := createUser(t, m, "heidi", "right-passphrase")
 
 	for i := range MaxFailedAttempts {
 		if _, err := m.Setup2FA(id, "wrong-pass"); !errors.Is(err, ErrInvalidCredentials) {
 			t.Fatalf("attempt %d: err = %v, want ErrInvalidCredentials", i+1, err)
 		}
 	}
-	if _, _, err := m.Authenticate("heidi", "right-pass"); !errors.Is(err, ErrAccountLocked) {
-		t.Errorf("sign-in after %d wrong step-up passwords: err = %v, want ErrAccountLocked", MaxFailedAttempts, err)
-	}
-	if _, err := m.Setup2FA(id, "right-pass"); !errors.Is(err, ErrAccountLocked) {
+	if _, err := m.Setup2FA(id, "right-passphrase"); !errors.Is(err, ErrAccountLocked) {
 		t.Errorf("step-up with the right password on a locked account: err = %v, want ErrAccountLocked", err)
+	}
+	if _, _, err := m.Authenticate("heidi", "right-passphrase", "198.51.100.7"); err != nil {
+		t.Errorf("sign-in after %d wrong step-up passwords: err = %v, want a session", MaxFailedAttempts, err)
 	}
 }
 
-// TestSetup2FAAndSignInShareOneFailureCount: failures from the two add up, so
-// alternating between them buys an attacker nothing.
-func TestSetup2FAAndSignInShareOneFailureCount(t *testing.T) {
+// TestSignInGuessesDoNotLockTheStepUp: the step-up's count is its own, so a
+// stranger guessing at the sign-in form -- who has no session and cannot reach
+// the step-up -- does not lock the owner out of it. The two used to share one
+// count, which is what let anyone lock the owner out of everything (ADR 0050).
+func TestSignInGuessesDoNotLockTheStepUp(t *testing.T) {
 	m := newTestManager(t)
-	id := createUser(t, m, "ivan", "right-pass")
+	id := createUser(t, m, "ivan", "right-passphrase")
 
-	for range MaxFailedAttempts - 1 {
-		if _, _, err := m.Authenticate("ivan", "wrong-pass"); !errors.Is(err, ErrInvalidCredentials) {
+	for range MaxFailedAttempts {
+		if _, _, err := m.Authenticate("ivan", "wrong-pass", "203.0.113.9"); !errors.Is(err, ErrInvalidCredentials) {
 			t.Fatalf("wrong sign-in: err = %v", err)
 		}
 	}
-	if _, err := m.Setup2FA(id, "wrong-pass"); !errors.Is(err, ErrInvalidCredentials) {
-		t.Fatalf("wrong step-up: err = %v", err)
-	}
-	if _, err := m.Setup2FA(id, "right-pass"); !errors.Is(err, ErrAccountLocked) {
-		t.Errorf("after %d wrong sign-ins and one wrong step-up: err = %v, want ErrAccountLocked", MaxFailedAttempts-1, err)
+	if _, err := m.Setup2FA(id, "right-passphrase"); err != nil {
+		t.Errorf("step-up after a stranger's %d wrong sign-ins: err = %v, want success", MaxFailedAttempts, err)
 	}
 }
 
@@ -86,18 +87,18 @@ func TestSetup2FAAndSignInShareOneFailureCount(t *testing.T) {
 // "like sign-in": a correct password resets the count, as a sign-in does.
 func TestSetup2FAWithThePasswordClearsTheFailureCount(t *testing.T) {
 	m := newTestManager(t)
-	id := createUser(t, m, "judy", "right-pass")
+	id := createUser(t, m, "judy", "right-passphrase")
 
 	for range MaxFailedAttempts - 1 {
 		_, _ = m.Setup2FA(id, "wrong-pass")
 	}
-	if _, err := m.Setup2FA(id, "right-pass"); err != nil {
+	if _, err := m.Setup2FA(id, "right-passphrase"); err != nil {
 		t.Fatalf("step-up with the right password: %v", err)
 	}
 	for range MaxFailedAttempts - 1 {
 		_, _ = m.Setup2FA(id, "wrong-pass")
 	}
-	if _, err := m.Setup2FA(id, "right-pass"); err != nil {
+	if _, err := m.Setup2FA(id, "right-passphrase"); err != nil {
 		t.Errorf("the count was not cleared by the correct password: %v", err)
 	}
 }
@@ -106,14 +107,14 @@ func TestSetup2FAWithThePasswordClearsTheFailureCount(t *testing.T) {
 // after a correct password, so the prompt cannot enumerate disabled accounts.
 func TestSetup2FAOnADisabledAccount(t *testing.T) {
 	m := newTestManager(t)
-	id := createUser(t, m, "ken", "right-pass")
+	id := createUser(t, m, "ken", "right-passphrase")
 	if err := m.SetUserDisabled(id, true); err != nil {
 		t.Fatalf("SetUserDisabled: %v", err)
 	}
 	if _, err := m.Setup2FA(id, "wrong-pass"); !errors.Is(err, ErrInvalidCredentials) {
 		t.Errorf("wrong password on a disabled account: err = %v, want ErrInvalidCredentials", err)
 	}
-	if _, err := m.Setup2FA(id, "right-pass"); !errors.Is(err, ErrAccountDisabled) {
+	if _, err := m.Setup2FA(id, "right-passphrase"); !errors.Is(err, ErrAccountDisabled) {
 		t.Errorf("right password on a disabled account: err = %v, want ErrAccountDisabled", err)
 	}
 }
@@ -124,8 +125,8 @@ func TestSetup2FAOnADisabledAccount(t *testing.T) {
 // leave the enrolled factor exactly as it was.
 func TestRefusedSetup2FALeavesAnEnrolledAccountsFactorAlone(t *testing.T) {
 	m := newTestManager(t)
-	id := createUser(t, m, "leo", "right-pass")
-	secret, _ := enroll(t, m, id, "right-pass")
+	id := createUser(t, m, "leo", "right-passphrase")
+	secret, _ := enroll(t, m, id, "right-passphrase")
 	before := storedTOTPSecret(t, m, id)
 
 	if _, err := m.Setup2FA(id, "wrong-pass"); !errors.Is(err, ErrInvalidCredentials) {
@@ -141,7 +142,7 @@ func TestRefusedSetup2FALeavesAnEnrolledAccountsFactorAlone(t *testing.T) {
 	if ok, _, _, err := m.Verify2FA(challengeFor(t, m, id), id, code); !ok || err != nil {
 		t.Fatalf("the owner's authenticator no longer verifies: ok=%v err=%v", ok, err)
 	}
-	if _, _, err := m.Authenticate("leo", "right-pass"); !errors.Is(err, ErrTwoFactorRequired) {
+	if _, _, err := m.Authenticate("leo", "right-passphrase", ""); !errors.Is(err, ErrTwoFactorRequired) {
 		t.Errorf("sign-in no longer asks for the second factor: err = %v", err)
 	}
 }
