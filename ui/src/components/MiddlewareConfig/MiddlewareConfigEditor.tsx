@@ -230,8 +230,8 @@ export function MiddlewareConfigEditor({
             }
           />
           <NumberInput
-            label="Max Buffer (bytes)"
-            description="Responses larger than this bypass compression (stream through). Default: 10MB"
+            label="Max Compressed Size (bytes)"
+            description="A response that declares a larger body (Content-Length) is sent uncompressed. Default: 10MB"
             value={
               parseInt(config.max_buffer_bytes) || 10 * 1024 * 1024
             }
