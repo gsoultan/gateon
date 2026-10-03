@@ -51,6 +51,7 @@ import {
   IconSettingsAutomation,
   IconRefresh,
   IconUsers,
+  IconKey,
   IconAccessPoint,
   IconChevronLeft,
   IconChevronRight,
@@ -124,7 +125,10 @@ export function Shell() {
     { label: "Diagnostics", to: "/diagnostics", icon: IconStethoscope },
     { label: "Logs", to: "/logs", icon: IconTerminal2 },
     ...(user?.role === "admin"
-      ? [{ label: "Users", to: "/users", icon: IconUsers }]
+      ? [
+          { label: "Users", to: "/users", icon: IconUsers },
+          { label: "API Tokens", to: "/api-tokens", icon: IconKey },
+        ]
       : []),
     // Viewers now have read access to Global Settings.
     { label: "Settings", to: "/settings", icon: IconSettings },

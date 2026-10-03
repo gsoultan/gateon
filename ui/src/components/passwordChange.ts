@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 import { apiFetch } from "../hooks/api";
+import { PASSWORD_REFUSED } from "./passwordPolicy";
 
 /**
  * The two ways the dashboard changes a password, and what it says when one is
@@ -25,7 +26,9 @@ const UNREACHABLE = "The gateway could not be reached. Check your connection and
 export function passwordChangeRefusalMessage(status: number, own: boolean): string {
   switch (status) {
     case 400:
-      return own ? "Enter your current password to change it." : "Enter a new password.";
+      // The form asks for the current password and checks the length, so
+      // what the gateway still refuses is the new password (ADR 0050).
+      return PASSWORD_REFUSED;
     case 403:
       return own ? "Your current password is not correct." : "You do not have permission to change this password.";
     case 429:

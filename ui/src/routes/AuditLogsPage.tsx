@@ -50,6 +50,8 @@ import { useIsMobile } from '../hooks/useMobile';
 import { format } from 'date-fns';
 import type { AuditLog, AuditArchive } from '../types/gateon';
 import { QueryError } from "../components/QueryError";
+import { AuditChainVerifier } from "../components/AuditChainVerifier";
+import { useAuthStore } from "../store/useAuthStore";
 
 const PAGE_SIZE = 50;
 
@@ -63,6 +65,7 @@ export default function AuditLogsPage() {
   const [selectedLog, setSelectedLog] = useState<AuditLog | null>(null);
   const [opened, { open, close }] = useDisclosure(false);
 
+  const isAdmin = useAuthStore((s) => s.user?.role === "admin");
   const [archiveOpened, { open: openArchive, close: closeArchive }] = useDisclosure(false);
   const [currentArchiveLogs, setCurrentArchiveLogs] = useState<AuditLog[]>([]);
   const [currentArchiveName, setCurrentArchiveName] = useState("");
@@ -153,6 +156,9 @@ export default function AuditLogsPage() {
             </Button>
           </Group>
         </Group>
+
+        {/* The chain is signed so it can be checked; an administrator checks it (ADR 0050). */}
+        {isAdmin && <AuditChainVerifier />}
 
         <Tabs value={activeTab} onChange={setActiveTab} variant="pills" radius="md">
           <Tabs.List mb="md" className="scrollable-tabs-list">

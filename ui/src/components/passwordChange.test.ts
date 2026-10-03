@@ -27,6 +27,7 @@ afterAll(() => {
 });
 
 const { changeOwnPassword, resetPassword } = await import("./passwordChange");
+const { PASSWORD_REFUSED } = await import("./passwordPolicy");
 
 // What the gateway writes on a refusal. None of it may reach the form.
 const SERVER_TEXT = '{"error":"rpc error: code = Internal desc = pq: deadlock detected"}';
@@ -46,7 +47,7 @@ describe("changeOwnPassword", () => {
   });
 
   test.each([
-    [400, "Enter your current password to change it."],
+    [400, PASSWORD_REFUSED],
     [403, "Your current password is not correct."],
     [429, "Too many failed attempts. The account is locked for a while; try again later."],
     [500, "The password could not be changed. Please try again."],
@@ -63,6 +64,11 @@ describe("resetPassword", () => {
   test("sends no current password: an administrator resetting another account has none", async () => {
     expect(await resetPassword("user-2", "new-pass")).toEqual({ ok: true });
     expect(sent).toEqual([{ path: "/v1/users/password", body: { id: "user-2", password: "new-pass" } }]);
+  });
+
+  test("a password the policy refuses is said as the rule, never the server's text", async () => {
+    answer = refusal(400);
+    expect(await resetPassword("user-2", "new-pass")).toEqual({ ok: false, message: PASSWORD_REFUSED });
   });
 
   test("a refusal is about permission, not about a current password", async () => {
