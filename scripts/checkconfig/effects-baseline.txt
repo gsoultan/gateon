@@ -123,3 +123,8 @@ users
 wordpress  # INERT T8
 cookie_name  # tls_binding: the effect is a Set-Cookie on a TLS session, which the registry probe does not record; proven by TestTLSBindingBindsTheIssuedSessionToTheClientCertificate
 revocation_prefix  # needs Redis, which this harness does not run; proven by TestRevokedTokenIsRefusedByEveryTypeThatOffersRevocation
+error_threshold  # circuit_breaker: state is per route across builds, so the registry's two builds share it; proven by TestBreakerJudgesAWindowOnlyOnceItHoldsMinRequests
+min_requests  # circuit_breaker: as error_threshold; proven by TestAnUnsetMinimumDoesNotOpenOnOneFailure
+sleep_window  # circuit_breaker: time-based; proven by TestFailedProbeReopensForAFullSleepWindow and TestRetryAfterIsTheTimeLeftInTheSleepWindow
+window_size  # circuit_breaker: time-based; proven by TestBreakerJudgesAWindowOnlyOnceItHoldsMinRequests
+per_ip  # inflightreq: differs only under concurrent requests, which the registry probe does not send; proven by TestInflightTotalCapIsATotal and TestInflightPerAddressIsPerAddress
