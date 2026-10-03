@@ -44,7 +44,7 @@ dry_run
 enable_browser_integrity
 enable_clamav
 enable_js_challenge
-enable_revocation  # INERT T6 for PASETO and OIDC; JWT only with Redis (authmw, ADR 0046)
+enable_revocation  # real since ADR 0046 but needs Redis, which this harness does not run; proven in internal/middleware/auth revocation tests
 entropy_threshold
 error_template
 excluded_content_types
@@ -121,3 +121,5 @@ type
 username
 users
 wordpress  # INERT T8
+cookie_name  # tls_binding: the effect is a Set-Cookie on a TLS session, which the registry probe does not record; proven by TestTLSBindingBindsTheIssuedSessionToTheClientCertificate
+revocation_prefix  # needs Redis, which this harness does not run; proven by TestRevokedTokenIsRefusedByEveryTypeThatOffersRevocation

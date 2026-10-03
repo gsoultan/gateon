@@ -22,4 +22,3 @@ tls.AcmeConfig.ChallengeType
 # INERT, T21 (review-truth 2026-10-02): the XFCC "Forward By" switch is read
 # into this field and never used, so no By= is emitted. The authmw agent is
 # fixing it under ADR 0046; delete this line when that lands.
-transform.XFCCConfig.ForwardBy
