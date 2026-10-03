@@ -260,8 +260,18 @@ func CreateBaseHandler(
 // is allocated or verified.
 func withholdFromDataPlane(deps BaseHandlerDeps, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if mwauth.MayCarryManagementCredential(r.Header) && !managementBound(r, deps.GlobalReg) {
+		if mwauth.MayCarryManagementCredential(r.Header) {
+			if managementBound(r, deps.GlobalReg) {
+				next.ServeHTTP(w, r)
+				return
+			}
 			mwauth.WithholdManagementCredentials(r.Header, deps.Auth)
+		}
+		// Withheld, or nothing to withhold: either way the proxy need not
+		// verify a session bearer again. A request the management plane
+		// answers is never proxied, and is not marked.
+		if rs := middleware.GetRequestState(r); rs != nil {
+			rs.CredentialsWithheld = true
 		}
 		next.ServeHTTP(w, r)
 	})

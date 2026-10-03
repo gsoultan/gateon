@@ -71,6 +71,11 @@ type RequestState struct {
 	// request again. Set whether or not sampling kept the line, so an outer
 	// logger does not resample what an inner one already decided.
 	AccessLogged bool
+	// CredentialsWithheld is set by the data-plane entry once it has withheld
+	// the management plane's credentials from this request (ADR 0051), session
+	// verification included, so the proxy's second line need not verify the
+	// same Authorization value again.
+	CredentialsWithheld bool
 	// Refused is why the gateway itself refused the request, where the refusal
 	// is one the brute-force detectors must not read as a guessed credential
 	// (MarkRefused). Written only by the code that refused, never from
@@ -187,5 +192,6 @@ func (rs *RequestState) Reset() {
 	rs.ExecutedSQLI = false
 	rs.RecordedRequest = false
 	rs.AccessLogged = false
+	rs.CredentialsWithheld = false
 	rs.Refused = RefusalNone
 }

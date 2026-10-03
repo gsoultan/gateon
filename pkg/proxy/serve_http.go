@@ -76,7 +76,15 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // Without a session cookie or a management bearer token this allocates
 // nothing.
 func (h *ProxyHandler) withholdManagementCredentials(r *http.Request) {
-	mwauth.WithholdManagementCredentials(r.Header, h.sessions)
+	sessions := h.sessions
+	if rs := request.GetRequestState(r); rs != nil && rs.CredentialsWithheld {
+		// The entry verified every Authorization value this request arrived
+		// with, and no route middleware holds a session to add one: verify
+		// once per request, not twice. The cookie and API-token shapes are
+		// still checked, which costs nothing.
+		sessions = nil
+	}
+	mwauth.WithholdManagementCredentials(r.Header, sessions)
 }
 
 // ManagementSessions is the management plane's session check this handler
