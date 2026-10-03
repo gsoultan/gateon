@@ -130,9 +130,10 @@ removal. The Windows service XML is no longer shipped as a Linux conffile.
 - An operator whose management port is taken now sees the service restart in
   a loop with the reason in the journal, instead of a quiet gateway with no
   dashboard. A load balancer stops sending traffic to a gateway with an unbound
-  entrypoint, a full trace disk, or an unreachable configuration database --
-  the last two pull a working data plane out of rotation, which is the point:
-  on that instance audit and threat records are not being written either.
+  entrypoint. A full trace disk or an unreachable configuration database leaves
+  it in rotation, answering "ready, degraded" -- as amended above: taking a
+  working data plane out of rotation turned a single-node gateway's lost traces
+  into an outage. The gauges are what alert on those.
 - On a busy gateway the trace store's budget, not its retention, decides how far
   back traces go: 2 GiB is about 1.9 million requests. The budget counts the
   store's tables; the write-ahead log adds up to a few memtables.

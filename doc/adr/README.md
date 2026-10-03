@@ -61,6 +61,12 @@ ADRs follow a lightweight [MADR](https://adr.github.io/madr/)-style format:
 | [0048](./0048-a-dashboard-number-is-computed-from-what-runs-or-not-shown.md) | A dashboard number is computed from what runs, or not shown | Accepted |
 | [0049](./0049-a-gateway-that-cannot-do-its-job-says-so-and-its-telemetry-cannot-take-it-down.md) | A gateway that cannot do its job says so, and its telemetry cannot take it down | Accepted |
 | [0050](./0050-machines-get-a-scoped-token-and-a-stranger-cannot-lock-the-owner-out.md) | Machines get a scoped token, the audit log is kept and checked, and a stranger cannot lock the owner out | Accepted |
+| [0051](./0051-management-credentials-never-enter-the-data-plane.md) | Management credentials never enter the data plane | Accepted |
+| [0052](./0052-the-gateway-never-proxies-to-its-own-management-listener.md) | The gateway never proxies to its own management listener | Accepted |
+| [0053](./0053-what-a-stranger-can-make-the-gateway-spend-on-sign-in-is-bounded.md) | What a stranger can make the gateway spend on sign-in is bounded, per client and in total | Accepted |
+| [0054](./0054-a-block-lookup-waits-a-deadline-not-the-database.md) | A block lookup waits a deadline, not the database | Accepted |
+| [0055](./0055-a-penalty-lands-only-on-the-client-that-did-the-thing.md) | A penalty lands only on the client that did the thing, and only for evidence | Accepted |
+| [0056](./0056-replicas-of-one-gateway-share-one-identity.md) | Replicas of one gateway share one identity, and the chart runs one replica until they share their settings | Accepted |
 
 ## Conventions
 
