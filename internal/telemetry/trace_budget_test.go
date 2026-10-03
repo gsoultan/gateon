@@ -8,6 +8,8 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"fmt"
+	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -90,5 +92,19 @@ func TestATraceStoreUnderItsBudgetKeepsEverything(t *testing.T) {
 
 	if GetTrace(start, "budget-000000") == nil {
 		t.Error("the oldest trace was evicted from a store well under its budget")
+	}
+}
+
+// TestTraceStoreNotReadySaysWhyTheStoreStoppedWriting: what /readyz reports
+// for the trace store is the guard's reason, and nothing while it writes.
+func TestTraceStoreNotReadySaysWhyTheStoreStoppedWriting(t *testing.T) {
+	t.Setenv("GATEON_PROFILE", "standard")
+	freshStore(t)
+	if r := TraceStoreNotReady(); r != "" {
+		t.Fatalf("TraceStoreNotReady() = %q on a store with room, want none", r)
+	}
+	getStore().traceGuard.BackgroundError(fmt.Errorf("write 000001.log: %w", syscall.ENOSPC))
+	if r := TraceStoreNotReady(); !strings.Contains(r, "no space left") {
+		t.Errorf("TraceStoreNotReady() = %q after ENOSPC, want the reason", r)
 	}
 }
