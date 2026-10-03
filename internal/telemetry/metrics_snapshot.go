@@ -277,17 +277,32 @@ type MetricsSnapshot struct {
 	MitigationFunnel MitigationFunnel `json:"mitigationFunnel,omitzero"`
 }
 
-// MitigationFunnel holds a reconciled, single-unit (HTTP request) view of how
-// ingress traffic is filtered by each security layer. The invariant
+// MitigationFunnel is what became of the HTTP requests the gateway received,
+// each counted once (ADR 0048).
 //
-//	Allowed + TotalMitigated == HTTPIngress
+//	HTTPIngress == Allowed + Refused + Answered
 //
-// holds by construction. All inputs share one scope: the request baseline and
-// each mitigation counter are summed unfiltered across every label, so they are
-// directly comparable (the previous frontend math mixed an entrypoint-scoped
-// request total with all-route block counters). ServerErrors (5xx of allowed
-// traffic) and XDPPacketsDropped (packets dropped below the HTTP layer, a
-// different unit) are reported separately and are NOT funnel stages.
+// holds by construction: all three come from gateon_request_outcomes_total,
+// which the request's Metrics middleware increments once per request. Allowed
+// is what reached a backend; Refused what the gateway answered with an error
+// before any backend saw it; Answered what it answered itself without one
+// (redirects, challenge pages, cached responses).
+//
+// The per-stage counts say which control refused, from the counters each
+// control (or the threat pipeline, for the ones that record a threat) keeps.
+// OtherRefused is the refusals no stage claims -- IP and host filters,
+// request limits, no matching route -- so the stages and it add up to
+// Refused. A stage counter that ran ahead of the outcome count (a restart
+// in between) leaves OtherRefused at zero rather than negative.
+//
+// The old funnel summed gateon_requests_total across every label, and a
+// proxied request is recorded under its entrypoint's and its route's: every
+// request counted twice, and the refusals no counter covered (IP filters)
+// were shown as "Allowed".
+//
+// TotalMitigated is Refused, kept for API compatibility. ServerErrors (5xx
+// among the requests, counted once) and XDPPacketsDropped (packets, a
+// different unit) are reported beside the funnel, not as stages.
 type MitigationFunnel struct {
 	HTTPIngress           float64 `json:"httpIngress"`
 	WAFBlocked            float64 `json:"wafBlocked"`
@@ -300,7 +315,11 @@ type MitigationFunnel struct {
 	BotBlocked            float64 `json:"botBlocked"`
 	FileSecurityBlocked   float64 `json:"fileSecurityBlocked"`
 	DeceptionBlocked      float64 `json:"deceptionBlocked"`
+	MitigationBlocked     float64 `json:"mitigationBlocked"`
 	AdvancedSecurityBlock float64 `json:"advancedSecurityBlocked"`
+	OtherRefused          float64 `json:"otherRefused"`
+	Refused               float64 `json:"refused"`
+	Answered              float64 `json:"answered"`
 	TotalMitigated        float64 `json:"totalMitigated"`
 	Allowed               float64 `json:"allowed"`
 	ServerErrors          float64 `json:"serverErrors"`
@@ -677,66 +696,91 @@ func computeGoldenSignals(idx map[string]*dto.MetricFamily, match func(*dto.Metr
 	return gs
 }
 
-// buildMitigationFunnel produces a reconciled, single-unit view of the security
-// mitigation funnel. Unlike the old frontend computation, it uses one consistent
-// scope (unfiltered request total + unfiltered block counters) so the stages add
-// up exactly: Allowed + TotalMitigated == HTTPIngress.
+// buildMitigationFunnel counts each request once, by outcome, and attributes
+// the refusals to the stage that made them. See MitigationFunnel.
 func buildMitigationFunnel(idx map[string]*dto.MetricFamily) MitigationFunnel {
-	// Unfiltered baseline so it shares scope with the all-label block counters.
-	allMatch := func(*dto.Metric) bool { return true }
-	gs := computeGoldenSignals(idx, allMatch)
-
 	f := MitigationFunnel{
-		HTTPIngress:           gs.RequestsTotal,
-		WAFBlocked:            sumCounter(idx, "gateon_middleware_waf_blocked_total", nil),
-		FastPathBlocked:       sumCounter(idx, "gateon_middleware_fast_path_blocked_total", nil),
-		RateLimited:           sumCounter(idx, "gateon_middleware_ratelimit_rejected_total", nil),
-		GeoIPBlocked:          sumCounter(idx, "gateon_middleware_geoip_blocked_total", nil),
-		AuthFailures:          sumCounter(idx, "gateon_middleware_auth_failures_total", nil),
-		HMACFailures:          sumCounter(idx, "gateon_middleware_hmac_failures_total", nil),
-		FileSecurityBlocked:   sumCounter(idx, "gateon_middleware_file_security_blocked_total", nil),
-		AdvancedSecurityBlock: sumCounter(idx, "gateon_middleware_advanced_security_blocked_total", nil),
-		DeceptionBlocked:      sumCounter(idx, "gateon_middleware_deception_blocked_total", nil),
-		ServerErrors:          gs.ErrorsTotal,
-		XDPPacketsDropped:     sumCounter(idx, "gateon_ebpf_dropped_packets_total", nil),
+		Allowed:           outcomeCount(idx, OutcomeForwarded),
+		Refused:           outcomeCount(idx, OutcomeRefused),
+		Answered:          outcomeCount(idx, OutcomeAnswered),
+		ServerErrors:      onceScopedSignals(idx).ErrorsTotal,
+		XDPPacketsDropped: sumCounter(idx, "gateon_ebpf_dropped_packets_total", nil),
 	}
+	f.HTTPIngress = f.Allowed + f.Refused + f.Answered
+	f.TotalMitigated = f.Refused
+	addFunnelStages(idx, &f)
 
-	// Add Bot Management blocks to the funnel
-	if fam, ok := idx["gateon_middleware_bot_management_total"]; ok {
-		for _, m := range fam.GetMetric() {
-			outcome := labelValue(m, "outcome")
-			if outcome == "blocked" || outcome == "integrity_failed" || outcome == "challenge_failed" {
-				f.BotBlocked += m.GetCounter().GetValue()
-			}
-		}
-	}
-
-	if fam, ok := idx["gateon_middleware_turnstile_total"]; ok {
-		for _, m := range fam.GetMetric() {
-			for _, lp := range m.GetLabel() {
-				if lp.GetName() == "outcome" && lp.GetValue() == "fail" {
-					f.TurnstileFailures += m.GetCounter().GetValue()
-					break
-				}
-			}
-		}
-	}
-
-	f.TotalMitigated = f.WAFBlocked + f.FastPathBlocked + f.RateLimited + f.GeoIPBlocked +
-		f.AuthFailures + f.TurnstileFailures + f.HMACFailures +
-		f.BotBlocked + f.FileSecurityBlocked + f.DeceptionBlocked +
-		f.AdvancedSecurityBlock
-
-	// Rejected requests are still counted once in gateon_requests_total (they
-	// return a 4xx through the metrics middleware), so subtracting the block
-	// counters yields the requests that passed every mitigation. Clamp at zero in
-	// case counters were restored/reset out of step across a restart.
-	f.Allowed = f.HTTPIngress - f.TotalMitigated
-	if f.Allowed < 0 {
-		f.Allowed = 0
-	}
-
+	stages := f.WAFBlocked + f.FastPathBlocked + f.RateLimited + f.GeoIPBlocked +
+		f.AuthFailures + f.TurnstileFailures + f.HMACFailures + f.BotBlocked +
+		f.FileSecurityBlocked + f.DeceptionBlocked + f.MitigationBlocked + f.AdvancedSecurityBlock
+	f.OtherRefused = max(f.Refused-stages, 0)
 	return f
+}
+
+// Threat types of a request refused because its source is blocked: the
+// address is shunned, or the client build is blocked on its network.
+const (
+	typeIPMitigation   = "ip_mitigation"
+	typeUserMitigation = "user_mitigation"
+)
+
+// mitigationThreatTypes are the advanced-security series that are a blocked
+// source (a shunned address, a blocked client build) rather than a check.
+var mitigationThreatTypes = map[string]bool{typeIPMitigation: true, typeUserMitigation: true, "ip_shunning": true}
+
+// addFunnelStages fills the per-control refusal counts.
+func addFunnelStages(idx map[string]*dto.MetricFamily, f *MitigationFunnel) {
+	// The "restored" series re-adds the persisted WAF blocks of earlier runs at
+	// startup, for the WAF page; the funnel's baseline starts at this run.
+	f.WAFBlocked = sumCounter(idx, "gateon_middleware_waf_blocked_total", func(m *dto.Metric) bool {
+		return labelValue(m, "rule_id") != "restored"
+	})
+	f.FastPathBlocked = sumCounter(idx, "gateon_middleware_fast_path_blocked_total", nil)
+	f.RateLimited = sumCounter(idx, "gateon_middleware_ratelimit_rejected_total", nil)
+	f.GeoIPBlocked = sumCounter(idx, "gateon_middleware_geoip_blocked_total", nil)
+	f.AuthFailures = sumCounter(idx, "gateon_middleware_auth_failures_total", nil)
+	f.HMACFailures = sumCounter(idx, "gateon_middleware_hmac_failures_total", nil)
+	f.FileSecurityBlocked = sumCounter(idx, "gateon_middleware_file_security_blocked_total", nil)
+	f.DeceptionBlocked = sumCounter(idx, "gateon_middleware_deception_blocked_total", nil)
+	f.MitigationBlocked = sumCounter(idx, "gateon_middleware_advanced_security_blocked_total", func(m *dto.Metric) bool {
+		return mitigationThreatTypes[labelValue(m, "threat_type")]
+	})
+	f.AdvancedSecurityBlock = sumCounter(idx, "gateon_middleware_advanced_security_blocked_total", func(m *dto.Metric) bool {
+		return !mitigationThreatTypes[labelValue(m, "threat_type")]
+	})
+	f.BotBlocked = sumCounter(idx, "gateon_middleware_bot_management_total", func(m *dto.Metric) bool {
+		switch labelValue(m, "outcome") {
+		case "blocked", "integrity_failed", "challenge_failed":
+			return true
+		}
+		return false
+	})
+	f.TurnstileFailures = sumCounter(idx, "gateon_middleware_turnstile_total", func(m *dto.Metric) bool {
+		return labelValue(m, "outcome") == "fail"
+	})
+}
+
+// outcomeCount reads one series of gateon_request_outcomes_total.
+func outcomeCount(idx map[string]*dto.MetricFamily, outcome string) float64 {
+	return sumCounter(idx, "gateon_request_outcomes_total", func(m *dto.Metric) bool {
+		return labelValue(m, "outcome") == outcome
+	})
+}
+
+// onceScopedSignals are the request signals over one scope only: the
+// entrypoint series, which see every request once, or the route series when
+// there are none (as buildGoldenSignals chooses).
+func onceScopedSignals(idx map[string]*dto.MetricFamily) GoldenSignals {
+	gs := computeGoldenSignals(idx, func(m *dto.Metric) bool {
+		return strings.HasPrefix(labelValue(m, "route"), internalRoutePrefix)
+	})
+	if gs.RequestsTotal == 0 {
+		gs = computeGoldenSignals(idx, func(m *dto.Metric) bool {
+			r := labelValue(m, "route")
+			return r != "" && !strings.HasPrefix(r, internalRoutePrefix)
+		})
+	}
+	return gs
 }
 
 // forEachRouteMetric walks one metric family and hands each sample to fn along

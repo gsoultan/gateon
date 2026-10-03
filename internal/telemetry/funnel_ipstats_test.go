@@ -24,12 +24,18 @@ func gatherIndex(t *testing.T) map[string]*dto.MetricFamily {
 	return idx
 }
 
-// TestMitigationFunnelReconciles verifies the core invariant of the reconciled
-// funnel: Allowed + TotalMitigated == HTTPIngress (no clamp when ingress exceeds
-// mitigations), and that 5xx errors and XDP packet drops are reported on their
-// own axes rather than folded into the request funnel.
+// TestMitigationFunnelReconciles verifies the funnel's invariants: ingress is
+// the three outcomes, each request once; the stages and OtherRefused add up to
+// Refused; and 5xx errors and XDP packet drops are reported on their own axes
+// rather than folded into the request funnel.
 func TestMitigationFunnelReconciles(t *testing.T) {
-	// Large request baseline so ingress >= mitigations (no clamp).
+	for range 1000 {
+		RecordRequestOutcome(true, 200)
+	}
+	for range 50 {
+		RecordRequestOutcome(false, 403)
+	}
+	RecordRequestOutcome(false, 302)
 	RequestsTotal.WithLabelValues("gateon-funnel", "svc", "GET", "200").Add(1000)
 	RequestsTotal.WithLabelValues("gateon-funnel", "svc", "GET", "500").Add(7)
 
@@ -46,28 +52,25 @@ func TestMitigationFunnelReconciles(t *testing.T) {
 	if f.HTTPIngress <= 0 {
 		t.Fatalf("expected http_ingress > 0, got %f", f.HTTPIngress)
 	}
-
-	// Every contributor buildMitigationFunnel adds, not just the six this test
-	// seeds. The counters are process-global, so summing only the seeded six
-	// made this an assertion about which other tests had run first: it failed
-	// 7 of 8 runs under -shuffle=on and passed in CI's declaration order
-	// forever. If a new contributor is added to TotalMitigated and not here,
-	// this fails -- which is the point, since a contributor missing from the
-	// funnel is a mitigation the dashboard does not count.
-	wantMitigated := f.WAFBlocked + f.FastPathBlocked + f.RateLimited + f.GeoIPBlocked +
-		f.AuthFailures + f.TurnstileFailures + f.HMACFailures +
-		f.BotBlocked + f.FileSecurityBlocked + f.DeceptionBlocked +
-		f.AdvancedSecurityBlock
-	if f.TotalMitigated != wantMitigated {
-		t.Errorf("total_mitigated = %f, want the sum of every contributor %f; "+
-			"either a counter was added to TotalMitigated without being added "+
-			"here, or one is being double-counted", f.TotalMitigated, wantMitigated)
+	if f.Allowed+f.Refused+f.Answered != f.HTTPIngress {
+		t.Errorf("invariant broken: allowed(%f) + refused(%f) + answered(%f) != ingress(%f)",
+			f.Allowed, f.Refused, f.Answered, f.HTTPIngress)
 	}
 
-	// The reconciliation invariant.
-	if f.Allowed+f.TotalMitigated != f.HTTPIngress {
-		t.Errorf("invariant broken: allowed(%f) + mitigated(%f) = %f != ingress(%f)",
-			f.Allowed, f.TotalMitigated, f.Allowed+f.TotalMitigated, f.HTTPIngress)
+	// Every stage buildMitigationFunnel attributes, not just the six this test
+	// seeds. The counters are process-global, so summing only the seeded six
+	// made this an assertion about which other tests had run first. If a new
+	// stage is added and not here, this fails -- a stage missing from the sum
+	// is a refusal counted twice, once by name and once as "other".
+	stages := f.WAFBlocked + f.FastPathBlocked + f.RateLimited + f.GeoIPBlocked +
+		f.AuthFailures + f.TurnstileFailures + f.HMACFailures +
+		f.BotBlocked + f.FileSecurityBlocked + f.DeceptionBlocked +
+		f.MitigationBlocked + f.AdvancedSecurityBlock
+	if want := max(f.Refused-stages, 0); f.OtherRefused != want {
+		t.Errorf("other_refused = %f, want refused(%f) - stages(%f) = %f", f.OtherRefused, f.Refused, stages, want)
+	}
+	if f.TotalMitigated != f.Refused {
+		t.Errorf("total_mitigated = %f, want refused %f", f.TotalMitigated, f.Refused)
 	}
 
 	// 5xx and XDP are reported separately, not subtracted into the funnel.

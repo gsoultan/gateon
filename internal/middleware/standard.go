@@ -305,13 +305,15 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 			method := r.Method
 			methodLabel := telemetry.MethodLabel(method)
 
-			// Track request body size
+			// Track request body size. A chunked body announces no length, and
+			// counting it as 0 put a 1 MiB streamed upload on the bandwidth
+			// card as 256 bytes: it is counted as it is read instead.
 			reqInSize := r.ContentLength
+			var counted *countingBody
 			if reqInSize < 0 {
 				reqInSize = 0
+				counted = countBody(r)
 			}
-			// Add a baseline of 256 bytes to account for headers and request line.
-			telemetry.RequestBytesTotal.WithLabelValues(activeRouteID, "in").Add(float64(reqInSize + 256))
 
 			sw, ok := w.(*StatusResponseWriter)
 			var pooled bool
@@ -324,6 +326,12 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 			}
 
 			next.ServeHTTP(sw, r)
+
+			if counted != nil {
+				reqInSize = counted.n.Load()
+			}
+			// A baseline of 256 bytes accounts for headers and request line.
+			telemetry.RequestBytesTotal.WithLabelValues(activeRouteID, "in").Add(float64(reqInSize + 256))
 
 			respOutSize := sw.BytesWritten
 			if respOutSize < 0 {
@@ -507,6 +515,10 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 					bytesIn: uint64(reqInSize + 256), bytesOut: uint64(respOutSize + 200),
 					duration: duration, bandwidth: totalBandwidthBytes,
 				})
+				// The router's service wrapper stamps TServiceStart when every
+				// route middleware has passed the request on, so its absence
+				// means the gateway answered without a backend (ADR 0048).
+				telemetry.RecordRequestOutcome(rs != nil && rs.TServiceStart > 0, actualStatus)
 			}
 
 			// Track response body size
@@ -519,6 +531,37 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 			}
 		})
 	}
+}
+
+// countingBody counts the bytes read from a request body whose length was not
+// announced (chunked, or HTTP/2 without content-length). n is atomic because
+// the transport may still be reading the body on its own goroutine when the
+// handler returns.
+type countingBody struct {
+	io.ReadCloser
+	n atomic.Int64
+}
+
+func (c *countingBody) Read(p []byte) (int, error) {
+	n, err := c.ReadCloser.Read(p)
+	c.n.Add(int64(n))
+	return n, err
+}
+
+// countBody wraps r's body in a countingBody, or returns the one an outer
+// Metrics already installed, so the entrypoint's and the route's share one
+// count and one allocation. One allocation per request of unknown length; a
+// request with a Content-Length, or none, costs nothing.
+func countBody(r *http.Request) *countingBody {
+	if r.Body == nil || r.Body == http.NoBody {
+		return nil
+	}
+	if c, ok := r.Body.(*countingBody); ok {
+		return c
+	}
+	c := &countingBody{ReadCloser: r.Body}
+	r.Body = c
+	return c
 }
 
 // claimRequest reports whether this Metrics instance records the request's
