@@ -17,6 +17,7 @@ import (
 
 	"aidanwoods.dev/go-paseto"
 	"github.com/google/uuid"
+	"github.com/gsoultan/gateon/internal/auth/admission"
 	"github.com/gsoultan/gateon/internal/auth/apitoken"
 	"github.com/gsoultan/gateon/internal/auth/lockout"
 	"github.com/gsoultan/gateon/internal/auth/passpolicy"
@@ -55,6 +56,10 @@ type Manager struct {
 	knownAttempts   *lockout.Tracker
 	unknownAttempts *lockout.Tracker
 
+	// hashes bounds the bcrypt work running at once (ADR 0053): every
+	// comparison and every hash this manager makes takes a slot first.
+	hashes *admission.Gate
+
 	// tokens holds the scrape credentials (ADR 0050).
 	tokens *apitoken.Store
 
@@ -88,6 +93,7 @@ func NewManager(databaseURL, symmetricKey string, l logger.Logger) (*Manager, er
 		bindings:        newBindingCache(),
 		knownAttempts:   lockout.New(lockout.DefaultBounds),
 		unknownAttempts: lockout.New(lockout.DefaultBounds),
+		hashes:          admission.NewGate(admission.HashConcurrency()),
 		tokens:          apitoken.NewStore(database, dialect),
 		now:             time.Now,
 	}
@@ -220,7 +226,13 @@ func (m *Manager) checkFirstFactor(username, password, addr string) (*loginRow, 
 	if err := m.admit(row, tracker, key, source); err != nil {
 		return nil, err
 	}
-	if !passwordMatches(row, password) {
+	slot, err := m.enterForSignIn(row, source)
+	if err != nil {
+		return nil, err
+	}
+	match := passwordMatches(row, password)
+	slot.Release()
+	if !match {
 		tracker.Fail(key, source)
 		return nil, ErrInvalidCredentials
 	}
@@ -259,6 +271,37 @@ func (m *Manager) admit(row *loginRow, tracker *lockout.Tracker, key, source str
 	return ErrAccountLocked
 }
 
+// enterForSignIn takes a hash slot for a password step, or refuses it as
+// ErrBusy at once: an anonymous attempt never waits (ADR 0053). When every
+// general slot is taken, the reserve is held back for an account's own known
+// source, so a flood from addresses the account has never signed in from --
+// however many -- cannot keep its owner out. The refusal comes before any hash,
+// and an unknown username is refused exactly as a real one from a source it
+// does not know.
+func (m *Manager) enterForSignIn(row *loginRow, source string) (admission.Slot, error) {
+	if s, ok := m.hashes.TryEnter(); ok {
+		return s, nil
+	}
+	if row != nil && m.isKnownSource(row.user.Id, source) {
+		if s, ok := m.hashes.TryEnterReserved(); ok {
+			return s, nil
+		}
+	}
+	return admission.Slot{}, ErrBusy
+}
+
+// withHashSlot runs fn, which hashes for a signed-in caller or for one who
+// has already proved the password, in a hash slot it waits up to
+// signedInHashWait for; ErrBusy if none came free.
+func (m *Manager) withHashSlot(fn func() error) error {
+	slot, ok := m.hashes.Enter(signedInHashWait)
+	if !ok {
+		return ErrBusy
+	}
+	defer slot.Release()
+	return fn()
+}
+
 // dummyHash is compared against when there is no stored hash to compare
 // against, at the cost passwords are stored at, so a sign-in for an account
 // that does not exist takes as long as one for an account that does.
@@ -274,10 +317,10 @@ var dummyHash = sync.OnceValue(func() []byte {
 // stored hash, it still pays for one comparison and answers false.
 func passwordMatches(row *loginRow, password string) bool {
 	if row == nil || row.hashed == "" {
-		_ = bcrypt.CompareHashAndPassword(dummyHash(), []byte(password))
+		_ = compareHash(dummyHash(), []byte(password))
 		return false
 	}
-	return bcrypt.CompareHashAndPassword([]byte(row.hashed), []byte(password)) == nil
+	return compareHash([]byte(row.hashed), []byte(password)) == nil
 }
 
 // maxLoginSources is how many source prefixes an account remembers.
@@ -525,7 +568,11 @@ func (m *Manager) UpsertUser(u *gateonv1.User) error {
 			return err
 		}
 	}
-	hashed, err := hashPassword(u.Password)
+	var hashed string
+	err := m.withHashSlot(func() (err error) {
+		hashed, err = hashPassword(u.Password)
+		return err
+	})
 	if err != nil {
 		return err
 	}
@@ -548,7 +595,7 @@ func hashPassword(password string) (string, error) {
 	if password == "" {
 		return "", nil
 	}
-	hashed, err := bcrypt.GenerateFromPassword([]byte(password), bcryptCost)
+	hashed, err := generateHash([]byte(password), bcryptCost)
 	if err != nil {
 		return "", fmt.Errorf("failed to hash password: %w", err)
 	}
@@ -619,7 +666,14 @@ func (m *Manager) checkNewPassword(id, password string) error {
 }
 
 func (m *Manager) setPassword(id, password string) error {
-	hashed, err := bcrypt.GenerateFromPassword([]byte(password), bcryptCost)
+	var hashed []byte
+	err := m.withHashSlot(func() (err error) {
+		hashed, err = generateHash([]byte(password), bcryptCost)
+		return err
+	})
+	if errors.Is(err, ErrBusy) {
+		return err
+	}
 	if err != nil {
 		return fmt.Errorf("failed to hash password: %w", err)
 	}
@@ -899,7 +953,14 @@ func (m *Manager) confirmPassword(id, password string) error {
 	if lockedUntil.Valid && time.Now().Before(lockedUntil.Time) {
 		return ErrAccountLocked
 	}
-	if err := bcrypt.CompareHashAndPassword([]byte(hashed), []byte(password)); err != nil {
+	var mismatch error
+	if err := m.withHashSlot(func() error {
+		mismatch = compareHash([]byte(hashed), []byte(password))
+		return nil
+	}); err != nil {
+		return err
+	}
+	if mismatch != nil {
 		m.handleFailedLogin(username, failedAttempts)
 		return ErrInvalidCredentials
 	}
@@ -936,7 +997,11 @@ func (m *Manager) beginTOTPEnrolment(id string) (string, string, []string, error
 	}
 
 	// Generate cryptographically strong recovery codes; store only their hashes.
-	plainCodes, hashedCodes, err := generateRecoveryCodes()
+	var plainCodes, hashedCodes []string
+	err = m.withHashSlot(func() (err error) {
+		plainCodes, hashedCodes, err = generateRecoveryCodes()
+		return err
+	})
 	if err != nil {
 		return "", "", nil, err
 	}
@@ -1088,7 +1153,13 @@ func (m *Manager) spendRecoveryCode(user *gateonv1.User, recoveryCodes, code str
 		return false, nil
 	}
 	hashes := strings.Split(recoveryCodes, ",")
-	i := matchRecoveryCode(hashes, code)
+	i := -1
+	if err := m.withHashSlot(func() error {
+		i = matchRecoveryCode(hashes, code)
+		return nil
+	}); err != nil {
+		return false, err
+	}
 	if i < 0 {
 		return false, nil
 	}

@@ -33,7 +33,7 @@ var attacker = &net.TCPAddr{IP: net.IPv4(198, 51, 100, 7), Port: 40000}
 type spoofFirst struct {
 	addrs chan net.Addr
 	n     int
-	as    net.Addr
+	as    []net.Addr // taken in turn, one connection each
 }
 
 func (s *spoofFirst) OptimizeListener(l net.Listener) net.Listener {
@@ -44,7 +44,7 @@ func (s *spoofFirst) OptimizeListener(l net.Listener) net.Listener {
 type spoofListener struct {
 	net.Listener
 	left int // only the server's accept loop touches it
-	as   net.Addr
+	as   []net.Addr
 }
 
 func (l *spoofListener) Accept() (net.Conn, error) {
@@ -53,7 +53,7 @@ func (l *spoofListener) Accept() (net.Conn, error) {
 		return c, err
 	}
 	l.left--
-	return &spoofedConn{Conn: c, remote: l.as}, nil
+	return &spoofedConn{Conn: c, remote: l.as[l.left%len(l.as)]}, nil
 }
 
 type spoofedConn struct {
@@ -67,6 +67,13 @@ func (c *spoofedConn) RemoteAddr() net.Addr { return c.remote }
 // connections to it appearing to come from attacker, and returns its address.
 func startManagement(t *testing.T, n int, h http.Handler, timeouts *deadline.RequestTimeouts) string {
 	t.Helper()
+	return startManagementFrom(t, n, []net.Addr{attacker}, h, timeouts)
+}
+
+// startManagementFrom is startManagement with the first n connections coming
+// from the addresses in as, in turn.
+func startManagementFrom(t *testing.T, n int, as []net.Addr, h http.Handler, timeouts *deadline.RequestTimeouts) string {
+	t.Helper()
 	t.Setenv("GATEON_PROFILE", "standard")
 	t.Setenv("GATEON_ENTRYPOINT_MAX_CONN_PER_ADDR", "")
 	t.Setenv("GATEON_MANAGEMENT_ALLOWED_IPS", "0.0.0.0/0,::/0")
@@ -74,7 +81,7 @@ func startManagement(t *testing.T, n int, h http.Handler, timeouts *deadline.Req
 		t.Setenv(env, "")
 	}
 	deps := mockDepsForInspection(t)
-	spoof := &spoofFirst{addrs: make(chan net.Addr, 1), n: n, as: attacker}
+	spoof := &spoofFirst{addrs: make(chan net.Addr, 1), n: n, as: as}
 	deps.Phantom = spoof
 	deps.BaseHandler = h
 	deps.ManagementConfig = &gateonv1.ManagementConfig{Bind: "127.0.0.1", Port: "0"}
@@ -159,6 +166,48 @@ func TestTheManagementPortAnswersHealthWhileOneAddressHoldsSlowBodies(t *testing
 	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("/healthz answered %d while %d slow-body connections from one address were held", resp.StatusCode, n)
+	}
+}
+
+// TestTheManagementPortAnswersHealthWhileTwoAddressesHoldEverySlot (review
+// finding MGMT-N4): the per-address cap stops one address reaching the
+// management chain's 500 in-flight slots, but two at the cap (256 each on the
+// standard profile) reach them together, and /healthz -- from loopback, which
+// no per-address cap applies to -- answered 503 while they held them. The
+// Helm chart's liveness probe then restarted a gateway that was only busy.
+func TestTheManagementPortAnswersHealthWhileTwoAddressesHoldEverySlot(t *testing.T) {
+	const n = 500 // every in-flight slot, 250 from each address
+	second := &net.TCPAddr{IP: net.IPv4(203, 0, 113, 77), Port: 40000}
+	entered := make(chan struct{}, n)
+	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/healthz" {
+			_, _ = io.WriteString(w, "ok")
+			return
+		}
+		entered <- struct{}{}
+		_, _ = io.Copy(io.Discard, r.Body)
+	})
+	addr := startManagementFrom(t, n, []net.Addr{attacker, second}, h, nil)
+	for range n {
+		slowVerify(t, dialEP(t, addr))
+	}
+	for range n {
+		<-entered // every slot is held by a slow body
+	}
+
+	c := dialEP(t, addr) // the next connection is loopback's own
+	if _, err := io.WriteString(c, "GET /healthz HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n"); err != nil {
+		t.Fatalf("write health check: %v", err)
+	}
+	_ = c.SetReadDeadline(time.Now().Add(streamTestBound))
+	resp, err := http.ReadResponse(bufio.NewReader(c), nil)
+	if err != nil {
+		t.Fatalf("health check: %v", err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("/healthz from loopback answered %d while two addresses held all %d in-flight slots; want 200",
+			resp.StatusCode, n)
 	}
 }
 

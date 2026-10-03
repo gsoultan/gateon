@@ -11,7 +11,11 @@
  * password, so as not to say which accounts exist; the page does not guess.
  */
 
-const LOCKED = "Too many failed attempts. The account is locked for a while; try again later.";
+// A 429 here is the account's lockout, this client's sign-in budget, or a
+// full password-hashing gate (ADR 0053); the status alone cannot say which,
+// so the sentence claims none of them -- it used to say the account was
+// locked when it was not.
+const LOCKED = "Too many attempts right now. Wait a few minutes and try again.";
 
 /**
  * The error code the gateway answers the second step with when it does not

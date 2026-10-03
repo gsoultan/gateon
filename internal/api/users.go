@@ -174,6 +174,9 @@ func (s *ApiService) changeOwnPassword(ctx context.Context, req *gateonv1.Change
 		return status.Error(codes.ResourceExhausted, err.Error())
 	case errors.Is(err, auth.ErrAccountDisabled):
 		return status.Error(codes.PermissionDenied, err.Error())
+	case errors.Is(err, auth.ErrBusy):
+		// Its own status, ResourceExhausted: nothing was checked (ADR 0053).
+		return err
 	default:
 		logger.L.LogError("password change failed", "error", err, "user", req.Id)
 		return status.Error(codes.Internal, "the password could not be changed")

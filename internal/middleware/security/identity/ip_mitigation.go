@@ -4,7 +4,9 @@
 package identity
 
 import (
+	"context"
 	"net/http"
+	"time"
 
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/middleware/kind"
@@ -30,8 +32,8 @@ func IPMitigation() kind.Middleware {
 				ip = rs.ClientRemoteAddr
 			}
 
-			if AddressBlocked(ip) {
-				refuseBlockedAddress(w, r, ip)
+			if refusal := addressRefusal(r.Context(), rs, ip); refusal != refusedNone {
+				refuseBlockedAddress(w, r, ip, refusal)
 				return
 			}
 
@@ -42,7 +44,7 @@ func IPMitigation() kind.Middleware {
 
 // refuseBlockedAddress answers 403 for an address AddressBlocked refuses, and
 // records which list refused it.
-func refuseBlockedAddress(w http.ResponseWriter, r *http.Request, ip string) {
+func refuseBlockedAddress(w http.ResponseWriter, r *http.Request, ip string, refusal addressRefusalKind) {
 	// The block refused this, not a credential check. Counted as a refused
 	// attempt, a shunned address's own POSTs would renew its shun from the
 	// shun's refusals once it lapsed (ADR 0031).
@@ -59,7 +61,7 @@ func refuseBlockedAddress(w http.ResponseWriter, r *http.Request, ip string) {
 		UserAgent:   r.UserAgent(),
 	}
 	body := "Forbidden: IP Shunned by Security Policy"
-	if !telemetry.IsIPMitigated(ip) {
+	if refusal == refusedByFeed {
 		// Not on the mitigation list, so a feed listed it. The type stays
 		// a mitigation type so the refusal is never evidence towards an
 		// escalation (escalateMitigation), and the threat carries no score,
@@ -81,21 +83,85 @@ func refuseBlockedAddress(w http.ResponseWriter, r *http.Request, ip string) {
 // allowlisted or loopback address on the list, which the allowlist -- "never
 // mitigated" -- says it must not, and which ADR 0029 left open.
 //
-// The exemption is read only for an address the list would refuse, so the
-// clients that are not on it -- nearly all of them -- pay nothing for it.
-// IsIPMitigated reads the database when its cache has no answer for ip, so a
-// caller that must not wait, such as an accept loop, asks from somewhere that
-// can.
-//
 // A threat-feed listing (reputation.Listed) is refused here as well, so the
 // feed switch -- "block known malicious actors" -- is enforced on every
 // entrypoint and route by the decision that already refuses blocked
 // addresses, under the same exemption. It used to be enforced only by a WAF
 // rule behind a second switch, and refused no one without it (truth T3, ADR
-// 0044). The feed is asked second and without a lock; with no feed loaded it
-// costs an atomic load.
+// 0044).
 func AddressBlocked(ip string) bool {
-	return ip != "" && (telemetry.IsIPMitigated(ip) || reputation.Listed(ip)) && !exemptFromEnforcement(ip)
+	return addressRefusal(context.Background(), nil, ip) != refusedNone
+}
+
+// addressRefusalKind is which list, if any, refuses an address.
+type addressRefusalKind uint8
+
+const (
+	refusedNone addressRefusalKind = iota
+	refusedByMitigation
+	refusedByFeed
+)
+
+// addressRefusal is AddressBlocked, saying which list refused. rs is the state
+// of the request the decision is for, whose lookup budget bounds the wait; nil
+// for a connection being accepted, which waits one lookup deadline at most.
+func addressRefusal(ctx context.Context, rs *request.RequestState, ip string) addressRefusalKind {
+	if ip == "" {
+		return refusedNone
+	}
+	refusal := listRefusal(ctx, rs, ip)
+	if refusal != refusedNone && exemptFromEnforcement(ip) {
+		return refusedNone
+	}
+	return refusal
+}
+
+// listRefusal is which list refuses ip, before its exemption -- except that
+// the exemption is decided before the database is asked, never after. It
+// costs a parse and no I/O; it used to be read only after the lookup, so
+// loopback -- a health check, a local proxy, the same-host tunnel -- waited
+// for the database like any other client and hung with it (dataplane DP-N1,
+// ADR 0054). An address the cache answers for -- nearly every request -- pays
+// for neither. The lookup itself waits at most the request's lookup budget,
+// and decides one that cannot finish the way ADR 0043 decides a failed one.
+// The feed is asked last and without a lock; with no feed loaded it costs an
+// atomic load.
+func listRefusal(ctx context.Context, rs *request.RequestState, ip string) addressRefusalKind {
+	blocked, cached := telemetry.IPMitigationFromCache(ip)
+	if !cached {
+		if exemptFromEnforcement(ip) {
+			return refusedNone
+		}
+		lookupCtx, cancel := lookupContext(ctx, rs)
+		blocked = telemetry.IsIPMitigatedContext(lookupCtx, ip)
+		cancel()
+	}
+	switch {
+	case blocked:
+		return refusedByMitigation
+	case reputation.Listed(ip):
+		return refusedByFeed
+	}
+	return refusedNone
+}
+
+// lookupContext is what a block lookup for the request rs belongs to waits
+// under: ctx, ending at the request's lookup budget, which the first lookup
+// that needs one sets one lookup deadline ahead
+// (request.RequestState.BlockLookupsUntil). Both IPMitigation and
+// UserMitigation run at the entrypoint and again at the route; with a
+// database that does not answer, each lookup waiting its own deadline made a
+// new client wait four. Reached only when the cache has no answer, so the
+// context it allocates is off the path nearly every request takes. With no
+// state -- a connection -- the lookup's own deadline is the bound.
+func lookupContext(ctx context.Context, rs *request.RequestState) (context.Context, context.CancelFunc) {
+	if rs == nil {
+		return ctx, func() {}
+	}
+	if rs.BlockLookupsUntil == 0 {
+		rs.BlockLookupsUntil = time.Now().Add(telemetry.BlockLookupTimeout()).UnixNano()
+	}
+	return context.WithDeadline(ctx, time.Unix(0, rs.BlockLookupsUntil))
 }
 
 // unmitigatedPaths are fetched by browsers and crawlers without a user ever
@@ -143,10 +209,21 @@ func serveUserMitigation(next http.Handler, w http.ResponseWriter, r *http.Reque
 		return
 	}
 	key := telemetry.GetReputationID(r)
-	// The exemption is read only for a request a block would refuse, so the
-	// requests that are not blocked -- nearly all of them -- pay nothing for it.
-	// The address is the one the key was scoped with, cached on the state.
-	if !telemetry.IsUserMitigated(key) || exemptFromEnforcement(telemetry.ClientIPOf(r)) {
+	// As listRefusal: the exemption is read only for a request a block would
+	// refuse -- and before the database is asked, never after, so an exempt
+	// client never waits for it (ADR 0054). The address is the one the key is
+	// scoped with, cached on the state.
+	blocked, cached := telemetry.UserMitigationFromCache(key)
+	if !cached {
+		if exemptFromEnforcement(telemetry.ClientIPOf(r)) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		ctx, cancel := lookupContext(r.Context(), rs)
+		blocked = telemetry.IsUserMitigatedContext(ctx, key)
+		cancel()
+	}
+	if !blocked || exemptFromEnforcement(telemetry.ClientIPOf(r)) {
 		next.ServeHTTP(w, r)
 		return
 	}

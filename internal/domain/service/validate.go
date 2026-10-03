@@ -4,11 +4,13 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/gsoultan/gateon/internal/config"
+	"github.com/gsoultan/gateon/internal/mgmtaddr"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
@@ -78,6 +80,27 @@ func validateHealthCheck(svc *gateonv1.Service) error {
 	}
 	if svc.GetUnhealthyThreshold() < 0 || svc.GetHealthyThreshold() < 0 {
 		return fmt.Errorf("%w: health check thresholds are 0 (the default, 2) or more", ErrInvalidService)
+	}
+	return nil
+}
+
+// validateTargets refuses a target that connects to this gateway's own
+// management listener (ADR 0052). Behind a Host() route on a public
+// entrypoint, such a service served the dashboard, sign-in and API to the
+// internet from loopback, past the listener's bind, its allowlist, its
+// per-address cap and the sign-in lockout. Every writer of a service -- REST,
+// gRPC, config import, the canary controller -- saves through SaveService, so
+// this is the one place it is refused; the connection is refused again when
+// it is dialled, for a name that resolves here only later. A UDP service
+// never reaches the TCP-only listener and is not checked.
+func validateTargets(ctx context.Context, svc *gateonv1.Service) error {
+	if strings.EqualFold(svc.GetBackendType(), "udp") {
+		return nil
+	}
+	for _, t := range svc.GetWeightedTargets() {
+		if err := mgmtaddr.CheckTarget(ctx, t.GetUrl()); err != nil {
+			return fmt.Errorf("%w: %w", ErrInvalidService, err)
+		}
 	}
 	return nil
 }

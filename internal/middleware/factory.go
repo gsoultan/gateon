@@ -38,6 +38,11 @@ type Factory struct {
 	dataDir     string
 	routeType   string // trusted route type (e.g. "grpc"); empty = treat as plain HTTP
 	routeKey    string // the route's ID, for per-route state; see kind.RouteStateKey
+	// sessions is the management plane's session check, handed to the
+	// middlewares that send a request's credentials elsewhere so they never
+	// send a management one (ADR 0051). Nil recognises only the session cookie
+	// and API tokens.
+	sessions TokenVerifier
 }
 
 func NewFactory(redisClient redis.Client, globalStore config.GlobalConfigStore, ebpfManager ebpf.Manager, reputation *reputation.IPReputationStore, dataDir string) *Factory {
@@ -58,6 +63,12 @@ func (f *Factory) SetRouteType(t string) {
 // chain is built, like SetRouteType.
 func (f *Factory) SetRouteKey(id string) {
 	f.routeKey = id
+}
+
+// SetManagementSessions records the management plane's session check for the
+// middlewares this factory builds; see Factory.sessions.
+func (f *Factory) SetManagementSessions(v TokenVerifier) {
+	f.sessions = v
 }
 
 // IsGRPCRoute reports whether this factory builds for a gRPC-typed route.

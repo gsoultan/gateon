@@ -5,6 +5,7 @@ package entrypoint
 
 import (
 	"net"
+	"net/netip"
 	"sync/atomic"
 	"testing"
 
@@ -74,8 +75,57 @@ func TestPerAddrLimiterCountsPerAddress(t *testing.T) {
 			t.Fatal("a loopback connection was capped per address")
 		}
 	}
-	if _, tracked := p.counts["127.0.0.1"]; tracked {
+	if _, tracked := p.counts[netip.MustParseAddr("127.0.0.1")]; tracked {
 		t.Error("an exempt address was counted in the per-address map")
+	}
+}
+
+// TestPerAddrLimiterCountsAnIPv6SlashSixtyFourAsOneAddress: an IPv6 client is
+// handed a /64, so counted per /128 it had 2^64 caps -- one per address it
+// cared to source from -- and the cap bounded nothing (review findings MGMT-N4
+// and dataplane F5). Every address in a /64 shares one count; the next /64 has
+// its own; a v4-mapped address is the IPv4 address it is.
+func TestPerAddrLimiterCountsAnIPv6SlashSixtyFourAsOneAddress(t *testing.T) {
+	p := newPerAddrLimiter(2)
+	if !p.acquire("2001:db8:1:2::1") || !p.acquire("2001:db8:1:2:ffff::9") {
+		t.Fatal("two connections from one /64 were not admitted under a per-address cap of 2")
+	}
+	if p.acquire("2001:db8:1:2:dead:beef:0:1") {
+		t.Fatal("a third address in the same /64 was admitted under a cap of 2: the cap is keyed per /128")
+	}
+	if !p.acquire("2001:db8:1:3::1") {
+		t.Fatal("an address in a different /64 was refused: the cap is wider than a /64")
+	}
+	p.release("2001:db8:1:2::1")
+	if !p.acquire("2001:db8:1:2::77") {
+		t.Fatal("after one connection from the /64 closed, the next from it was refused: the slot was not freed")
+	}
+	if !p.acquire("203.0.113.9") || !p.acquire("::ffff:203.0.113.9") {
+		t.Fatal("two connections from one IPv4 address were not admitted under a cap of 2")
+	}
+	if p.acquire("203.0.113.9") {
+		t.Fatal("a v4-mapped connection was counted apart from the IPv4 address it is")
+	}
+}
+
+// TestTheManagementListenerCapsAnIPv6SlashSixtyFour drives the management
+// listener's own wrapper: three connections from three addresses of one /64,
+// under a per-address cap of 2, and the third is closed at accept while a
+// connection from another /64 is admitted.
+func TestTheManagementListenerCapsAnIPv6SlashSixtyFour(t *testing.T) {
+	t.Setenv("GATEON_ENTRYPOINT_MAX_CONN_PER_ADDR", "2")
+	first, second := fromAddr(t, "2001:db8:aa:1::1"), fromAddr(t, "2001:db8:aa:1::2")
+	third, other := fromAddr(t, "2001:db8:aa:1::3"), fromAddr(t, "2001:db8:aa:2::1")
+	l := managementListener(scriptListener(first, second, third, other))
+	_ = acceptOne(t, l)
+	_ = acceptOne(t, l)
+	got := acceptOne(t, l)
+	if want := "2001:db8:aa:2::1"; got.(*slotConn).addr != want {
+		t.Fatalf("the management listener returned %q; want the third address of the /64 refused and %q returned",
+			got.(*slotConn).addr, want)
+	}
+	if !closedConn(third) {
+		t.Error("a third address in one /64 was not closed at accept under a per-address cap of 2")
 	}
 }
 

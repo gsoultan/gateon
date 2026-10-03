@@ -11,12 +11,14 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/gsoultan/gateon/internal/api"
 	"github.com/gsoultan/gateon/internal/audit"
 	"github.com/gsoultan/gateon/internal/auth"
+	"github.com/gsoultan/gateon/internal/auth/admission"
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/db"
 	"github.com/gsoultan/gateon/internal/httputil"
@@ -81,6 +83,9 @@ func wrongCodeStatus(isLoginStep bool) int {
 // the service produced is written, and neither is its error text, which for an
 // unexpected failure could be a database error.
 func writeSetup2FARefusal(w http.ResponseWriter, r *http.Request, err error) {
+	if writeBusy(w, err) {
+		return
+	}
 	switch {
 	case errors.Is(err, auth.ErrAccountLocked):
 		logger.SecurityEvent("auth_2fa_setup_locked", r, "account_locked")
@@ -96,6 +101,19 @@ func writeSetup2FARefusal(w http.ResponseWriter, r *http.Request, err error) {
 	}
 }
 
+// writeBusy answers auth.ErrBusy -- every hash slot taken, refused before any
+// hash (ADR 0053) -- as 429 with a Retry-After, and reports whether err was
+// that. Not 401: nothing was checked, and the dashboard reads 401 on a step a
+// signed-in user takes as the end of their session.
+func writeBusy(w http.ResponseWriter, err error) bool {
+	if !errors.Is(err, auth.ErrBusy) {
+		return false
+	}
+	w.Header().Set("Retry-After", strconv.Itoa(int(admission.BusyRetryAfter/time.Second)))
+	WriteHTTPError(w, http.StatusTooManyRequests, err.Error())
+	return true
+}
+
 // signInUnavailable is the answer to a sign-in the gateway could not judge.
 const signInUnavailable = "sign-in is unavailable: the gateway could not read its user database; " +
 	"try again shortly (the gateway's log has the reason)"
@@ -107,6 +125,9 @@ const signInUnavailable = "sign-in is unavailable: the gateway could not read it
 // signing in and named the database to anyone who asked. It is 503, which the
 // dashboard shows as "not ready", and the error goes to the log.
 func writeSignInRefusal(w http.ResponseWriter, err error) {
+	if writeBusy(w, err) {
+		return
+	}
 	if errors.Is(err, auth.ErrInvalidCredentials) || errors.Is(err, auth.ErrAccountLocked) ||
 		errors.Is(err, auth.ErrAccountDisabled) {
 		WriteHTTPError(w, http.StatusUnauthorized, err.Error())
@@ -735,6 +756,9 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 
 		resp, err := svc.Verify2FA(r.Context(), &req)
 		if err != nil {
+			if writeBusy(w, err) {
+				return
+			}
 			switch {
 			case errors.Is(err, auth.ErrInvalidChallenge):
 				// No proof of the password step. 401 with a code the dashboard
@@ -802,6 +826,9 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 		}
 		secret, qr, recovery, id, err := d.AuthManager.EnrollPending2FA(req.Username, req.Password, request.ClientAddr(r))
 		if err != nil {
+			if writeBusy(w, err) {
+				return
+			}
 			switch {
 			case errors.Is(err, auth.ErrAccountLocked):
 				WriteHTTPError(w, http.StatusTooManyRequests, err.Error())

@@ -185,42 +185,25 @@ func (r *Responder) Handle(inc correlation.Incident) Action {
 	}
 }
 
-// degradeRep penalises every network that took part in the incident.
+// degradeRep penalises the incident's source: its client class on the network
+// its source address is on, once.
 //
-// An incident can span many addresses -- that is what the correlation engine is
-// for, and a botnet sharing one fingerprint across a hundred hosts is the case it
-// exists to catch. Reputation is scoped per network (ADR 0011), so penalising
-// only inc.SourceIP would leave the other participants untouched while the
-// operator reads that the incident was mitigated.
+// The correlation engine groups signals by exactly that identity (repid.For),
+// so every participant of an incident is on the source's network and shares
+// its score; penalising each participant took the same score down once per
+// address. It also used to penalise every participant on every network, back
+// when the engine grouped by browser class alone -- which is how one attacker's
+// WAF blocks restricted an unrelated network whose only part in the "incident"
+// was running the same browser build (ADR 0055). An incident handed over with
+// participants on other networks still penalises only the source's: a
+// browser-class match across networks is context, never a reason to act.
 //
-// Penalising every *participant* is the safe way to keep the cross-address reach
-// that made JA4+ attractive in the first place: reach is derived from addresses
-// that actually appeared in the incident, never extended to bystanders who happen
-// to run the same browser.
+// An incident with no address names no network, and is not acted on.
 func (r *Responder) degradeRep(inc correlation.Incident, penalty float64) {
-	if r.degrade == nil || inc.Fingerprint == "" {
+	if r.degrade == nil || inc.Fingerprint == "" || inc.SourceIP == "" {
 		return
 	}
-	reason := "correlated incident: " + strings.Join(inc.SignalTypes, ",")
-
-	seen := make(map[string]struct{}, len(inc.SourceIPs)+1)
-	for _, ip := range append([]string{inc.SourceIP}, inc.SourceIPs...) {
-		if ip == "" {
-			continue
-		}
-		if _, dup := seen[ip]; dup {
-			continue
-		}
-		seen[ip] = struct{}{}
-		r.degrade(inc.Fingerprint, ip, penalty, reason)
-	}
-
-	// An incident with no address at all still deserves the penalty; the
-	// identity degrades to the fingerprint's own unknown-network bucket rather
-	// than being dropped.
-	if len(seen) == 0 {
-		r.degrade(inc.Fingerprint, "", penalty, reason)
-	}
+	r.degrade(inc.Fingerprint, inc.SourceIP, penalty, "correlated incident: "+strings.Join(inc.SignalTypes, ","))
 }
 
 func (r *Responder) emit(a Action, inc correlation.Incident, reason string) {

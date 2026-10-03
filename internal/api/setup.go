@@ -45,8 +45,9 @@ func (s *ApiService) Setup(ctx context.Context, req *gateonv1.SetupRequest) (*ga
 	if req == nil {
 		return &gateonv1.SetupResponse{Success: false, Error: "request is required"}, nil
 	}
-	// Paseto symmetric key MUST be exactly 32 bytes
-	if len(req.PasetoSecret) != 32 {
+	// Paseto symmetric key MUST be exactly 32 bytes, unless the configuration
+	// names the key and the request's is not used.
+	if len(req.PasetoSecret) != 32 && s.setupSessionKey(ctx, "") == "" {
 		return &gateonv1.SetupResponse{Success: false, Error: "paseto secret must be exactly 32 characters"}, nil
 	}
 	// Check if setup is already done
@@ -85,9 +86,9 @@ func (s *ApiService) Setup(ctx context.Context, req *gateonv1.SetupRequest) (*ga
 	// administrator alone closed setup for good, over a config that had
 	// neither the session key nor auth.enabled. A failure now undoes what
 	// this call did, so setup stays open and a retry starts clean.
-	prevAuth, installed := s.Auth, false
+	prevAuth, installed, key := s.Auth, false, s.setupSessionKey(ctx, req.PasetoSecret)
 	if !auth.Available(s.Auth) {
-		if err := s.installAuthManager(ctx, req.PasetoSecret); err != nil {
+		if err := s.installAuthManager(ctx, key); err != nil {
 			return &gateonv1.SetupResponse{Success: false, Error: err.Error()}, nil
 		}
 		installed = true
@@ -97,7 +98,7 @@ func (s *ApiService) Setup(ctx context.Context, req *gateonv1.SetupRequest) (*ga
 		s.undoSetup(prevAuth, installed, "")
 		return &gateonv1.SetupResponse{Success: false, Error: "failed to create admin: " + err.Error()}, nil
 	}
-	if err := s.saveSetupConfig(ctx, req); err != nil {
+	if err := s.saveSetupConfig(ctx, req, key); err != nil {
 		s.undoSetup(prevAuth, installed, createdID)
 		return &gateonv1.SetupResponse{Success: false, Error: "failed to update config: " + err.Error()}, nil
 	}
@@ -105,7 +106,7 @@ func (s *ApiService) Setup(ctx context.Context, req *gateonv1.SetupRequest) (*ga
 	// 3. Put the saved key in force now. The administrator and the config are
 	// already written, so a failure is reported, not returned: the next start
 	// reads the saved key.
-	if err := s.Auth.UpdateSymmetricKey(req.PasetoSecret); err != nil {
+	if err := s.Auth.UpdateSymmetricKey(key); err != nil {
 		logger.L.LogError("setup saved the session key but could not put it in force; restart the gateway",
 			"error", err)
 	}
@@ -140,9 +141,30 @@ func (s *ApiService) upsertSetupAdmin(req *gateonv1.SetupRequest) (string, error
 	return admin.Id, nil
 }
 
+// setupSessionKey is the session key Setup puts in force: the one the
+// configuration names by reference when it names one -- GATEON_SESSION_KEY,
+// which every replica of one gateway and every start on a fresh volume share
+// (ADR 0056) -- and otherwise the one the wizard generated.
+//
+// Setup used to store the wizard's key over the reference. The replica that ran
+// setup then signed with a key no other replica had; and with no persistent
+// volume, the second factors enrolled under it were unreadable after the next
+// restart, which brought the environment's key back.
+func (s *ApiService) setupSessionKey(ctx context.Context, requested string) string {
+	if s.Globals == nil {
+		return requested
+	}
+	live := s.Globals.Get(ctx)
+	view := config.WithSecretReferences(s.Globals, live)
+	if key := live.GetAuth().GetPasetoSecret(); key != "" && config.IsSecretReference(view.GetAuth().GetPasetoSecret()) {
+		return key
+	}
+	return requested
+}
+
 // saveSetupConfig writes the session key, auth.enabled and the management
 // settings Setup chose to the global config.
-func (s *ApiService) saveSetupConfig(ctx context.Context, req *gateonv1.SetupRequest) error {
+func (s *ApiService) saveSetupConfig(ctx context.Context, req *gateonv1.SetupRequest, key string) error {
 	conf, ok := proto.Clone(s.Globals.Get(ctx)).(*gateonv1.GlobalConfig)
 	if !ok || conf == nil {
 		conf = &gateonv1.GlobalConfig{}
@@ -150,7 +172,7 @@ func (s *ApiService) saveSetupConfig(ctx context.Context, req *gateonv1.SetupReq
 	if conf.Auth == nil {
 		conf.Auth = &gateonv1.AuthConfig{}
 	}
-	conf.Auth.PasetoSecret = req.PasetoSecret
+	conf.Auth.PasetoSecret = key
 	conf.Auth.Enabled = true
 	if conf.Management == nil {
 		conf.Management = &gateonv1.ManagementConfig{}

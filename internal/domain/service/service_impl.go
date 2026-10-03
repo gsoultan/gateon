@@ -54,6 +54,9 @@ func (s *serviceImpl) SaveService(ctx context.Context, svc *gateonv1.Service) er
 	if err := validateService(svc); err != nil {
 		return err
 	}
+	if err := validateTargets(ctx, svc); err != nil {
+		return err
+	}
 	if svc.Id == "" {
 		svc.Id = uuid.NewString()
 	}

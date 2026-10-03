@@ -11,7 +11,7 @@ import {
   signInRefusalMessage,
 } from "./signInMessages";
 
-const LOCKED = "Too many failed attempts. The account is locked for a while; try again later.";
+const LOCKED = "Too many attempts right now. Wait a few minutes and try again.";
 
 describe("sign-in refusals", () => {
   test.each([

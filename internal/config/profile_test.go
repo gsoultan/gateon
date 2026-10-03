@@ -3,7 +3,10 @@
 
 package config
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestNormalizeTier(t *testing.T) {
 	cases := map[string]Tier{
@@ -106,6 +109,17 @@ func TestStreamBoundsAreSetOnEveryTier(t *testing.T) {
 		d := DefaultsFor(tier)
 		if d.StreamIdleTimeout <= 0 || d.StreamMaxLifetime <= d.StreamIdleTimeout {
 			t.Errorf("%s: idle %v, lifetime %v; want both set, lifetime the longer", tier, d.StreamIdleTimeout, d.StreamMaxLifetime)
+		}
+	}
+}
+
+// Every tier gives a block lookup a deadline short enough that a database that
+// stopped answering costs a new client a fraction of a second, not as long as
+// the database stays stopped (ADR 0054). Zero would be no deadline at all.
+func TestBlockLookupsHaveADeadlineOnEveryTier(t *testing.T) {
+	for _, tier := range []Tier{TierMinimal, TierStandard, TierEnterprise} {
+		if d := DefaultsFor(tier).BlockLookupTimeout; d <= 0 || d > time.Second {
+			t.Errorf("%s: block lookup deadline %v; want set, and under a second", tier, d)
 		}
 	}
 }

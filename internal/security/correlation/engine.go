@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/gsoultan/gateon/internal/telemetry/repid"
 )
 
 // Default tuning values for the correlation Engine.
@@ -160,12 +161,25 @@ func New(cfg Config) *Engine {
 	}
 }
 
-// sourceKey prefers the (more stable) fingerprint, falling back to source IP.
+// sourceKey is who a signal is held against: the client class on the network
+// it came from, or, with no fingerprint, the address -- repid.For, the identity
+// a reputation score is kept for (ADR 0011, 0024). An incident's penalty lands
+// on that identity, so grouping by anything wider would penalise clients that
+// sent none of the signals.
+//
+// It used to be the fingerprint alone. A fingerprint names a browser build, not
+// a client, so one attacker's WAF blocks and a single detection against an
+// unrelated user of the same build, on another network, made one "incident"
+// naming the user, and the responder restricted the user's network (ADR 0055).
+//
+// A signal with no address has no network to hold it against and is not
+// correlated: putting every such client of a class in one bucket would be the
+// class-wide grouping again.
 func sourceKey(s Signal) string {
-	if s.Fingerprint != "" {
-		return s.Fingerprint
+	if s.SourceIP == "" {
+		return ""
 	}
-	return s.SourceIP
+	return repid.For(s.Fingerprint, s.SourceIP)
 }
 
 // Observe ingests a signal and, if it crosses the correlation threshold,

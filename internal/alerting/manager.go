@@ -125,56 +125,68 @@ func (m *AlertingManager) process(threat *telemetry.SecurityThreat) {
 		return
 	}
 
-	// Smart autonomous mitigation: check aggregate IP risk score.
-	//
-	// Loopback is never shunned -- doing so would cut off the gateway's own
-	// management traffic -- but it is deliberately only the *mitigation* that is
-	// skipped. This used to `return` outright, which is upstream of the playbook
-	// loop, so a threat from 127.0.0.1 was silently never reported either. That
-	// is not a corner case: a gateway behind nginx, a Cloudflare tunnel or any
-	// sidecar sees loopback as the source for every request until client-IP
-	// extraction is configured, and in that deployment alerting reads as enabled
-	// and configured while sending nothing at all.
-	if threat.SourceIP != "" && m.ebpfManager != nil && !httputil.IsLoopback(threat.SourceIP) {
-		score := telemetry.GetIPThreatScore(threat.SourceIP)
-		// If score is high (e.g. > 150) or very high severity threat
-		if score > 150 || threat.Severity == "critical" {
-			// Ensure we don't re-mitigate if already mitigated or manually unmitigated
-			if threat.ActionTaken == "" && !telemetry.IsIPUnmitigated(threat.SourceIP) {
-				// To follow the "only block the attacker" policy, we prefer fingerprint-based
-				// mitigation (already recorded in telemetry.RecordSecurityThreat).
-				// We only perform kernel-level IP shunning for extremely severe threats
-				// where the risk to infrastructure outweighs the potential for NAT false positives.
-				if threat.Severity == "critical" && threat.JA4 == "" {
-					// The automatic shun every path takes: it lapses, and it is
-					// leased in the kernel (ADR 0031). Shunning the kernel here
-					// first, as this did, left an entry that never lapsed.
-					res, err := telemetry.ShunAutomatically(threat.SourceIP, "Autonomous mitigation (score > 150 or critical)")
-					if err != nil {
-						logger.L.LogError("autonomous mitigation did not persist; the source is not blocked",
-							"ip", threat.SourceIP, "error", err)
-					}
-					if err == nil && res.Shunned() {
-						threat.ActionTaken = "Autonomous Mitigation"
-						logger.L.LogInfo("autonomous smart mitigation: shunned high-risk IP",
-							"ip", threat.SourceIP,
-							"total_score", score,
-							"threat_type", threat.Type,
-							"severity", threat.Severity)
-					}
-				} else {
-					logger.L.LogInfo("autonomous smart mitigation: skipping IP shun in favor of fingerprint mitigation",
-						"ip", threat.SourceIP,
-						"ja4", threat.JA4)
-				}
-			}
-		}
-	}
+	m.autonomousMitigation(threat)
 
 	for _, pb := range m.config.Playbooks {
 		if m.matchPlaybook(pb, *threat) {
 			m.executePlaybook(pb, *threat)
 		}
+	}
+}
+
+// autonomousMitigation shuns the source of a critical threat with no
+// fingerprint, when its address's aggregate score is high or the threat is
+// critical.
+//
+// Loopback is never shunned -- doing so would cut off the gateway's own
+// management traffic -- but it is deliberately only the *mitigation* that is
+// skipped. This used to `return` from process outright, which is upstream of
+// the playbook loop, so a threat from 127.0.0.1 was silently never reported
+// either. That is not a corner case: a gateway behind nginx, a Cloudflare
+// tunnel or any sidecar sees loopback as the source for every request until
+// client-IP extraction is configured, and in that deployment alerting reads as
+// enabled and configured while sending nothing at all.
+//
+// A threat not held against its source -- an audit-only match, a leak in a
+// response, a refusal of an earlier decision -- shuns nobody (ADR 0055).
+func (m *AlertingManager) autonomousMitigation(threat *telemetry.SecurityThreat) {
+	if threat.SourceIP == "" || m.ebpfManager == nil || httputil.IsLoopback(threat.SourceIP) ||
+		!threat.HeldAgainstSource() {
+		return
+	}
+	score := telemetry.GetIPThreatScore(threat.SourceIP)
+	// Not for a low score on a threat below critical, nor again for one already
+	// acted on or released by an operator.
+	if (score <= 150 && threat.Severity != "critical") || threat.ActionTaken != "" ||
+		telemetry.IsIPUnmitigated(threat.SourceIP) {
+		return
+	}
+	// To follow the "only block the attacker" policy, we prefer fingerprint-based
+	// mitigation (already recorded in telemetry.RecordSecurityThreat). We only
+	// perform kernel-level IP shunning for extremely severe threats where the
+	// risk to infrastructure outweighs the potential for NAT false positives.
+	if threat.Severity != "critical" || threat.JA4 != "" {
+		logger.L.LogInfo("autonomous smart mitigation: skipping IP shun in favor of fingerprint mitigation",
+			"ip", threat.SourceIP,
+			"ja4", threat.JA4)
+		return
+	}
+	// The automatic shun every path takes: it lapses, and it is leased in the
+	// kernel (ADR 0031). Shunning the kernel here first, as this did, left an
+	// entry that never lapsed.
+	res, err := telemetry.ShunAutomatically(threat.SourceIP, "Autonomous mitigation (score > 150 or critical)")
+	if err != nil {
+		logger.L.LogError("autonomous mitigation did not persist; the source is not blocked",
+			"ip", threat.SourceIP, "error", err)
+		return
+	}
+	if res.Shunned() {
+		threat.ActionTaken = "Autonomous Mitigation"
+		logger.L.LogInfo("autonomous smart mitigation: shunned high-risk IP",
+			"ip", threat.SourceIP,
+			"total_score", score,
+			"threat_type", threat.Type,
+			"severity", threat.Severity)
 	}
 }
 
@@ -228,7 +240,11 @@ func (m *AlertingManager) executePlaybook(pb *gateonv1.AlertPlaybook, threat tel
 		}
 	}
 
-	if pb.Action == "block" && threat.SourceIP != "" {
+	// The alert goes out for every threat; the block only for one held against
+	// its source. A playbook blocking on "WAF threats" otherwise shunned the
+	// reader of a page the DLP rules redacted, and every client an audit-only
+	// WAF matched (ADR 0055).
+	if pb.Action == "block" && threat.SourceIP != "" && threat.HeldAgainstSource() {
 		blockSource(pb, threat.SourceIP)
 	}
 }

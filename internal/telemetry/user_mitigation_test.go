@@ -155,6 +155,11 @@ func TestUserMitigationExpiresAfterTTL(t *testing.T) {
 
 	// CURRENT_TIMESTAMP is second-granular, so step well clear of the boundary.
 	time.Sleep(2500 * time.Millisecond)
+	// A cached block decides for one to two mitigationEpochLength before it
+	// is read again (ADR 0054), so a block outlives its TTL here by at most
+	// that; the cache is aged past what may decide a request at all, so the
+	// next answer is the table's.
+	ageCachedAnswer(t, fp, staleAnswerEpochs+1)
 
 	if IsUserMitigated(fp) {
 		t.Errorf("still blocked %v after a %v TTL; a coarse fingerprint block that "+

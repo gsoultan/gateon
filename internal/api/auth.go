@@ -38,6 +38,11 @@ func (s *ApiService) Login(ctx context.Context, req *gateonv1.LoginRequest) (*ga
 				TwoFactorChallenge:     auth.ChallengeFrom(err),
 			}, nil
 		}
+		// Refused before any check (ADR 0053): not an attempt, and not worth
+		// an audit write each while the gate is full.
+		if errors.Is(err, auth.ErrBusy) {
+			return nil, err
+		}
 		s.logAudit(ctx, "login_failed", "auth", fmt.Sprintf("Failed login attempt for user: %s", req.Username))
 		return nil, err
 	}

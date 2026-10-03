@@ -40,8 +40,14 @@ RecordSecurityThreat  ──▶  ThreatBroadcaster  ──▶  threat pipeline (
                                    └── OnIncident ─▶ log + ship incident ─────┘
 ```
 
-- Every recorded threat is converted into a `correlation.Signal` and observed by
-  the engine.
+- Every recorded threat that is held against its source is converted into a
+  `correlation.Signal` and observed by the engine. Three kinds are recorded and
+  shipped but never correlated (ADR 0055): a threat the client did not choose to
+  send (a cross-site trap load, loopback, a data leak in a response it was
+  served), a match a control did not act on (an audit-only WAF, a WAF match below
+  the blocking threshold), and a refusal of an earlier decision (a shun or IP
+  reputation feed listing, a fingerprint block, a reputation refusal). Serving a
+  challenge records no threat at all.
 - When enough related signals appear from one source within the window, an
   `Incident` is raised (logged as a warning, and shipped to the SIEM if enabled).
 - Raw threats can optionally also be shipped (`GATEON_SIEM_RAW_THREATS=true`).
@@ -50,8 +56,13 @@ RecordSecurityThreat  ──▶  ThreatBroadcaster  ──▶  threat pipeline (
 
 ## Correlation engine
 
-Sources are keyed by **fingerprint** (preferred) or **source IP**. Within a
-sliding **window**, signals are accumulated; an incident is raised when either:
+A source is a **client build on one network**: the fingerprint's class on the
+source address's /24 (IPv4) or /64 (IPv6), or the address alone when there is
+no fingerprint -- the identity a reputation score is kept for. A fingerprint
+names a browser build, not a client, so the same build on two networks is two
+sources, and an incident's response reaches only the network that produced it.
+A signal with no address is not correlated. Within a sliding **window**, signals
+are accumulated; an incident is raised when either:
 
 - the number of signals reaches **MinSignals** (default `3`), or
 - the cumulative score reaches **MinScore** (disabled by default).
@@ -144,6 +155,8 @@ escalating responses so legitimate heavy traffic is not knocked offline:
 - **Escalation tiers:** medium → moderate reputation penalty (tightens the WAF's
   adaptive anomaly threshold and hardens PoW); high/critical → heavy penalty
   (near-block via WAF); critical + ≥3 distinct signals → optional hard eBPF shun.
+  The penalty lands once, on the incident source's build on the source's
+  network, never on another network that runs the same browser.
 - **Self-healing.** Reputation recovers over time if the behaviour stops, so a
   false positive degrades gracefully rather than permanently blocking.
 

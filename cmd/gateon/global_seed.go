@@ -70,9 +70,9 @@ func writeFileAtomic(path string, b []byte) error {
 	return nil
 }
 
-// applyGlobalConfigSeed seeds target, logging what it did; a seed that cannot
-// be copied stops the gateway.
-func applyGlobalConfigSeed(target string) {
+// applyGlobalConfigSeed seeds target, logging what it did, and reports whether
+// it did; a seed that cannot be copied stops the gateway.
+func applyGlobalConfigSeed(target string) bool {
 	copied, err := seedGlobalConfig(target)
 	if err != nil {
 		logger.Fatal("refusing to start on built-in defaults: the global config seed could not be copied",
@@ -82,4 +82,5 @@ func applyGlobalConfigSeed(target string) {
 		logger.L.LogInfo("global config seeded; later changes to the seed are not read",
 			"seed", os.Getenv(globalConfigSeedEnv), "path", target)
 	}
+	return copied
 }
