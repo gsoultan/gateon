@@ -5,7 +5,6 @@ package auth
 
 import (
 	"bytes"
-	"crypto/tls"
 	"fmt"
 	"io"
 	"math"
@@ -74,18 +73,7 @@ func ForwardAuth(cfg ForwardAuthConfig) (Middleware, error) {
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			return http.ErrUseLastResponse
 		},
-	}
-	if authURL.Scheme == "https" && cfg.TLSInsecureSkipVerify {
-		client.Transport = &http.Transport{
-			TLSClientConfig: &tls.Config{
-				// #nosec G402 -- verification is skipped only when the operator
-				// sets TLSInsecureSkipVerify on this specific forward-auth
-				// middleware, for an auth service presenting an internal or
-				// self-signed certificate. The zero value is false, so the
-				// default stays verifying; this is an opt-in, not a fallback.
-				InsecureSkipVerify: true,
-			},
-		}
+		Transport: outboundTransport(authURL.Scheme == "https" && cfg.TLSInsecureSkipVerify),
 	}
 
 	return func(next http.Handler) http.Handler {

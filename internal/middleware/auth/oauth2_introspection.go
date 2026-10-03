@@ -78,7 +78,7 @@ func NewOAuth2IntrospectionValidator(cfg OAuth2IntrospectionConfig) (*OAuth2Intr
 	if cfg.IntrospectionURL == "" || cfg.ClientID == "" || cfg.ClientSecret == "" {
 		return nil, fmt.Errorf("oauth2 introspection requires introspection_url, client_id, and client_secret")
 	}
-	client := &http.Client{Timeout: oauth2IntrospectionTimeout}
+	client := &http.Client{Timeout: oauth2IntrospectionTimeout, Transport: outboundTransport(false)}
 	return &OAuth2IntrospectionValidator{config: cfg, client: client}, nil
 }
 
