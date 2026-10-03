@@ -79,6 +79,54 @@ func BenchmarkRoundRobinLB_Next(b *testing.B) {
 	}
 }
 
+// BenchmarkDefaultPolicyWeightedNext is the pick under the default policy, as
+// the dashboard builds it: round robin, three targets weighted 1:2:6.
+func BenchmarkDefaultPolicyWeightedNext(b *testing.B) {
+	lb := NewDefaultLoadBalancerFactory().Create("round_robin", []*gateonv1.Target{
+		{Url: "http://localhost:8001", Weight: 1},
+		{Url: "http://localhost:8002", Weight: 2},
+		{Url: "http://localhost:8003", Weight: 6},
+	})
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		lb.NextState()
+	}
+}
+
+// BenchmarkDefaultPolicyNextOneDown is the same pick with one of three equal
+// targets ejected by its health check, so a third of turns take the fallback.
+func BenchmarkDefaultPolicyNextOneDown(b *testing.B) {
+	lb := NewDefaultLoadBalancerFactory().Create("round_robin", []*gateonv1.Target{
+		{Url: "http://localhost:8001", Weight: 1},
+		{Url: "http://localhost:8002", Weight: 1},
+		{Url: "http://localhost:8003", Weight: 1},
+	})
+	lb.SetAlive("http://localhost:8002", false)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		lb.NextState()
+	}
+}
+
+// BenchmarkDefaultPolicyNext_Parallel is the equal-weight pick under
+// contention, where every request shares the rotation counter.
+func BenchmarkDefaultPolicyNext_Parallel(b *testing.B) {
+	lb := NewDefaultLoadBalancerFactory().Create("round_robin", []*gateonv1.Target{
+		{Url: "http://localhost:8001", Weight: 1},
+		{Url: "http://localhost:8002", Weight: 1},
+		{Url: "http://localhost:8003", Weight: 1},
+	})
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			lb.NextState()
+		}
+	})
+}
+
 func BenchmarkLeastConnLB_Next(b *testing.B) {
 	lb := NewLeastConnLB([]string{"http://localhost:8001", "http://localhost:8002", "http://localhost:8003"})
 	b.ReportAllocs()
@@ -132,7 +180,7 @@ func BenchmarkGetOrCreateProxy_CacheHit(b *testing.B) {
 	}
 	defer h.Close()
 
-	state := (*lb.targetsPtr.Load())[0]
+	state := lb.set.Load().targets[0]
 	// Prime the cache
 	_ = h.getOrCreateProxy(state)
 

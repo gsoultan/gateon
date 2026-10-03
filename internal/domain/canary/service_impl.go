@@ -78,9 +78,9 @@ func (cs *serviceImpl) checkRunnable(ctx context.Context, req *gateonv1.StartCan
 	if !ok {
 		return fmt.Errorf("%w: service %q not found", ErrNotRunnable, req.ServiceId)
 	}
-	if policy := config.CanonicalLBPolicy(svc.LoadBalancerPolicy); policy != "weighted_round_robin" {
+	if policy := config.CanonicalLBPolicy(svc.LoadBalancerPolicy); policy != "round_robin" && policy != "weighted_round_robin" {
 		return fmt.Errorf("%w: service %q balances with %s, which ignores target weights; "+
-			"switch it to weighted round robin to shift traffic by weight", ErrNotRunnable, svc.Id, policy)
+			"switch it to round robin to shift traffic by weight", ErrNotRunnable, svc.Id, policy)
 	}
 	for _, tw := range req.TargetWeights {
 		for _, t := range svc.WeightedTargets {

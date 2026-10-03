@@ -21,7 +21,9 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	state := h.lb.NextState()
 	if state == nil || state.url == "" {
-		http.Error(w, "no targets available for service", http.StatusBadGateway)
+		// 503, not 502: no backend was asked, so none answered badly. Every
+		// target is out of rotation (or the service has none).
+		http.Error(w, "no healthy targets available for service", http.StatusServiceUnavailable)
 		return
 	}
 

@@ -27,21 +27,22 @@ func shiftTo(weights ...int32) *gateonv1.StartCanaryRequest {
 }
 
 // TestCanaryRefusesAServiceThatIgnoresWeights: a canary shifts traffic by
-// shifting target weights, and only weighted round robin reads them. On any
-// other policy the rollout logged its progress while every request went where
-// it always had -- and StartCanary answered success for it.
+// shifting target weights. On a policy that does not read them the rollout
+// logged its progress while every request went where it always had -- and
+// StartCanary answered success for it. Round robin reads weights since ADR
+// 0047, so the default policy runs a canary too.
 func TestCanaryRefusesAServiceThatIgnoresWeights(t *testing.T) {
-	for _, policy := range []string{"", "round_robin", "least_conn", "roundRobin"} {
+	for _, policy := range []string{"least_conn", "leastConn", "ai_predictive"} {
 		cs, fake := canaryService(weightedService(policy))
 		_, err := cs.StartCanary(t.Context(), shiftTo(50, 50))
-		if !errors.Is(err, ErrNotRunnable) || !strings.Contains(err.Error(), "weighted round robin") {
-			t.Errorf("policy %q: err = %v, want ErrNotRunnable naming weighted round robin", policy, err)
+		if !errors.Is(err, ErrNotRunnable) || !strings.Contains(err.Error(), "round robin") {
+			t.Errorf("policy %q: err = %v, want ErrNotRunnable naming round robin", policy, err)
 		}
 		if n := fake.saveCount(); n != 0 {
 			t.Errorf("policy %q: a refused canary saved the service %d times", policy, n)
 		}
 	}
-	for _, policy := range []string{"weighted_round_robin", "weightedRoundRobin"} {
+	for _, policy := range []string{"", "round_robin", "roundRobin", "weighted_round_robin", "weightedRoundRobin"} {
 		cs, _ := canaryService(weightedService(policy))
 		if _, err := cs.StartCanary(t.Context(), shiftTo(50, 50)); err != nil {
 			t.Errorf("policy %q refused: %v", policy, err)

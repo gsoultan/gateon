@@ -4,148 +4,101 @@
 package proxy
 
 import (
-	"sync"
-	"sync/atomic"
-
-	"github.com/gsoultan/gateon/internal/telemetry"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
-// WeightedRoundRobinLB implements weighted round-robin load balancing.
-type WeightedRoundRobinLB struct {
-	targetsPtr atomic.Pointer[[]*targetState]
-	current    uint64
-	mu         sync.Mutex
-}
+// WeightedRoundRobinLB is round robin by weight. Since round robin honours
+// weights itself (ADR 0047) the two policies are one balancer; both names stay
+// because services are saved under both.
+type WeightedRoundRobinLB = RoundRobinLB
 
 func NewWeightedRoundRobinLB(targets []*gateonv1.Target) *WeightedRoundRobinLB {
-	lbTargets := make([]*targetState, len(targets))
-	for i, t := range targets {
-		lbTargets[i] = newTargetStateFromTarget(t)
-	}
-	lb := &WeightedRoundRobinLB{}
-	lb.targetsPtr.Store(&lbTargets)
+	lb := &RoundRobinLB{}
+	lb.UpdateWeightedTargets(targets)
 	return lb
 }
 
-func (lb *WeightedRoundRobinLB) Next() string {
-	s := lb.NextState()
-	if s == nil {
-		return ""
-	}
-	return s.url
-}
+// maxScheduleLen bounds the smooth schedule a balancer keeps: 4096 entries of
+// four bytes, 16 KiB, for a route whose weights (divided by their common
+// factor) add up to that much. Larger sums keep exact proportions without the
+// interleaving (rrSet.pickLive walks the weights instead).
+const maxScheduleLen = 4096
 
-func (lb *WeightedRoundRobinLB) NextState() *targetState {
-	ptr := lb.targetsPtr.Load()
-	if ptr == nil {
-		return nil
-	}
-	targets := *ptr
-	if len(targets) == 0 {
-		return nil
-	}
-
-	totalWeight, weighted := int32(0), false
-	for _, t := range targets {
-		if t.weight > 0 {
+// effectiveShares is what each target is owed. A service saved with no weight
+// on any target (proto3's zero) means "no preference", so every target gets 1.
+// Once any target carries a weight, a target at zero is on standby and gets
+// nothing: that is how a canary is held at 0%.
+func effectiveShares(targets []*gateonv1.Target) []int32 {
+	shares := make([]int32, len(targets))
+	weighted := false
+	for i, t := range targets {
+		if t != nil && t.Weight > 0 {
+			shares[i] = t.Weight
 			weighted = true
-			if t.alive.Load() {
-				totalWeight += t.weight
-			}
 		}
 	}
 	if !weighted {
-		// No target carries a weight: the service was saved without any
-		// (proto3's zero), which means "no preference", not "send nothing".
-		// This used to answer 502 "no targets available" to every request.
-		return lb.nextEqual(targets)
-	}
-	if totalWeight <= 0 {
-		return nil // every weighted target is down; zero weights stay unused
-	}
-	n := atomic.AddUint64(&lb.current, 1)
-	val := int32((n - 1) % uint64(totalWeight))
-	currentSum := int32(0)
-	for _, t := range targets {
-		if t.weight <= 0 || !t.alive.Load() {
-			continue
-		}
-		currentSum += t.weight
-		if val < currentSum {
-			return t
+		for i := range shares {
+			shares[i] = 1
 		}
 	}
-	return nil // defensive: loop should always return; no alive target
+	return shares
 }
 
-// nextEqual rotates through the alive targets with equal weight.
-func (lb *WeightedRoundRobinLB) nextEqual(targets []*targetState) *targetState {
-	alive := 0
-	for _, t := range targets {
-		if t.alive.Load() {
-			alive++
+// smoothSchedule is the order smooth weighted round robin (nginx's) serves the
+// shares in: each target appears share/gcd times per cycle, spread out, so
+// weights 6:1:1 go a a b a a c a a rather than six in a row to one backend
+// (whole 40-request bursts went to one canary target at 50/50). Equal shares
+// give plain rotation. Nil when the cycle would exceed maxScheduleLen.
+func smoothSchedule(shares []int32) []uint32 {
+	g := int64(0)
+	for _, s := range shares {
+		if s > 0 {
+			g = gcd(g, int64(s))
 		}
 	}
-	if alive == 0 {
+	if g == 0 {
 		return nil
 	}
-	idx := int((atomic.AddUint64(&lb.current, 1) - 1) % uint64(alive))
-	for _, t := range targets {
-		if !t.alive.Load() {
-			continue
+	reduced := make([]int64, len(shares))
+	total := int64(0)
+	for i, s := range shares {
+		if s > 0 {
+			reduced[i] = int64(s) / g
+			total += reduced[i]
 		}
-		if idx == 0 {
-			return t
-		}
-		idx--
 	}
-	return nil
+	if total > maxScheduleLen {
+		return nil
+	}
+	return interleave(reduced, total)
 }
 
-func (lb *WeightedRoundRobinLB) UpdateWeightedTargets(targets []*gateonv1.Target) {
-	lb.mu.Lock()
-	defer lb.mu.Unlock()
-	newTargets := make([]*targetState, len(targets))
-	for i, t := range targets {
-		newTargets[i] = newTargetStateFromTarget(t)
-	}
-	lb.targetsPtr.Store(&newTargets)
-}
-
-func (lb *WeightedRoundRobinLB) SetAlive(url string, alive bool) {
-	ptr := lb.targetsPtr.Load()
-	if ptr == nil {
-		return
-	}
-	for _, t := range *ptr {
-		if t.url == url {
-			if t.alive.Load() != alive {
-				state := telemetry.CircuitClosed
-				if !alive {
-					state = telemetry.CircuitOpen
-				}
-				telemetry.RecordCircuitBreakerEvent(url, state, "health check")
+// interleave runs one cycle of smooth weighted round robin: every turn each
+// target gains its weight, the richest is picked and pays the total.
+func interleave(weights []int64, total int64) []uint32 {
+	order := make([]uint32, 0, total)
+	current := make([]int64, len(weights))
+	for range total {
+		best := -1
+		for i, w := range weights {
+			if w <= 0 {
+				continue
 			}
-			t.alive.Store(alive)
-			return
+			current[i] += w
+			if best < 0 || current[i] > current[best] {
+				best = i
+			}
 		}
+		current[best] -= total
+		order = append(order, uint32(best)) //nolint:gosec // best < len(weights), an int32-sized target count
 	}
+	return order
 }
 
-func (lb *WeightedRoundRobinLB) GetStats() []TargetStats {
-	ptr := lb.targetsPtr.Load()
-	if ptr == nil {
-		return nil
+func gcd(a, b int64) int64 {
+	for b != 0 {
+		a, b = b, a%b
 	}
-	targets := *ptr
-	stats := make([]TargetStats, len(targets))
-	for i, t := range targets {
-		stats[i] = targetStatsFromState(t)
-	}
-	return stats
-}
-
-func (lb *WeightedRoundRobinLB) RecordLatency(url string, latency float64) {
-	// WeightedRoundRobinLB doesn't use latency for balancing.
+	return a
 }

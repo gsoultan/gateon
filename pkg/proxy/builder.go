@@ -191,21 +191,12 @@ func (b *ProxyHandlerBuilder) Build() *ProxyHandler {
 		go h.runDiscovery()
 	}
 
-	// Health check is enabled if:
-	// 1. Type is HTTP and path is set
-	// 2. Type is gRPC (path is optional service name)
-	enableHC := false
-	if h.healthCheckType == gateonv1.HealthCheckType_HEALTH_CHECK_TYPE_HTTP && h.healthCheckPath != "" {
-		enableHC = true
-	} else if h.healthCheckType == gateonv1.HealthCheckType_HEALTH_CHECK_TYPE_GRPC {
-		enableHC = true
-	} else if h.healthCheckType == gateonv1.HealthCheckType_HEALTH_CHECK_TYPE_TCP {
-		enableHC = true
-	} else if h.healthCheckType == gateonv1.HealthCheckType_HEALTH_CHECK_TYPE_CUSTOM {
-		enableHC = h.healthCheckPath != "" || h.healthCheckProtocol != ""
-	}
-
-	if enableHC && (len(b.targets) > 0 || b.discoveryURL != "") {
+	// Every service's targets are checked. An HTTP or Custom check with no path
+	// used to run no check at all -- and "Auto" with no path, the dashboard's
+	// default, resolves to HTTP -- so a dead backend stayed in rotation for
+	// good and read as alive. With no path to request, the check connects to
+	// the target instead (checkTargetHealth), under the same thresholds.
+	if len(b.targets) > 0 || b.discoveryURL != "" {
 		h.healthChecked = true
 		go h.runHealthCheck()
 	}

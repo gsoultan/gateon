@@ -12,6 +12,7 @@ import (
 	"github.com/gsoultan/gateon/internal/auth"
 	"github.com/gsoultan/gateon/internal/authz/routebind"
 	"github.com/gsoultan/gateon/internal/domain/canary"
+	"github.com/gsoultan/gateon/internal/domain/service"
 	"github.com/gsoultan/gateon/internal/request"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
@@ -39,6 +40,10 @@ func registerServiceHandlers(mux *http.ServeMux, apiService *api.ApiService, d *
 		if err := d.ServiceService.SaveService(r.Context(), &svc); err != nil {
 			if errors.Is(err, routebind.ErrRequiresAdmin) {
 				WriteHTTPError(w, http.StatusForbidden, err.Error())
+				return
+			}
+			if errors.Is(err, service.ErrInvalidService) {
+				WriteHTTPError(w, http.StatusBadRequest, err.Error())
 				return
 			}
 			WriteHTTPError(w, http.StatusInternalServerError, "failed to save service")

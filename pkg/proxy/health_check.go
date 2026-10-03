@@ -20,51 +20,57 @@ import (
 	"google.golang.org/grpc/health/grpc_health_v1"
 )
 
+// healthCheckInterval is how often every target is checked.
+const healthCheckInterval = 15 * time.Second
+
 func (h *ProxyHandler) runHealthCheck() {
-	ticker := time.NewTicker(15 * time.Second)
+	ticker := time.NewTicker(healthCheckInterval)
 	defer ticker.Stop()
-
-	client := h.healthCheckClient
-	if client == nil {
-		transport := h.transport
-		if h.transportFactory != nil {
-			transport = h.transportFactory.HealthCheckTransport()
-		}
-		client = &http.Client{
-			Timeout:   5 * time.Second,
-			Transport: transport,
-		}
-	}
-
+	client := h.healthHTTPClient()
 	for {
 		select {
 		case <-ticker.C:
-			currentStats := h.lb.GetStats()
-			for _, s := range currentStats {
-				u := s.URL
-				ok := h.checkTargetHealth(context.Background(), client, u)
-
-				// One check result is not a state change. See healthThresholds:
-				// every target is checked in this one loop on this one goroutine,
-				// so whatever makes a single check fail tends to fail all of them
-				// in the same tick, and acting on each result individually is how
-				// a busy gateway empties its own backend pool.
-				alive, changed := h.healthThresholds.Record(u, ok)
-				if changed {
-					h.lb.SetAlive(u, alive)
-				}
-
-				// Update Prometheus target health gauge
-				healthVal := 0.0
-				if alive {
-					healthVal = 1.0
-				}
-				telemetry.TargetHealth.WithLabelValues(h.routeName, u).Set(healthVal)
-				telemetry.ActiveConnections.WithLabelValues(u).Set(float64(s.ActiveConn))
-			}
+			h.checkAll(context.Background(), client)
 		case <-h.stopHealthCheck:
 			return
 		}
+	}
+}
+
+func (h *ProxyHandler) healthHTTPClient() *http.Client {
+	if h.healthCheckClient != nil {
+		return h.healthCheckClient
+	}
+	transport := h.transport
+	if h.transportFactory != nil {
+		transport = h.transportFactory.HealthCheckTransport()
+	}
+	return &http.Client{Timeout: 5 * time.Second, Transport: transport}
+}
+
+// checkAll checks every target once and tells the balancer what changed. It is
+// one tick of runHealthCheck.
+func (h *ProxyHandler) checkAll(ctx context.Context, client *http.Client) {
+	for _, s := range h.lb.GetStats() {
+		u := s.URL
+		ok := h.checkTargetHealth(ctx, client, u)
+
+		// One check result is not a state change. See healthThresholds:
+		// every target is checked in this one loop on this one goroutine,
+		// so whatever makes a single check fail tends to fail all of them
+		// in the same tick, and acting on each result individually is how
+		// a busy gateway empties its own backend pool.
+		alive, changed := h.healthThresholds.Record(u, ok)
+		if changed {
+			h.lb.SetAlive(u, alive)
+		}
+
+		healthVal := 0.0
+		if alive {
+			healthVal = 1.0
+		}
+		telemetry.TargetHealth.WithLabelValues(h.routeName, u).Set(healthVal)
+		telemetry.ActiveConnections.WithLabelValues(u).Set(float64(s.ActiveConn))
 	}
 }
 
@@ -77,6 +83,11 @@ func (h *ProxyHandler) checkTargetHealth(ctx context.Context, client *http.Clien
 	case gateonv1.HealthCheckType_HEALTH_CHECK_TYPE_CUSTOM:
 		return h.checkCustomHealth(ctx, client, targetURL)
 	default:
+		if h.healthCheckPath == "" {
+			// Nothing to request. Saving an explicit HTTP check with no path is
+			// refused; this is "Auto" with none, or one stored before that.
+			return h.checkTCPHealth(ctx, targetURL)
+		}
 		return h.checkHTTPHealth(client, targetURL)
 	}
 }

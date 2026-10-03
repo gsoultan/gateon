@@ -62,11 +62,12 @@ func TestRebuiltHandlerKeepsItsDownTargets(t *testing.T) {
 
 // TestInheritedHealthNeedsAHealthCheck: a target marked down by a handler with
 // nothing to check it would stay down for good, so a handler without a health
-// check inherits nothing.
+// check inherits nothing. Since ADR 0047 every handler with targets checks
+// them -- an empty path checks by connecting -- so that handler is built by
+// hand here; the guard is what is under test.
 func TestInheritedHealthNeedsAHealthCheck(t *testing.T) {
-	reg, _, down := twoTargetService(t, "")
-	ph := NewProxyHandler(&gateonv1.Route{Id: "r", ServiceId: "svc"}, reg)
-	defer ph.Close()
+	const down = "http://down.internal"
+	ph := &ProxyHandler{lb: NewRoundRobinLB([]string{"http://up.internal", down})}
 	ph.InheritHealth(map[string]bool{down: false})
 	for _, s := range ph.GetStats() {
 		if !s.Alive {
@@ -75,5 +76,20 @@ func TestInheritedHealthNeedsAHealthCheck(t *testing.T) {
 	}
 	if snap := ph.HealthSnapshot(); snap != nil {
 		t.Fatalf("snapshot %v from a handler that checks nothing", snap)
+	}
+}
+
+// TestAHandlerWithNoHealthPathInheritsDownTargets: with no path the targets are
+// still checked (by connecting), so a rebuilt handler keeps its predecessor's
+// down targets out of rotation like any other.
+func TestAHandlerWithNoHealthPathInheritsDownTargets(t *testing.T) {
+	reg, _, down := twoTargetService(t, "")
+	ph := NewProxyHandler(&gateonv1.Route{Id: "r", ServiceId: "svc"}, reg)
+	defer ph.Close()
+	ph.InheritHealth(map[string]bool{down: false})
+	for _, s := range ph.GetStats() {
+		if s.URL == down && s.Alive {
+			t.Fatalf("target %s, down before the rebuild, is back in rotation", s.URL)
+		}
 	}
 }
