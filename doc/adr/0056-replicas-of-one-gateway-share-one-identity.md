@@ -95,6 +95,14 @@ fails at template time with a message naming this ADR, whatever
 `externalDatabase` and `redis` say. `kubectl scale` bypasses the chart and is
 not supported.
 
+The shared identity is necessary for (a) and not sufficient: with it, two pods
+on one Postgres accepted each other's sessions and second factors, and the
+audit chain they both wrote still broke at the first entry the second pod
+added ("previous_hash does not match the preceding entry's signature"),
+because each process chains from the last entry it wrote itself. One pod
+restarted on a fresh volume kept the chain intact across the restart (13 of 13
+entries). A multi-replica design has to answer that too.
+
 ### A fresh volume over a set-up database is a set-up gateway
 
 With persistence off the seed is all a restarted pod has, so:
