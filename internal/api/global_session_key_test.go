@@ -7,6 +7,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"google.golang.org/grpc/codes"
@@ -84,6 +85,31 @@ func TestUpdateGlobalConfigRefusesASessionKeyTheGatewayCannotStartWith(t *testin
 	}
 	if _, err := m.VerifyToken(token); err != nil {
 		t.Fatalf("a refused key ended the session: %v", err)
+	}
+}
+
+// TestUpdateGlobalConfigRefusesRotatingASessionKeyFromTheEnvironment: with the
+// key from GATEON_SESSION_KEY (a Helm install, ADR 0056) a key rotated in
+// Settings was in force on this pod only, written over the reference on this
+// volume only, and the second factors re-encrypted under it unreadable after
+// the next start that read the reference again.
+func TestUpdateGlobalConfigRefusesRotatingASessionKeyFromTheEnvironment(t *testing.T) {
+	t.Setenv(config.SessionKeyEnv, sessionKeyInForce)
+	svc, m, token, path := sessionKeyFixture(t)
+	err := saveSessionKey(svc, sessionKeyNext)
+	if status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("rotating an environment-supplied key = %v; want InvalidArgument", err)
+	}
+	if _, err := m.VerifyToken(token); err != nil {
+		t.Fatalf("a refused rotation ended the session: %v", err)
+	}
+	if raw, err := os.ReadFile(path); err != nil || !strings.Contains(string(raw), "$env:"+config.SessionKeyEnv) {
+		t.Fatalf("global.json no longer refers to %s (err %v):\n%s", config.SessionKeyEnv, err, raw)
+	}
+	// Saving the settings as a writer reads them -- the reference -- is not a
+	// rotation, and still saves.
+	if err := saveSessionKey(svc, "$env:"+config.SessionKeyEnv); err != nil {
+		t.Fatalf("saving the reference back: %v", err)
 	}
 }
 
