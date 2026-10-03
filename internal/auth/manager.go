@@ -23,6 +23,7 @@ import (
 	"github.com/gsoultan/gateon/internal/db"
 	"github.com/gsoultan/gateon/internal/logger"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
+	"github.com/pquerna/otp"
 	"github.com/pquerna/otp/totp"
 	"github.com/skip2/go-qrcode"
 	"golang.org/x/crypto/bcrypt"
@@ -56,6 +57,9 @@ type Manager struct {
 
 	// tokens holds the scrape credentials (ADR 0050).
 	tokens *apitoken.Store
+
+	// now is the clock TOTP codes are checked against; time.Now but in tests.
+	now func() time.Time
 }
 
 // NewManager creates an auth manager using the given database URL.
@@ -85,6 +89,7 @@ func NewManager(databaseURL, symmetricKey string, l logger.Logger) (*Manager, er
 		knownAttempts:   lockout.New(lockout.DefaultBounds),
 		unknownAttempts: lockout.New(lockout.DefaultBounds),
 		tokens:          apitoken.NewStore(database, dialect),
+		now:             time.Now,
 	}
 	m.keys.Store(keys)
 
@@ -1032,26 +1037,47 @@ func (m *Manager) Verify2FA(challenge, id, code string) (bool, string, *gateonv1
 		return false, "", nil, ErrInvalidTwoFactorCode
 	}
 
-	// Recovery codes are only valid once 2FA is fully enabled, never during the
-	// enrollment verification step.
-	if spent, err := m.spendRecoveryCode(&user, recoveryCodes, code); err != nil || spent {
-		if err != nil {
-			return false, "", nil, err
-		}
+	ok, err := m.acceptCode(&user, plainSecret, recoveryCodes, code)
+	if err != nil {
+		return false, "", nil, err
+	}
+	if ok {
 		return m.completeSecondFactor(&user)
 	}
-
-	if totp.Validate(code, plainSecret) {
-		if err := m.completeEnrolment(&user, recoveryCodes); err != nil {
-			return false, "", nil, err
-		}
-		return m.completeSecondFactor(&user)
-	}
-
 	// Invalid code: count it towards the lockout threshold.
 	m.handleFailedLogin(user.Username, failedAttempts)
 	return false, "", nil, ErrInvalidTwoFactorCode
 }
+
+// totpOpts are totp.Validate's defaults: 30-second steps, six digits, SHA-1,
+// and one step of skew either way.
+var totpOpts = totp.ValidateOpts{Period: 30, Skew: 1, Digits: otp.DigitsSix, Algorithm: otp.AlgorithmSHA1}
+
+// acceptCode reports whether code is the account's current TOTP code -- which
+// completes an enrolment -- or one of its unused recovery codes, which it
+// spends. user.TwoFactorSecret is the stored, encrypted secret.
+//
+// The TOTP code is checked first. The recovery codes are bcrypt hashes at the
+// production cost, ten of them, and were compared first: every ordinary
+// sign-in paid for ten bcrypt comparisons before its code was looked at, and
+// on a loaded host -- or under the race detector, where it took 6 s idle and
+// over 30 s at six times oversubscription -- the code could pass out of its
+// one-step window while it waited, and be refused. The two cannot be confused
+// (a TOTP code is six digits, a recovery code is not), so the order changes
+// nothing else.
+func (m *Manager) acceptCode(user *gateonv1.User, plainSecret, recoveryCodes, code string) (bool, error) {
+	if ok, _ := totp.ValidateCustom(code, plainSecret, m.now().UTC(), totpOpts); ok {
+		return true, m.completeEnrolment(user, recoveryCodes)
+	}
+	// Recovery codes are only valid once 2FA is fully enabled, never during the
+	// enrollment verification step.
+	return m.spendRecoveryCode(user, recoveryCodes, code)
+}
+
+// SetClock replaces the clock a TOTP code is checked against. For tests, which
+// generate a code for an instant and need it checked at that instant however
+// long the host takes to get there.
+func (m *Manager) SetClock(now func() time.Time) { m.now = now }
 
 // spendRecoveryCode reports whether code is one of user's unused recovery
 // codes, stored as the comma-joined hashes recoveryCodes, and if it is, removes
