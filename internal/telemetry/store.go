@@ -70,6 +70,10 @@ const (
 	ActionThrottled  = "throttled"
 	// ActionDetected is recorded when a threat was observed but not stopped.
 	ActionDetected = "detected"
+	// ActionRedacted is recorded when a data leak was removed from a response
+	// and the rest of it was sent. It is not a mitigating action: nothing was
+	// refused, and the record is about the response, not a client.
+	ActionRedacted = "redacted"
 
 	statusUnmitigated = "unmitigated"
 )
@@ -502,9 +506,50 @@ type SecurityThreat struct {
 	// of those would be a ban on the visitor. Not persisted; the threat's
 	// Details say it instead.
 	Unattributed bool `json:"unattributed,omitzero"`
+	// Observed marks a match a control recorded and did not act on: a WAF in
+	// audit-only mode, or a WAF match the engine scored below the route's
+	// blocking threshold. It is recorded, counted, broadcast and shipped, and
+	// held against nobody -- the operator has said not to act on it, or the
+	// control itself judged it short of a refusal, so it is not evidence
+	// (ADR 0025, 0055). Not persisted; the type (waf_detected) says it.
+	Observed bool `json:"observed,omitzero"`
 	// Internal fields for lazy formatting in background worker
 	rawReqHeader  map[string][]string
 	rawRespHeader map[string][]string
+}
+
+// Threat types that, with typeIPMitigation and typeUserMitigation, record a
+// refusal following an earlier gateway decision -- a shun or feed listing, a
+// fingerprint block, a reputation score -- rather than anything the client
+// just sent.
+const (
+	threatIPShunning      = "ip_shunning"
+	threatReputationBlock = "reputation_block"
+)
+
+// HeldAgainstSource reports whether a threat may count against the client that
+// sent it: lower its reputation, count towards a fingerprint block or an
+// address shun, be a correlation signal, or trigger a playbook's block.
+//
+// Three kinds are recorded, counted and shown, and held against nobody
+// (ADR 0055):
+//
+//   - Unattributed: the client did not choose to send it (a cross-site trap
+//     load, loopback, or a data leak in a response it was served).
+//   - Observed: a control recorded a match and did not act on it.
+//   - A refusal that follows an earlier decision (a shun or feed listing, a
+//     fingerprint block, a reputation refusal). It is the gateway's own
+//     decision coming back: counting it made a refused client's every retry a
+//     new penalty, and a feed listing a correlation signal (ADR 0044).
+func (st *SecurityThreat) HeldAgainstSource() bool {
+	if st.Unattributed || st.Observed {
+		return false
+	}
+	switch st.Type {
+	case typeIPMitigation, typeUserMitigation, threatIPShunning, threatReputationBlock:
+		return false
+	}
+	return true
 }
 
 type UserMitigation struct {
@@ -1956,7 +2001,9 @@ func normalizeThreatHeaders(st *SecurityThreat) {
 // (escalateAddress, ADR 0029): one address can front an entire office, and a
 // shun refuses all of it until it lapses or an operator releases it.
 //
-// Mitigation threats are excluded, or acting on one would produce another.
+// A threat not HeldAgainstSource is excluded: a mitigation or reputation
+// refusal, or acting on one would produce another; a match nobody acted on;
+// one the client did not choose to send.
 //
 // So is everything from an allowlisted source. Its threats are recorded,
 // listed and correlated like any other -- the allowlist exempts enforcement,
@@ -1968,11 +2015,7 @@ func escalateMitigation(st *SecurityThreat) {
 	if !st.Mitigated && st.Category != "reputation" && st.Score < autoMitigateScore {
 		return
 	}
-	switch st.Type {
-	case "user_mitigation", "ip_mitigation", "ip_shunning":
-		return
-	}
-	if mitigation.IsAllowlisted(st.SourceIP) {
+	if !st.HeldAgainstSource() || mitigation.IsAllowlisted(st.SourceIP) {
 		return
 	}
 
@@ -2130,9 +2173,7 @@ func (s *pathStatsStore) processThreat(st *SecurityThreat) {
 		st.ActionTaken = ActionDetected
 	}
 	st.Mitigated = isMitigatingAction(st.ActionTaken)
-	if !st.Unattributed {
-		escalateMitigation(st)
-	}
+	escalateMitigation(st)
 	enrichThreatOrigin(st)
 
 	// Log to audit trail
@@ -2161,8 +2202,12 @@ func (s *pathStatsStore) processThreat(st *SecurityThreat) {
 	// see repid.For. The recording key and the enforcement key come from
 	// the same function on purpose: if they ever diverge, every lookup returns
 	// the neutral 100 and the control reports "clean" while checking nothing.
-	// An allowlisted source's threats move no score (DecreaseReputationOf).
-	if !st.Unattributed {
+	// An allowlisted source's threats move no score (DecreaseReputationOf), and
+	// neither does a threat not held against its source: an audit-only or
+	// below-threshold match, a refusal of an earlier decision, or a leak in a
+	// response the client was served (ADR 0055). The score is what the
+	// reputation blocker refuses on, on every route.
+	if st.HeldAgainstSource() {
 		DecreaseReputationOf(st.Fingerprint, st.SourceIP, st.Score/2, st.Type) // Penalty is half the threat score
 	}
 

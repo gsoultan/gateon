@@ -334,7 +334,7 @@ func TestRedactionIsObservedExactlyOnce(t *testing.T) {
 				bufLimit:       1024,
 				redactPending:  true,
 				respEnc:        encodingIdentity,
-				onDecision:     func(gwaf.Decision) { observed++ },
+				onDecision:     func(gwaf.Decision, string) { observed++ },
 			}
 
 			w.resolveRedaction()

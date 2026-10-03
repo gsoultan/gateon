@@ -12,10 +12,11 @@ import (
 	"github.com/gsoultan/gateon/internal/telemetry/repid"
 )
 
-// The responder penalises the class of every address that took part in an
-// incident. A score is shared by the class on its network and enforced
+// The responder penalises the incident source's class on the source's network
+// (ADR 0055). A score is shared by the class on its network and enforced
 // against all of it (ADR 0024), so a penalty for an allowlisted participant
-// refused its neighbours who run the same build. ADR 0031.
+// refused its neighbours who run the same build (ADR 0031), and a penalty for a
+// participant on another network refused people who only run the same browser.
 func TestTheResponderDoesNotPenaliseAnAllowlistedParticipant(t *testing.T) {
 	const build = "t13d1516h2_8daaf6152771_b0da82dd1658_ge11cr0200_7e33b58890ac"
 	const attacker, allowlisted, other = "198.51.100.9", "203.0.113.9", "192.0.2.9"
@@ -37,8 +38,11 @@ func TestTheResponderDoesNotPenaliseAnAllowlistedParticipant(t *testing.T) {
 		t.Errorf("an allowlisted participant's network now scores %v for its build: its neighbours "+
 			"running the build are refused for an incident the operator exempted it from", got)
 	}
-	if got := telemetry.GetReputationScore(repid.For(build, other)); got >= 100 {
-		t.Errorf("a participant the allowlist does not name was not penalised (%v); the assertion "+
-			"above proves nothing", got)
+	if got := telemetry.GetReputationScore(repid.For(build, other)); got < 100 {
+		t.Errorf("a participant on another network now scores %v for its build: a browser-class "+
+			"match across networks is context, never a reason to act", got)
+	}
+	if got := telemetry.GetReputationScore(repid.For(build, attacker)); got >= 100 {
+		t.Errorf("the incident's source was not penalised (%v); the assertions above prove nothing", got)
 	}
 }

@@ -479,12 +479,10 @@ func (t *wafRuntime) enforceProtocol(w http.ResponseWriter, r *http.Request) boo
 		return true
 	}
 
-	recordFastPathThreat(r, t.cfg.RouteID, "protocol_violation", v.reason)
-	if !t.cfg.AuditOnly {
-		http.Error(w, "Forbidden by Security Policy ("+v.reason+")", v.status)
-		return false
-	}
-	return true
+	return t.refuseFastPath(w, r, fastPathFinding{
+		threatType: "protocol_violation", details: v.reason,
+		status: v.status, message: "Forbidden by Security Policy (" + v.reason + ")",
+	})
 }
 
 func (t *wafRuntime) applyCloudflareTrust(r *http.Request) {
@@ -522,9 +520,10 @@ func (t *wafRuntime) fastPathChecks(w http.ResponseWriter, r *http.Request, rs *
 	// Check entropy of common fields to detect shellcode/obfuscation
 	if !t.cfg.DisableEntropy {
 		if detail, found := suspiciousHeaderEntropy(r, t.cfg, repScore); found {
-			recordFastPathThreat(r, t.cfg.RouteID, "fast_path_entropy", detail)
-			http.Error(w, "Forbidden by Security Fast-Path (High Entropy Detected)", http.StatusForbidden)
-			return false
+			return t.refuseFastPath(w, r, fastPathFinding{
+				threatType: threatFastPathEntropy, details: detail,
+				message: "Forbidden by Security Fast-Path (High Entropy Detected)",
+			})
 		}
 	}
 
@@ -536,9 +535,10 @@ func (t *wafRuntime) fastPathChecks(w http.ResponseWriter, r *http.Request, rs *
 	// 2. Body Entropy Check (Fast-Path)
 	if t.cfg.EnableBodyEntropy && inspectBody && r.ContentLength > 0 && r.ContentLength < maxBodyEntropyScan {
 		if detail, found := suspiciousBodyEntropy(r, rs, t.cfg, repScore); found {
-			recordFastPathThreat(r, t.cfg.RouteID, "fast_path_entropy", detail)
-			http.Error(w, "Forbidden by Security Fast-Path (High Body Entropy Detected)", http.StatusForbidden)
-			return false
+			return t.refuseFastPath(w, r, fastPathFinding{
+				threatType: threatFastPathEntropy, details: detail,
+				message: "Forbidden by Security Fast-Path (High Body Entropy Detected)",
+			})
 		}
 	}
 
@@ -558,26 +558,29 @@ func (t *wafRuntime) checkFingerprintConsistency(w http.ResponseWriter, r *http.
 	// TLS Check
 	if r.TLS != nil && isSuspiciousTLS(r) {
 		details := fmt.Sprintf("Fingerprint mismatch: Browser UA '%s' with suspicious TLS profile (v%x)", ua, r.TLS.Version)
-		recordFastPathThreat(r, t.cfg.RouteID, "fast_path_fingerprint", details)
-		http.Error(w, "Forbidden by Security (Client Spoofing Detected)", http.StatusForbidden)
-		return false
+		return t.refuseFastPath(w, r, fastPathFinding{
+			threatType: "fast_path_fingerprint", details: details,
+			message: "Forbidden by Security (Client Spoofing Detected)",
+		})
 	}
 
 	// H2/H3 Consistency Check
 	if (r.ProtoMajor == 2 || r.ProtoMajor == 3) && r.Header.Get("Connection") != "" {
 		// Connection header is forbidden in HTTP/2 and HTTP/3
 		details := fmt.Sprintf("Protocol violation: %s request from '%s' contains forbidden 'Connection' header", r.Proto, ua)
-		recordFastPathThreat(r, t.cfg.RouteID, "fast_path_protocol_violation", details)
-		http.Error(w, "Forbidden by Security (Protocol Violation)", http.StatusForbidden)
-		return false
+		return t.refuseFastPath(w, r, fastPathFinding{
+			threatType: "fast_path_protocol_violation", details: details,
+			message: "Forbidden by Security (Protocol Violation)",
+		})
 	}
 
 	// Modern browsers always send certain headers
 	if r.ProtoMajor >= 2 && r.Header.Get("Accept-Encoding") == "" {
 		details := fmt.Sprintf("Suspicious client: %s request from '%s' missing 'Accept-Encoding'", r.Proto, ua)
-		recordFastPathThreat(r, t.cfg.RouteID, "fast_path_suspicious_client", details)
-		http.Error(w, "Forbidden by Security (Suspicious Client)", http.StatusForbidden)
-		return false
+		return t.refuseFastPath(w, r, fastPathFinding{
+			threatType: "fast_path_suspicious_client", details: details,
+			message: "Forbidden by Security (Suspicious Client)",
+		})
 	}
 
 	return true
@@ -614,9 +617,11 @@ func (t *wafRuntime) checkTokenStructure(w http.ResponseWriter, r *http.Request)
 		return true
 	}
 
-	recordFastPathThreat(r, t.cfg.RouteID, "fast_path_malformed_token", "Malformed security token structure in Authorization header")
-	http.Error(w, "Forbidden by Security (Malformed Security Token)", http.StatusForbidden)
-	return false
+	return t.refuseFastPath(w, r, fastPathFinding{
+		threatType: "fast_path_malformed_token",
+		details:    "Malformed security token structure in Authorization header",
+		message:    "Forbidden by Security (Malformed Security Token)",
+	})
 }
 
 func (t *wafRuntime) annotateIPReputation(r *http.Request) {
@@ -645,17 +650,17 @@ func (t *wafRuntime) inspectAndForward(next http.Handler, w http.ResponseWriter,
 		defer tx.Close()
 	}
 
-	observePhase := func(d gwaf.Decision, phase string) {
+	observePhase := func(d gwaf.Decision, phase, outcome string) {
 		matches := tx.Matches()
 		obs := wafObservation{
 			decision: d, matches: matches, request: r,
 			routeID: t.cfg.RouteID, cfg: t.cfg, repScore: repScore,
-			phase: phase,
+			phase: phase, outcome: outcome,
 		}
 		recordWAFDecision(obs)
 		t.engine.audit.record(d, matches, obs)
 	}
-	observe := func(d gwaf.Decision) { observePhase(d, wafPhaseRequest) }
+	observe := func(d gwaf.Decision) { observePhase(d, wafPhaseRequest, "") }
 
 	if err != nil {
 		// The engine could not finish inspecting. Whether that permits
@@ -708,7 +713,7 @@ func (t *wafRuntime) inspectAndForward(next http.Handler, w http.ResponseWriter,
 // the response instead, which is the honest trade: the leaked bytes stop
 // either way, and a client that received a 200 with a truncated body is
 // strictly better off than one that waited for the whole thing to be buffered.
-func (t *wafRuntime) inspectResponse(next http.Handler, w http.ResponseWriter, r *http.Request, tx *gwaf.Transaction, observePhase func(gwaf.Decision, string)) {
+func (t *wafRuntime) inspectResponse(next http.Handler, w http.ResponseWriter, r *http.Request, tx *gwaf.Transaction, observePhase func(d gwaf.Decision, phase, outcome string)) {
 	// Narrow what the origin may answer in before the request goes
 	// upstream: an encoding this build cannot undo would hand the
 	// response phase an opaque stream and every data-leak rule would
@@ -720,7 +725,7 @@ func (t *wafRuntime) inspectResponse(next http.Handler, w http.ResponseWriter, r
 		ResponseWriter: w,
 		tx:             tx,
 		auditOnly:      t.cfg.AuditOnly,
-		onDecision:     func(d gwaf.Decision) { observePhase(d, wafPhaseResponse) },
+		onDecision:     func(d gwaf.Decision, outcome string) { observePhase(d, wafPhaseResponse, outcome) },
 		bufLimit:       responseBufferLimit(t.cfg),
 		encDecodable:   true,
 		routeID:        t.cfg.RouteID,
@@ -732,27 +737,46 @@ func (t *wafRuntime) inspectResponse(next http.Handler, w http.ResponseWriter, r
 	ww.release()
 	restoreAcceptEncoding(r.Header, prevAE, hadAE)
 }
-func recordFastPathThreat(r *http.Request, routeID, typeStr, details string) {
-	clientIP := request.ClientAddr(r)
-	category := "general"
-	lowerDetails := strings.ToLower(details)
-	recommendation := "Review your request for suspicious patterns. If this is legitimate traffic, consider adjusting the Fast-Path sensitivity."
 
-	if strings.Contains(lowerDetails, "sql") || strings.Contains(lowerDetails, "union") {
-		category = "sqli"
-		recommendation = "SQL patterns were detected in the request. Ensure you are not sending raw SQL fragments in your headers or parameters."
-	} else if strings.Contains(lowerDetails, "script") || strings.Contains(lowerDetails, "xss") {
-		category = "xss"
-		recommendation = "Script-like patterns were detected. Avoid using <script> tags or common XSS vectors in headers like Referer or User-Agent."
-	} else if strings.Contains(lowerDetails, "scanner") || strings.Contains(lowerDetails, "nmap") || strings.Contains(lowerDetails, "sqlmap") {
-		category = "bot"
-		recommendation = "Your request was flagged as a known automated scanner or bot. If you are a developer, ensure your tool uses a legitimate User-Agent."
+// fastPathFinding is one of the gateon-owned checks the engine cannot make --
+// entropy, client consistency, token structure, protocol -- having matched.
+type fastPathFinding struct {
+	threatType string
+	details    string
+	status     int    // the refusal's status; 0 is 403
+	message    string // the refusal's body
+
+	// Filled in by refuseFastPath from the WAF's configuration.
+	routeID  string
+	observed bool
+}
+
+// refuseFastPath records a fast-path finding and refuses the request, and
+// reports whether the request may continue.
+//
+// An audit-only WAF records it as observed and lets the request through:
+// "block nothing on this route" has to include these checks. Only the protocol
+// check honoured it; the entropy, fingerprint and token checks refused in
+// audit-only mode, and recorded the refusal as attack evidence (ADR 0055).
+func (t *wafRuntime) refuseFastPath(w http.ResponseWriter, r *http.Request, f fastPathFinding) bool {
+	f.routeID, f.observed = t.cfg.RouteID, t.cfg.AuditOnly
+	recordFastPathThreat(r, f)
+	if f.observed {
+		return true
 	}
+	http.Error(w, f.message, cmp.Or(f.status, http.StatusForbidden))
+	return false
+}
+
+func recordFastPathThreat(r *http.Request, f fastPathFinding) {
+	typeStr, details := f.threatType, f.details
+	clientIP := request.ClientAddr(r)
+	category, recommendation := fastPathCategory(details)
 
 	// Record in OpenTelemetry span
 	if span := trace.SpanFromContext(r.Context()); span.IsRecording() {
 		span.SetAttributes(
-			attribute.Bool("security.blocked", true),
+			attribute.Bool("security.blocked", !f.observed),
 			attribute.String("security.threat_type", typeStr),
 			attribute.String("security.details", details),
 			attribute.String("security.category", category),
@@ -766,40 +790,64 @@ func recordFastPathThreat(r *http.Request, routeID, typeStr, details string) {
 	}
 	telemetry.RegisterRecommendation(kind.GetRequestID(r), recommendation)
 
-	rules := ""
-	switch typeStr {
-	case "fast_path_signature":
-		rules = "[1900001]"
-	case "fast_path_entropy":
-		rules = "[1900002]"
-	case "fast_path_fingerprint":
-		rules = "[1900003]"
-	case "fast_path_protocol_violation":
-		rules = "[1900004]"
-	case "fast_path_suspicious_client":
-		rules = "[1900005]"
-	case "fast_path_malformed_token":
-		rules = "[1990002]"
-	}
-
 	telemetry.RecordSecurityThreat(telemetry.RecordSecurityThreatWithJA4(r, telemetry.SecurityThreat{
 		Type:           typeStr,
 		SourceIP:       clientIP,
 		Fingerprint:    telemetry.GetJA4Plus(r),
 		Score:          100,
 		Details:        details,
-		TriggeredRules: rules,
+		TriggeredRules: fastPathRuleIDs[typeStr],
 		Recommendation: recommendation,
 		Time:           time.Now(),
-		RouteID:        routeID,
+		RouteID:        f.routeID,
 		RequestURI:     r.RequestURI,
 		UserAgent:      r.UserAgent(),
 		Method:         r.Method,
 		Category:       category,
 		Severity:       kind.SeverityCritical,
-		ActionTaken:    kind.ActionBlocked,
-		Mitigated:      true,
+		ActionTaken:    fastPathAction(f.observed),
+		Mitigated:      !f.observed,
+		Observed:       f.observed,
 	}))
+}
+
+// fastPathCategory files a fast-path finding by what its details mention, and
+// says what the client can do about it.
+func fastPathCategory(details string) (category, recommendation string) {
+	lowerDetails := strings.ToLower(details)
+	switch {
+	case strings.Contains(lowerDetails, "sql") || strings.Contains(lowerDetails, "union"):
+		return "sqli", "SQL patterns were detected in the request. Ensure you are not sending raw SQL fragments in your headers or parameters."
+	case strings.Contains(lowerDetails, "script") || strings.Contains(lowerDetails, "xss"):
+		return "xss", "Script-like patterns were detected. Avoid using <script> tags or common XSS vectors in headers like Referer or User-Agent."
+	case strings.Contains(lowerDetails, "scanner") || strings.Contains(lowerDetails, "nmap") || strings.Contains(lowerDetails, "sqlmap"):
+		return "bot", "Your request was flagged as a known automated scanner or bot. If you are a developer, ensure your tool uses a legitimate User-Agent."
+	default:
+		return "general", "Review your request for suspicious patterns. If this is legitimate traffic, consider adjusting the Fast-Path sensitivity."
+	}
+}
+
+// threatFastPathEntropy is the finding both entropy checks record.
+const threatFastPathEntropy = "fast_path_entropy"
+
+// fastPathRuleIDs is the rule id each fast-path finding is recorded under, as
+// the JSON array the false-positive workflow and the dashboard parse.
+var fastPathRuleIDs = map[string]string{
+	"fast_path_signature":          "[1900001]",
+	threatFastPathEntropy:          "[1900002]",
+	"fast_path_fingerprint":        "[1900003]",
+	"fast_path_protocol_violation": "[1900004]",
+	"fast_path_suspicious_client":  "[1900005]",
+	"fast_path_malformed_token":    "[1990002]",
+}
+
+// fastPathAction is what an audit-only WAF did with a fast-path finding
+// (nothing), or what an enforcing one did (refused it).
+func fastPathAction(observed bool) string {
+	if observed {
+		return kind.ActionDetected
+	}
+	return kind.ActionBlocked
 }
 
 func isSafeHeader(name string) bool {
@@ -1169,7 +1217,9 @@ type wafResponseWriter struct {
 	headerWritten bool
 	flushed       bool
 	auditOnly     bool
-	onDecision    func(gwaf.Decision)
+	// onDecision records a response-phase decision with what was done to the
+	// response: blocked, redacted, or forwarded untouched (detected).
+	onDecision func(d gwaf.Decision, outcome string)
 
 	// hijacked records that the handler took the connection away through
 	// Hijack. From then on net/http owns nothing about the response, and a
@@ -1224,7 +1274,7 @@ func (w *wafResponseWriter) applyDecision(d gwaf.Decision) {
 			// Recorded and forwarded untouched. This is the stage of a rollout
 			// where the false-positive rate is still being learned.
 			if w.onDecision != nil {
-				w.onDecision(d)
+				w.onDecision(d, kind.ActionDetected)
 			}
 			return
 		}
@@ -1550,7 +1600,7 @@ func (w *wafResponseWriter) resolveRedaction() {
 
 	w.redacted = body
 	if w.onDecision != nil {
-		w.onDecision(w.pendingDecision)
+		w.onDecision(w.pendingDecision, kind.ActionRedacted)
 	}
 	logger.L.LogDebug("WAF redacted a response body",
 		"route", w.routeID, "findings", count, "rule", w.pendingDecision.RuleID())
@@ -1570,7 +1620,7 @@ func (w *wafResponseWriter) block(d gwaf.Decision) {
 		w.buf.Reset()
 	}
 	if w.onDecision != nil {
-		w.onDecision(d)
+		w.onDecision(d, kind.ActionBlocked)
 	}
 	if w.flushed {
 		// Headers are already on the wire, so the status cannot be changed.

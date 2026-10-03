@@ -232,14 +232,19 @@ type threatSinks struct {
 
 // forward hands one threat to each sink that wants it.
 //
-// An unattributed threat is shipped but not correlated: an incident's response
-// degrades the source's reputation and can shun it, and this threat's source
-// did not choose to send it (see telemetry.SecurityThreat.Unattributed).
+// A threat not held against its source is shipped but not correlated: an
+// incident's response degrades the source's reputation and can shun it. That
+// excludes a threat its source did not choose to send, a match nobody acted on
+// (an audit-only WAF), and a refusal of an earlier decision -- a feed listing
+// or shun (ADR 0044), a fingerprint block, a reputation refusal -- which is the
+// gateway's own decision coming back as "evidence" for the next one
+// (telemetry.SecurityThreat.HeldAgainstSource, ADR 0055). Serving a challenge
+// records no threat at all (ADR 0045).
 func (s threatSinks) forward(t *telemetry.SecurityThreat) {
 	if s.shipRaw {
 		s.shipper.Ship(threatToEvent(t))
 	}
-	if s.correlate && !t.Unattributed {
+	if s.correlate && t.HeldAgainstSource() {
 		select {
 		case s.signals <- threatToSignal(t):
 		default: // drop on backpressure; never block the broadcaster

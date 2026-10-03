@@ -68,7 +68,17 @@ the difference is whether your rollback works.
 
 In audit-only the WAF runs every rule, scores every request, records what it
 found — and then lets the request through. Latency cost is the same as
-enforcing; only the decision changes.
+enforcing; only the decision changes. Its fast-path checks (token structure,
+entropy, client consistency, protocol) record and let through too.
+
+Nothing it records counts against the client (ADR 0055): an audit-only match
+does not lower the client's reputation, is no evidence towards an automatic
+block, is not a correlation signal and does not trigger a playbook's block. So
+the users whose false positives you are measuring are never refused because of
+them. (Before this, every match cost the client half its reputation, and the
+third false positive was refused on every route.) The same holds in enforcing
+mode for a match the WAF scores below the route's threshold: only a refusal
+counts against the client.
 
 Confirm it is actually running by watching the counter appear:
 
