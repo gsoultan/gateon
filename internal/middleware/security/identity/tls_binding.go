@@ -173,10 +173,19 @@ func (w *bindingWriter) commit() {
 // bindingCookie is the binding for the session cookie the backend set: the
 // same scope and lifetime, and expired when the session is.
 func (b tlsBinder) bindingCookie(session *http.Cookie, cert []byte) *http.Cookie {
+	// The binding travels wherever the session does, so it takes the
+	// session's SameSite (a session set SameSite=None for cross-site use would
+	// otherwise arrive without its binding and be refused); Lax when the
+	// session names none.
+	sameSite := session.SameSite
+	if sameSite == http.SameSiteDefaultMode {
+		sameSite = http.SameSiteLaxMode
+	}
+	// #nosec G124 -- HttpOnly and Secure are always set; SameSite follows the session it binds, see above.
 	c := &http.Cookie{
 		Name: b.binding, Path: session.Path, Domain: session.Domain,
 		MaxAge: session.MaxAge, Expires: session.Expires,
-		HttpOnly: true, Secure: true, SameSite: session.SameSite,
+		HttpOnly: true, Secure: true, SameSite: sameSite,
 	}
 	if session.Value == "" || session.MaxAge < 0 {
 		c.MaxAge = -1

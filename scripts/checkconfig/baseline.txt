@@ -43,6 +43,14 @@
 # so setting enabled=false leaves it on.
 
 
+# --- TlsBindingConfig ---
+# The global "TLS Session Binding" switch is retired (ADR 0046): it had no
+# secret to bind with, so it could only refuse sessions. `enabled` is still
+# read -- turning it on is refused and one left on is logged -- but nothing
+# reads cookie_name any more. Remove the message (reserving its tags) the next
+# time security_advanced's proto is changed.
+TlsBindingConfig.cookie_name
+
 # --- TlsConfig ---
 # auto_redirect: an operator who asked for HTTP-to-HTTPS redirection
 # did not get it. Security-adjacent.
