@@ -36,7 +36,9 @@ func TestCoverageReadsTheWAFThatRuns(t *testing.T) {
 		mw("w-one", "waf", map[string]string{"audit_only": "1"}),
 		mw("w-plain", "waf", map[string]string{}),
 		mw("w-enforce", "waf", map[string]string{"audit_only": "false"}),
+		mw("w-empty", "waf", map[string]string{"audit_only": ""}),
 	)
+	auditNoCRS := &gateonv1.GlobalConfig{Waf: &gateonv1.WafConfig{Enabled: true, AuditOnly: true}}
 	cases := []struct {
 		name   string
 		global *gateonv1.GlobalConfig
@@ -50,6 +52,10 @@ func TestCoverageReadsTheWAFThatRuns(t *testing.T) {
 		{"global audit-only with CRS, route WAF inherits it", auditGlobal, httpRoute("r", "w-plain"), ModeDetect},
 		{"route WAF says enforce over an audit-only global", auditGlobal, httpRoute("r", "w-enforce"), ModeEnforce},
 		{"one enforcing WAF of two refuses", auditGlobal, httpRoute("r", "w-audit", "w-enforce"), ModeEnforce},
+		// ADR 0044: a route WAF inherits what it leaves unset from any enabled
+		// global WAF, not only one with CRS on, and an empty value is unset.
+		{"global audit-only without CRS, route WAF inherits it", auditNoCRS, httpRoute("r", "w-plain"), ModeDetect},
+		{"an empty audit_only inherits", auditNoCRS, httpRoute("r", "w-empty"), ModeDetect},
 		{"no WAF at all", &gateonv1.GlobalConfig{}, httpRoute("r"), ModeOff},
 		{"route WAF with the global off", &gateonv1.GlobalConfig{}, httpRoute("r", "w-plain"), ModeEnforce},
 	}

@@ -8,6 +8,8 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/gsoultan/gateon/internal/security/posture"
+
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
@@ -104,5 +106,19 @@ func TestPostureWAFReportsModeNotAutoUpdate(t *testing.T) {
 	}
 	if _, ok := wire.Score["percent"]; !ok {
 		t.Fatalf("report has no score.percent: %s", raw)
+	}
+}
+
+// TestPostureCountsARouteWAFByTheModeItInherits: since ADR 0044 a route WAF
+// inherits an unset audit_only from any enabled global WAF. The Security Hub
+// counted such a route as enforcing under an audit-only global WAF without
+// CRS, while the engine only detected on it.
+func TestPostureCountsARouteWAFByTheModeItInherits(t *testing.T) {
+	store := &mockGlobalReg{config: &gateonv1.GlobalConfig{Waf: &gateonv1.WafConfig{Enabled: true, AuditOnly: true}}}
+	pc := postureConfig(context.Background(), postureDeps{globalStore: store})
+	pc.Routes = []*gateonv1.Route{{Id: "r", Rule: "PathPrefix(`/`)", Middlewares: []string{"w"}}}
+	pc.Middlewares = map[string]*gateonv1.Middleware{"w": {Id: "w", Type: "waf", Config: map[string]string{}}}
+	if cov := posture.Coverage(pc); cov.Detecting != 1 || cov.Enforcing != 0 {
+		t.Fatalf("coverage = %+v, want the route counted as detecting, as the engine runs it", cov)
 	}
 }

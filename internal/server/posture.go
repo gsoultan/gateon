@@ -151,6 +151,18 @@ func postureConfig(ctx context.Context, d postureDeps) posture.Config {
 	if d.entryPoints != nil {
 		pc.EntryPoints, _ = d.entryPoints.ListPaginated(ctx, 0, 0, "")
 	}
+	// A route WAF's mode as the WAF package builds it, so the coverage the
+	// Security Hub shows and the engine that runs agree by construction.
+	pc.RouteWAF = func(cfg map[string]string) posture.Mode {
+		switch wafmw.EffectiveRoute(ctx, cfg, d.globalStore).Mode {
+		case wafmw.ModeAuditOnly:
+			return posture.ModeDetect
+		case wafmw.ModeOff:
+			return posture.ModeOff
+		default:
+			return posture.ModeEnforce
+		}
+	}
 	mgmt := pc.Global.GetManagement()
 	pc.ManagementWorldOpen = epserver.ManagementListenerWorldOpen(mgmt)
 	pc.PublicManagement = managementOnEveryEntrypoint(mgmt)

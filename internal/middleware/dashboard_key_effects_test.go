@@ -51,10 +51,17 @@ type keyEffect struct {
 
 // dashboardKeyEffects is the registry.
 var dashboardKeyEffects = []keyEffect{
-	{mwType: "waf", key: "sqli", a: "true", b: "false", probe: get("/?id=1%27%20OR%20%271%27%3D%271"),
-		inert: "T8: the category switches disable gateon's specs; gwaf's core rules still match (wafgeo, ADR 0044)"},
-	{mwType: "waf", key: "xss", a: "true", b: "false", probe: get("/?q=%3Cscript%3Ealert(1)%3C%2Fscript%3E"),
-		inert: "T8: as sqli"},
+	// The WAF category switches (T8, ADR 0044): each turns off its own rules,
+	// gwaf's core rules carrying its tags included. Probes as in
+	// security/waf/waf_category_switch_test.go.
+	{mwType: "waf", key: "sqli", a: "true", b: "false", probe: get("/?id=1%27%20OR%20%271%27%3D%271")},
+	{mwType: "waf", key: "xss", a: "true", b: "false", probe: get("/?q=%3Cscript%3Ealert(1)%3C%2Fscript%3E")},
+	{mwType: "waf", key: "lfi", a: "true", b: "false", probe: get("/?f=..%2F..%2F..%2F..%2Fetc%2Fpasswd")},
+	{mwType: "waf", key: "rce", a: "true", b: "false", probe: get("/?c=%3Buname%20-a")},
+	{mwType: "waf", key: "php", a: "true", b: "false", probe: get("/?x=%3C%3Fphp%20system(%24_GET%5B%22c%22%5D)%3B%20%3F%3E")},
+	{mwType: "waf", key: "java", a: "true", b: "false", probe: get("/?q=java.lang.Runtime")},
+	{mwType: "waf", key: "nodejs", a: "true", b: "false", probe: get("/?q=process.mainModule")},
+	{mwType: "waf", key: "scanner", a: "true", b: "false", probe: withUA("sqlmap/1.7.2#stable (https://sqlmap.org)")},
 	{mwType: "waf", key: "audit_only", a: "false", b: "true", probe: get("/?id=1%27%20OR%20%271%27%3D%271")},
 	{mwType: "ipfilter", key: "deny_list", a: "", b: "198.51.100.9", probe: getFrom("/", "198.51.100.9:4000")},
 	{mwType: "ipfilter", key: "allow_list", a: "", b: "203.0.113.1", probe: getFrom("/", "198.51.100.9:4000")},
@@ -136,6 +143,14 @@ func getFrom(target, remote string) func(*testing.T) *http.Request {
 	return func(*testing.T) *http.Request {
 		r := httptest.NewRequest(http.MethodGet, "http://app.example"+target, nil)
 		r.RemoteAddr = remote
+		return r
+	}
+}
+
+func withUA(ua string) func(*testing.T) *http.Request {
+	return func(t *testing.T) *http.Request {
+		r := get("/")(t)
+		r.Header.Set("User-Agent", ua)
 		return r
 	}
 }

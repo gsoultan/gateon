@@ -54,6 +54,11 @@ type Config struct {
 	// PublicManagement is whether the management API answers on every
 	// entrypoint (management.allow_public_management or its env override).
 	PublicManagement bool
+	// RouteWAF, when set, is the mode a route WAF with this config runs in,
+	// as the WAF package builds it (waf.EffectiveRoute). The server sets it so
+	// the report and the engine answer from one rule; without it the
+	// coverage falls back to routeWAFConfigMode, a copy of that rule.
+	RouteWAF func(cfg map[string]string) Mode
 }
 
 // RouteCoverage counts the enabled HTTP routes by what inspects them.
@@ -95,7 +100,7 @@ func Coverage(c Config) RouteCoverage {
 			continue
 		}
 		cov.Total++
-		switch routeWAFMode(rt, c.Middlewares, global) {
+		switch routeWAFMode(rt, c.Middlewares, global, c.RouteWAF) {
 		case ModeEnforce:
 			cov.Enforcing++
 		case ModeDetect:
@@ -123,13 +128,17 @@ func isL4(routeType string) bool {
 //
 // Every "waf" middleware a route lists runs, so one that enforces refuses
 // what it matches whatever the others do.
-func routeWAFMode(rt *gateonv1.Route, mws map[string]*gateonv1.Middleware, global *gateonv1.WafConfig) Mode {
+func routeWAFMode(rt *gateonv1.Route, mws map[string]*gateonv1.Middleware, global *gateonv1.WafConfig,
+	resolve func(map[string]string) Mode) Mode {
 	own := routeMiddlewares(rt, mws, typeWAF)
 	if len(own) == 0 {
 		return GlobalWAFMode(global)
 	}
+	if resolve == nil {
+		resolve = func(cfg map[string]string) Mode { return routeWAFConfigMode(cfg, global) }
+	}
 	for _, mw := range own {
-		if routeWAFConfigMode(mw.GetConfig(), global) == ModeEnforce {
+		if resolve(mw.GetConfig()) == ModeEnforce {
 			return ModeEnforce
 		}
 	}
@@ -137,18 +146,19 @@ func routeWAFMode(rt *gateonv1.Route, mws map[string]*gateonv1.Middleware, globa
 }
 
 // routeWAFConfigMode reads a route WAF's audit_only the way the WAF factory
-// does. A route WAF that leaves audit_only unset inherits the global value
-// when the global WAF is on with use_crs (mergeGlobalWAFDefaults ->
-// applyGlobalCRSToggles copies it in before parseWAFConfig reads it).
+// does. A route WAF inherits every setting it leaves unset -- an empty value
+// is unset -- from the global WAF whenever that is enabled (ADR 0044,
+// mergeGlobalWAF), so an unset audit_only under an enabled audit-only global
+// WAF detects. It used to inherit only with use_crs on, which ADR 0044 removed.
 func routeWAFConfigMode(cfg map[string]string, global *gateonv1.WafConfig) Mode {
-	v, set := cfg[keyAuditOnly]
-	if !set && global.GetEnabled() && global.GetUseCrs() {
+	v := strings.ToLower(strings.TrimSpace(cfg[keyAuditOnly]))
+	if v == "" && global.GetEnabled() {
 		if global.GetAuditOnly() {
 			return ModeDetect
 		}
 		return ModeEnforce
 	}
-	switch strings.ToLower(strings.TrimSpace(v)) {
+	switch v {
 	case "true", "1":
 		return ModeDetect
 	default:

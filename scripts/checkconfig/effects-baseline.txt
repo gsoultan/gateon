@@ -39,7 +39,6 @@ deny_countries
 disable_entropy
 dlp
 dlp_action
-dos_protection
 dry_run
 enable_browser_integrity
 enable_clamav
@@ -60,9 +59,7 @@ included_content_types
 introspection_url
 ip_reputation
 issuer
-java  # INERT T8
 jwks_url
-lfi  # INERT T8: WAF category switch; gwaf core rules still match (wafgeo, ADR 0044)
 malware_detection
 max_age
 max_body_kb
@@ -71,21 +68,18 @@ max_entries
 max_file_size
 methods
 min_response_body_bytes
-nodejs  # INERT T8
 paranoia_level
 password
 path
 paths
 pattern
-php  # INERT T8
 prefix
 prefixes
 preserve_request_method
 preset
 proto
-protocol  # INERT T8
+protocol  # WAF category switch, real since ADR 0044; no probe in the registry yet
 ransomware_detection
-rce  # INERT T8
 realm
 redirect_url
 regex
@@ -100,7 +94,6 @@ response_body_limit
 response_replace
 response_search
 route
-scanner  # INERT T8
 schema
 scopes
 secret
@@ -114,13 +107,12 @@ sts_preload
 sts_seconds
 tls_insecure_skip_verify
 token_type_hint
-trust_cloudflare_headers
 trust_forward_header
 ttl_seconds
 type
 username
 users
-wordpress  # INERT T8
+wordpress  # WAF category switch, real since ADR 0044; no probe in the registry yet
 cookie_name  # tls_binding: the effect is a Set-Cookie on a TLS session, which the registry probe does not record; proven by TestTLSBindingBindsTheIssuedSessionToTheClientCertificate
 revocation_prefix  # needs Redis, which this harness does not run; proven by TestRevokedTokenIsRefusedByEveryTypeThatOffersRevocation
 error_threshold  # circuit_breaker: state is per route across builds, so the registry's two builds share it; proven by TestBreakerJudgesAWindowOnlyOnceItHoldsMinRequests
