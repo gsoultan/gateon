@@ -199,6 +199,37 @@ func TestHelmSuppliesTheIdentityFromTheSecret(t *testing.T) {
 	}
 }
 
+// TestHelmIdentityFromAnExistingSecretIsRequiredWithoutAVolume: an operator's
+// own Secret from before the identity keys may lack them. On a persistent
+// volume the first start's generated identity is kept, so a missing key is
+// harmless and the pod must still start; without one a missing key is a new
+// gateway at every restart, so the pod must not start.
+func TestHelmIdentityFromAnExistingSecretIsRequiredWithoutAVolume(t *testing.T) {
+	helm := helmBinary(t)
+	for _, tc := range []struct {
+		persistence  string
+		wantOptional int
+	}{{"true", len(identityKeys)}, {"false", 0}} {
+		out, err := helmTemplate(t, helm, "--set", "secrets.existingSecret=mine",
+			"--set", "persistence.enabled="+tc.persistence)
+		if err != nil {
+			t.Fatalf("helm template: %v\n%s", err, out)
+		}
+		if strings.Contains(out, "name: t-gateon-secrets") {
+			t.Error("the chart rendered its own Secret beside existingSecret")
+		}
+		if got := strings.Count(out, "optional: true"); got != tc.wantOptional {
+			t.Errorf("persistence.enabled=%s: %d optional identity keys; want %d", tc.persistence, got, tc.wantOptional)
+		}
+		for env := range identityKeys {
+			if !strings.Contains(out, "- name: "+env+"\n              valueFrom:\n                secretKeyRef:\n"+
+				"                  name: mine\n") {
+				t.Errorf("persistence.enabled=%s: %s is not read from existingSecret", tc.persistence, env)
+			}
+		}
+	}
+}
+
 // TestHelmKeepsTheIdentityOnUpgrade drives the chart's lookup against a fake
 // API server holding the release's Secret, as `helm upgrade` sees it. A
 // regenerated session key signs everyone out and strands every second factor;
