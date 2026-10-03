@@ -9,9 +9,11 @@ import { test, expect, type APIRequestContext } from '@playwright/test';
  * timeline of state changes.
  *
  * The fixture's targets are all healthy, so the spec brings its own service:
- * one target nothing listens on and one that answers, both health-checked over
- * TCP. The gateway marks a target down on its first failed check (the first
- * result is applied at once, pkg/proxy/health), and checks every 15 seconds.
+ * one target nothing listens on and one that answers, with the health check
+ * the dashboard's service form saves by default -- "Auto", no path -- which
+ * checked nothing until ADR 0047 and now connects to each target. The gateway
+ * marks a target down on its first failed check (the first result is applied
+ * at once, pkg/proxy/health), and checks every 15 seconds.
  */
 
 const PROXY = 'http://localhost:8081';
@@ -44,7 +46,7 @@ test.describe('Circuit Breaker', () => {
           ],
           loadBalancerPolicy: 'round_robin',
           backendType: 'http',
-          healthCheckType: 'HEALTH_CHECK_TYPE_TCP',
+          // No health check type or path: the form's default.
         },
       });
       expect(svc.ok(), `PUT /v1/services: ${svc.status()} ${await svc.text()}`).toBe(true);
@@ -132,5 +134,93 @@ test.describe('Circuit Breaker', () => {
     await page.getByRole('option', { name: 'Open', exact: true }).click();
     await expect(dead).toHaveCount(1);
     await expect(live, 'the Open filter kept a CLOSED target').toHaveCount(0);
+  });
+});
+
+/**
+ * A circuit breaker made in the dashboard (there was no way to make one there),
+ * on a route whose only target accepts TCP -- so its health check passes and
+ * the health check alone would say CLOSED -- but answers no HTTP, so every
+ * request fails. The breaker opens, and the page's row for the target says
+ * OPEN: it used to say CLOSED while the route refused everything with 503.
+ */
+const ECHO = 'http://127.0.0.1:8084'; // tcp_backend: echoes bytes, speaks no HTTP
+const CB_SERVICE = `cb-mw-e2e-svc-${stamp}`;
+const CB_ROUTE = `cb-mw-e2e-route-${stamp}`;
+const CB_ROUTE_NAME = `CB mw e2e ${stamp}`;
+const CB_PREFIX = `/cb-mw-e2e-${stamp}`;
+const CB_NAME = `CB e2e breaker ${stamp}`;
+
+test.describe('Circuit Breaker middleware from the dashboard', () => {
+  test.setTimeout(120_000);
+  let breakerId = '';
+
+  test.beforeAll(async ({ playwright }) => {
+    const api = await admin(playwright);
+    try {
+      const svc = await api.put('/v1/services', {
+        data: {
+          id: CB_SERVICE, name: CB_SERVICE, backendType: 'http',
+          weightedTargets: [{ url: ECHO, weight: 1 }], healthCheckType: 'HEALTH_CHECK_TYPE_TCP',
+        },
+      });
+      expect(svc.ok(), `PUT /v1/services: ${svc.status()} ${await svc.text()}`).toBe(true);
+    } finally {
+      await api.dispose();
+    }
+  });
+
+  test.afterAll(async ({ playwright }) => {
+    const api = await admin(playwright);
+    try {
+      await api.delete(`/v1/routes/${encodeURIComponent(CB_ROUTE)}`);
+      if (breakerId) await api.delete(`/v1/middlewares/${encodeURIComponent(breakerId)}`);
+      await api.delete(`/v1/services/${encodeURIComponent(CB_SERVICE)}`);
+    } finally {
+      await api.dispose();
+    }
+  });
+
+  test('is created in the editor, opens on failures, and its route reads OPEN', async ({ page, request, playwright }) => {
+    await page.goto('/middlewares');
+    await page.getByRole('button', { name: 'Add Middleware' }).click();
+    const create = page.getByRole('dialog', { name: 'Add Middleware' });
+    await create.getByLabel('Friendly Name').fill(CB_NAME);
+    await create.getByLabel('Type').and(page.locator('input')).click();
+    await page.getByRole('option', { name: 'Circuit Breaker', exact: true }).click();
+    await create.getByLabel('Minimum Requests').fill('3');
+    await create.getByLabel('Sleep Window', { exact: true }).fill('1h');
+    const saved = page.waitForResponse((r) => new URL(r.url()).pathname === '/v1/middlewares' && r.request().method() === 'PUT');
+    await create.getByRole('button', { name: 'Save Middleware' }).click();
+    const res = await saved;
+    expect(res.status(), `PUT /v1/middlewares: ${await res.text()}`).toBe(200);
+    const mw = (await res.json()) as { id: string; type: string; config: Record<string, string> };
+    breakerId = mw.id;
+    expect(mw.type).toBe('circuit_breaker');
+    expect(mw.config).toMatchObject({ min_requests: '3', sleep_window: '1h' });
+
+    const api = await admin(playwright);
+    try {
+      const route = await api.put('/v1/routes', {
+        data: { id: CB_ROUTE, name: CB_ROUTE_NAME, type: 'http', rule: `PathPrefix(\`${CB_PREFIX}\`)`,
+          serviceId: CB_SERVICE, middlewares: [breakerId] },
+      });
+      expect(route.ok(), `PUT /v1/routes: ${route.status()} ${await route.text()}`).toBe(true);
+      // Fail until the breaker answers for the backend: 503 with its own message.
+      await expect
+        .poll(async () => (await request.get(`${PROXY}${CB_PREFIX}/x`)).text(), {
+          message: 'the breaker never opened on a backend that fails every request',
+          timeout: 30_000,
+        })
+        .toContain('circuit open');
+      const stats = (await (await api.get('/v1/routes/stats')).json()) as Record<string, { url: string; alive: boolean; circuitState: string; breaker?: string }[]>;
+      expect(stats[CB_ROUTE], 'route stats').toEqual([expect.objectContaining({ url: ECHO, alive: true, circuitState: 'OPEN', breaker: 'OPEN' })]);
+    } finally {
+      await api.dispose();
+    }
+
+    await page.goto('/circuit-breaker');
+    const row = page.getByRole('row').filter({ hasText: CB_ROUTE_NAME }).filter({ has: page.getByRole('cell', { name: ECHO, exact: true }) });
+    await expect(row, 'the target behind an open breaker does not read OPEN').toContainText('OPEN', { timeout: 30_000 });
   });
 });
