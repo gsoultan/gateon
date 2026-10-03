@@ -48,7 +48,7 @@ func TestAnalyzeConfigCountsTheWAFsRoutesCarry(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			resp := postAnalyzeConfig(t, tc.globalWAF, tc.routeWAF, tc.pausedWithoutWAF)
+			resp := postAnalyzeConfig(t, advisorySetup{globalWAF: tc.globalWAF, routeWAF: tc.routeWAF, pausedWithoutWAF: tc.pausedWithoutWAF})
 			if got := hasInsight(resp, "Web Application Firewall is disabled"); got != tc.disabled {
 				t.Errorf("WAF-disabled insight reported = %v, want %v", got, tc.disabled)
 			}
@@ -59,21 +59,64 @@ func TestAnalyzeConfigCountsTheWAFsRoutesCarry(t *testing.T) {
 	}
 }
 
+// TestAnalyzeConfigNamesAnAuditOnlyWAF is T12: an audit-only WAF blocks
+// nothing, and the advisory said nothing about it -- the global case produced
+// no insight at all, and a route-level audit-only WAF, which replaces the
+// enforcing global one on its route, was counted as coverage.
+func TestAnalyzeConfigNamesAnAuditOnlyWAF(t *testing.T) {
+	cases := []struct {
+		name  string
+		setup advisorySetup
+		want  string // insight severity, "" for none
+	}{
+		{"global WAF audit-only", advisorySetup{globalWAF: true, globalAudit: true, routeWAF: []bool{false, false}}, insightCritical},
+		{"route WAF audit-only beside the enforcing global", advisorySetup{globalWAF: true, routeAudit: true, routeWAF: []bool{true, false}}, insightWarning},
+		{"enforcing everywhere", advisorySetup{globalWAF: true, routeWAF: []bool{true, false}}, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			resp := postAnalyzeConfig(t, tc.setup)
+			got := ""
+			for _, in := range resp.Insights {
+				if strings.Contains(in.Title, "detecting only (audit)") {
+					got = in.Severity
+				}
+			}
+			if got != tc.want {
+				t.Fatalf("audit-only insight severity = %q, want %q; insights: %+v", got, tc.want, resp.Insights)
+			}
+		})
+	}
+}
+
+// advisorySetup is the gateway postAnalyzeConfig builds.
+type advisorySetup struct {
+	globalWAF, globalAudit bool
+	routeWAF               []bool // per route: attaches a "waf" middleware
+	routeAudit             bool   // that middleware is audit-only
+	pausedWithoutWAF       bool
+}
+
 // postAnalyzeConfig asks the real handler, wired to real route and middleware
 // services, for an analysis of a gateway whose routes do or do not attach a WAF.
-func postAnalyzeConfig(t *testing.T, globalWAF bool, routeWAF []bool, pausedWithoutWAF bool) aiAnalysisResponse {
+func postAnalyzeConfig(t *testing.T, s advisorySetup) aiAnalysisResponse {
 	t.Helper()
 	ctx, dir := t.Context(), t.TempDir()
 	globals := config.NewGlobalRegistry(filepath.Join(dir, "global.json"))
 	gc := proto.Clone(globals.Get(ctx)).(*gateonv1.GlobalConfig)
-	gc.Waf.Enabled = globalWAF
+	gc.Waf.Enabled = s.globalWAF
+	gc.Waf.AuditOnly = s.globalAudit
 	must(t, globals.Update(ctx, gc))
 
 	routes := config.NewRouteRegistry(filepath.Join(dir, "routes.json"))
 	mws := config.NewMiddlewareRegistry(filepath.Join(dir, "middlewares.json"))
-	must(t, mws.Update(ctx, &gateonv1.Middleware{Id: "edge-waf", Name: "edge-waf", Type: "waf"}))
+	wafCfg := map[string]string{}
+	if s.routeAudit {
+		wafCfg["audit_only"] = "true"
+	}
+	must(t, mws.Update(ctx, &gateonv1.Middleware{Id: "edge-waf", Name: "edge-waf", Type: "waf", Config: wafCfg}))
 	must(t, mws.Update(ctx, &gateonv1.Middleware{Id: "gzip", Name: "gzip", Type: "compress"}))
-	for i, has := range routeWAF {
+	for i, has := range s.routeWAF {
 		rt := &gateonv1.Route{Id: fmt.Sprintf("rt-%d", i), Name: fmt.Sprintf("app-%d", i),
 			Rule: fmt.Sprintf("PathPrefix(`/app%d`)", i), Middlewares: []string{"gzip"}}
 		if has {
@@ -81,7 +124,7 @@ func postAnalyzeConfig(t *testing.T, globalWAF bool, routeWAF []bool, pausedWith
 		}
 		must(t, routes.Update(ctx, rt))
 	}
-	if pausedWithoutWAF {
+	if s.pausedWithoutWAF {
 		must(t, routes.Update(ctx, &gateonv1.Route{Id: "rt-paused", Name: "paused", Disabled: true,
 			Rule: "PathPrefix(`/old`)", Middlewares: []string{"gzip"}}))
 	}

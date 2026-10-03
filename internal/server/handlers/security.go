@@ -13,6 +13,7 @@ import (
 	"github.com/gsoultan/gateon/internal/auth"
 	"github.com/gsoultan/gateon/internal/security/correlation"
 	"github.com/gsoultan/gateon/internal/security/fim"
+	"github.com/gsoultan/gateon/internal/security/posture"
 	"github.com/gsoultan/gateon/internal/security/siem"
 )
 
@@ -33,20 +34,35 @@ type SecurityPostureReport struct {
 	SIEM        siem.StatusReport `json:"siem"`
 	FIM         *fim.Status       `json:"fim,omitzero"`
 	Ebpf        EbpfPosture       `json:"ebpf"`
+	// Score is the posture percentage and the controls behind it, computed
+	// from configuration only (ADR 0048).
+	Score posture.Score `json:"score"`
 }
 
-// SignaturePosture reports the dependency-free YARA-lite upload signature engine
-// state (built-in + any loaded custom rules).
+// SignaturePosture reports the YARA-lite upload signature engine as the routes
+// run it. It scans only inside a file_security middleware with
+// enable_signature_scan on, so Enabled means at least one enabled route does,
+// Routes says how many, and RuleCount is the built-in rule set's size then.
 type SignaturePosture struct {
 	Enabled   bool `json:"enabled"`
+	Routes    int  `json:"routes"`
 	RuleCount int  `json:"ruleCount"`
 }
 
-// WAFPosture reports WAF rule-set freshness.
+// WAFPosture reports what the WAF does. Mode is the gateway-wide WAF's
+// effective mode ("enforce", "detect" for audit-only, "off"); Routes counts
+// the enabled HTTP routes by the mode of the WAF that actually inspects each,
+// which for a route with its own WAF middleware is that middleware's.
+//
+// There is no autoUpdate: rules are compiled in and nothing downloads them.
+// CustomRulesFromDisk is what the repurposed auto_update_rules flag does --
+// load a rules directory already present under the data directory.
 type WAFPosture struct {
-	Enabled     bool      `json:"enabled"`
-	AutoUpdate  bool      `json:"autoUpdate"`
-	LastUpdated time.Time `json:"lastUpdated,omitzero"`
+	Enabled             bool                  `json:"enabled"`
+	Mode                string                `json:"mode"`
+	Routes              posture.RouteCoverage `json:"routes"`
+	CustomRulesFromDisk bool                  `json:"customRulesFromDisk"`
+	LastUpdated         time.Time             `json:"lastUpdated,omitzero"`
 }
 
 // ClamAVPosture reports antivirus engine availability and scan freshness.

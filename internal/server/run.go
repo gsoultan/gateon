@@ -232,7 +232,11 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 		Version:            s.Version,
 		StartTime:          s.StartTime(),
 		RouteStatsProvider: s.GetRouteStats,
-		SecurityPosture:    newPostureProvider(s.Version, s.GlobalStore, clamavManager, wafUpdater, fimScanner, s.EbpfManager),
+		SecurityPosture: newPostureProvider(postureDeps{
+			version: s.Version, globalStore: s.GlobalStore, clamav: clamavManager, waf: wafUpdater,
+			fimScanner: fimScanner, ebpf: s.EbpfManager,
+			routes: routeService, middlewares: mwService, entryPoints: epService,
+		}),
 		InvalidateAllProxies: func() {
 			s.InvalidateRouteProxies(func(*gateonv1.Route) bool { return true })
 		},
