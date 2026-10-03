@@ -22,6 +22,7 @@ import (
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware"
 	"github.com/gsoultan/gateon/internal/request"
+	"github.com/gsoultan/gateon/internal/server/readiness"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 	"google.golang.org/grpc/codes"
@@ -92,6 +93,49 @@ func writeSetup2FARefusal(w http.ResponseWriter, r *http.Request, err error) {
 		logger.L.LogError("2FA setup failed", "error", err)
 		WriteHTTPError(w, http.StatusInternalServerError, "2FA setup could not be started")
 	}
+}
+
+// signInUnavailable is the answer to a sign-in the gateway could not judge.
+const signInUnavailable = "sign-in is unavailable: the gateway could not read its user database; " +
+	"try again shortly (the gateway's log has the reason)"
+
+// writeSignInRefusal answers a failed POST /v1/login. A refusal of the
+// credentials is 401 with its reason. Anything else is the gateway failing,
+// not the caller: with the user database down every sign-in used to answer
+// 401 with the driver's error, which read as a wrong password to the person
+// signing in and named the database to anyone who asked. It is 503, which the
+// dashboard shows as "not ready", and the error goes to the log.
+func writeSignInRefusal(w http.ResponseWriter, err error) {
+	if errors.Is(err, auth.ErrInvalidCredentials) || errors.Is(err, auth.ErrAccountLocked) ||
+		errors.Is(err, auth.ErrAccountDisabled) {
+		WriteHTTPError(w, http.StatusUnauthorized, err.Error())
+		return
+	}
+	logger.L.LogError("sign-in failed: the user database could not be read", "error", err)
+	WriteHTTPError(w, http.StatusServiceUnavailable, signInUnavailable)
+}
+
+// secondFactorUnreadable is the answer when an account's stored second factor
+// does not decrypt under the session key in force.
+const secondFactorUnreadable = "this account's two-factor secret cannot be read by this gateway: it was stored " +
+	"under a different session key, which is what restoring the database with another global.json does. " +
+	"An administrator can restore the matching global.json (or set GATEON_PREVIOUS_SESSION_KEY and restart), " +
+	"or reset this account's two-factor authentication"
+
+// writeSecondFactorFailure answers a 2FA verification that failed for a
+// reason other than the code. It used to write the error itself, which for a
+// database restored under another key was "failed to decrypt secret: cipher:
+// message authentication failed" -- true, and no help to anyone.
+func writeSecondFactorFailure(w http.ResponseWriter, id string, err error) {
+	if errors.Is(err, auth.ErrSecretUndecryptable) {
+		logger.L.LogError("a 2FA sign-in failed: the account's second factor does not decrypt under the "+
+			"session key in global.json", "user_id", id)
+		WriteHTTPError(w, http.StatusInternalServerError, secondFactorUnreadable)
+		return
+	}
+	logger.L.LogError("2FA verification failed", "user_id", id, "error", err)
+	WriteHTTPError(w, http.StatusInternalServerError,
+		"two-factor verification could not be completed (the gateway's log has the reason)")
 }
 
 // writeServiceRefusal answers an error ApiService returned with the HTTP status
@@ -470,14 +514,20 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 	// 200 on /readyz means an orchestrator cannot tell a healthy gateway from
 	// one whose telemetry never opened, so it routes production traffic to a
 	// blind instance and completes the rollout past it.
+	//
+	// Beyond the telemetry store it reports every entrypoint listener that did
+	// not bind and a configuration database that does not answer (ADR 0049):
+	// a gateway whose :443 is held by another process, or whose user database
+	// is down, is alive but must not be sent traffic.
 	mux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
 		var notReady []string
 		if !telemetry.PathStatsStoreReady() {
 			notReady = append(notReady, "telemetry store")
 		}
+		notReady = append(notReady, readiness.NotReady()...)
 		if len(notReady) > 0 {
 			w.WriteHeader(http.StatusServiceUnavailable)
-			_, _ = w.Write([]byte("not ready: " + strings.Join(notReady, ", ")))
+			_, _ = w.Write([]byte("not ready: " + strings.Join(notReady, "; ")))
 			return
 		}
 		w.WriteHeader(http.StatusOK)
@@ -678,7 +728,7 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 				audit.Log(r.Context(), req.Id, "2fa_failed", "auth", "Invalid 2FA code", request.ClientAddr(r))
 				WriteHTTPError(w, wrongCodeStatus(isLoginStep), err.Error())
 			default:
-				WriteHTTPError(w, http.StatusInternalServerError, err.Error())
+				writeSecondFactorFailure(w, req.Id, err)
 			}
 			return
 		}
@@ -764,7 +814,7 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 				logger.SecurityEvent("auth_failure", r, "invalid_credentials")
 				audit.Log(r.Context(), req.Username, "login_failed", "auth", "Invalid credentials", request.ClientAddr(r))
 			}
-			WriteHTTPError(w, http.StatusUnauthorized, err.Error())
+			writeSignInRefusal(w, err)
 			return
 		}
 

@@ -8,6 +8,7 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
@@ -25,6 +26,7 @@ import (
 	"github.com/gsoultan/gateon/internal/middleware/security"
 	"github.com/gsoultan/gateon/internal/middleware/security/identity"
 	"github.com/gsoultan/gateon/internal/middleware/traffic"
+	"github.com/gsoultan/gateon/internal/server/readiness"
 	"github.com/gsoultan/gateon/internal/syncutil"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	gtls "github.com/gsoultan/gateon/internal/tls"
@@ -52,9 +54,17 @@ func entrypointRateLimiter() traffic.RateLimiter {
 	return traffic.NewQPSRateLimiter(qps, burst)
 }
 
-// StartServers starts all entrypoints (HTTP, TCP, UDP) in goroutines.
-// shutdownReg is used for graceful shutdown; pass nil to skip registering shutdown.
-// l4Resolver resolves L4 backends from Route->Service.
+// StartServers starts the management listener and every entrypoint, and
+// returns once each has bound or failed to. shutdownReg is used for graceful
+// shutdown; pass nil to skip registering shutdown. l4Resolver resolves L4
+// backends from Route->Service.
+//
+// It returns an error when the management listener cannot bind: a gateway
+// with no management plane cannot be configured, signed into or probed, and
+// carrying on (as it used to) left it running blind while the service manager
+// saw a healthy process and never restarted it. An entrypoint that cannot bind
+// is not fatal -- the others still carry traffic -- but it is logged at ERROR
+// and /readyz answers 503 naming it (see internal/server/readiness).
 func StartServers(
 	epStore config.EntryPointStore,
 	port string,
@@ -68,7 +78,7 @@ func StartServers(
 	mgmt_config *gateonv1.ManagementConfig,
 	global_store config.GlobalConfigStore,
 	phantom PhantomCore,
-) {
+) error {
 	limiter := entrypointRateLimiter()
 	deps := &Deps{
 		Port:             port,
@@ -86,19 +96,20 @@ func StartServers(
 	}
 
 	// ALWAYS start a dedicated management listener
-	startSecureManagementServer(port, deps, wg)
-
-	entryPoints := epStore.List(context.Background())
-	for _, ep := range entryPoints {
-		epCopy := ep
-		runner := runnerFor(epCopy.Type)
-		if runner == nil {
-			continue
-		}
-		wg.Go(func() {
-			runner.Run(context.Background(), epCopy, deps, wg)
-		})
+	if err := startSecureManagementServer(port, deps, wg); err != nil {
+		return err
 	}
+
+	// Each runner binds before it returns and serves on its own goroutines, so
+	// running them here in turn means that by the time this returns every
+	// listener has bound or recorded why it did not -- /readyz cannot report
+	// ready while an entrypoint is still starting.
+	for _, ep := range epStore.List(context.Background()) {
+		if runner := runnerFor(ep.Type); runner != nil {
+			runner.Run(context.Background(), ep, deps, wg)
+		}
+	}
+	return nil
 }
 
 // ManagementBind is the address the dedicated management listener binds to:
@@ -138,7 +149,7 @@ func ManagementListenerWorldOpen(cfg *gateonv1.ManagementConfig) bool {
 	return isWildcardBind(ManagementBind(cfg)) && allowsEveryAddress(ManagementAllowedIPs(cfg))
 }
 
-func startSecureManagementServer(port string, deps *Deps, wg *syncutil.WaitGroup) {
+func startSecureManagementServer(port string, deps *Deps, wg *syncutil.WaitGroup) error {
 	bind := ManagementBind(deps.ManagementConfig)
 	mgmtPort := managementPort(port, deps.ManagementConfig)
 	addr := net.JoinHostPort(bind, mgmtPort)
@@ -166,8 +177,14 @@ func startSecureManagementServer(port string, deps *Deps, wg *syncutil.WaitGroup
 		})
 	}
 
+	l, err := net.Listen("tcp", addr)
+	if err != nil {
+		return fmt.Errorf("management listener could not bind %s: %w (set GATEON_MANAGEMENT_PORT or "+
+			"management.port to a free port)", addr, err)
+	}
 	logger.L.LogInfo("Secure Management Entrypoint started", "addr", addr)
-	wg.Go(func() { serveManagement(server, addr, deps.Phantom) })
+	wg.Go(func() { serveManagement(server, l, deps.Phantom) })
+	return nil
 }
 
 // defaultManagementTimeouts bound each request on the management listener
@@ -223,14 +240,9 @@ func managementHost(bind string) string {
 	return ""
 }
 
-// serveManagement listens on addr and serves the management API until the
-// server is shut down.
-func serveManagement(server *http.Server, addr string, phantom PhantomCore) {
-	l, err := net.Listen("tcp", addr)
-	if err != nil {
-		logger.L.LogError("Management listen failed", "error", err)
-		return
-	}
+// serveManagement serves the management API on l until the server is shut
+// down.
+func serveManagement(server *http.Server, l net.Listener, phantom PhantomCore) {
 	defer l.Close()
 
 	if phantom != nil {
@@ -300,9 +312,12 @@ func startTCPServer(addr string, ep *gateonv1.EntryPoint, deps *Deps, wg *syncut
 	s := newTCPServer(ep, deps, wg)
 	l, err := s.listen(addr)
 	if err != nil {
-		logger.L.LogError("TCP listen failed", "error", err, "addr", addr)
+		logger.L.LogError("TCP listen failed; the entrypoint is not serving and /readyz reports it",
+			"error", err, "addr", addr, "ep", ep.Id)
+		readiness.ListenerFailed(ep.Id, addr, err)
 		return
 	}
+	readiness.ListenerBound(ep.Id, addr)
 	s.start(l, shutdownReg)
 }
 
@@ -438,15 +453,21 @@ func (s *tcpServer) refusePerAddr(c net.Conn) {
 func startUDPServer(addr string, ep *gateonv1.EntryPoint, deps *Deps, wg *syncutil.WaitGroup, shutdownReg *ShutdownRegistry) {
 	logger.L.LogInfo("starting UDP entrypoint", "addr", addr)
 	laddr, err := net.ResolveUDPAddr("udp", addr)
-	if err != nil {
-		logger.L.LogError("UDP resolve failed", "error", err, "addr", addr)
-		return
+	if err == nil {
+		var conn *net.UDPConn
+		if conn, err = net.ListenUDP("udp", laddr); err == nil {
+			readiness.ListenerBound(ep.Id, "udp "+addr)
+			serveUDP(conn, ep, deps, wg, shutdownReg)
+			return
+		}
 	}
-	conn, err := net.ListenUDP("udp", laddr)
-	if err != nil {
-		logger.L.LogError("UDP listen failed", "error", err, "addr", addr)
-		return
-	}
+	logger.L.LogError("UDP listen failed; the entrypoint is not serving and /readyz reports it",
+		"error", err, "addr", addr, "ep", ep.Id)
+	readiness.ListenerFailed(ep.Id, "udp "+addr, err)
+}
+
+// serveUDP proxies or answers datagrams on conn until shutdown closes it.
+func serveUDP(conn *net.UDPConn, ep *gateonv1.EntryPoint, deps *Deps, wg *syncutil.WaitGroup, shutdownReg *ShutdownRegistry) {
 	if shutdownReg != nil {
 		shutdownReg.Register(func(context.Context) error {
 			return conn.Close()
