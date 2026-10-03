@@ -113,6 +113,7 @@ func analyzeConfig(ctx context.Context, cfg *gateonv1.GlobalConfig, routes wafCo
 	insights := make([]aiInsight, 0, 12)
 	insights = append(insights, tlsInsights(cfg.GetTls())...)
 	insights = append(insights, wafInsights(cfg.GetWaf(), routes)...)
+	insights = append(insights, botInsights(routes)...)
 	insights = append(insights, managementExposureInsights(cfg.GetManagement())...)
 	insights = append(insights, auditInsights(cfg.GetAudit())...)
 	insights = append(insights, detectionInsights(cfg)...)
@@ -267,16 +268,30 @@ func globalWAFInsights(waf *gateonv1.WafConfig) []aiInsight {
 			Recommendation: "Enable WAF DoS protection (and consider eBPF/XDP rate limiting) on public entrypoints.",
 		})
 	}
-	if !waf.GetBotManagement().GetEnabled() {
-		out = append(out, aiInsight{
-			Title:          "Bot management is disabled",
-			Description:    "Automated scrapers and credential-stuffing bots are not being challenged.",
-			Severity:       insightInfo,
-			Category:       categorySecurity,
-			Recommendation: "Enable bot management with a JS/browser-integrity challenge for sensitive routes.",
-		})
-	}
 	return out
+}
+
+// botInsights reports which routes carry a bot_management middleware. It used
+// to read the global bot-management switch, which only supplies defaults to
+// that middleware and protects no route that lacks it, so "enabled" there was
+// counted as coverage nobody had.
+func botInsights(cov wafCoverage) []aiInsight {
+	if cov.Total == 0 || cov.BotManagement == cov.Total {
+		return nil
+	}
+	title := "Bot management covers no route"
+	if cov.BotManagement > 0 {
+		title = fmt.Sprintf("Bot management covers %d of %d routes", cov.BotManagement, cov.Total)
+	}
+	return []aiInsight{{
+		Title: title,
+		Description: fmt.Sprintf("%d of %d routes carry no bot management middleware, so automated scrapers "+
+			"and credential-stuffing bots reach them unchallenged. The global bot settings are only defaults "+
+			"for that middleware.", cov.Total-cov.BotManagement, cov.Total),
+		Severity:       insightInfo,
+		Category:       categorySecurity,
+		Recommendation: "Attach a bot management middleware to sensitive routes (logins, forms, APIs).",
+	}}
 }
 
 func auditInsights(audit *gateonv1.AuditConfig) []aiInsight {

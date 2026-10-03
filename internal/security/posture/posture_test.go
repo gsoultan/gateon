@@ -110,6 +110,19 @@ func TestSignatureScanningFollowsFileSecurity(t *testing.T) {
 	}
 }
 
+// TestBotCoverageCountsTheRoutesThatCarryIt: the global bot settings are
+// defaults for the bot_management middleware; a route is covered only by
+// carrying one.
+func TestBotCoverageCountsTheRoutesThatCarryIt(t *testing.T) {
+	mws := index(mw("bots", "bot_management", nil), mw("waf", "waf", nil))
+	global := &gateonv1.GlobalConfig{Waf: &gateonv1.WafConfig{BotManagement: &gateonv1.BotManagementConfig{Enabled: true}}}
+	cov := Coverage(Config{Global: global, Middlewares: mws,
+		Routes: []*gateonv1.Route{httpRoute("a", "bots"), httpRoute("b", "waf"), httpRoute("c")}})
+	if cov.BotManagement != 1 {
+		t.Fatalf("BotManagement = %d, want 1 (only route a carries the middleware)", cov.BotManagement)
+	}
+}
+
 func controlByID(t *testing.T, s Score, id string) Control {
 	t.Helper()
 	for _, c := range s.Controls {

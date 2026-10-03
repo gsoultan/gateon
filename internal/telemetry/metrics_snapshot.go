@@ -749,15 +749,21 @@ func addFunnelStages(idx map[string]*dto.MetricFamily, f *MitigationFunnel) {
 		return !mitigationThreatTypes[labelValue(m, "threat_type")]
 	})
 	f.BotBlocked = sumCounter(idx, "gateon_middleware_bot_management_total", func(m *dto.Metric) bool {
-		switch labelValue(m, "outcome") {
-		case "blocked", "integrity_failed", "challenge_failed":
-			return true
-		}
-		return false
+		return botRefusal(labelValue(m, "outcome"))
 	})
 	f.TurnstileFailures = sumCounter(idx, "gateon_middleware_turnstile_total", func(m *dto.Metric) bool {
 		return labelValue(m, "outcome") == "fail"
 	})
+}
+
+// botRefusal reports whether a bot-management outcome is a request it
+// refused: a challenge page served in place of the response (403, whatever the
+// challenge -- "challenge_served", "pow_challenge_served"), or a block the
+// threat pipeline recorded for a failed check or a wrong answer ("blocked").
+// The funnel used to count "integrity_failed" and "challenge_failed",
+// which nothing records, and missed the served challenges.
+func botRefusal(outcome string) bool {
+	return outcome == ActionBlocked || strings.HasSuffix(outcome, "challenge_served")
 }
 
 // outcomeCount reads one series of gateon_request_outcomes_total.

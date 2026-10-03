@@ -28,6 +28,8 @@ export interface RouteCoverage {
   unprotected: number;
   /** Routes running the upload signature engine (file_security). */
   signatureScanning: number;
+  /** Routes carrying a bot_management middleware. */
+  botManagement: number;
 }
 
 /** "enforce" blocks, "detect" is audit-only (records and forwards), "off". */

@@ -33,10 +33,11 @@ const (
 
 // Middleware types and keys read here, spelled as the factory spells them.
 const (
-	typeWAF          = "waf"
-	typeFileSecurity = "file_security"
-	keyAuditOnly     = "audit_only"
-	keySignatureScan = "enable_signature_scan"
+	typeWAF           = "waf"
+	typeFileSecurity  = "file_security"
+	typeBotManagement = "bot_management"
+	keyAuditOnly      = "audit_only"
+	keySignatureScan  = "enable_signature_scan"
 )
 
 // Config is the configuration a posture is computed from: the same objects the
@@ -64,6 +65,10 @@ type RouteCoverage struct {
 	// SignatureScanning is how many routes run the upload signature engine
 	// (a file_security middleware with enable_signature_scan on).
 	SignatureScanning int `json:"signatureScanning"`
+	// BotManagement is how many routes carry a bot_management middleware. The
+	// global bot-management settings only supply defaults to that middleware;
+	// they protect no route that does not carry it.
+	BotManagement int `json:"botManagement"`
 }
 
 // GlobalWAFMode is the mode the gateway-wide WAF runs in.
@@ -100,6 +105,9 @@ func Coverage(c Config) RouteCoverage {
 		}
 		if routeScansSignatures(rt, c.Middlewares) {
 			cov.SignatureScanning++
+		}
+		if len(routeMiddlewares(rt, c.Middlewares, typeBotManagement)) > 0 {
+			cov.BotManagement++
 		}
 	}
 	return cov

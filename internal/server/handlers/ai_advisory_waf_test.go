@@ -89,11 +89,41 @@ func TestAnalyzeConfigNamesAnAuditOnlyWAF(t *testing.T) {
 	}
 }
 
+// TestAnalyzeConfigReadsBotCoverageFromTheRoutes: the advisory counted the
+// global bot-management switch as coverage, but it only supplies defaults to
+// the bot_management middleware and protects no route that lacks one.
+func TestAnalyzeConfigReadsBotCoverageFromTheRoutes(t *testing.T) {
+	cases := []struct {
+		name  string
+		setup advisorySetup
+		want  string // the bot insight's title, "" for none
+	}{
+		{"global switch on, no route carries it", advisorySetup{globalBot: true, routeWAF: []bool{false, false}}, "Bot management covers no route"},
+		{"one of two routes carries it", advisorySetup{routeWAF: []bool{false, false}, botRoutes: 1}, "Bot management covers 1 of 2 routes"},
+		{"every route carries it", advisorySetup{routeWAF: []bool{false, false}, botRoutes: 2}, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := ""
+			for _, in := range postAnalyzeConfig(t, tc.setup).Insights {
+				if strings.HasPrefix(in.Title, "Bot management") {
+					got = in.Title
+				}
+			}
+			if got != tc.want {
+				t.Fatalf("bot insight = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 // advisorySetup is the gateway postAnalyzeConfig builds.
 type advisorySetup struct {
 	globalWAF, globalAudit bool
+	globalBot              bool   // the global bot-management switch
 	routeWAF               []bool // per route: attaches a "waf" middleware
 	routeAudit             bool   // that middleware is audit-only
+	botRoutes              int    // the first n routes attach a bot_management middleware
 	pausedWithoutWAF       bool
 }
 
@@ -106,6 +136,7 @@ func postAnalyzeConfig(t *testing.T, s advisorySetup) aiAnalysisResponse {
 	gc := proto.Clone(globals.Get(ctx)).(*gateonv1.GlobalConfig)
 	gc.Waf.Enabled = s.globalWAF
 	gc.Waf.AuditOnly = s.globalAudit
+	gc.Waf.BotManagement = &gateonv1.BotManagementConfig{Enabled: s.globalBot}
 	must(t, globals.Update(ctx, gc))
 
 	routes := config.NewRouteRegistry(filepath.Join(dir, "routes.json"))
@@ -116,11 +147,15 @@ func postAnalyzeConfig(t *testing.T, s advisorySetup) aiAnalysisResponse {
 	}
 	must(t, mws.Update(ctx, &gateonv1.Middleware{Id: "edge-waf", Name: "edge-waf", Type: "waf", Config: wafCfg}))
 	must(t, mws.Update(ctx, &gateonv1.Middleware{Id: "gzip", Name: "gzip", Type: "compress"}))
+	must(t, mws.Update(ctx, &gateonv1.Middleware{Id: "bots", Name: "bots", Type: "bot_management"}))
 	for i, has := range s.routeWAF {
 		rt := &gateonv1.Route{Id: fmt.Sprintf("rt-%d", i), Name: fmt.Sprintf("app-%d", i),
 			Rule: fmt.Sprintf("PathPrefix(`/app%d`)", i), Middlewares: []string{"gzip"}}
 		if has {
 			rt.Middlewares = append(rt.Middlewares, "edge-waf")
+		}
+		if i < s.botRoutes {
+			rt.Middlewares = append(rt.Middlewares, "bots")
 		}
 		must(t, routes.Update(ctx, rt))
 	}
