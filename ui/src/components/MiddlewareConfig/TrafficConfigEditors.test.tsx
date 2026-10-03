@@ -1,9 +1,14 @@
 // Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
 // SPDX-License-Identifier: MIT
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, mock, test } from "bun:test";
 import { isValidElement, type ReactElement, type ReactNode } from "react";
-import { InFlightReqConfigEditor } from "./TrafficConfigEditors";
+
+// MiddlewareConfigEditor pulls in the API client, which reads window.location
+// on import; there is no window under bun:test.
+mock.module("../../services/client", () => ({ api: {} }));
+const { CircuitBreakerConfigEditor, InFlightReqConfigEditor } = await import("./TrafficConfigEditors");
+const { MiddlewareConfigEditor } = await import("./MiddlewareConfigEditor");
 
 type Props = Record<string, unknown>;
 type Element = ReactElement<Props>;
@@ -48,5 +53,25 @@ describe("in-flight requests editor", () => {
   test("an unset cap shows no value rather than one it would not save", () => {
     const tree = InFlightReqConfigEditor({ config: {}, updateConfig: () => {} });
     expect(findElement(tree, labelled("Max Concurrent Requests"))?.props.value).toBe("");
+  });
+});
+
+describe("circuit breaker editor", () => {
+  // There was no editor: the type could not be created from the dashboard.
+  test("the middleware editor has one for circuit_breaker", () => {
+    const tree = MiddlewareConfigEditor({ type: "circuit_breaker", config: {}, onChange: () => {} });
+    expect(isValidElement(tree) && tree.type).toBe(CircuitBreakerConfigEditor);
+  });
+
+  test("each field writes the key the gateway reads", () => {
+    const written: Record<string, string> = {};
+    const tree = CircuitBreakerConfigEditor({ config: {}, updateConfig: (k, v) => { written[k] = v; } });
+    const set = (label: string, value: unknown) =>
+      (findElement(tree, (el) => el.props.label === label)!.props.onChange as (v: unknown) => void)(value);
+    set("Error Threshold", 0.25);
+    set("Minimum Requests", 10);
+    set("Window", { currentTarget: { value: "20s" } });
+    set("Sleep Window", { currentTarget: { value: "1m" } });
+    expect(written).toEqual({ error_threshold: "0.25", min_requests: "10", window_size: "20s", sleep_window: "1m" });
   });
 });

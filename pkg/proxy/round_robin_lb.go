@@ -151,3 +151,10 @@ func (lb *RoundRobinLB) GetStats() []TargetStats {
 func (lb *RoundRobinLB) RecordLatency(url string, latency float64) {
 	// Round robin does not use latency for balancing.
 }
+
+func (lb *RoundRobinLB) states() []*targetState {
+	if set := lb.set.Load(); set != nil {
+		return set.targets
+	}
+	return nil
+}

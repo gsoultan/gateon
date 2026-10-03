@@ -6,6 +6,7 @@ package proxy
 import (
 	"sync/atomic"
 
+	"github.com/gsoultan/gateon/internal/middleware"
 	"github.com/gsoultan/gateon/internal/telemetry"
 )
 
@@ -17,9 +18,15 @@ const (
 )
 
 type TargetStats struct {
-	URL          string `json:"url"`
-	Alive        bool   `json:"alive"`
-	CircuitState string `json:"circuitState"` // CLOSED, OPEN, HALF-OPEN
+	URL   string `json:"url"`
+	Alive bool   `json:"alive"`
+	// CircuitState is whether requests reach this target: OPEN when its health
+	// check took it out of rotation or the route's circuit breaker is open,
+	// HALF-OPEN while that breaker probes, CLOSED otherwise.
+	CircuitState string `json:"circuitState"`
+	// Breaker is the route's circuit breaker state, empty when the route has
+	// none.
+	Breaker      string `json:"breaker,omitempty"`
 	RequestCount uint64 `json:"requestCount"`
 	ErrorCount   uint64 `json:"errorCount"`
 	AvgLatencyMs uint64 `json:"avgLatencyMs"`
@@ -47,6 +54,27 @@ func targetStatsFromState(t *targetState) TargetStats {
 		AvgLatencyUs: avgUs,
 		ActiveConn:   atomic.LoadInt32(&t.activeConn),
 	}
+}
+
+// withBreaker folds the circuit breaker kept under key -- the route's ID, when
+// the route has one -- into every target's row. The rows used to derive their
+// state from the health check alone, so an open breaker refusing the route's
+// every request read CLOSED, and the page's OPEN filter hid it (ADR 0047).
+func withBreaker(stats []TargetStats, key string) []TargetStats {
+	if key == "" {
+		return stats
+	}
+	state, ok := middleware.CircuitStateOf(key)
+	if !ok {
+		return stats
+	}
+	for i := range stats {
+		stats[i].Breaker = string(state)
+		if stats[i].CircuitState == CircuitClosed {
+			stats[i].CircuitState = string(state)
+		}
+	}
+	return stats
 }
 
 // TallyTargets adds stats to c. It is the one place the dashboard's target

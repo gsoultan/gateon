@@ -11,6 +11,7 @@ import (
 	"net/http/httputil"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	gateonhttputil "github.com/gsoultan/gateon/internal/httputil"
@@ -56,6 +57,9 @@ type ProxyHandler struct {
 	// sessions recognises a management session token in Authorization, so it
 	// is not forwarded either; nil forwards Authorization as sent.
 	sessions SessionVerifier
+	// breakerKey is the route's circuit breaker key when its chain has one;
+	// set once, before the handler is published.
+	breakerKey string
 }
 
 // SessionVerifier is the management plane's token check, as the proxy needs
@@ -156,6 +160,60 @@ func (h *ProxyHandler) InheritHealth(prev map[string]bool) {
 	}
 }
 
+// Carry is what a handler hands the one built to replace it: what its health
+// checks concluded, and each target's request, error and latency counts.
+type Carry struct {
+	Health   map[string]bool
+	Counters map[string]TargetCounters
+}
+
+// TargetCounters are one target's cumulative counts, as the dashboard shows
+// them.
+type TargetCounters struct {
+	Requests, Errors, LatencySumUs uint64
+}
+
+// stateLister is every balancer here: its live target states.
+type stateLister interface{ states() []*targetState }
+
+// Carry snapshots what the next handler for this route should start from.
+func (h *ProxyHandler) Carry() Carry {
+	c := Carry{Health: h.HealthSnapshot()}
+	if l, ok := h.lb.(stateLister); ok {
+		c.Counters = make(map[string]TargetCounters)
+		for _, t := range l.states() {
+			c.Counters[t.url] = TargetCounters{
+				Requests:     atomic.LoadUint64(&t.requestCount),
+				Errors:       atomic.LoadUint64(&t.errorCount),
+				LatencySumUs: atomic.LoadUint64(&t.latencySumUs),
+			}
+		}
+	}
+	return c
+}
+
+// Inherit starts this handler where the one it replaces left off. Counts
+// used to start again at zero on every rebuild -- after a memory-pressure
+// purge, and on any service save, including one for another service -- so a
+// target's errors vanished from the dashboard while it was still failing. A
+// target the previous handler did not have starts from nothing.
+func (h *ProxyHandler) Inherit(c Carry) {
+	h.InheritHealth(c.Health)
+	l, ok := h.lb.(stateLister)
+	if !ok || len(c.Counters) == 0 {
+		return
+	}
+	for _, t := range l.states() {
+		prev, known := c.Counters[t.url]
+		if !known {
+			continue
+		}
+		atomic.AddUint64(&t.requestCount, prev.Requests)
+		atomic.AddUint64(&t.errorCount, prev.Errors)
+		atomic.AddUint64(&t.latencySumUs, prev.LatencySumUs)
+	}
+}
+
 // RouteName returns the label of the route this handler serves.
 func (h *ProxyHandler) RouteName() string {
 	return h.routeName
@@ -253,8 +311,16 @@ func (h *ProxyHandler) getOrCreateProxy(state *targetState) *httputil.ReversePro
 	return state.proxy.Load()
 }
 
+// GetStats is each target's counters and state as the dashboard shows them,
+// including the route's circuit breaker when it has one.
 func (h *ProxyHandler) GetStats() []TargetStats {
-	return h.lb.GetStats()
+	return withBreaker(h.lb.GetStats(), h.breakerKey)
+}
+
+// SetCircuitBreakerKey names the circuit breaker in front of this handler --
+// its route's ID -- when the route has one, so the target rows report it.
+func (h *ProxyHandler) SetCircuitBreakerKey(key string) {
+	h.breakerKey = key
 }
 
 // ClientIdentityHeaders names the request headers this handler chooses the

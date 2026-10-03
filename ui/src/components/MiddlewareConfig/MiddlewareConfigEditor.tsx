@@ -42,6 +42,7 @@ import {
   BufferingConfigEditor,
   InFlightReqConfigEditor,
   CacheConfigEditor,
+  CircuitBreakerConfigEditor,
 } from "./TrafficConfigEditors";
 import {
   RewriteConfigEditor,
@@ -82,6 +83,9 @@ export function MiddlewareConfigEditor({
 
     case "buffering":
       return <BufferingConfigEditor config={config} updateConfig={updateConfig} />;
+
+    case "circuit_breaker":
+      return <CircuitBreakerConfigEditor config={config} updateConfig={updateConfig} />;
 
     case "auth":
       return <AuthConfigEditor config={config} onChange={onChange} />;

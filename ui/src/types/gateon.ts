@@ -69,7 +69,10 @@ export type TargetStats = {
   errorCount: number;
   avgLatencyMs: number;
   activeConn: number;
+  /** OPEN when the health check took the target out of rotation or the route's breaker is open. */
   circuitState?: string;
+  /** The route's circuit breaker state; absent when the route has none. */
+  breaker?: string;
   statusCodes?: Record<string, number>;
 };
 

@@ -427,6 +427,7 @@ export default function MiddlewaresPage() {
               { label: "gRPC-Web", value: "grpcweb" },
               { label: "Custom Errors", value: "errors" },
               { label: "Retry", value: "retry" },
+              { label: "Circuit Breaker", value: "circuit_breaker" },
               { label: "Access Logging", value: "accesslog" },
               { label: "Prometheus Metrics", value: "metrics" },
             ]}
@@ -489,7 +490,9 @@ export default function MiddlewaresPage() {
                   {editingMW?.type === "ratelimit" &&
                     "Keys: requests_per_minute, burst, per_tenant (true/false), storage (local/redis; redis needs Redis configured for this gateway), strategy (ip/tenant/ja4h/fingerprint). The client address is the one the entrypoint resolved, under Settings > Trust Cloudflare Headers."}
                   {editingMW?.type === "inflightreq" &&
-                    "Keys: amount (required), per_ip (true/false)"}
+                    "Keys: amount (required), per_ip (true = per client address, the default; false = one total for the route)"}
+                  {editingMW?.type === "circuit_breaker" &&
+                    "Keys: error_threshold (0-1, default 0.5), min_requests (default 20), window_size (default 10s), sleep_window (default 30s)"}
                   {editingMW?.type === "buffering" &&
                     "Keys: max_request_body_bytes (required)"}
                   {editingMW?.type === "auth" &&

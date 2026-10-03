@@ -49,10 +49,11 @@ type ProxyCache struct {
 	// refusalRetry is how long a refused chain is served before the next
 	// request, or the next Sync, builds the route again.
 	refusalRetry time.Duration
-	// retiredHealth holds, under mu, what an invalidated route's health checks
-	// had concluded about its targets, until the route's next build takes it.
-	// One entry per route at most; Sync drops those of deleted routes.
-	retiredHealth map[string]map[string]bool
+	// retiredHealth holds, under mu, what an invalidated route's handler had
+	// -- its health conclusions and per-target counts -- until the route's next
+	// build takes it. One entry per route at most, each bounded by the route's
+	// targets; Sync drops those of deleted routes.
+	retiredHealth map[string]proxy.Carry
 	// sharedLabels holds, under mu, each route name more than one route
 	// carries, with the IDs that carry it, so Sync warns when that changes
 	// rather than every thirty seconds. At most one entry per route.
@@ -216,6 +217,9 @@ func (c *ProxyCache) compile(rt *gateonv1.Route) (http.Handler, *proxy.ProxyHand
 		SetStripCORS(stripCORS).
 		SetSessionVerifier(c.sessions).
 		Build()
+	if c.routeHasCircuitBreaker(rt) {
+		pHandler.SetCircuitBreakerKey(rt.Id) // the key the breaker keeps its state under
+	}
 
 	h := router.ApplyRouteMiddlewares(pHandler, rt, c.redisClient, c.mwStore, c.globalStore, c.ebpfManager, c.reputation)
 	if h == nil {
@@ -223,6 +227,22 @@ func (c *ProxyCache) compile(rt *gateonv1.Route) (http.Handler, *proxy.ProxyHand
 		return nil, nil
 	}
 	return h, pHandler
+}
+
+// routeHasCircuitBreaker reports whether rt's chain includes a circuit breaker,
+// so its target rows report the breaker's state (ADR 0047). Asked per build,
+// so a breaker removed from the route stops being reported with the rebuild.
+func (c *ProxyCache) routeHasCircuitBreaker(rt *gateonv1.Route) bool {
+	if c.mwStore == nil {
+		return false
+	}
+	for _, id := range rt.Middlewares {
+		if mw, ok := c.mwStore.Get(context.Background(), strings.TrimSpace(id)); ok && mw != nil &&
+			strings.EqualFold(mw.Type, "circuit_breaker") {
+			return true
+		}
+	}
+	return false
 }
 
 // storeIfCurrent caches a chain unless an invalidation has landed since the
@@ -270,28 +290,28 @@ func (c *ProxyCache) inheritHealthLocked(id string, ph, old *proxy.ProxyHandler)
 		return
 	}
 	if old != nil && old != ph {
-		ph.InheritHealth(old.HealthSnapshot())
+		ph.Inherit(old.Carry())
 		return
 	}
 	if snap, ok := c.retiredHealth[id]; ok {
 		delete(c.retiredHealth, id)
-		ph.InheritHealth(snap)
+		ph.Inherit(snap)
 	}
 }
 
 // retireHandlerLocked drains a handler that is leaving the cache, keeping what
-// its health checks concluded for the route's next handler to start from.
-// Purge used to drain without keeping it, so after a purge -- which comes
-// under memory pressure -- every route sent traffic to backends known to be
-// down until each new handler's first check. At most one snapshot per route;
-// Sync drops those of deleted routes. Caller holds c.mu.
+// its health checks concluded, and its per-target counts, for the route's next
+// handler to start from. Purge used to drain without keeping either, so after
+// a purge -- which comes under memory pressure -- every route sent traffic to
+// backends known to be down until each new handler's first check, and every
+// target's request and error counts on the dashboard started again at zero.
+// At most one snapshot per route; Sync drops those of deleted routes. Caller
+// holds c.mu.
 func (c *ProxyCache) retireHandlerLocked(id string, ph *proxy.ProxyHandler) {
-	if snap := ph.HealthSnapshot(); len(snap) > 0 {
-		if c.retiredHealth == nil {
-			c.retiredHealth = make(map[string]map[string]bool)
-		}
-		c.retiredHealth[id] = snap
+	if c.retiredHealth == nil {
+		c.retiredHealth = make(map[string]proxy.Carry)
 	}
+	c.retiredHealth[id] = ph.Carry()
 	go ph.DrainAndClose(drainTimeout)
 }
 

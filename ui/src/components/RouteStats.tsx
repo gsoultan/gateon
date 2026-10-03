@@ -6,6 +6,12 @@ import { useRouteStats } from "../hooks/useGateon";
 import { useRouteStatsHistory } from "../hooks/useRouteStatsHistory";
 import { safeToFixed } from "../utils/format";
 import { Sparkline } from "./Sparkline";
+import type { TargetStats } from "../types/gateon";
+
+// A target's circuit is OPEN when its health check took it out of rotation or
+// the route's breaker is open; the color follows that, not health alone.
+const circuitOf = (s: TargetStats) => s.circuitState ?? (s.alive ? 'CLOSED' : 'OPEN')
+const circuitColor = (c: string) => (c === 'CLOSED' ? 'green' : c === 'HALF-OPEN' ? 'yellow' : 'orange')
 
 export interface RouteStatsProps {
   routeId: string;
@@ -43,8 +49,8 @@ export function RouteStats({ routeId }: RouteStatsProps) {
                 <Text size="xs">Errs: {s.errorCount}</Text>
                 <Text size="xs">Active: {s.activeConn}</Text>
                 <Text size="xs">Avg Lat: {safeToFixed(s.avgLatencyMs ?? (s as any).avg_latency_ms, 2)}ms</Text>
-                <Text size="xs" fw={700} c={s.alive ? 'green' : 'orange'}>
-                  Circuit: {(s as any).circuitState ?? (s.alive ? 'CLOSED' : 'OPEN')}
+                <Text size="xs" fw={700} c={circuitColor(circuitOf(s))}>
+                  Circuit: {circuitOf(s)}{s.breaker ? ` (breaker ${s.breaker})` : ''}
                 </Text>
               </Group>
               {s.statusCodes && Object.keys(s.statusCodes).length > 0 && (
