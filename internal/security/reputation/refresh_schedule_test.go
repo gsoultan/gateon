@@ -70,7 +70,7 @@ func joinOnCleanup(t *testing.T, store *IPReputationStore, cancel context.Cancel
 	t.Helper()
 	t.Cleanup(func() {
 		cancel()
-		<-store.loopDone
+		store.Wait()
 	})
 }
 

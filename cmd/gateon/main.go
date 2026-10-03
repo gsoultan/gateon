@@ -209,6 +209,10 @@ func main() {
 	if gc := globalReg.Get(ctx); gc != nil && gc.SecurityAdvanced != nil && gc.SecurityAdvanced.IpReputation != nil {
 		ipReputation = reputation.NewIPReputationStore(gc.SecurityAdvanced.IpReputation)
 		ipReputation.Start(ctx)
+		// Every entrypoint and route refuses what the feeds list
+		// (identity.AddressBlocked), not only a route whose WAF has its own
+		// reputation switch on (ADR 0044).
+		reputation.Publish(ipReputation)
 	}
 
 	// The data-path engine the listeners and the Diagnostics page consult.

@@ -7,10 +7,12 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"math"
 	"net/http"
 	"net/netip"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gsoultan/gateon/internal/logger"
@@ -19,10 +21,16 @@ import (
 
 type IPReputationStore struct {
 	mu           sync.RWMutex
-	trie         *ipTrie
-	badIPs       map[string]float64
 	config       *gateonv1.IPReputationConfig
 	integrations []reputationProvider
+
+	// index is what the feeds list, replaced whole and never modified once
+	// stored, so a lookup reads it with one atomic load and no lock: every
+	// request on every entrypoint asks it (ADR 0044).
+	index atomic.Pointer[feedIndex]
+	// threshold is GetBlockThreshold as float64 bits, kept beside the index
+	// for the same reason.
+	threshold atomic.Uint64
 
 	// feedMu serialises refreshes and guards lastGood.
 	feedMu sync.Mutex
@@ -53,6 +61,18 @@ type ReputationClient interface {
 type reputationProvider struct {
 	config *gateonv1.IPReputationIntegration
 	client ReputationClient
+}
+
+// feedIndex is one immutable generation of the feed entries: host entries by
+// their text, and every entry in the trie.
+type feedIndex struct {
+	ips     map[string]float64
+	trie    *ipTrie
+	entries int
+}
+
+func newFeedIndex() *feedIndex {
+	return &feedIndex{ips: map[string]float64{}, trie: newIPTrie()}
 }
 
 type trieNode struct {
@@ -152,11 +172,8 @@ func (t *ipTrie) search(addr netip.Addr) (bool, float64) {
 // to finish -- so every boot fetched every feed twice, one after the other,
 // before a listener opened.
 func NewIPReputationStore(cfg *gateonv1.IPReputationConfig) *IPReputationStore {
-	store := &IPReputationStore{
-		badIPs:      make(map[string]float64),
-		trie:        newIPTrie(),
-		rescheduled: make(chan struct{}, 1),
-	}
+	store := &IPReputationStore{rescheduled: make(chan struct{}, 1)}
+	store.index.Store(newFeedIndex())
 	store.configure(cfg)
 	return store
 }
@@ -197,6 +214,7 @@ func (s *IPReputationStore) configure(cfg *gateonv1.IPReputationConfig) {
 	s.config = cfg
 	s.integrations = integrations
 	s.mu.Unlock()
+	s.threshold.Store(math.Float64bits(blockThresholdOf(cfg)))
 }
 
 // newReputationClient returns the client for an integration's provider type,
@@ -241,18 +259,19 @@ func (s *IPReputationStore) clearFeeds() {
 	s.feedMu.Lock()
 	defer s.feedMu.Unlock()
 	s.lastGood = nil
-	s.mu.Lock()
-	s.badIPs = make(map[string]float64)
-	s.trie = newIPTrie()
-	s.mu.Unlock()
+	s.index.Store(newFeedIndex())
 }
 
+// IsBad reports whether a feed lists ipStr, and the score the listing carries.
+// It takes no lock: an install with no feed entries pays one atomic load.
 func (s *IPReputationStore) IsBad(ipStr string) (bool, float64) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	idx := s.index.Load()
+	if idx == nil || idx.entries == 0 {
+		return false, 0
+	}
 
 	// Check manual map first (O(1))
-	if score, ok := s.badIPs[ipStr]; ok {
+	if score, ok := idx.ips[ipStr]; ok {
 		return true, score
 	}
 
@@ -267,17 +286,31 @@ func (s *IPReputationStore) IsBad(ipStr string) (bool, float64) {
 	// to the IPv6 trie, where no IPv4 entry lives, and every listed IPv4
 	// address walked past the feed. The trie holds every entry, host routes
 	// included, so the unmapped search finds what the map lookup above missed.
-	return s.trie.search(addr.Unmap())
+	return idx.trie.search(addr.Unmap())
+}
+
+// Listed reports whether ipStr is listed at or above the block threshold:
+// what "block known malicious actors" refuses.
+func (s *IPReputationStore) Listed(ipStr string) bool {
+	bad, score := s.IsBad(ipStr)
+	return bad && score >= s.GetBlockThreshold()
 }
 
 // SetIPScore manually sets the reputation score for an IP (primarily for testing or internal overrides).
+// The index is copied rather than written: a lookup may be reading it.
 func (s *IPReputationStore) SetIPScore(ip string, score float64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.badIPs == nil {
-		s.badIPs = make(map[string]float64)
+	old := s.index.Load()
+	next := &feedIndex{ips: make(map[string]float64, len(old.ips)+1), trie: old.trie, entries: old.entries}
+	for k, v := range old.ips {
+		next.ips[k] = v
 	}
-	s.badIPs[ip] = score
+	if _, dup := next.ips[ip]; !dup {
+		next.entries++
+	}
+	next.ips[ip] = score
+	s.index.Store(next)
 }
 
 // GetExternalScore checks external integrations for the given IP.
@@ -331,12 +364,23 @@ func (p reputationProvider) threshold() int {
 }
 
 func (s *IPReputationStore) GetBlockThreshold() float64 {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if s.config != nil && s.config.BlockThreshold > 0 {
-		return s.config.BlockThreshold
+	if bits := s.threshold.Load(); bits != 0 {
+		return math.Float64frombits(bits)
 	}
-	return 80.0 // Default
+	// Zero is a store built without configure; a configured threshold is
+	// never zero (blockThresholdOf).
+	return defaultBlockThreshold
+}
+
+// defaultBlockThreshold is the listing score that refuses when the config
+// names none. A feed listing scores 100, so it refuses.
+const defaultBlockThreshold = 80.0
+
+func blockThresholdOf(cfg *gateonv1.IPReputationConfig) float64 {
+	if t := cfg.GetBlockThreshold(); t > 0 {
+		return t
+	}
+	return defaultBlockThreshold
 }
 
 // Start loads the configured feeds, then keeps them refreshed until ctx ends.
@@ -358,6 +402,16 @@ func (s *IPReputationStore) Start(ctx context.Context) {
 		s.loopDone = make(chan struct{})
 		go s.refreshLoop(ctx, timer)
 	})
+}
+
+// Wait blocks until the refresh loop Start began has returned, which it does
+// once Start's context ends; it returns at once when Start never ran. It is
+// how a caller that cancels the context joins the loop rather than leaving it
+// running behind it.
+func (s *IPReputationStore) Wait() {
+	if s.loopDone != nil {
+		<-s.loopDone
+	}
 }
 
 // refreshLoop refreshes the feeds each time timer fires until ctx ends. A store
@@ -489,28 +543,26 @@ func (s *IPReputationStore) update(ctx context.Context) {
 	// which is what bounds it.
 	s.lastGood = current
 
-	newIPs, newTrie := indexFeeds(current)
-	s.mu.Lock()
-	s.badIPs = newIPs
-	s.trie = newTrie
-	s.mu.Unlock()
+	idx := indexFeeds(current)
+	s.index.Store(idx)
 
-	logger.L.Info().Int("ips", len(newIPs)).Msg("IP reputation store updated with Radix Tree")
+	logger.L.LogInfo("IP reputation store updated; listed addresses are refused on every entrypoint",
+		"ips", len(idx.ips), "entries", idx.entries)
 }
 
 // indexFeeds builds the lookup structures from every feed's entries.
-func indexFeeds(feeds map[string][]netip.Prefix) (map[string]float64, *ipTrie) {
-	ips := make(map[string]float64)
-	trie := newIPTrie()
+func indexFeeds(feeds map[string][]netip.Prefix) *feedIndex {
+	idx := newFeedIndex()
 	for _, prefixes := range feeds {
 		for _, p := range prefixes {
-			trie.insert(p, feedListedScore)
+			idx.trie.insert(p, feedListedScore)
+			idx.entries++
 			if p.IsSingleIP() {
-				ips[p.Addr().String()] = feedListedScore
+				idx.ips[p.Addr().String()] = feedListedScore
 			}
 		}
 	}
-	return ips, trie
+	return idx
 }
 
 // feedListedScore is the score an address carries for appearing on a feed.

@@ -425,7 +425,8 @@ func (s *tcpServer) refuseBlocked(c net.Conn) bool {
 		Category:    "threat_intel",
 		Severity:    kind.SeverityHigh,
 		ActionTaken: kind.ActionBlocked,
-		Details:     "Connection refused at TCP entrypoint " + s.ep.Id + ": the address is on the IP mitigation list",
+		Details: "Connection refused at TCP entrypoint " + s.ep.Id +
+			": the address is on the IP mitigation list or listed by an IP reputation feed",
 	})
 	return true
 }

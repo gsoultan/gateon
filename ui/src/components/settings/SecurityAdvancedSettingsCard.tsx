@@ -308,7 +308,9 @@ export const SecurityAdvancedSettingsCard: React.FC<SecurityAdvancedSettingsCard
                     <Text fw={500}>IP Reputation</Text>
                   </Group>
                   <Text size="xs" c="dimmed">
-                    Sync with global threat feeds to block known malicious actors.
+                    Sync with threat feeds and refuse the addresses they list, on every
+                    entrypoint and route, with or without a WAF. Loopback and addresses in
+                    GATEON_MITIGATION_ALLOWLIST are never refused.
                   </Text>
                 </Stack>
                 <Switch
@@ -338,7 +340,7 @@ export const SecurityAdvancedSettingsCard: React.FC<SecurityAdvancedSettingsCard
                     />
                     <NumberInput
                       label="Block Threshold"
-                      description="Minimum score to block. Recommended: 80.0."
+                      description="A feed listing scores 100, so any threshold up to 100 refuses it. Above 100 the feeds load and refuse no one. Recommended: 80."
                       value={security.ipReputation?.blockThreshold}
                       onChange={(val) => updateSection("ipReputation", { blockThreshold: val })}
                       disabled={disabled}
