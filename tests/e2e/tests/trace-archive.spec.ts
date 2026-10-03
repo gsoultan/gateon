@@ -52,15 +52,24 @@ test.describe('Trace archive', () => {
     const to = new Date(Date.now() + 5 * 60_000).toISOString();
     const from = new Date(Date.now() - 3 * 24 * 3600_000).toISOString();
     // The store writes traces in batches; look again until the new one is in.
+    //
+    // Narrowed to paths containing "archive" -- this trace's and the seeded
+    // ones -- because History lists the newest 100 first: once the specs before
+    // this one sent enough requests through the gateway, the archived hour,
+    // 48 hours old, fell off the first page, only this gateway's traces showed,
+    // and the Node column (shown when the rows come from several gateways)
+    // never appeared. What this asserts is the merge, not the suite's volume.
     await expect(async () => {
       await page.goto(`/traces?tab=history&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
-      await expect(page.getByRole('cell', { name: '/test/trace-archive-e2e', exact: true })).toBeVisible({
+      await page.getByLabel('Contains').fill('archive');
+      await page.getByRole('button', { name: 'Search', exact: true }).click();
+      await expect(page.getByRole('cell', { name: '/test/trace-archive-e2e', exact: true }).first()).toBeVisible({
         timeout: 5_000,
       });
     }).toPass({ timeout: 60_000 });
 
     await expect(page.getByRole('columnheader', { name: 'Node' })).toBeVisible();
-    await expect(page.getByRole('row').filter({ hasText: '/test/trace-archive-e2e' })).toContainText('gw-e2e');
+    await expect(page.getByRole('row').filter({ hasText: '/test/trace-archive-e2e' }).first()).toContainText('gw-e2e');
     await expect(page.getByRole('row').filter({ hasText: '/archived/payments' })).toContainText('gw-seed');
   });
 });
