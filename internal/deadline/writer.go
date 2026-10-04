@@ -167,10 +167,20 @@ func (s *StreamWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 func (s *StreamWriter) Unwrap() http.ResponseWriter { return s.ResponseWriter }
 
 // decide makes the one decision: a 200 whose Content-Type is
-// text/event-stream is a stream from here on.
+// text/event-stream and that declares no length is a stream from here on.
+//
+// The length is what tells an event stream from an object that only carries
+// its type (DP-N7). An app that stores uploads under the type the uploader
+// chose answers one with text/event-stream, and on the type alone a client
+// reading nothing held it -- a goroutine, a backend connection -- for the
+// stream lifetime. An event stream has no end to declare, so it never sends
+// Content-Length; a stored object almost always does. The request's Accept
+// still decides nothing (ADR 0042): the client asking for the lift is the
+// party the deadline is there to bound.
 func (s *StreamWriter) decide(code int) {
 	s.decided = true
-	if code != http.StatusOK || !IsEventStream(s.Header().Get("Content-Type")) {
+	h := s.Header()
+	if code != http.StatusOK || !IsEventStream(h.Get("Content-Type")) || h.Get("Content-Length") != "" {
 		return
 	}
 	s.streaming = true

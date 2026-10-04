@@ -94,6 +94,15 @@ func TestStreamWriterLiftsOnlyWhatTheServerAnsweredAsAStream(t *testing.T) {
 			w.Header().Set("Content-Type", "text/event-stream")
 			_, _ = w.Write([]byte("y"))
 		}, false},
+		// DP-N7: an object an app stores under a type its uploader chose. It
+		// declares its length, so it is a finite body, not an event stream,
+		// and a slow reader of it is cut at the write deadline like any other
+		// download instead of holding it for the stream lifetime.
+		{"stored_object_typed_as_stream", func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.Header().Set("Content-Length", "67108864")
+			w.WriteHeader(http.StatusOK)
+		}, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
