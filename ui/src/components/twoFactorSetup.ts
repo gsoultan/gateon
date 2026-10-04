@@ -26,7 +26,11 @@ import { isChallengeRefusal } from "./signInMessages";
 export type Outcome<T> = { ok: true; data: T } | { ok: false; message: string };
 
 const UNREACHABLE = "The gateway could not be reached. Check your connection and try again.";
-const LOCKED = "Too many failed attempts. The account is locked for a while; try again later.";
+// A 429 here is the account's lockout, this client's sign-in budget, or a
+// full password-hashing gate (ADR 0053); the status alone cannot say which,
+// so the sentence claims none of them -- it used to say the account was
+// locked when it was not.
+const LOCKED = "Too many attempts right now. Wait a few minutes and try again.";
 const EXPIRED = "Setup took too long and has expired. Close this window and start again.";
 
 /** What the dialog says when setup is refused with this status. */

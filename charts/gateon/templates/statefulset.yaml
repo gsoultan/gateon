@@ -110,8 +110,32 @@ spec:
             - name: GATEON_ENCRYPTION_KEY
               valueFrom:
                 secretKeyRef:
-                  name: {{ default (printf "%s-secrets" (include "gateon.fullname" .)) .Values.secrets.existingSecret }}
+                  name: {{ include "gateon.secretName" . }}
                   key: encryption-key
+            {{- /*
+              The gateway's identity (ADR 0056): the session key, the audit
+              signature key and the proof-of-work secret, the same on every
+              start. Without them each fresh volume -- every restart, with
+              persistence off -- generated new ones: everyone was signed out,
+              and every 2FA account was locked out. A global.json that already
+              names its own keeps them, so an existing install is unchanged.
+
+              Optional only for an existingSecret on a persistent volume, where
+              the volume keeps the identity the first start generated; without
+              one, a missing key is a pod that does not start rather than a new
+              gateway at every restart.
+            */}}
+            {{- $optional := and (not (empty .Values.secrets.existingSecret)) .Values.persistence.enabled }}
+            {{- range $env, $secretKey := include "gateon.identityKeys" . | fromYaml }}
+            - name: {{ $env }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "gateon.secretName" $ }}
+                  key: {{ $secretKey }}
+                  {{- if $optional }}
+                  optional: true
+                  {{- end }}
+            {{- end }}
             {{- if .Values.redis.enabled }}
             # REDIS_ADDR enables Redis on its own; the redis.enabled flag in
             # global.json is the dashboard's switch and an env var is an

@@ -37,8 +37,9 @@ import (
 type routeAPI struct {
 	url    string
 	http   *http.Client
-	grpc   gateonv1.ApiServiceClient
-	routes *config.RouteRegistry
+	grpc     gateonv1.ApiServiceClient
+	routes   *config.RouteRegistry
+	services *config.ServiceRegistry
 }
 
 func newRouteAPI(t *testing.T, role string) *routeAPI {
@@ -83,7 +84,7 @@ func newRouteAPI(t *testing.T, role string) *routeAPI {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = conn.Close() })
-	return &routeAPI{url: srv.URL, http: srv.Client(), grpc: gateonv1.NewApiServiceClient(conn), routes: routes}
+	return &routeAPI{url: srv.URL, http: srv.Client(), grpc: gateonv1.NewApiServiceClient(conn), routes: routes, services: services}
 }
 
 // seedBindingFixtures stores the middlewares and services the tests bind to: a

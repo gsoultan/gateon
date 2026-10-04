@@ -116,11 +116,12 @@ func NewGlobalRegistry(path string) *GlobalRegistry {
 		Audit:    &gateonv1.AuditConfig{},
 		Profile:  "standard",
 	}
-	reg.config.Store(initialConfig)
+	applyIdentityDefaults(initialConfig)
 	reg.defaults = proto.Clone(initialConfig).(*gateonv1.GlobalConfig)
 	idx := make(map[string]*gateonv1.Certificate)
 	reg.certIndex.Store(&idx)
 
+	reg.useDefaults()
 	reg.load()
 	globalInstance.Store(reg)
 	return reg
@@ -183,10 +184,28 @@ func (r *GlobalRegistry) load() {
 		logger.L.LogError("global config holds a secret that cannot be read", "error", err, "path", r.path)
 		return
 	}
+	warnIdentityOverridden(refs, cfg)
 	r.refs = refs
 	r.config.Store(cfg)
 	r.rebuildCertIndexLocked()
 	logger.L.LogInfo("loaded global config", "path", r.path)
+}
+
+// useDefaults puts the shipped defaults in force, with the identity references
+// applyIdentityDefaults put there resolved: what a gateway with no global.json
+// yet runs on, and what first-run setup then saves.
+func (r *GlobalRegistry) useDefaults() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	cfg := proto.Clone(r.defaults).(*gateonv1.GlobalConfig)
+	refs := secretReferences(cfg)
+	// Only variables that are set become references, so this does not fail on
+	// an unset one.
+	if err := decryptSensitiveFields(cfg); err != nil {
+		logger.L.LogError("an identity secret named in the environment could not be read", "error", err)
+	}
+	r.refs = refs
+	r.config.Store(cfg)
 }
 
 func (r *GlobalRegistry) rebuildCertIndexLocked() {
@@ -276,6 +295,9 @@ func decryptSensitiveFields(c *gateonv1.GlobalConfig) error {
 	}
 	if c.Geoip != nil {
 		resolve("geoip.maxmind_license_key", &c.Geoip.MaxmindLicenseKey)
+	}
+	if c.Audit != nil {
+		resolve("audit.signature_key", &c.Audit.SignatureKey)
 	}
 	if c.SecurityAdvanced != nil && c.SecurityAdvanced.Pow != nil {
 		resolve("security_advanced.pow.secret", &c.SecurityAdvanced.Pow.Secret)
@@ -447,42 +469,112 @@ func TrustCloudflare(w *gateonv1.WafConfig) bool {
 
 // secretField is one global-config field that may hold a secret. ptr finds it
 // in a config, or returns nil when its section is absent.
+//
+// identityEnv, when set, names the environment variable that supplies the
+// field by default (ADR 0056). These are the secrets a gateway generates for
+// itself -- the key that signs its sessions and encrypts its second factors,
+// the key that chains its audit log, the key behind its proof-of-work
+// challenges -- and so the ones that made two replicas of one gateway two
+// gateways: each generated its own, a session from one was refused by the
+// other, a second factor enrolled on one could not be read on the other, and
+// with no persistent volume every restart was a new gateway.
 type secretField struct {
-	name string
-	ptr  func(*gateonv1.GlobalConfig) *string
+	name        string
+	identityEnv string
+	ptr         func(*gateonv1.GlobalConfig) *string
 }
 
 var secretFields = []secretField{
-	{"auth.paseto_secret", func(c *gateonv1.GlobalConfig) *string {
+	{"auth.paseto_secret", SessionKeyEnv, func(c *gateonv1.GlobalConfig) *string {
 		if c.GetAuth() == nil {
 			return nil
 		}
 		return &c.Auth.PasetoSecret
 	}},
-	{"auth.database_url", func(c *gateonv1.GlobalConfig) *string {
+	{"auth.database_url", "", func(c *gateonv1.GlobalConfig) *string {
 		if c.GetAuth() == nil {
 			return nil
 		}
 		return &c.Auth.DatabaseUrl
 	}},
-	{"auth.database_config.password", func(c *gateonv1.GlobalConfig) *string {
+	{"auth.database_config.password", "", func(c *gateonv1.GlobalConfig) *string {
 		if c.GetAuth().GetDatabaseConfig() == nil {
 			return nil
 		}
 		return &c.Auth.DatabaseConfig.Password
 	}},
-	{"geoip.maxmind_license_key", func(c *gateonv1.GlobalConfig) *string {
+	{"geoip.maxmind_license_key", "", func(c *gateonv1.GlobalConfig) *string {
 		if c.GetGeoip() == nil {
 			return nil
 		}
 		return &c.Geoip.MaxmindLicenseKey
 	}},
-	{"security_advanced.pow.secret", func(c *gateonv1.GlobalConfig) *string {
+	{"audit.signature_key", AuditSignatureKeyEnv, func(c *gateonv1.GlobalConfig) *string {
+		if c.GetAudit() == nil {
+			return nil
+		}
+		return &c.Audit.SignatureKey
+	}},
+	{"security_advanced.pow.secret", PowSecretEnv, func(c *gateonv1.GlobalConfig) *string {
 		if c.GetSecurityAdvanced().GetPow() == nil {
 			return nil
 		}
 		return &c.SecurityAdvanced.Pow.Secret
 	}},
+}
+
+// The variables that supply a gateway's identity secrets. Replicas of one
+// gateway, and one gateway across restarts on a fresh volume, are one gateway
+// only when these hold the same values (ADR 0056).
+const (
+	SessionKeyEnv        = "GATEON_SESSION_KEY"
+	AuditSignatureKeyEnv = "GATEON_AUDIT_SIGNATURE_KEY"
+	PowSecretEnv         = "GATEON_POW_SECRET" // #nosec G101 -- the name of a variable, not its value
+)
+
+// applyIdentityDefaults makes each identity secret whose variable is set a
+// reference to that variable in the shipped defaults. A global.json that names
+// its own value still wins -- an existing install keeps the keys its sessions,
+// second factors and audit chain were made with -- and one that names none,
+// which is a fresh install and every start on a fresh volume, runs on the
+// environment's. Being a reference, it is what setup and every later save
+// write back, never the value.
+func applyIdentityDefaults(c *gateonv1.GlobalConfig) {
+	for _, f := range secretFields {
+		if f.identityEnv == "" || os.Getenv(f.identityEnv) == "" {
+			continue
+		}
+		if p := f.ptr(c); p != nil {
+			*p = "$env:" + f.identityEnv
+		}
+	}
+}
+
+// identityOverrides names each identity variable that is set while the loaded
+// config, with its references in refs, uses a different value for its field.
+func identityOverrides(refs map[string]string, c *gateonv1.GlobalConfig) []string {
+	var out []string
+	for _, f := range secretFields {
+		v := os.Getenv(f.identityEnv)
+		if f.identityEnv == "" || v == "" || refs[f.name] == "$env:"+f.identityEnv {
+			continue
+		}
+		if p := f.ptr(c); p != nil && *p != v {
+			out = append(out, f.identityEnv+" ("+f.name+")")
+		}
+	}
+	return out
+}
+
+// warnIdentityOverridden says when global.json keeps a gateway from using the
+// identity its environment supplies: replicas, and restarts on a fresh volume,
+// that start from the environment would not share it.
+func warnIdentityOverridden(refs map[string]string, c *gateonv1.GlobalConfig) {
+	if over := identityOverrides(refs, c); len(over) > 0 {
+		logger.L.LogWarn("global.json names its own value for an identity secret the environment also sets, and "+
+			"global.json's is the one used. Set the field to the $env: reference to use the environment's "+
+			"(see doc/adr/0056)", "variables", strings.Join(over, ", "))
+	}
 }
 
 // secretReferences returns the secret fields of c that hold a reference.

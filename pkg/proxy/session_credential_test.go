@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/gsoultan/gateon/internal/request"
 )
 
 // The management session cookie is the dashboard's bearer credential, and a
@@ -276,5 +278,73 @@ func TestWebSocketBackendNeverSeesTheManagementSessionCookie(t *testing.T) {
 	if c := got.Get("Cookie"); c != survivingCookies {
 		t.Errorf("WebSocket backend saw Cookie %q, want %q: the admin's session cookie rode the upgrade",
 			c, survivingCookies)
+	}
+}
+
+// TestBackendNeverSeesAManagementBearerInASecondAuthorizationValue: a request
+// may carry Authorization twice. Only the first value used to be checked, so a
+// session or a scrape token sent second reached the backend (ADR 0051).
+func TestBackendNeverSeesAManagementBearerInASecondAuthorizationValue(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Seen-Authorization", strings.Join(r.Header.Values("Authorization"), " | "))
+	}))
+	t.Cleanup(backend.Close)
+	h := credentialTestHandler(backend.URL)
+	h.sessions = sessionsAccepting{token: "v4.local.MGMT", asked: new(int)}
+	defer h.Close()
+	front := httptest.NewServer(h)
+	t.Cleanup(front.Close)
+
+	req, err := http.NewRequest(http.MethodGet, front.URL+"/app", nil)
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+	req.Header.Add("Authorization", "Bearer v4.local.APP")
+	req.Header.Add("Authorization", "Bearer v4.local.MGMT")
+	req.Header.Add("Authorization", "Bearer "+apiTokenShaped)
+	resp, err := front.Client().Do(req)
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	_ = resp.Body.Close()
+	if got, want := resp.Header.Get("X-Seen-Authorization"), "Bearer v4.local.APP"; got != want {
+		t.Errorf("backend saw Authorization %q, want only the app's %q", got, want)
+	}
+}
+
+// TestProxyVerifiesASessionOnceWhenTheEntryHasWithheld: the data-plane entry
+// verifies every Authorization value before the route's middlewares run (ADR
+// 0051) and marks the request; the proxy then strips by shape only, so an app
+// whose clients send their own PASETO tokens pays one failed verification per
+// request, not two. A request the entry did not mark is verified here as
+// before, and the cookie is stripped either way.
+func TestProxyVerifiesASessionOnceWhenTheEntryHasWithheld(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		withheld  bool
+		wantAsked int
+	}{
+		{"entry has withheld", true, 0},
+		{"no entry", false, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			asked := 0
+			h := &ProxyHandler{sessions: sessionsAccepting{token: "v4.local.MGMT", asked: &asked}}
+			rs := &request.RequestState{CredentialsWithheld: tc.withheld}
+			r := httptest.NewRequest(http.MethodGet, "/", nil)
+			r = r.WithContext(request.WithState(r.Context(), rs))
+			r.Header.Set("Authorization", "Bearer v4.local.APP")
+			r.Header.Set("Cookie", "a=1; gateon_session=x")
+			h.withholdManagementCredentials(r)
+			if asked != tc.wantAsked {
+				t.Errorf("verifier asked %d times, want %d", asked, tc.wantAsked)
+			}
+			if got := r.Header.Get("Cookie"); got != "a=1" {
+				t.Errorf("Cookie after withholding = %q, want %q", got, "a=1")
+			}
+			if got := r.Header.Get("Authorization"); got != "Bearer v4.local.APP" {
+				t.Errorf("the app's token was withheld: Authorization = %q", got)
+			}
+		})
 	}
 }

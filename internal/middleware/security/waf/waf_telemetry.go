@@ -4,6 +4,7 @@
 package waf
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -60,6 +61,11 @@ type wafObservation struct {
 	// a data-leak refusal on the way out. The two have completely different
 	// remedies and averaging them together hides which one is happening.
 	phase string
+
+	// outcome is what was done to a response a response-phase decision was
+	// about: blocked, redacted, or forwarded untouched (detected). Unused on the
+	// request side, where the decision's own verdict says it.
+	outcome string
 }
 
 // WAF decision phases, used as a metric label.
@@ -99,7 +105,30 @@ func recordWAFDecision(o wafObservation) {
 		// entries nobody can act on.
 		return
 	}
+	o.countDecision(blocked)
 
+	// A response-phase finding is about what the server sent: a card number in
+	// a page, a stack trace in an error. The client only read it. It used to be
+	// filed as a WAF block against the reader, so the reader's reputation fell
+	// on every view of a redacted page, the third view was refused on every
+	// route, and the per-address WAF-block count could shun it (ADR 0055).
+	if o.phaseOrRequest() == wafPhaseResponse {
+		telemetry.RecordSecurityThreat(telemetry.RecordSecurityThreatWithJA4(o.request, o.exposure()))
+		return
+	}
+
+	clientIP := request.GetClientIP(o.request, o.cfg.TrustCloudflare)
+	if blocked && clientIP != "" {
+		telemetry.GetAggregator().RecordWAFBlock(clientIP)
+		o.applyAdaptiveMitigation(clientIP)
+	}
+
+	telemetry.RecordSecurityThreat(telemetry.RecordSecurityThreatWithJA4(o.request, o.threat(clientIP)))
+}
+
+// countDecision feeds the would-block counter, the block log line and the
+// failure counter -- the same for both phases.
+func (o wafObservation) countDecision(blocked bool) {
 	if o.cfg.AuditOnly && wouldHaveBlocked(o.decision) {
 		// Audit-only: record the refusal that did not happen. This is the number
 		// an operator needs before enforcing, and the one nothing reported.
@@ -122,14 +151,6 @@ func recordWAFDecision(o wafObservation) {
 		telemetry.RequestFailuresTotal.
 			WithLabelValues(o.routeID, "waf:"+o.decision.RuleID().String()).Inc()
 	}
-
-	clientIP := request.GetClientIP(o.request, o.cfg.TrustCloudflare)
-	if blocked && clientIP != "" {
-		telemetry.GetAggregator().RecordWAFBlock(clientIP)
-		o.applyAdaptiveMitigation(clientIP)
-	}
-
-	telemetry.RecordSecurityThreat(telemetry.RecordSecurityThreatWithJA4(o.request, o.threat(clientIP)))
 }
 
 // threat builds the dashboard record for a decision.
@@ -182,6 +203,11 @@ func (o wafObservation) threat(clientIP string) telemetry.SecurityThreat {
 		Severity:       severity,
 		ActionTaken:    action,
 		Mitigated:      blocked,
+		// A match the WAF did not refuse -- audit-only, or scored below the
+		// route's threshold -- is recorded and counted, and held against
+		// nobody: the operator said not to act on it, or the engine judged it
+		// short of a refusal (ADR 0025, 0055).
+		Observed:       !blocked,
 		JA4:            ja4,
 		JA4H:           ja4h,
 		UserAgent:      o.request.Header.Get("User-Agent"),
@@ -190,6 +216,32 @@ func (o wafObservation) threat(clientIP string) telemetry.SecurityThreat {
 		Entropy:        matchedEntropy(o.matches),
 		TriggeredRules: triggered,
 	}
+}
+
+// threatTypeDataExposure is the record of a data leak found in a response.
+const threatTypeDataExposure = "data_exposure"
+
+// exposure is the record of a response-phase decision: an event on the route,
+// not a threat from a client. It names no source address -- the reader did not
+// choose what the server sent it, so nothing that acts on a source (reputation,
+// escalation, correlation, a playbook's block, the analysis engine's
+// per-address tally) may act on the reader -- and says in its details whom the
+// response was for, which is what a leak investigation needs.
+func (o wafObservation) exposure() telemetry.SecurityThreat {
+	clientIP := request.GetClientIP(o.request, o.cfg.TrustCloudflare)
+	th := o.threat(clientIP)
+	th.Type = threatTypeDataExposure
+	th.SourceIP = ""
+	th.Fingerprint, th.JA4, th.JA4H = "", "", ""
+	th.Unattributed = true
+	th.Observed = false
+	th.ActionTaken = cmp.Or(o.outcome, kind.ActionBlocked)
+	th.Mitigated = th.ActionTaken == kind.ActionBlocked
+	th.Details += " (in the response served to " + cmp.Or(clientIP, "an unknown client") + ", " + th.ActionTaken + ")"
+	th.Recommendation = "The backend sent this data. Fix the page or API that returns it; " +
+		"the client that received it did nothing wrong."
+	telemetry.RegisterRecommendation(th.ID, th.Recommendation)
+	return th
 }
 
 // applyAdaptiveMitigation rate-limits a source that keeps scoring highly.

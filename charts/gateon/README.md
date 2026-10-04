@@ -24,15 +24,30 @@ kubectl port-forward svc/gateon-management 8080:8080
 Then open <http://localhost:8080> and complete setup. Until an administrator
 exists the management API answers `503` for everything but setup and the probes.
 
-## Three things worth knowing before you scale it
+## Four things worth knowing before you rely on it
 
-**`replicaCount > 1` is refused unless you configure an external database and
-Redis.** Each replica keeps its own SQLite file, Pebble trace store and ACME
-cache on its own volume, so two replicas on the defaults are two gateways that
-agree about nothing — a route added through one dashboard is invisible to the
-other, and which one a request reaches is the load balancer's decision. Nothing
-errors. The chart fails at template time instead, because this is not
-recoverable by noticing later.
+**`replicaCount > 1` is refused** ([ADR 0056](../../doc/adr/0056-replicas-of-one-gateway-share-one-identity.md)).
+Each replica keeps its own `global.json` on its own volume, and `global.json`
+holds what setup writes and every global setting saved in the dashboard. An
+external database and Redis share the routes, users and session revocations,
+but not that: setup on one replica turned authentication and the audit log on
+for that replica only, and each dashboard save reached whichever replica served
+it. The chart used to allow it with `externalDatabase` and `redis` set; it now
+fails at template time whatever they say, because this is not recoverable by
+noticing later. See [High availability](#high-availability) for what is
+supported. `kubectl scale` bypasses the check; do not.
+
+**The gateway's identity is in the release's Secret.** The session key (which
+signs dashboard sessions and encrypts stored second factors), the audit log's
+signature key and the proof-of-work secret are generated once into
+`<release>-secrets` (`session-key`, `audit-signature-key`, `pow-secret`) and
+read by the pod as `GATEON_SESSION_KEY`, `GATEON_AUDIT_SIGNATURE_KEY` and
+`GATEON_POW_SECRET`. Gateon used to generate them per volume, so with
+persistence off every restart signed everyone out and locked every 2FA account
+out. Like the encryption key they are reused on every upgrade and kept on
+uninstall. An install whose `global.json` already names its own keys keeps
+them, and logs that it is not using the Secret's (ADR 0056 says how to adopt
+them).
 
 **The encryption key is not in any backup.** `GATEON_ENCRYPTION_KEY` encrypts
 the paseto secret, the database URL and password, the MaxMind key and the
@@ -63,8 +78,46 @@ mounted at `/etc/gateon`, and its `global.json` -- `globalConfig` with
 the first time the volume has none (`GATEON_GLOBAL_CONFIG_SEED`). After that the
 copy on the volume is what the gateway reads, so changing `globalConfig`,
 `externalDatabase` or `redis` on an existing install does not reach it; change
-those settings in the dashboard. With `persistence.enabled=false` the volume is
-an `emptyDir`, so every pod start seeds afresh and runs setup again.
+those settings in the dashboard. The seed starts the audit log on, signed, as
+setup does; `globalConfig.audit` overrides it.
+
+**With the setup wizard and `externalDatabase`, choose the same database in the
+wizard's Database step.** Its default is SQLite, and the gateway already has
+the configured database open: the administrator is created there, `global.json`
+is switched to SQLite, and the next start refuses ("the user database has no
+administrator"). This is an open defect (ADR 0056, Consequences); setting up
+through `POST /v1/setup` without a database avoids it.
+
+## Persistence off
+
+With `persistence.enabled=false` the data directory is an `emptyDir`, so every
+pod start is on a fresh one:
+
+- **Global settings are the seed again.** Whatever was saved in the dashboard
+  since -- the WAF, alerting, the management allowlist -- is gone; put what must
+  survive a restart in `globalConfig`. The audit log comes back on.
+- **Sessions and second factors survive**, because the identity is the
+  Secret's, not the volume's. (Before ADR 0056 every restart signed everyone out
+  and locked every 2FA account out.)
+- **With `externalDatabase`** the routes and users are in the database, setup
+  does **not** reopen, and the gateway marks itself set up again at start
+  because the database holds an administrator.
+- **Without `externalDatabase`** the SQLite database is on the `emptyDir` too:
+  every restart is a new, empty gateway, and first-run setup is open again,
+  behind a new setup token (in the pod log).
+- Traces, the ACME cache (unless Redis holds it) and audit archives are lost.
+
+## High availability
+
+One replica. On Kubernetes, availability comes from the StatefulSet
+rescheduling the pod, not from a second replica: a second replica is a second
+gateway until the global settings live in the shared database (ADR 0056's
+option (a), not built). The identity in the Secret is what a future
+multi-replica chart needs and is already shared; the global settings are what
+is missing.
+
+On hosts, the two-node VRRP failover is supported with the shared identity set
+on both nodes; see [doc/ha-two-node-check.md](../../doc/ha-two-node-check.md).
 
 ## Entrypoints are seeded once
 
@@ -83,12 +136,14 @@ about in advance.
 
 | Key | Default | |
 | :--- | :--- | :--- |
-| `replicaCount` | `1` | >1 requires `externalDatabase` and `redis` |
+| `replicaCount` | `1` | >1 is refused (ADR 0056) |
 | `profile` | `standard` | `minimal` / `standard` / `enterprise` |
 | `resources` | 500m / 256Mi, limit 2Gi | matches the measured 2c/2GB target |
 | `memoryLimit` | derived | `GOMEMLIMIT`, 80% of the memory limit |
 | `persistence.size` | `10Gi` | traces dominate; see storage-retention.md |
 | `secrets.encryptionKey` | generated | min 16 chars |
+| `secrets.existingSecret` | none | `encryption-key`; and `session-key`, `audit-signature-key`, `pow-secret` (required with persistence off) |
+| `persistence.enabled` | `true` | off: see [Persistence off](#persistence-off) |
 | `externalDatabase.*` | disabled | rendered into `global.json`, not env |
 | `redis.*` | disabled | `REDIS_ADDR` + `global.json` |
 | `kubernetesIntegration.gatewayAPI` | `false` | needs the CRDs installed |

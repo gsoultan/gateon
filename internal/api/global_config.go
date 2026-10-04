@@ -204,6 +204,10 @@ func (s *ApiService) rotateSessionKey(update, stored *gateonv1.GlobalConfig) (bo
 	if len(resolved) < 32 {
 		return false, status.Errorf(codes.InvalidArgument, "auth.paseto_secret: %v", auth.ErrSessionKeyTooShort)
 	}
+	if ref := config.WithSecretReferences(s.Globals, stored).GetAuth().GetPasetoSecret(); resolved != current &&
+		config.IsSecretReference(ref) {
+		return false, status.Errorf(codes.InvalidArgument, "auth.paseto_secret: %v", errSessionKeyByReference)
+	}
 	if resolved == current || !auth.Available(s.Auth) {
 		return false, nil
 	}
@@ -343,6 +347,15 @@ func errorMessage(err error) string {
 var errGlobalTLSBindingRetired = errors.New("security_advanced.tls_binding: the global TLS Session Binding " +
 	"switch is retired and cannot be turned on; add a tls_binding middleware, with a secret, to the routes " +
 	"that need it, on an entrypoint that asks for client certificates")
+
+// errSessionKeyByReference refuses rotating, in the settings, a session key
+// the configuration names by reference (ADR 0056). The reference is what every
+// replica and every start on a fresh volume read; a key rotated here would be in
+// force on this replica alone, and the second factors re-encrypted under it
+// unreadable wherever the reference is read again.
+var errSessionKeyByReference = errors.New("the session key comes from a reference (GATEON_SESSION_KEY in a " +
+	"Helm install); change the value it names and restart, with GATEON_PREVIOUS_SESSION_KEY set to the old key " +
+	"so stored second factors move to the new one")
 
 // errGlobalStoreUnavailable is answered by an internal writer with no store.
 var errGlobalStoreUnavailable = errors.New("global configuration store not available")

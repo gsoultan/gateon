@@ -317,6 +317,12 @@ func RouteLabel(rt *gateonv1.Route) string {
 	return cmp.Or(rt.Name, rt.Id)
 }
 
+// managementSessionsSource is a route's final handler that knows the
+// management plane's session check: the proxy handler (ADR 0041, 0051).
+type managementSessionsSource interface {
+	ManagementSessions() middleware.TokenVerifier
+}
+
 // ApplyRouteMiddlewares wraps the handler with infrastructure middlewares and user-defined middlewares from the store.
 func ApplyRouteMiddlewares(h http.Handler, rt *gateonv1.Route, redisClient redis.Client, mwStore config.MiddlewareStore, globalStore config.GlobalConfigStore, ebpfManager ebpf.Manager, reputation *reputation.IPReputationStore) http.Handler {
 	var chain []middleware.Middleware
@@ -327,6 +333,11 @@ func ApplyRouteMiddlewares(h http.Handler, rt *gateonv1.Route, redisClient redis
 	// Per-route state is kept under the ID, which is unique; the label below
 	// is only what a person reads.
 	mwFactory.SetRouteKey(rt.Id)
+	// The management plane's session check, from the proxy handler that has
+	// it, for the middlewares that send credentials to another server.
+	if src, ok := h.(managementSessionsSource); ok {
+		mwFactory.SetManagementSessions(src.ManagementSessions())
+	}
 
 	routeLabel := RouteLabel(rt)
 	ctx := context.Background()

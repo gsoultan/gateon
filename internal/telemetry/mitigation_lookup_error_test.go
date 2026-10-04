@@ -89,25 +89,65 @@ func TestANotShunnedAnswerIsReadAgainOnceItAgesOut(t *testing.T) {
 	}
 }
 
-// ageNegativeAnswers rewrites key's cached "not blocked" answer as one read two
-// epochs ago, which is what the passage of two mitigationEpochLength does.
-func ageNegativeAnswers(t *testing.T, key string) {
+// ageCachedAnswer rewrites key's cached answer -- "not blocked", or a
+// fingerprint block -- as one read epochs ago, which is what the passage of
+// that many mitigationEpochLength does.
+func ageCachedAnswer(t *testing.T, key string, epochs int64) {
 	t.Helper()
 	s := getStore()
-	stale := notBlockedUntil(mitigationEpoch.Load() - 2)
+	then := mitigationEpoch.Load() - epochs
 	for _, c := range []interface {
 		Peek(key any) (any, bool)
 		Add(key, value any)
 	}{s.unmitigatedCache, s.userMitigationCache} {
-		if v, ok := c.Peek(key); ok {
-			if _, isNegative := v.(notBlockedUntil); !isNegative {
-				t.Fatalf("cached answer for %s is %T, want a not-blocked answer", key, v)
-			}
-			c.Add(key, stale)
-			return
+		v, ok := c.Peek(key)
+		if !ok {
+			continue
 		}
+		switch v.(type) {
+		case notBlockedUntil:
+			c.Add(key, notBlockedUntil(then))
+		case blockedAt:
+			c.Add(key, blockedAt(then))
+		default:
+			t.Fatalf("cached answer for %s is %T, want one that ages", key, v)
+		}
+		return
 	}
 	t.Fatalf("no cached answer for %s", key)
+}
+
+// ageNegativeAnswers ages key's "not blocked" answer past the window in which
+// it may decide a request at all, so the next lookup reads the database
+// before it answers.
+func ageNegativeAnswers(t *testing.T, key string) {
+	t.Helper()
+	ageCachedAnswer(t, key, staleAnswerEpochs+1)
+}
+
+// A "not blocked" answer between two and staleAnswerEpochs old still decides
+// the request it is asked for -- the client does not wait -- and is read again
+// in the background, so the next request meets a block written meanwhile
+// (ADR 0054). Both halves are what the stale window promises.
+func TestAStaleNotShunnedAnswerIsServedAndReadAgainInTheBackground(t *testing.T) {
+	freshStore(t)
+	const ip = "198.51.100.83"
+	if IsIPMitigated(ip) {
+		t.Fatal("shunned before anything was written")
+	}
+	s := getStore()
+	if _, err := s.db.Exec(s.dialect.Rebind(`INSERT INTO ip_mitigations (ip, status, reason, mitigated_at, updated_at)
+		VALUES (?, 'mitigated', 'other node', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`), ip); err != nil {
+		t.Fatal(err)
+	}
+	ageCachedAnswer(t, ip, 2)
+	if IsIPMitigated(ip) {
+		t.Fatal("a stale answer was not served: the request waited for the database")
+	}
+	WaitBlockLookupsForTest()
+	if !IsIPMitigated(ip) {
+		t.Fatal("the stale answer was not read again: a block written elsewhere was not enforced after it")
+	}
 }
 
 // The fingerprint block has the same shape: a failed lookup answered "not

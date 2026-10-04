@@ -51,6 +51,17 @@ more -- each is stated where it applies -- but plan around them:
 - **The global WAF's category switches are read-only.** Narrow a category on a
   route WAF; the gateway-wide equivalent needs a configuration change still to
   come.
+- **Run one replica.** The Helm chart refuses `replicaCount > 1`: replicas share
+  one identity from a Secret, but not their global settings or audit chain yet
+  (ADR 0056).
+- **The setup wizard's database step can switch a configured database to
+  SQLite.** On a gateway whose configuration already names a database (the
+  chart's `externalDatabase`), keep the wizard on that database; choosing the
+  default SQLite creates the administrator in the existing database and the next
+  start refuses to run.
+- **Sign-in is budgeted per client, loopback included** (10 a minute by default,
+  `GATEON_AUTH_ATTEMPTS_PER_MINUTE`): scripts that sign in in a loop from the
+  host share one budget.
 - **A challenge raises the cost of automation; it does not prove a human.**
   Clients that cannot run JavaScript are refused on challenged routes, and the
   challenge has no allowlist.
@@ -275,9 +286,6 @@ groups:
   - alert: GateonTracesDropped
     expr: increase(gateon_trace_dropped_total[15m]) > 0
     for: 15m
-  - alert: GateonManyShuns
-    expr: gateon_active_shunned_entities_total > 500
-    for: 10m
 ```
 
 Also watch, without paging: `gateon_middleware_waf_uninspected_responses_total`
@@ -286,8 +294,11 @@ Diagnostics page's connection-limit card for `inflight_rejected` counts climbing
 on one entrypoint.
 
 Ship the service's journal and the audit log somewhere off the host. The audit
-log is hash-chained, but gateon does not yet offer operators a way to verify
-that chain, so the off-host copy is the record to trust after an incident.
+log is hash-chained and signed; an administrator checks it under **Audit Log >
+Verify integrity** (or `GET /v1/audit/verify`, which walks at most 5000 entries
+a call and returns a cursor). Verification detects altered or removed entries in
+the middle of the chain, but not entries removed from its newest end, so the
+off-host copy is still the record to trust after an incident.
 
 ## 6. The soak
 

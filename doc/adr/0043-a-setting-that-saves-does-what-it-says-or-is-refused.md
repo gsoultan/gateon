@@ -9,6 +9,10 @@ Accepted. `sec` co-signs with `data` (route rules, block lookups) and `ux`
 boundary -- which route a request reaches, who authenticates, which tokens and
 which addresses are refused.
 
+A10 is amended by ADR 0054: a block lookup now waits at most a deadline, and a
+cached fingerprint block is trusted for one to two epochs instead of being read
+again on every request. What a lookup that cannot finish decides is unchanged.
+
 ## Context
 
 The 2026-10-02 review found four settings that were accepted with a success and

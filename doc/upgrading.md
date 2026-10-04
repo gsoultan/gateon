@@ -11,6 +11,307 @@ here after the fact.
 
 ## Unreleased
 
+### The dashboard's credentials no longer reach any route middleware, and apps behind JWT, PASETO or introspection accept a signed-in administrator's browser
+
+The dashboard session (`gateon_session` / `__Host-gateon_session`), a session sent
+as `Authorization: Bearer v4.local.…`, and a `gateon_tok_` scrape token used to be
+withheld only from the backend, by the proxy, after the route's middlewares had
+run. A forwardauth middleware copied every request header -- the session cookie
+included -- to its auth server, and OAuth2 introspection posted the session as
+`token=`. A browser sends the dashboard cookie to every app on the dashboard's
+host, so a forwardauth or introspection middleware pointed at someone else's
+server collected an administrator session from the administrator's own browser.
+
+- The gateway now withholds those three credentials as a request enters the data
+  plane: before route matching and before every route middleware (forwardauth,
+  introspection, the auth middlewares, WAF, logging, all of them), on HTTP/1.1,
+  HTTP/2, HTTP/3, gRPC and WebSocket upgrades. Every other cookie and credential
+  passes unchanged, a route's own `gateon_session_<route>` OIDC cookie included.
+  Requests to the management plane are unchanged.
+- forwardauth and introspection also refuse to pass one on themselves, should one
+  ever reach them.
+- A route's JWT, PASETO and introspection checks used to read the dashboard
+  session cookie ahead of the app's own bearer token, so they refused an
+  administrator's browser whatever app token it sent. They now authenticate it
+  with the app's token.
+- The proxy now checks every `Authorization` value, not just the first: a session
+  or scrape token sent as a second `Authorization` value reached the backend.
+
+**Who is affected:** anyone with a forwardauth or OAuth2-introspection middleware
+on a route that a signed-in dashboard user visits from the same browser. **If
+either middleware ever pointed at a server you do not control, end the sessions
+it may hold after upgrading: each administrator signs out once (a sign-out ends
+every session of the account), or save a new session key in Settings, which ends
+everyone's. Sessions that server received before the upgrade otherwise stay valid
+until they expire, up to eight hours.** A scrape token it may have received is
+revoked on the API Tokens page. Apps that used a cookie named exactly
+`gateon_session` or `__Host-gateon_session` for themselves no longer receive it --
+those names belong to the gateway. Apps whose clients send their own
+`Bearer v4.local.` PASETO tokens pay one extra failed verification against the
+gateway's key per request. Nothing to configure. See ADR 0051.
+
+### A service cannot target the gateway's own management listener (ADR 0052)
+
+A service whose target is the management port on an address of this host --
+`127.0.0.1`, any `127.x`, `::1`, `0.0.0.0`, `::`, the host's own addresses,
+`localhost` or any name that resolves to one of them, over `http://`,
+`https://`, `h2c://`, `h2://`, `tcp://` or a bare `host:port` -- is now refused
+when it is saved, on REST (`400`), gRPC (`InvalidArgument`) and config import
+(an import error), naming the target. Behind a `Host()` route on a public
+entrypoint such a service served the dashboard, sign-in and API to the
+internet from loopback, past the management bind, allowlist, per-address cap
+and sign-in lockout.
+
+The connection is refused at dial time too, so a service that arrives without
+being saved (a configuration file, GitOps, discovery, a pre-upgrade database)
+or whose name resolves to this host only later answers **502** (503 once its
+health check counts it down) and the gateway logs a WARN, at most once a
+minute, naming the address. UDP targets are not affected.
+
+To reach the dashboard through an entrypoint, an administrator enables public
+management (`management.allow_public_management`, ADR 0040), which keeps
+authentication, the allowlist and the lockout in force.
+
+**Who is affected:** anyone who exposed the dashboard by proxying a route to
+`127.0.0.1:<management port>` (or an equivalent) -- that route now answers 502;
+switch to public management. Also anyone running a backend on this host on the
+same port number as the management listener at another of the host's
+addresses: move one of them.
+
+### `/healthz` and `/readyz` answer while the management port is saturated
+
+A bodiless `GET` or `HEAD` of `/healthz` or `/readyz` on the management
+listener no longer takes one of its 500 in-flight slots. Two addresses holding
+slow request bodies could fill them, and the probes -- loopback included --
+answered 503, so a liveness probe (the Helm chart's included) restarted a
+gateway that was only busy. Every other request is limited as before.
+
+**Who is affected:** nobody needs to change anything; liveness and readiness
+probes stop failing under that load.
+
+### The per-address connection cap counts an IPv6 client by its /64
+
+`GATEON_ENTRYPOINT_MAX_CONN_PER_ADDR` (128 / 256 / 1024 by profile) on every
+HTTP, HTTP/3 and TCP entrypoint and on the management listener now counts all
+of an IPv6 client's addresses in one /64 together, as the eBPF limits, the
+honeypot and reputation already do. It counted each /128 separately, so a
+client holding a /64 was effectively uncapped. IPv4 is unchanged; a
+v4-mapped address counts as the IPv4 address it is.
+
+**Who is affected:** IPv6 deployments where many clients share one /64 (some
+carrier NATs and hosting providers): they now share one cap. Raise
+`GATEON_ENTRYPOINT_MAX_CONN_PER_ADDR` if legitimate traffic from one /64
+reaches it (the WARN "source address at its per-address connection limit"
+says so, once a minute).
+
+### Public sign-in endpoints have one per-client budget and a bound on concurrent password hashes (ADR 0053)
+
+Every endpoint served without a session that can reach a password check -- `POST /v1/login`,
+`POST /v1/auth/2fa/enroll`, `POST /v1/auth/2fa/verify`, `POST /v1/setup`, `POST /v1/setup/test-db`,
+and the `Login` and `Setup` RPCs over gRPC and Connect -- now spends from one budget per client:
+10 requests a minute, 10 at once, shared by all of them. A client is an IPv4 address or an IPv6 /64.
+Past it the answer is `429` with `Retry-After` (gRPC `RESOURCE_EXHAUSTED`; a Connect
+`resource_exhausted` error). Before, only `/v1/login` had a limit (5 a minute, keyed per IPv6 /128,
+REST and Connect only, answered to gRPC as an HTTP 429 the client read as `UNAVAILABLE`), and the
+2FA enrolment step -- the same password check -- had none: one address could keep ten cores busy
+hashing invented usernames and move the data plane's median latency from under a millisecond to
+86 ms.
+
+Separately, at most `AuthHashConcurrency` password hashes run at once in the whole process
+(minimal 1, standard 2, enterprise 4, never more than half of `GOMAXPROCS`), plus one slot held
+back for a sign-in from an address the account has signed in from before. A sign-in that finds
+every slot taken is refused at once with `429` / `Retry-After: 1` -- before any hash, so the answer
+is the same for every username. Work a signed-in user asks for (a password change, a 2FA
+enrolment, saving an account with a password) waits up to two seconds for a slot instead.
+
+The sign-in lockout tables (ADR 0050) now key every username and source by a fixed-size digest:
+a flood of long invented usernames used to hold up to a GiB per table; a full table is now about
+4 MiB.
+
+Overrides: `GATEON_AUTH_ATTEMPTS_PER_MINUTE` (per-client budget) and
+`GATEON_AUTH_HASH_CONCURRENCY` (concurrent hashes, besides the reserve). Neither can be switched
+off: a value that is not a positive integer is ignored with a warning.
+
+**Who is affected:** anyone signing in from behind one shared address -- an office NAT, or a
+proxy on the same host (a Cloudflare Tunnel) that the gateway is not told to trust. All of them
+share one budget of 10 a minute; configure the proxy as trusted so the gateway sees each client's
+own address, or raise `GATEON_AUTH_ATTEMPTS_PER_MINUTE`. Scripts that sign in in a tight loop from
+one address get 429 after ten. Several administrators signing in in the same instant on the
+minimal tier may see one "try again in a moment". Each node of an HA pair keeps its own budgets and
+gate.
+
+### The Helm chart refuses more than one replica
+
+`replicaCount` greater than 1 now fails at `helm template`/`helm upgrade` with
+"replicaCount > 1 is not supported ... (ADR 0056)", whatever `externalDatabase`
+and `redis` say. The chart used to allow it with both set, but each replica kept
+its own `global.json` on its own volume: setup turned authentication and the
+audit log on for the replica that ran it only, every global setting saved in the
+dashboard reached one replica, and each replica had its own session key -- a
+session from one got 401 on another, and a 2FA sign-in on another answered 500.
+
+**Who is affected:** Helm installs with `replicaCount` above 1. Set
+`replicaCount: 1` before upgrading. The surviving replica should be the one that
+ran setup (ordinal 0, unless you know otherwise): the others' volumes hold only
+their own `global.json`, traces and ACME cache, and can be deleted after the
+scale-down (`kubectl delete pvc data-<release>-gateon-1` and so on). See the
+chart README's "High availability" for the supported shape.
+
+### The Helm chart supplies the gateway's identity from its Secret
+
+The release's Secret (`<release>-secrets`) gains `session-key`,
+`audit-signature-key` and `pow-secret`, and the pod reads them as
+`GATEON_SESSION_KEY`, `GATEON_AUDIT_SIGNATURE_KEY` and `GATEON_POW_SECRET`. Each
+is generated once and reused on every later upgrade. The gateway uses them for
+`auth.paseto_secret`, `audit.signature_key` and `security_advanced.pow.secret`
+whenever `global.json` names no value of its own, and writes the `$env:`
+reference, never the value, when setup or a settings save stores the config.
+With persistence off, sessions and second factors now survive a restart; before,
+every restart signed everyone out and locked every 2FA account out.
+
+**Who is affected:** every Helm install, but only fresh volumes change behaviour.
+An existing install's `global.json` already names its own keys, and those keep
+being used -- the gateway logs a warning at startup naming the variables it is
+not using. Nothing to do on a persistent single-replica install. With
+`persistence.enabled=false`, the first restart after the upgrade moves to the
+Secret's keys: everyone signs in again once, and 2FA accounts enrolled before the
+upgrade must re-enrol (their second factors were under a key that the restart
+discards; set `GATEON_PREVIOUS_SESSION_KEY` through `extraEnv` to that key, if
+you have it, to move them instead). With `secrets.existingSecret`, add the three
+keys to your Secret (`session-key` at least 32 characters); with persistence off
+they are required and the pod does not start without them.
+
+### Setup keeps a session key the configuration names by reference; rotating one is refused
+
+When `auth.paseto_secret` is a reference (`$env:`, `$vault:`, `$aws-sm:` -- which
+is what `GATEON_SESSION_KEY` makes it), first-run setup keeps it instead of
+storing the wizard's generated key over it, and does not require the request to
+carry a key. Changing a session key that comes from a reference in Settings is
+refused with a message naming the variable: change the value at its source and
+restart, with `GATEON_PREVIOUS_SESSION_KEY` set to the old key so second factors
+move. `audit.signature_key` now accepts a secret reference as well.
+
+**Who is affected:** installs that configured the session key by reference, and
+API clients that rotate it through `UpdateGlobalConfig`.
+
+### The chart's seed starts the audit log on, and a fresh volume over a set-up database is marked set up
+
+When the chart renders a `global.json` seed (`globalConfig`, `externalDatabase`
+or `redis` set), it now carries `audit.enabled` and `audit.sign_entries`, as
+setup writes them; `globalConfig.audit` overrides. And a gateway whose
+`global.json` was seeded at this start, over a database that already holds an
+administrator, records `auth.enabled: true` -- what setup wrote to a volume that
+no longer exists. Before, with persistence off, every restart came up with the
+audit log off and `auth.enabled` false, which disabled the refusal to start on a
+database that lost its administrator.
+
+**Who is affected:** Helm installs with `persistence.enabled=false` and
+`externalDatabase`; on a persistent volume neither changes anything.
+
+### Known issue: the setup wizard's database step with the chart's externalDatabase
+
+The dashboard's setup wizard always submits a database, SQLite by default. On a
+gateway whose `global.json` already names one -- the chart with
+`externalDatabase`, or a hand-written config -- the administrator is created in
+the database that is open, and `global.json` is switched to the wizard's: on a
+persistent volume the next start refuses ("the user database has no
+administrator"). Until this is fixed, choose the same database in the wizard's
+Database step, or run setup with `POST /v1/setup` and no database fields.
+
+**Who is affected:** Helm installs with `externalDatabase` set up through the
+dashboard wizard. Not new in this release.
+
+### A database that stops answering no longer stalls every client: block lookups have a deadline
+
+With Postgres frozen, partitioned or behind a long table lock, every request and
+every TCP connection waited for the IP and fingerprint block list for as long as the
+database did -- new clients, clients seen a minute before, and loopback (health
+checks, a same-host tunnel) alike. lib/pq does not return at a context deadline
+against a server that does not answer, so this is not a setting you could have
+tuned around.
+
+- A block lookup now waits at most **200 ms (minimal), 100 ms (standard) or 50 ms
+  (enterprise)**, set with `GATEON_BLOCK_LOOKUP_TIMEOUT` (a Go duration, e.g.
+  `150ms`; `0` or garbage is the tier's value, never "no deadline"). A lookup that
+  does not answer in time is decided the way a failed one has been since ADR 0043:
+  **the request is served unless this node already holds a block for it**, and
+  nothing is cached.
+- A request waits that long **in all**, however many lookups it makes (an address
+  and a fingerprint, at the entrypoint and again at the route).
+- **Loopback and `GATEON_MITIGATION_ALLOWLIST` are decided before the database is
+  asked** and never touch it.
+- Concurrent lookups for one address or fingerprint share one query, and at most
+  **40 / 200 / 800** lookups (minimal / standard / enterprise; eight per database
+  pool connection) are in flight at once. A lookup past that is not queued: the
+  request is decided from the cache, or served.
+- A client seen in the last ten minutes is answered from the cache while its entry
+  is re-read in the background; it never waits for the database.
+- A cached **fingerprint block is no longer re-read on every request.** As a
+  consequence, a fingerprint block **released on another node, or past its TTL
+  (`GATEON_JA4_MITIGATION_TTL`), ends on this node within one to two minutes**
+  instead of on the next request. A release made on this node still ends at once.
+- `gateon_mitigation_lookup_errors_total` has a new `reason` label: `error` (the
+  database refused), `timeout` (it did not answer in time) and `saturated` (too
+  many lookups in flight; none was started). A sustained `timeout` or
+  `saturated` rate means requests are being decided without the block list:
+  alert on it. Queries that `sum by (kind)` are unchanged.
+
+**Who is affected:** every install with Postgres (and SQLite installs under heavy
+write load) gets bounded request latency during a database stall. Dashboards or
+alerts that select `gateon_mitigation_lookup_errors_total` by its full label set
+need the new `reason` label. Multi-node installs that release fingerprint blocks on
+one node: allow up to two minutes for other nodes to stop enforcing it. During a
+database stall, or a burst of new addresses past the bound, a block this node has
+not seen since it started is not enforced for those requests -- the same trade-off
+ADR 0043 made for an outage. See ADR 0054.
+
+### Only a client's own refused traffic counts against it (ADR 0055)
+
+Three ways an innocent client was refused on every route are gone:
+
+- **Correlated incidents are per client build per network.** The correlation
+  engine grouped signals by browser fingerprint, so an attacker's WAF blocks
+  and one detection against an unrelated user of the same browser, on another
+  network, made one incident that restricted the user's /24. Incidents are now
+  keyed by the build on a /24 (IPv4) or /64 (IPv6), or by the address when
+  there is no fingerprint, and the responder penalises the incident source's
+  network once. The incident's `sourceKey` (Security Hub, SIEM export) now
+  reads `<class>|<network>` instead of a bare fingerprint. A build attacking
+  from many networks is one incident per network.
+- **Audit-only blocks nothing, and counts against nobody.** An audit-only WAF
+  took half the client's reputation per match; the third false positive was
+  refused everywhere. Audit-only matches are now recorded and counted
+  (would-block) and never lower reputation, feed an automatic block, become a
+  correlation signal, or trigger a playbook's block. The same holds for a match
+  an *enforcing* WAF scored below the route's threshold, including the log-only
+  inbound data-leak rules. An audit-only WAF's fast-path checks (malformed
+  token, entropy, client consistency) now record and let the request through,
+  as its protocol check already did.
+- **A data leak in a response is the backend's, not the reader's.** DLP
+  findings in responses (block, redact and audit alike) were recorded as
+  `waf_blocked` against the client that read the page, and the third view of
+  a redacted page was refused on every route. They are now recorded as
+  `data_exposure` events on the route, with no source address and the address
+  the page was served to in the details, and `actionTaken` `blocked`,
+  `redacted` (new value) or `detected`. They no longer count as WAF blocks in
+  the security funnel or towards the exploit-scan detector's per-address count,
+  and the reader is no longer put under the WAF's adaptive eBPF rate limit.
+- **A refusal of an earlier decision is not new evidence.** Refusals by a shun
+  or IP reputation feed listing, a fingerprint block or the reputation blocker
+  are no longer correlation signals, and the reputation blocker's refusals no
+  longer lower the score again on every retry, so a mistakenly refused client
+  recovers at the normal rate while it keeps trying.
+
+**Who is affected:** every install with correlation on (the standard and
+enterprise tiers, `GATEON_MITIGATION_ENABLED` defaults to true), any route WAF in
+audit-only mode or with DLP on, and alerting playbooks with the block action.
+Alert rules or SIEM queries that select DLP findings by `waf_blocked`, or
+incidents by a bare fingerprint `sourceKey`, need the new type and key. An
+operator who relied on audit-only or below-threshold matches lowering a client's
+reputation (to tighten the WAF's adaptive threshold or proof-of-work) must
+switch the route to enforcing for matches to have effect. No migration; no new
+setting.
+
 ### "Enable Revocation" now checks revoked tokens for JWT, PASETO and OIDC, and needs Redis
 
 **Read this before upgrading if any `auth` middleware has `enable_revocation: "true"`.**
@@ -152,8 +453,9 @@ write-ahead log hit the full disk -- exited the whole process, proxy included.
 far back traces go -- 2 GiB is about 1.9 million requests, five hours at 100 req/s.
 Raise `GATEON_TRACE_STORE_MAX_MB` or turn on the trace archive for more. A store
 already over its budget is cut to it 30 seconds after the upgrade starts. A
-Kubernetes readiness probe now takes a pod whose trace disk is nearly full out of
-rotation. See ADR 0049.
+Kubernetes readiness probe keeps a pod whose trace disk is nearly full in rotation:
+`/readyz` answers `200 ready, degraded: ...`; alert on `gateon_trace_dropped_total`.
+See ADR 0049.
 
 ### The gateway exits if the management port cannot bind, /readyz goes 503 for an unbound entrypoint and reports an unreachable database
 

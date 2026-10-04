@@ -15,6 +15,7 @@ import (
 	"github.com/gsoultan/gateon/internal/ai"
 	"github.com/gsoultan/gateon/internal/api"
 	"github.com/gsoultan/gateon/internal/auth"
+	"github.com/gsoultan/gateon/internal/auth/admission"
 	"github.com/gsoultan/gateon/internal/authz/routebind"
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/domain/canary"
@@ -26,7 +27,6 @@ import (
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware"
 	wafmw "github.com/gsoultan/gateon/internal/middleware/security/waf"
-	"github.com/gsoultan/gateon/internal/middleware/traffic"
 	"github.com/gsoultan/gateon/internal/middleware/transform"
 	"github.com/gsoultan/gateon/internal/phantom"
 	"github.com/gsoultan/gateon/internal/resource"
@@ -42,7 +42,6 @@ import (
 	"github.com/gsoultan/gateon/pkg/l4"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 	"github.com/gsoultan/gateon/proto/gateon/v1/gateonv1connect"
-	"golang.org/x/time/rate"
 	"google.golang.org/grpc"
 )
 
@@ -247,9 +246,6 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 	proxyHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		s.HandleProxyOrLocal(w, r, grpcServer, internalAPI, mux)
 	})
-	// Login rate limit: 5 attempts per minute per IP to mitigate brute force.
-	loginLimiter := traffic.NewRateLimiter(rate.Every(time.Minute/5), 5)
-
 	mgmtCors := BuildManagementCORS(mgmtConfig)
 	s.MgmtCORS = mgmtCors
 
@@ -258,9 +254,11 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 		RouteStore:   s.RouteStore,
 		GlobalReg:    s.GlobalStore,
 		Auth:         s.AuthManager,
-		LoginLimiter: loginLimiter,
-		MgmtCORS:     mgmtCors,
-		MgmtOrigins:  mgmtOrigins,
+		// One budget per client across sign-in, the 2FA steps and setup,
+		// on every transport (ADR 0053).
+		PublicAuth:  admission.NewSources(admission.AttemptsPerMinute()),
+		MgmtCORS:    mgmtCors,
+		MgmtOrigins: mgmtOrigins,
 	}, internalAPI, mux)
 	tlsConfig, err := s.TLSManager.GetTLSConfig()
 	if err != nil {

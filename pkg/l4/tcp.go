@@ -104,7 +104,8 @@ const (
 
 func (p *TCPBackendPool) healthCheck() {
 	for i, addr := range p.addrs {
-		conn, err := net.DialTimeout("tcp", addr, p.timeout)
+		d := net.Dialer{Timeout: p.timeout, Control: backendDialer.Control}
+		conn, err := d.Dial("tcp", addr)
 		if err != nil {
 			p.recordFailure(i, addr, err)
 			continue

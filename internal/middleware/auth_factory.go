@@ -136,6 +136,9 @@ func (f *Factory) createAuth(cfg map[string]string) (Middleware, error) {
 			ClientID:         clientID,
 			ClientSecret:     clientSecret,
 			TokenTypeHint:    strings.TrimSpace(cfg["token_type_hint"]),
+			// The management plane's session check, so a session is never
+			// posted for introspection (ADR 0051).
+			ManagementSessions: f.sessions,
 		}
 		validator, err := NewOAuth2IntrospectionValidator(introCfg)
 		if err != nil {

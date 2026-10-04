@@ -9,12 +9,14 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
 
 	"github.com/gsoultan/gateon/internal/config"
+	"github.com/gsoultan/gateon/internal/mgmtaddr"
 	"github.com/gsoultan/gateon/internal/request"
 )
 
@@ -30,6 +32,10 @@ type ForwardAuthConfig struct {
 	PreserveRequestMethod bool     // Use same HTTP method; if false, use GET
 	MaxBodySize           int64    // Max body size when forwarding; 0 = 1MB default, -1 = unlimited
 	TLSInsecureSkipVerify bool     // Skip TLS cert verification (for dev)
+	// ManagementSessions is the management plane's session check. A session
+	// it accepts is never forwarded to the auth service, nor are the session
+	// cookie and API tokens, which are recognised without it (ADR 0051).
+	ManagementSessions TokenVerifier
 }
 
 // ForwardAuth returns a middleware that delegates auth to an external service.
@@ -70,18 +76,7 @@ func ForwardAuth(cfg ForwardAuthConfig) (Middleware, error) {
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			return http.ErrUseLastResponse
 		},
-	}
-	if authURL.Scheme == "https" && cfg.TLSInsecureSkipVerify {
-		client.Transport = &http.Transport{
-			TLSClientConfig: &tls.Config{
-				// #nosec G402 -- verification is skipped only when the operator
-				// sets TLSInsecureSkipVerify on this specific forward-auth
-				// middleware, for an auth service presenting an internal or
-				// self-signed certificate. The zero value is false, so the
-				// default stays verifying; this is an opt-in, not a fallback.
-				InsecureSkipVerify: true,
-			},
-		}
+		Transport: outboundTransport(authURL.Scheme == "https" && cfg.TLSInsecureSkipVerify),
 	}
 
 	return func(next http.Handler) http.Handler {
@@ -151,6 +146,11 @@ func ForwardAuth(cfg ForwardAuthConfig) (Middleware, error) {
 					}
 				}
 			}
+			// The auth service is the operator's choice of server; the
+			// dashboard's credentials are not the operator's to send it. The
+			// base handler has already withheld them (ADR 0051); this is the
+			// second line, on the copy, so the backend's request is untouched.
+			WithholdManagementCredentials(authReq.Header, cfg.ManagementSessions)
 
 			// X-Forwarded-* headers (Traefik-style). Set *after* the copy
 			// above: Set replaces and Add appends, and these are the values the
@@ -206,4 +206,27 @@ func ForwardAuth(cfg ForwardAuthConfig) (Middleware, error) {
 			next.ServeHTTP(w, r)
 		})
 	}, nil
+}
+
+// outboundTransport is the transport for a call a route middleware makes to a
+// URL an operator configured -- a forward-auth service, an introspection
+// endpoint. Its dialer refuses the gateway's own management listener, as the
+// proxy's does (ADR 0052): these clients dialled with http.DefaultTransport,
+// so an auth URL naming 127.0.0.1:<management port> reached the management
+// API from loopback, and forward auth hands a non-2xx response body straight
+// back to the client.
+func outboundTransport(insecureSkipVerify bool) *http.Transport {
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.DialContext = (&net.Dialer{
+		Timeout:   10 * time.Second,
+		KeepAlive: 30 * time.Second,
+		Control:   mgmtaddr.Control,
+	}).DialContext
+	if insecureSkipVerify {
+		// #nosec G402 -- only when the operator sets tls_insecure_skip_verify on
+		// this specific middleware, for a service presenting an internal or
+		// self-signed certificate; the zero value keeps verification on.
+		t.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+	}
+	return t
 }

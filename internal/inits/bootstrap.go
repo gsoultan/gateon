@@ -17,6 +17,7 @@ import (
 	"github.com/gsoultan/gateon/internal/db"
 	"github.com/gsoultan/gateon/internal/logger"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
+	"google.golang.org/protobuf/proto"
 )
 
 func InitGlobalConfig(globalFile string, globalReg *config.GlobalRegistry) *auth.Manager {
@@ -60,6 +61,38 @@ func InitGlobalConfig(globalFile string, globalReg *config.GlobalRegistry) *auth
 		applyGlobalEnv(gc)
 	}
 	return authManager
+}
+
+// AdoptSetUp marks a gateway set up -- auth.enabled, which setup writes --
+// when its global.json was seeded this start and the database it opened
+// already holds an administrator (ADR 0056).
+//
+// That is a pod on a fresh volume over a database that was set up before: every
+// restart with the Helm chart's persistence off. Setup wrote auth.enabled to the
+// volume it ran on, so each later start came up on the seed with it false, and
+// with it went the refusal to start on a database that has lost its
+// administrator, and authentication on a management API served on a public
+// entrypoint. Only a seeded start is adopted: on a volume that kept its
+// global.json, auth.enabled false is the operator's choice.
+func AdoptSetUp(globalReg *config.GlobalRegistry, m *auth.Manager) {
+	if globalReg == nil || m == nil || !m.IsSetupDone() {
+		return
+	}
+	ctx := context.Background()
+	gc, ok := proto.Clone(globalReg.Get(ctx)).(*gateonv1.GlobalConfig)
+	if !ok || gc == nil || gc.GetAuth().GetEnabled() {
+		return
+	}
+	if gc.Auth == nil {
+		gc.Auth = &gateonv1.AuthConfig{}
+	}
+	gc.Auth.Enabled = true
+	if err := globalReg.Update(ctx, gc); err != nil {
+		logger.L.LogError("could not record that this gateway's database is set up", "error", err)
+		return
+	}
+	logger.L.LogInfo("global.json was seeded over a database that already has an administrator; " +
+		"marked this gateway set up")
 }
 
 // openAuthManager opens the user database a configured gateway names, and

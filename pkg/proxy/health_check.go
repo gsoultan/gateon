@@ -160,8 +160,7 @@ func (h *ProxyHandler) checkTCPHealth(ctx context.Context, targetURL string) boo
 	checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	var d net.Dialer
-	conn, err := d.DialContext(checkCtx, "tcp", host)
+	conn, err := backendDialer.DialContext(checkCtx, "tcp", host)
 	if err != nil {
 		return false
 	}

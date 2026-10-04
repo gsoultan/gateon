@@ -24,6 +24,7 @@ import { apiFetch, getCloudflareIPs } from "../../hooks/useGateon";
 import { StoredSecretInput } from "../settings/StoredSecretInput";
 import { WAF_APP_PROFILES } from "../../types/gateon";
 import { BROWSER_HEADER_CHECK_HELP, JS_CHALLENGE_HELP } from "./botManagementCopy";
+import { AUDIT_ONLY_HELP, DLP_ACTION_HELP } from "./wafCopy";
 import { ClientAddressNote } from "./RatelimitConfigEditor";
 import { tlsBindingProblem, xfccProblem } from "./middlewareConfigProblems";
 import { ipListError } from "./ipList";
@@ -182,7 +183,7 @@ export function WAFConfigFields({ config, updateConfig, global, globalUnreadable
           {isEnabled("dlp") && (
             <Select
               label="When a leak is found"
-              description="Roll out in stages: watch first, then redact, then block once the false-positive rate is known."
+              description={DLP_ACTION_HELP}
               data={[
                 { value: "block", label: "Block — refuse the whole response (default)" },
                 { value: "redact", label: "Redact — remove the finding, send the rest" },
@@ -329,7 +330,7 @@ export function WAFConfigFields({ config, updateConfig, global, globalUnreadable
       */}
       <Switch
         label="Audit Only"
-        description="Record matched rules and block nothing on this route."
+        description={AUDIT_ONLY_HELP}
         checked={auditOnly}
         onChange={(e) =>
           updateConfig("audit_only", e.currentTarget.checked ? "true" : "false")

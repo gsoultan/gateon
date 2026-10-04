@@ -14,6 +14,7 @@ import (
 
 	"github.com/MicahParks/keyfunc/v3"
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/gsoultan/gateon/internal/auth/apitoken"
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/request"
@@ -435,6 +436,26 @@ func ExtractToken(r *http.Request) string {
 	if t := sessionCookieValue(r); t != "" {
 		return t
 	}
+	return requestToken(r)
+}
+
+// ExtractAppToken is the token a route's own check sends elsewhere -- OAuth2
+// introspection posts it to the app's endpoint. It is ExtractToken without
+// the management session cookie, which is the dashboard's and never an app's,
+// and it is empty when the token found is a management credential (ADR 0051):
+// the base handler withholds those before a route middleware runs, and this
+// keeps the middleware from passing one on if it ever reaches it.
+func ExtractAppToken(r *http.Request, sessions TokenVerifier) string {
+	t := requestToken(r)
+	if t == "" || isManagementToken(t, sessions) {
+		return ""
+	}
+	return t
+}
+
+// requestToken returns the Authorization Bearer token or -- on a WebSocket
+// handshake only -- the query parameters token, access_token and auth.
+func requestToken(r *http.Request) string {
 	if t := bearerToken(r); t != "" {
 		return t
 	}
@@ -513,17 +534,102 @@ func StripSessionCookie(h http.Header) {
 	h["Cookie"] = kept
 }
 
+// WithholdManagementCredentials removes from h everything that would let its
+// holder act on the management plane: the session cookie under either name,
+// and each Authorization value that is a gateway API token or a session the
+// management plane's verifier accepts (ADR 0041, 0050, 0051). Every other
+// cookie and credential is kept as it was sent. A nil sessions withholds the
+// cookie and API tokens only.
+//
+// Without a management credential it allocates nothing, and calls the
+// verifier only for a "Bearer v4.local." value.
+func WithholdManagementCredentials(h http.Header, sessions TokenVerifier) {
+	StripSessionCookie(h)
+	values := h["Authorization"]
+	if len(values) == 0 {
+		return
+	}
+	kept := values[:0]
+	for _, v := range values {
+		if !IsManagementBearer(v, sessions) {
+			kept = append(kept, v)
+		}
+	}
+	if len(kept) == len(values) {
+		return
+	}
+	if len(kept) == 0 {
+		delete(h, "Authorization")
+		return
+	}
+	h["Authorization"] = kept
+}
+
+// MayCarryManagementCredential reports, without allocating or verifying
+// anything, whether h has something WithholdManagementCredentials might
+// remove: a Cookie line naming the session cookie, or an Authorization value
+// shaped like an API token or a PASETO v4.local bearer. False means there is
+// nothing to withhold, so a caller can skip deciding whether to.
+func MayCarryManagementCredential(h http.Header) bool {
+	for _, line := range h["Cookie"] {
+		if strings.Contains(line, sessionCookieName) && hasSessionCookie(line) {
+			return true
+		}
+	}
+	for _, v := range h["Authorization"] {
+		if _, ok := apitoken.BearerToken(v); ok {
+			return true
+		}
+		if _, ok := pasetoLocalBearer(v); ok {
+			return true
+		}
+	}
+	return false
+}
+
+// IsManagementBearer reports whether one Authorization value is a gateway
+// credential: a Bearer whose token isManagementToken accepts.
+func IsManagementBearer(value string, sessions TokenVerifier) bool {
+	const scheme = "bearer "
+	if len(value) <= len(scheme) || !strings.EqualFold(value[:len(scheme)], scheme) {
+		return false
+	}
+	return isManagementToken(strings.TrimSpace(value[len(scheme):]), sessions)
+}
+
+// isManagementToken reports whether token is a gateway credential. An API
+// token is recognised by its shape, which is gateon's own and needs no lookup;
+// a session only by the management plane's verifier, as an app may use PASETO
+// v4.local tokens under its own key. A nil sessions recognises API tokens only.
+func isManagementToken(token string, sessions TokenVerifier) bool {
+	if apitoken.LooksLikeToken(token) {
+		return true
+	}
+	if sessions == nil || !strings.HasPrefix(token, pasetoLocalPrefix) {
+		return false
+	}
+	_, err := sessions.VerifyToken(token)
+	return err == nil
+}
+
+// pasetoLocalPrefix starts every management session token.
+const pasetoLocalPrefix = "v4.local."
+
+// pasetoLocalBearer returns the token of a "Bearer v4.local." value, the only
+// form a management session token takes.
+func pasetoLocalBearer(value string) (string, bool) {
+	const scheme = "bearer "
+	if len(value) <= len(scheme)+len(pasetoLocalPrefix) || !strings.EqualFold(value[:len(scheme)], scheme) {
+		return "", false
+	}
+	token := strings.TrimSpace(value[len(scheme):])
+	return token, strings.HasPrefix(token, pasetoLocalPrefix)
+}
+
 // withoutSessionCookie returns line minus any session cookie, and whether it
 // had one. A line without one is returned as it was, unallocated.
 func withoutSessionCookie(line string) (string, bool) {
-	found := false
-	for part := range strings.SplitSeq(line, ";") {
-		if isSessionCookiePart(part) {
-			found = true
-			break
-		}
-	}
-	if !found {
+	if !hasSessionCookie(line) {
 		return line, false
 	}
 	var b strings.Builder
@@ -539,6 +645,17 @@ func withoutSessionCookie(line string) (string, bool) {
 		b.WriteString(part)
 	}
 	return b.String(), true
+}
+
+// hasSessionCookie reports whether one Cookie line holds the session cookie,
+// under either name. It allocates nothing.
+func hasSessionCookie(line string) bool {
+	for part := range strings.SplitSeq(line, ";") {
+		if isSessionCookiePart(part) {
+			return true
+		}
+	}
+	return false
 }
 
 // isSessionCookiePart reports whether one name=value pair of a Cookie line is

@@ -10,8 +10,10 @@ import (
 	"time"
 
 	"github.com/gsoultan/gateon/internal/auth"
+	"github.com/gsoultan/gateon/internal/auth/admission"
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/middleware"
+	mwauth "github.com/gsoultan/gateon/internal/middleware/auth"
 	"github.com/gsoultan/gateon/internal/middleware/security"
 	"github.com/gsoultan/gateon/internal/middleware/traffic"
 	"github.com/gsoultan/gateon/internal/router"
@@ -35,8 +37,11 @@ type BaseHandlerDeps struct {
 	RouteStore   config.RouteStore
 	GlobalReg    config.GlobalConfigStore
 	Auth         auth.Service
-	LoginLimiter traffic.RateLimiter // stricter rate limit for /v1/login (e.g. 5/min per IP)
-	MgmtCORS     *cors.Cors
+	// PublicAuth is the per-client budget on the public endpoints that can
+	// reach a password check (ADR 0053). Nil is the resource profile's budget,
+	// never none.
+	PublicAuth *admission.Sources
+	MgmtCORS   *cors.Cors
 	// MgmtOrigins names the origins, besides the management origin itself,
 	// that may write with the session cookie. Nil trusts none; the guard runs
 	// either way.
@@ -85,7 +90,7 @@ func CreateBaseHandler(
 		security.XSSRecognition("gateon-management"),
 		security.SQLiRecognition("gateon-management"),
 		security.ThreatRecognition("gateon-management"),
-		traffic.MaxConnections(500),
+		traffic.ManagementInflight(500), // probes take no slot (MGMT-N4)
 	)(internalHandler)
 
 	// Built unconditionally, and deliberately not guarded on whether auth is
@@ -100,6 +105,11 @@ func CreateBaseHandler(
 	// service fails closed on its own.
 	authInternal := middleware.PasetoAuth(deps.Auth, middleware.AuthBaseConfig{})(finalInternal)
 
+	publicAuth := deps.PublicAuth
+	if publicAuth == nil {
+		publicAuth = admission.NewSources(admission.AttemptsPerMinute())
+	}
+
 	// mgmtLogic defines the internal handler for management API, UI, and auth.
 	// It is separated so that MgmtCORS can be applied only to this path.
 	mgmtLogic := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -107,6 +117,11 @@ func CreateBaseHandler(
 			// An answer holds configuration, users and audit entries. Set
 			// before any handler runs so an error answer carries it too.
 			w.Header().Set("Cache-Control", "no-store")
+		}
+		// Before anything reads the body, and whatever the authentication
+		// setting: these are the endpoints a stranger can make hash.
+		if !admitPublicAuth(w, r, publicAuth) {
+			return
 		}
 		gc := deps.GlobalReg.Get(r.Context())
 		epID := ""
@@ -123,11 +138,7 @@ func CreateBaseHandler(
 				finalInternal.ServeHTTP(w, r)
 				return
 			}
-			if isLoginPath(r.URL.Path) {
-				handleLoginWithRateLimit(w, withAuthNotRequired(r), finalInternal, deps)
-				return
-			}
-			if isPublicAuthPath(r.URL.Path) {
+			if isLoginPath(r.URL.Path) || isPublicAuthPath(r.URL.Path) {
 				finalInternal.ServeHTTP(w, withAuthNotRequired(r))
 				return
 			}
@@ -236,7 +247,70 @@ func CreateBaseHandler(
 
 	// Apply Telemetry at the edge to ensure it covers all responses.
 	// MgmtCORS is now applied conditionally inside mainHandler for better isolation.
-	return middleware.Telemetry("gateon")(mainHandler)
+	return withholdFromDataPlane(deps, middleware.Telemetry("gateon")(mainHandler))
+}
+
+// withholdFromDataPlane removes the management plane's credentials -- the
+// session cookie under either name, a session as a bearer token, a scrape
+// token -- from every request the management plane will not answer, before
+// route matching and before any route middleware runs (ADR 0051).
+//
+// The proxy already withheld them from the backend (ADR 0041), but the route's
+// middlewares run before the proxy, and some of them send the request on:
+// forwardauth copies every header to its auth server, OAuth2 introspection
+// posts the request's token to its endpoint. A browser sends the dashboard's
+// cookie to every app on the dashboard's host, so an operator who bound either
+// middleware to a route, pointed at a server of their own, was handed the
+// administrator's session. And since a route's JWT, PASETO and introspection
+// checks read the session cookie ahead of the app's own bearer token, they
+// refused the administrator's browser whatever app token it presented.
+//
+// A request with nothing that could be a management credential -- nearly all
+// of them -- pays one scan of its Cookie and Authorization values, and nothing
+// is allocated or verified.
+func withholdFromDataPlane(deps BaseHandlerDeps, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if mwauth.MayCarryManagementCredential(r.Header) {
+			if managementBound(r, deps.GlobalReg) {
+				next.ServeHTTP(w, r)
+				return
+			}
+			mwauth.WithholdManagementCredentials(r.Header, deps.Auth)
+		}
+		// Withheld, or nothing to withhold: either way the proxy need not
+		// verify a session bearer again. A request the management plane
+		// answers is never proxied, and is not marked.
+		if rs := middleware.GetRequestState(r); rs != nil {
+			rs.CredentialsWithheld = true
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// managementBound reports whether the management plane, rather than a route,
+// will answer r: everything on the management listener or on an entrypoint
+// sharing its address (HandleProxyOrLocal never proxies those), and the
+// management API on an entrypoint allowed to serve it. It is the decision
+// mainHandler makes after SelectRoute, taken before it, so the path is read as
+// SelectRoute will normalise it: "/v1/status/../../app" is the app's.
+func managementBound(r *http.Request, globalReg config.GlobalConfigStore) bool {
+	epID, isMgmt := requestEntrypoint(r)
+	if isMgmt || epID == "management" {
+		return true
+	}
+	return isGateonManagementAPIPath(router.NormalizePath(r.URL.Path)) &&
+		isPublicManagementAllowed(r, epID, globalReg)
+}
+
+// requestEntrypoint returns the ID of the entrypoint r arrived on, and whether
+// that entrypoint is the management plane's address.
+func requestEntrypoint(r *http.Request) (string, bool) {
+	if rs := middleware.GetRequestState(r); rs != nil {
+		return rs.EntryPointID, rs.IsManagement
+	}
+	epID, _ := r.Context().Value(middleware.EntryPointIDContextKey).(string)
+	isMgmt, _ := r.Context().Value(middleware.IsManagementContextKey).(bool)
+	return epID, isMgmt
 }
 
 // withAuthNotRequired marks r as needing no credential; see

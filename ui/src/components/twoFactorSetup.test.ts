@@ -61,7 +61,7 @@ describe("startTwoFactorSetup", () => {
   test.each([
     [400, "Enter your current password to continue."],
     [403, "That password is not correct."],
-    [429, "Too many failed attempts. The account is locked for a while; try again later."],
+    [429, "Too many attempts right now. Wait a few minutes and try again."],
     [500, "Two-factor setup could not be started. Please try again."],
   ])("a %i says what happened in its own words, never the server's", async (status, message) => {
     answer = refusal(status);
@@ -139,7 +139,7 @@ describe("verifyTwoFactorCode", () => {
 
     expect(outcome).toEqual({
       ok: false,
-      message: "Too many failed attempts. The account is locked for a while; try again later.",
+      message: "Too many attempts right now. Wait a few minutes and try again.",
     });
   });
 });

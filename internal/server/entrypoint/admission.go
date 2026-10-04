@@ -9,6 +9,7 @@ import (
 	"io"
 	"math"
 	"net"
+	"net/netip"
 	"os"
 	"strconv"
 	"strings"
@@ -93,9 +94,13 @@ const (
 // an entry is deleted when its last connection closes. Loopback and the
 // mitigation allowlist are exempt and never tracked, so a local proxy -- behind
 // which every client is loopback -- is not capped by the one address it shares.
+//
+// An IPv6 client is counted by the /64 it sits in (connKey), as the eBPF
+// limits, the honeypot and reputation count it: a /64 is what one subscriber
+// is handed, and counted per /128 its 2^64 addresses were 2^64 caps.
 type perAddrLimiter struct {
 	mu     sync.Mutex
-	counts map[string]int
+	counts map[netip.Addr]int // 16-byte keys, at most connLimit of them
 	limit  int
 	warn   limitWarning
 }
@@ -106,39 +111,72 @@ func newPerAddrLimiter(limit int) *perAddrLimiter {
 	if limit <= 0 {
 		return nil
 	}
-	return &perAddrLimiter{counts: make(map[string]int), limit: limit}
+	return &perAddrLimiter{counts: make(map[netip.Addr]int), limit: limit}
 }
 
 // acquire reserves a slot for ip and reports whether one was free. A nil
 // limiter (the cap disabled) and an exempt address always succeed and hold no
-// entry, so the map never grows for loopback or the allowlist.
+// entry, so the map never grows for loopback or the allowlist. The exemption
+// is decided on ip itself, the count on its key.
 func (p *perAddrLimiter) acquire(ip string) bool {
 	if p == nil || perAddrExempt(ip) {
 		return true
 	}
+	key, ok := connKey(ip)
+	if !ok {
+		return true
+	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.counts[ip] >= p.limit {
+	if p.counts[key] >= p.limit {
 		return false
 	}
-	p.counts[ip]++
+	p.counts[key]++
 	return true
 }
 
 // release returns ip's slot; its entry is deleted when the last connection
-// from it closes, so the map retains no address that holds nothing.
+// from its key closes, so the map retains no address that holds nothing.
 func (p *perAddrLimiter) release(ip string) {
 	if p == nil || perAddrExempt(ip) {
 		return
 	}
+	key, ok := connKey(ip)
+	if !ok {
+		return
+	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	switch n := p.counts[ip]; {
+	switch n := p.counts[key]; {
 	case n <= 1:
-		delete(p.counts, ip)
+		delete(p.counts, key)
 	default:
-		p.counts[ip] = n - 1
+		p.counts[key] = n - 1
 	}
+}
+
+// connKeyIPv6Bits is how much of an IPv6 address the per-address cap keys on.
+const connKeyIPv6Bits = 64
+
+// connKey is what a connection from ip is counted under: an IPv4 address
+// (a v4-mapped IPv6 one included) as itself, an IPv6 address as its /64. It
+// is the one keying every per-address connection cap uses -- the data-plane
+// entrypoints' (ADR 0036) and the management listener's (ADR 0042) -- and it
+// does not allocate. ok is false when ip is not an address.
+func connKey(ip string) (netip.Addr, bool) {
+	a, err := netip.ParseAddr(ip)
+	if err != nil {
+		return netip.Addr{}, false
+	}
+	a = a.Unmap().WithZone("")
+	if a.Is4() {
+		return a, true
+	}
+	p, err := a.Prefix(connKeyIPv6Bits)
+	if err != nil {
+		return netip.Addr{}, false
+	}
+	return p.Addr(), true
 }
 
 // perAddrExempt reports whether ip is never capped per address: an address that

@@ -93,11 +93,14 @@ func main() {
 	// memory limit and GC target) before any allocation-heavy subsystem starts.
 	tuneRuntime()
 
-	globalReg, globalFile := initConfigRegistries()
+	globalReg, globalFile, seeded := initConfigRegistries()
 	auth.SetConfigGetter(globalReg)
 	authManager := inits.InitGlobalConfig(globalFile, globalReg)
 	if authManager != nil {
 		defer authManager.Close()
+	}
+	if seeded {
+		inits.AdoptSetUp(globalReg, authManager)
 	}
 
 	// otel.service_name, or OTEL_SERVICE_NAME, so instances are distinguishable
@@ -343,9 +346,9 @@ func buildUIAssets(uiPath *string) {
 	}
 }
 
-func initConfigRegistries() (*config.GlobalRegistry, string) {
+func initConfigRegistries() (*config.GlobalRegistry, string, bool) {
 	globalFile := getEnvDefault("GLOBAL_CONFIG_FILE", "global.json")
-	applyGlobalConfigSeed(globalFile)
+	seeded := applyGlobalConfigSeed(globalFile)
 
 	// A missing global.json is not an error — first run reaches the setup
 	// wizard through it — but it must be visible. The zero-value config has the
@@ -367,7 +370,7 @@ func initConfigRegistries() (*config.GlobalRegistry, string) {
 			"— fix the file named here, or move it aside to run first-time setup",
 			"error", err)
 	}
-	return reg, globalFile
+	return reg, globalFile, seeded
 }
 
 func initTelemetry(globalReg *config.GlobalRegistry, ctx context.Context) {

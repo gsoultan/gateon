@@ -101,6 +101,22 @@ type TierDefaults struct {
 	// steady-state cost.
 	RLLimiterStates int
 
+	// AuthAttemptsPerMinute is how many requests one client -- an IPv4
+	// address, an IPv6 /64 -- may make a minute, and at once, to the public
+	// endpoints that can reach a password check: sign-in, the 2FA steps and
+	// setup, over REST, Connect and gRPC alike (ADR 0053). Ten covers a
+	// sign-in, its second step and a few typos; the old limit was five a minute
+	// on /v1/login alone. GATEON_AUTH_ATTEMPTS_PER_MINUTE overrides it.
+	AuthAttemptsPerMinute int
+
+	// AuthHashConcurrency is how many password hashes run at once in the whole
+	// process, besides one reserved for an account's known source; never more
+	// than half of GOMAXPROCS. A hash is a core for tens of milliseconds, and an
+	// unknown username costs one too, so without a bound a flood of sign-ins
+	// took every core from the data plane. GATEON_AUTH_HASH_CONCURRENCY
+	// overrides it.
+	AuthHashConcurrency int
+
 	// EntryPointMaxConnections is how many connections an entrypoint holds
 	// open at once when its own max_connections is 0: on a TCP entrypoint L4
 	// sessions and connections still being inspected, on an HTTP one its
@@ -143,6 +159,17 @@ type TierDefaults struct {
 	// GATEON_STREAM_MAX_LIFETIME override them; 0 disables either.
 	StreamIdleTimeout time.Duration
 	StreamMaxLifetime time.Duration
+
+	// BlockLookupTimeout is the longest a request, or a connection being
+	// accepted, waits for the database to say whether its address or
+	// fingerprint is blocked (ADR 0054). Past it the lookup is answered as a
+	// failed one is (ADR 0043): served, unless this node's cache already holds
+	// a block. With no deadline a Postgres that stopped answering held every
+	// new client for as long as it stayed stopped. A healthy point read takes
+	// a millisecond or two; the minimal tier's small hosts get more headroom
+	// for scheduling, the enterprise tier's request rates less.
+	// GATEON_BLOCK_LOOKUP_TIMEOUT overrides it.
+	BlockLookupTimeout time.Duration
 }
 
 // NormalizeTier coerces an arbitrary string to a known tier, defaulting to
@@ -201,11 +228,14 @@ func DefaultsFor(tier Tier) TierDefaults {
 			FlushIntervalSeconds:      10,
 			WAFTier:                   TierMinimal,
 			RLLimiterStates:           2000,
+			AuthAttemptsPerMinute:     10,
+			AuthHashConcurrency:       1,
 			EntryPointMaxConnections:  1000,
 			EntryPointMaxConnPerAddr:  128,
 			MaxHeaderBytes:            32 << 10, // 32 KiB
 			StreamIdleTimeout:         2 * time.Minute,
 			StreamMaxLifetime:         time.Hour,
+			BlockLookupTimeout:        200 * time.Millisecond,
 		}
 	case TierEnterprise:
 		return TierDefaults{
@@ -232,11 +262,14 @@ func DefaultsFor(tier Tier) TierDefaults {
 			FlushIntervalSeconds:      1,
 			WAFTier:                   TierEnterprise,
 			RLLimiterStates:           100000,
+			AuthAttemptsPerMinute:     10,
+			AuthHashConcurrency:       4,
 			EntryPointMaxConnections:  50000,
 			EntryPointMaxConnPerAddr:  1024,
 			MaxHeaderBytes:            64 << 10, // 64 KiB
 			StreamIdleTimeout:         10 * time.Minute,
 			StreamMaxLifetime:         12 * time.Hour,
+			BlockLookupTimeout:        50 * time.Millisecond,
 		}
 	default: // TierStandard
 		return TierDefaults{
@@ -263,11 +296,14 @@ func DefaultsFor(tier Tier) TierDefaults {
 			FlushIntervalSeconds:      2,
 			WAFTier:                   TierStandard,
 			RLLimiterStates:           20000,
+			AuthAttemptsPerMinute:     10,
+			AuthHashConcurrency:       2,
 			EntryPointMaxConnections:  10000,
 			EntryPointMaxConnPerAddr:  256,
 			MaxHeaderBytes:            32 << 10, // 32 KiB
 			StreamIdleTimeout:         5 * time.Minute,
 			StreamMaxLifetime:         4 * time.Hour,
+			BlockLookupTimeout:        100 * time.Millisecond,
 		}
 	}
 }

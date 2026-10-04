@@ -38,27 +38,46 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end -}}
 
 {{/*
-Guard the one arrangement that loses data quietly.
+Refuse more than one replica (ADR 0056).
 
-Each replica keeps its own SQLite database, Pebble trace store and ACME cache on
-its own volume. Two replicas on the default storage are therefore two gateways
-that agree about nothing: a route added through one dashboard is invisible to the
-other, and which one a request reaches is the load balancer's decision. Nothing
-errors — it just behaves differently on every other request.
+The chart used to allow it with an external database and Redis. The database
+was then shared, but each replica still kept its own global.json on its own
+volume, so the global settings were per replica: setup ran on one, and only
+that one had auth.enabled, the audit log on, the management bind setup chose,
+and every setting saved in its dashboard afterwards. The others kept the seed.
+Which replica a request reached decided which gateway answered it, and nothing
+errored.
 
-So scaling out requires an external database, and Redis for session revocation to
-propagate faster than the binding TTL. Refusing at install time is the whole
-point: this is not recoverable by noticing later.
+The identity secrets the replicas also used to disagree on now come from the
+Secret this chart creates (GATEON_SESSION_KEY and its two siblings), so a
+session and a second factor are the same on every pod. The global settings are
+not: they live in global.json, and until they live in the shared database a
+second replica is a second gateway. Refusing at install time is the point --
+this is not recoverable by noticing later. `kubectl scale` bypasses this check;
+do not.
 */}}
 {{- define "gateon.validateScaleOut" -}}
 {{- if gt (int .Values.replicaCount) 1 -}}
-{{- if not .Values.externalDatabase.enabled -}}
-{{- fail "replicaCount > 1 requires externalDatabase.enabled=true. Each replica keeps its own SQLite file, so multiple replicas on the default storage silently serve different configuration. Set externalDatabase.* to a shared Postgres/MySQL, or keep replicaCount=1." -}}
-{{- end -}}
-{{- if not .Values.redis.enabled -}}
-{{- fail "replicaCount > 1 requires redis.enabled=true. Without it a session revocation reaches only the replica that handled it, and the others keep honouring the token until their binding TTL expires (30s by default). See doc/adr/0012." -}}
+{{- fail "replicaCount > 1 is not supported: each replica keeps its own global.json, so setup, the audit setting and every global setting saved in the dashboard would reach one replica only (ADR 0056). Keep replicaCount=1; see the chart README's \"High availability\" section for the supported shape." -}}
 {{- end -}}
 {{- end -}}
+
+{{/* The Secret holding the encryption key and the gateway's identity secrets. */}}
+{{- define "gateon.secretName" -}}
+{{- default (printf "%s-secrets" (include "gateon.fullname" .)) .Values.secrets.existingSecret -}}
+{{- end -}}
+
+{{/*
+The identity secrets every pod of this release reads from the Secret (ADR 0056):
+environment variable -> Secret key. Each is a value gateon otherwise generates
+for itself on first start and keeps in global.json -- on the pod's own volume,
+so a second pod or a fresh volume generated another, and a session or a second
+factor from one was refused by the other.
+*/}}
+{{- define "gateon.identityKeys" -}}
+GATEON_SESSION_KEY: session-key
+GATEON_AUDIT_SIGNATURE_KEY: audit-signature-key
+GATEON_POW_SECRET: pow-secret
 {{- end -}}
 
 {{/*
@@ -127,6 +146,13 @@ prevent, arriving by a different route.
 {{- $redis := merge (dict "enabled" true "addr" .Values.redis.addr "db" (int .Values.redis.db)) (default dict (get $cfg "redis")) -}}
 {{- $_ := set $cfg "redis" $redis -}}
 {{- end -}}
+{{- /*
+  The audit log starts on, signed, as first-run setup turns it on (ADR 0050).
+  On a persistent volume this changes nothing -- setup writes the same. Without
+  one the seed is all a restarted pod has, and a seed without this restarted
+  every pod with the audit log off. globalConfig.audit still wins.
+*/ -}}
+{{- $_ := set $cfg "audit" (merge (default dict (get $cfg "audit")) (dict "enabled" true "sign_entries" true)) -}}
 {{- toPrettyJson $cfg -}}
 {{- end -}}
 

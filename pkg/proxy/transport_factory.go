@@ -24,6 +24,7 @@ import (
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/httputil"
 	"github.com/gsoultan/gateon/internal/logger"
+	"github.com/gsoultan/gateon/internal/mgmtaddr"
 	"github.com/gsoultan/gateon/internal/request"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
@@ -37,6 +38,36 @@ const healthCheckTransportKey = "__healthcheck"
 // backendResponseHeaderTimeout is how long an HTTP/1 backend has to answer a
 // request once it has been sent, an upgrade request included.
 const backendResponseHeaderTimeout = time.Minute
+
+// backendDialer opens every TCP connection the proxy makes to a backend: the
+// HTTP/1 and HTTP/2 transports, h2c, the PROXY-protocol path, the WebSocket
+// tunnel and the health checks. Its timeouts are http.DefaultTransport's.
+// Control refuses a connection to this gateway's own management listener
+// (ADR 0052): checked on the address being connected to, after the name is
+// resolved, so a target that resolves here only after it was saved is refused
+// too. A net.Dialer is safe for concurrent use, so one serves them all.
+var backendDialer = &net.Dialer{
+	Timeout:   30 * time.Second,
+	KeepAlive: 30 * time.Second,
+	Control:   mgmtaddr.Control,
+}
+
+// dialH2TLS is the HTTP/2-over-TLS transport's dial: backendDialer, then the
+// TLS handshake, then the check http2.Transport makes when it dials for
+// itself -- that the server agreed to speak HTTP/2.
+func dialH2TLS(ctx context.Context, network, addr string, cfg *tls.Config) (net.Conn, error) {
+	d := tls.Dialer{NetDialer: backendDialer, Config: cfg}
+	c, err := d.DialContext(ctx, network, addr)
+	if err != nil {
+		return nil, err
+	}
+	tc, ok := c.(*tls.Conn)
+	if !ok || tc.ConnectionState().NegotiatedProtocol != http2.NextProtoTLS {
+		_ = c.Close()
+		return nil, fmt.Errorf("http2: backend %s did not negotiate %s", addr, http2.NextProtoTLS)
+	}
+	return c, nil
+}
 
 type backendTransportFactory struct {
 	tlsConfig        *tls.Config
@@ -58,6 +89,7 @@ func (f *backendTransportFactory) HealthCheckTransport() http.RoundTripper {
 		return v.(http.RoundTripper)
 	}
 	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.DialContext = backendDialer.DialContext
 	// A clone, never the factory's own config: net/http edits a Transport's
 	// TLSClientConfig in place when it sets up HTTP/2, and every other backend
 	// transport is cloned from f.tlsConfig concurrently.
@@ -195,12 +227,7 @@ func (f *backendTransportFactory) buildTransport(state *targetState, selectedIde
 			ReadIdleTimeout: 30 * time.Second,
 			PingTimeout:     15 * time.Second,
 			DialTLSContext: func(ctx context.Context, network, addr string, _ *tls.Config) (net.Conn, error) {
-				var d net.Dialer
-				conn, err := d.DialContext(ctx, network, addr)
-				if err != nil {
-					return nil, err
-				}
-				return conn, nil
+				return backendDialer.DialContext(ctx, network, addr)
 			},
 		}
 	case "h2":
@@ -208,6 +235,7 @@ func (f *backendTransportFactory) buildTransport(state *targetState, selectedIde
 			TLSClientConfig: tlsCfg,
 			ReadIdleTimeout: 30 * time.Second,
 			PingTimeout:     15 * time.Second,
+			DialTLSContext:  dialH2TLS,
 		}
 	default:
 		t := http.DefaultTransport.(*http.Transport).Clone()
@@ -222,12 +250,12 @@ func (f *backendTransportFactory) buildTransport(state *targetState, selectedIde
 		t.ExpectContinueTimeout = 1 * time.Second
 		t.ForceAttemptHTTP2 = !proxyProtocolEnabled
 		t.TLSClientConfig = tlsCfg
+		t.DialContext = backendDialer.DialContext
 
 		if proxyProtocolEnabled {
 			t.DisableKeepAlives = true
 			t.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
-				var d net.Dialer
-				conn, err := d.DialContext(ctx, network, addr)
+				conn, err := backendDialer.DialContext(ctx, network, addr)
 				if err != nil {
 					return nil, err
 				}

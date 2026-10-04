@@ -70,6 +70,10 @@ func assertMitigationTTLHolds(t *testing.T, databaseURL string) {
 	if _, err := s.db.Exec(age, int((mitigationTTL + time.Minute).Seconds()), fp); err != nil {
 		t.Fatalf("age the row: %v", err)
 	}
+	// A cached block decides for one to two epochs before it is read again
+	// (ADR 0054); age it past what may decide a request, so the answer is
+	// the table's comparison.
+	ageCachedAnswer(t, fp, staleAnswerEpochs+1)
 	if IsUserMitigated(fp) {
 		t.Errorf("a block older than its %v TTL is still in force", mitigationTTL)
 	}
