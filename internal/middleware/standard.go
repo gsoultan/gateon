@@ -23,6 +23,7 @@ import (
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware/security/identity"
 	"github.com/gsoultan/gateon/internal/request"
+	"github.com/gsoultan/gateon/internal/security/redact"
 	"github.com/gsoultan/gateon/internal/telemetry"
 )
 
@@ -831,9 +832,12 @@ func Debugger(globalStore config.GlobalConfigStore) Middleware {
 				return
 			}
 
-			maxBodySize := int(conf.Debugger.MaxBodySize)
+			// Bounded by what a trace keeps (ADR 0060): an operator's larger
+			// max_body_size held that much per body per in-flight request, to
+			// store 64 KiB of it.
+			maxBodySize := min(int(conf.Debugger.MaxBodySize), redact.MaxBodyBytes)
 			if maxBodySize <= 0 {
-				maxBodySize = 64 * 1024
+				maxBodySize = redact.MaxBodyBytes
 			}
 
 			// Capture Request Body without consuming it (using TeeReader)
