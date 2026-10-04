@@ -16,6 +16,7 @@ import (
 	"github.com/gsoultan/gateon/internal/middleware/security/identity"
 	"github.com/gsoultan/gateon/internal/syncutil"
 	"github.com/gsoultan/gateon/internal/telemetry"
+	"github.com/gsoultan/gateon/internal/telemetry/repid"
 	gtls "github.com/gsoultan/gateon/internal/tls"
 	"github.com/gsoultan/gateon/pkg/l4"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
@@ -147,10 +148,15 @@ func (o *openConns) remove(c net.Conn) {
 // socket is what ends the session: the goroutine serving it unblocks, its
 // handler returns, and remove forgets it -- this does not wait for that, so it
 // cannot deadlock against remove taking the same lock.
+//
+// A block covers what repid.AddressKey keys it by -- an IPv6 address's whole
+// /64 (ADR 0058) -- so it closes every address of that /64, except one the
+// allowlist names, which the block does not refuse either.
 func (o *openConns) closeByAddr(ip string) int {
 	if ip == "" {
 		return 0
 	}
+	key := repid.AddressKey(ip)
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	n := 0
@@ -158,7 +164,7 @@ func (o *openConns) closeByAddr(ip string) int {
 		if addr == "" {
 			addr = peerIP(c)
 		}
-		if addr == ip {
+		if addr == ip || (addr != "" && repid.AddressKey(addr) == key && !identity.ExemptFromEnforcement(addr)) {
 			_ = c.Close()
 			n++
 		}

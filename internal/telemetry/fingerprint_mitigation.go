@@ -345,7 +345,10 @@ func escalateAddress(st *SecurityThreat) {
 	if st.SourceIP == "" || st.Fingerprint == "" || AttackEvidenceWeight(st) == 0 {
 		return
 	}
-	classes := recordAddressEvidence(st.SourceIP, repid.Class(st.Fingerprint), evidenceTime(st))
+	// Kept per repid.Address -- an IPv6 client by its /64 -- the key the shun
+	// is written and enforced under (ADR 0058).
+	key := repid.AddressKey(st.SourceIP)
+	classes := recordAddressEvidence(key, repid.Class(st.Fingerprint), evidenceTime(st))
 	if classes < ipShunMinClasses {
 		return
 	}
@@ -363,7 +366,7 @@ func escalateAddress(st *SecurityThreat) {
 	// Applied or already in force, the evidence has been acted on; a shun that
 	// lapses is earned again only with new evidence (ADR 0031).
 	if res.Shunned() {
-		forgetAddressEvidence(st.SourceIP)
+		forgetAddressEvidence(key)
 	}
 }
 

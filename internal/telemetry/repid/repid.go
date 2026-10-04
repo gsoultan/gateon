@@ -291,6 +291,53 @@ func networkScope(ip string) string {
 	return prefix.String()
 }
 
+// addressIPv6Bits is how much of an IPv6 address an address-level decision
+// covers: the /64, as the kernel's shun map, the per-address connection caps
+// and the honeypot already key it.
+const addressIPv6Bits = 64
+
+// Address is what a decision about one source address is kept under -- the
+// automatic shun's evidence, the IP block list and its enforcement: an IPv4
+// address as itself (a v4-mapped one unmapped), and an IPv6 address as the
+// network address of its /64. ok is false for anything that is not an address.
+//
+// Per IPv6 address the decision held no client at all (dataplane F5, ADR
+// 0058). A subscriber is delegated a /64 and chooses the low 64 bits itself --
+// privacy addresses rotate on their own -- so one host rotating through its
+// /64 never put two pieces of evidence on one key and was never shunned, and a
+// block of one address it left at will.
+func Address(ip string) (netip.Addr, bool) {
+	a, err := netip.ParseAddr(ip)
+	if err != nil {
+		return netip.Addr{}, false
+	}
+	a = a.Unmap().WithZone("")
+	if a.Is4() {
+		return a, true
+	}
+	p, err := a.Prefix(addressIPv6Bits)
+	if err != nil {
+		return netip.Addr{}, false
+	}
+	return p.Addr(), true
+}
+
+// AddressKey is Address as the block list stores it: "203.0.113.7", or
+// "2001:db8:1:2::" for every address in 2001:db8:1:2::/64 -- an address any
+// IPv6 parser accepts, so a key shown in the dashboard can be released, and
+// pushed to the kernel, as it is. Text that is not an address is returned as
+// it is. Plain IPv4 text is returned without a parse.
+func AddressKey(ip string) string {
+	if strings.IndexByte(ip, ':') < 0 {
+		return ip
+	}
+	a, ok := Address(ip)
+	if !ok {
+		return ip
+	}
+	return a.String()
+}
+
 // ipv4Scope returns the /24 of a dotted-quad address as a substring of the
 // input, reporting false for anything that is not plainly IPv4.
 //

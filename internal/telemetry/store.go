@@ -2268,13 +2268,13 @@ func IsIPUnmitigated(ip string) bool {
 	// holds "not shunned" for every address IPMitigation looked up and found
 	// no row for, which says nothing about a release.
 	if s.unmitigatedCache != nil {
-		if val, ok := s.unmitigatedCache.Get(ip); ok {
+		if val, ok := s.unmitigatedCache.Get(addressCacheKey(ip)); ok {
 			if until, isUntil := val.(shunUntil); isUntil && until.active() {
 				return false
 			}
 		}
 	}
-	row, err := s.readIPShun(ip)
+	row, err := s.readIPShun(repid.AddressKey(ip))
 	return err == nil && row.held(time.Now())
 }
 
@@ -2315,7 +2315,7 @@ func IsIPMitigatedContext(ctx context.Context, ip string) bool {
 	if blocked, ok := s.cachedIPMitigation(ip); ok {
 		return blocked
 	}
-	until, err := s.lookups.ip.Do(ctx, ip)
+	until, err := s.lookups.ip.Do(ctx, repid.AddressKey(ip))
 	if err != nil {
 		mitigationLookupFailed(mitigationLookupIP, err)
 		return false
@@ -2341,7 +2341,7 @@ func (s *pathStatsStore) cachedIPMitigation(ip string) (blocked, ok bool) {
 	if s.unmitigatedCache == nil {
 		return false, false
 	}
-	val, hit := s.unmitigatedCache.Get(ip)
+	val, hit := s.unmitigatedCache.Get(addressCacheKey(ip))
 	if !hit {
 		return false, false
 	}
@@ -2350,10 +2350,29 @@ func (s *pathStatsStore) cachedIPMitigation(ip string) (blocked, ok bool) {
 	case answerFresh:
 		return blocked, true
 	case answerStale:
-		s.lookups.ip.Refresh(ip)
+		s.lookups.ip.Refresh(repid.AddressKey(ip))
 		return blocked, true
 	}
 	return false, false
+}
+
+// addressCacheKey is what the enforcement cache keeps ip's answer under:
+// repid.Address's key, in a form the request path builds without formatting
+// text -- plain IPv4 text as it is, and an IPv6 address as the netip.Addr of
+// its /64, which costs a parse and the one allocation the cache's interface
+// key cost already (ADR 0058). A v4-mapped address is its IPv4 text.
+func addressCacheKey(ip string) any {
+	if strings.IndexByte(ip, ':') < 0 {
+		return ip
+	}
+	a, ok := repid.Address(ip)
+	switch {
+	case !ok:
+		return ip
+	case a.Is4():
+		return a.String()
+	}
+	return a
 }
 
 // cachedIPAnswer reads what the cache holds for an address: whether it is
@@ -2388,7 +2407,7 @@ func (s *pathStatsStore) lookupIPShun(ctx context.Context, ip string) (shunUntil
 	since := s.lookups.writes.Load()
 	until, err := s.readIPShunUntil(ctx, ip)
 	if err == nil {
-		s.lookups.keep(s.unmitigatedCache, ip, ipAnswerToCache(until), since)
+		s.lookups.keep(s.unmitigatedCache, addressCacheKey(ip), ipAnswerToCache(until), since)
 	}
 	return until, err
 }
@@ -2676,7 +2695,7 @@ func ShunAutomatically(ip, reason string) (ShunResult, error) {
 		return ShunResult{Outcome: ShunExempt}, nil
 	}
 	now := time.Now().UTC().Truncate(time.Second)
-	prev, err := s.readIPShun(ip)
+	prev, err := s.readIPShun(repid.AddressKey(ip))
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return ShunResult{}, err
 	}
@@ -2692,7 +2711,7 @@ func ShunAutomatically(ip, reason string) (ShunResult, error) {
 // applyAutoShun writes ip's automatic shun until then and makes it take
 // effect: the cache the request path reads, and a leased kernel entry.
 func (s *pathStatsStore) applyAutoShun(ip, reason string, now, until time.Time) (ShunResult, error) {
-	written, err := s.writeAutoShun(ip, reason, now, until)
+	written, err := s.writeAutoShun(repid.AddressKey(ip), reason, now, until)
 	if err != nil {
 		logger.Default().LogError("failed to record an automatic shun", "ip", ip, "error", err)
 		return ShunResult{}, err
@@ -2707,7 +2726,7 @@ func (s *pathStatsStore) applyAutoShun(ip, reason string, now, until time.Time) 
 	}
 	s.lookups.noteWrite()
 	if s.unmitigatedCache != nil {
-		s.unmitigatedCache.Add(ip, shunUntil(until.UnixNano()))
+		s.unmitigatedCache.Add(addressCacheKey(ip), shunUntil(until.UnixNano()))
 	}
 	// An automatic shun -- an SSH brute-forcer, a scanner -- reaches open L4
 	// sessions too, not only connections accepted after it (ADR 0036).
@@ -2850,13 +2869,14 @@ func markIPMitigated(ip string, reason string, duration time.Duration) error {
 	// name the same instant.
 	now := time.Now().UTC().Truncate(time.Second)
 	cacheEnd := shunForever
+	key := repid.AddressKey(ip)
 	var err error
 	if duration > 0 {
 		until := now.Add(duration)
 		cacheEnd = shunUntil(until.UnixNano())
-		_, err = s.db.Exec(s.dialect.Rebind(QueryMarkIPMitigatedFor), ip, reason, sqlUTC(now), sqlUTC(until))
+		_, err = s.db.Exec(s.dialect.Rebind(QueryMarkIPMitigatedFor), key, reason, sqlUTC(now), sqlUTC(until))
 	} else {
-		_, err = s.db.Exec(s.dialect.Rebind(QueryMarkIPMitigated), ip, reason, sqlUTC(now))
+		_, err = s.db.Exec(s.dialect.Rebind(QueryMarkIPMitigated), key, reason, sqlUTC(now))
 	}
 	if err != nil {
 		logger.Default().LogError("failed to mark IP as mitigated", "ip", ip, "error", err)
@@ -2875,7 +2895,7 @@ func markIPMitigated(ip string, reason string, duration time.Duration) error {
 		s.lookups.noteWrite()
 	}
 	if err == nil && s.unmitigatedCache != nil {
-		s.unmitigatedCache.Add(ip, cacheEnd)
+		s.unmitigatedCache.Add(addressCacheKey(ip), cacheEnd)
 	}
 
 	// A block reaches the entrypoints' open sessions, not only connections
@@ -2924,7 +2944,8 @@ func MarkIPUnmitigated(ip string) error {
 	// The release time is bound in UTC rather than taken from the database's
 	// CURRENT_TIMESTAMP, which Postgres writes in the server's zone into a
 	// column without one: the hold is measured from it.
-	_, err := s.db.Exec(s.dialect.Rebind(QueryReleaseIPMitigation), sqlUTC(time.Now()), ip)
+	key := repid.AddressKey(ip)
+	_, err := s.db.Exec(s.dialect.Rebind(QueryReleaseIPMitigation), sqlUTC(time.Now()), key)
 	if err != nil {
 		logger.Default().LogError("failed to mark IP as unmitigated", "ip", ip, "error", err)
 	}
@@ -2937,12 +2958,12 @@ func MarkIPUnmitigated(ip string) error {
 		s.lookups.noteWrite()
 	}
 	if err == nil && s.unmitigatedCache != nil {
-		s.unmitigatedCache.Add(ip, notBlocked())
+		s.unmitigatedCache.Add(addressCacheKey(ip), notBlocked())
 	}
 	// A release is a ruling on the evidence that earned the shun, so none of
 	// it may count towards another (ADR 0029).
 	if err == nil {
-		forgetAddressEvidence(ip)
+		forgetAddressEvidence(key)
 	}
 
 	// Real-time eBPF synchronization to restore access immediately
@@ -3217,7 +3238,7 @@ func (l *blockLookups) noteWrite() { l.writes.Add(1) }
 // this node since the lookup began, which may have read the database before
 // it. Then the entry is dropped rather than kept over the write's own, and the
 // next request reads the database again. Rare: blocks are.
-func (l *blockLookups) keep(c *lru.ARCCache, key string, answer any, since uint64) {
+func (l *blockLookups) keep(c *lru.ARCCache, key, answer any, since uint64) {
 	if c == nil {
 		return
 	}
