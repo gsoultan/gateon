@@ -447,8 +447,8 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 			// Trace recording: an active debugger always records (explicit opt-in);
 			// otherwise sample per the tier to bound hot-path cost, except for
 			// requests that failed, which are always kept.
-			debug, hasDebug := r.Context().Value(DebugInfoContextKey).(*DebugInfo)
-			recordDetailed := hasDebug && debug != nil
+			debug := debugInfoOf(r, rs)
+			recordDetailed := debug != nil
 			recordSampled := false
 			if !recordDetailed {
 				recordSampled = shouldRecordTrace(traceRate, &traceCounter, actualStatus)
@@ -891,6 +891,18 @@ func Debugger(globalStore config.GlobalConfigStore) Middleware {
 			}
 		})
 	}
+}
+
+// debugInfoOf is what the debugger captured for r: on the request state when
+// there is one -- every request through an entrypoint -- else in the context.
+// Read from the context alone, as the metrics middleware once did, a debugger
+// capture never reached a trace (ADR 0060).
+func debugInfoOf(r *http.Request, rs *RequestState) *DebugInfo {
+	if rs != nil && rs.DebugInfo != nil {
+		return rs.DebugInfo
+	}
+	debug, _ := r.Context().Value(DebugInfoContextKey).(*DebugInfo)
+	return debug
 }
 
 type requestBodyCapture struct {
