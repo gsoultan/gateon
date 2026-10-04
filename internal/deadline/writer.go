@@ -5,6 +5,7 @@ package deadline
 
 import (
 	"bufio"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -44,6 +45,7 @@ type StreamWriter struct {
 	limits    StreamLimits
 	decided   bool // a final status has been written, or the connection hijacked
 	streaming bool
+	cut       bool      // a write to the client failed: the response is incomplete
 	start     time.Time // when the stream began
 	moved     time.Time // when its deadlines were last moved
 }
@@ -89,6 +91,9 @@ func (s *StreamWriter) Write(b []byte) (int, error) {
 	if s.streaming && n > 0 {
 		s.touch()
 	}
+	if err != nil {
+		s.noteFailure(err)
+	}
 	return n, err
 }
 
@@ -100,9 +105,40 @@ func (s *StreamWriter) ReadFrom(src io.Reader) (int64, error) {
 		s.decide(http.StatusOK)
 	}
 	if rf, ok := s.ResponseWriter.(io.ReaderFrom); ok && !s.streaming {
-		return rf.ReadFrom(src)
+		n, err := rf.ReadFrom(src)
+		if err != nil {
+			s.noteFailure(err)
+		}
+		return n, err
 	}
 	return io.Copy(writerOnly{s}, src)
+}
+
+// noteFailure records that the response did not reach the client whole.
+// ErrBodyNotAllowed (a body on a 204 or 304) and ErrHijacked lose nothing the
+// client was owed, so they are not a cut.
+func (s *StreamWriter) noteFailure(err error) {
+	if !errors.Is(err, http.ErrBodyNotAllowed) && !errors.Is(err, http.ErrHijacked) {
+		s.cut = true
+	}
+}
+
+// Cut reports whether a write to the client failed -- a deadline passed, the
+// stream was reset -- so the response the handler produced is incomplete.
+func (s *StreamWriter) Cut() bool { return s.cut }
+
+// AbortIfCut ends a cut response as an abort: it panics with
+// http.ErrAbortHandler, which every server takes to mean "do not finish this
+// response". Without it, a handler that returns normally after a failed write
+// -- httputil.ReverseProxy does, when the request carries no
+// http.ServerContextKey -- leaves HTTP/3 to end the stream cleanly, and a
+// streamed response with no Content-Length then reads as complete (DP-N4).
+// HTTP/1 closes the connection and HTTP/2 resets the stream, as they already
+// did once the deadline passed. Called after the handler has returned.
+func (s *StreamWriter) AbortIfCut() {
+	if s.cut {
+		panic(http.ErrAbortHandler)
+	}
 }
 
 // writerOnly hides every method of a writer but Write, so io.Copy cannot hand

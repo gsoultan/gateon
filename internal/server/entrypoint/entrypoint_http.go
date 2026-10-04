@@ -99,6 +99,7 @@ func dynamicTimeouts(ep *gateonv1.EntryPoint, deps *Deps, next http.Handler) htt
 		sw := deadline.NewStreamWriter(w, limits)
 		defer deadline.Release(sw)
 		next.ServeHTTP(sw, r)
+		sw.AbortIfCut() // a response the deadline cut never ends cleanly (DP-N4)
 	})
 }
 
@@ -331,7 +332,7 @@ func (e *httpEntrypoint) serveTCP(server *http.Server) {
 }
 
 func newHTTP3Server(addr string, handler http.Handler, tlsConfig *tls.Config) *http3.Server {
-	return &http3.Server{
+	s := &http3.Server{
 		Addr:           addr,
 		Handler:        handler,
 		TLSConfig:      tlsConfig,
@@ -343,6 +344,17 @@ func newHTTP3Server(addr string, handler http.Handler, tlsConfig *tls.Config) *h
 			MaxIncomingUniStreams: quicMaxIncomingUniStreams,
 		},
 	}
+	// httputil.ReverseProxy aborts a response whose copy failed only when the
+	// request context carries http.ServerContextKey -- its sign that a server
+	// will recover the panic. quic-go sets its own key, so the proxy returned
+	// normally from a cut copy, logged "suppressing panic" to stderr once per
+	// cut response, and quic-go ended the stream cleanly (DP-N4). Set once per
+	// connection, not per request. The value is the HTTP/3 server; nothing in
+	// the gateway reads it as an *http.Server.
+	s.ConnContext = func(ctx context.Context, _ *quic.Conn) context.Context {
+		return context.WithValue(ctx, http.ServerContextKey, s)
+	}
+	return s
 }
 
 func protocols(ep *gateonv1.EntryPoint) (hasTCP, hasUDP bool) {
