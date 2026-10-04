@@ -51,8 +51,9 @@ func ListenerBound(entrypoint, addr string) {
 }
 
 // ListenerFailed records that a listener of entrypoint could not bind addr.
-// /readyz answers 503 naming it until the process is restarted: entrypoints
-// are bound once, at startup, so nothing will try again.
+// /readyz answers 503 naming it until ListenerBound says otherwise: the
+// entrypoint keeps retrying the bind, with a backoff capped at 30 s, until it
+// succeeds or the gateway shuts down (OPS-N5).
 func ListenerFailed(entrypoint, addr string, err error) {
 	listeners.Lock()
 	defer listeners.Unlock()

@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"sync/atomic"
 	"time"
 
 	"github.com/gsoultan/gateon/internal/deadline"
@@ -20,7 +21,6 @@ import (
 	"github.com/gsoultan/gateon/internal/middleware/security"
 	"github.com/gsoultan/gateon/internal/middleware/security/identity"
 	"github.com/gsoultan/gateon/internal/middleware/traffic"
-	"github.com/gsoultan/gateon/internal/server/readiness"
 	"github.com/gsoultan/gateon/internal/syncutil"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
@@ -207,18 +207,39 @@ func (e *httpEntrypoint) startHTTP3(h http.Handler) http.Handler {
 	// all, so a slow body or a slow read over QUIC was bounded only by the
 	// connection's idle timeout, which one byte now and then resets.
 	h3Server := newHTTP3Server(addr, dynamicTimeouts(e.ep, e.deps, h), e.tlsConfig)
+	// HTTP/3 is advertised (Alt-Svc) only while its listener is serving: a
+	// listener still waiting for its port would send every client to a QUIC
+	// endpoint that is not there.
+	var serving atomic.Bool
+	// Derived now, not in the retry: newServer hands e.tlsConfig to
+	// http2.ConfigureServer, which writes to it, and a retry runs later on its
+	// own goroutine.
+	tlsConf, quicConf := http3.ConfigureTLSConfig(e.tlsConfig), h3Server.QUICConfig.Clone()
 	// Listened on here rather than by ListenAndServe, so that the listener
 	// the server accepts from is the one that holds the entrypoint's limit.
-	ln, err := quic.ListenAddrEarly(addr, http3.ConfigureTLSConfig(e.tlsConfig), h3Server.QUICConfig.Clone())
-	if err != nil {
-		logger.L.LogError("HTTP/3 listen failed; the entrypoint is not serving HTTP/3 and /readyz reports it",
-			"error", err, "addr", addr, "ep", e.ep.Id)
-		readiness.ListenerFailed(e.ep.Id, "udp "+addr, err)
-		return h
-	}
-	readiness.ListenerBound(e.ep.Id, "udp "+addr)
+	bindListener(e.deps, e.wg, listenerSpec[*quic.EarlyListener]{
+		ep: e.ep.Id, addr: "udp " + addr,
+		listen: func() (*quic.EarlyListener, error) {
+			return quic.ListenAddrEarly(addr, tlsConf, quicConf)
+		},
+		serve: func(ln *quic.EarlyListener) {
+			e.serveHTTP3(h3Server, ln)
+			serving.Store(true)
+		},
+	})
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.ProtoMajor < 3 && serving.Load() {
+			_ = h3Server.SetQUICHeaders(w.Header())
+		}
+		h.ServeHTTP(w, r)
+	})
+}
+
+// serveHTTP3 serves h3Server on ln until shutdown.
+func (e *httpEntrypoint) serveHTTP3(h3Server *http3.Server, ln *quic.EarlyListener) {
+	addr := e.ep.Address
 	if e.deps.ShutdownRegistry != nil {
-		e.deps.ShutdownRegistry.Register(func(ctx context.Context) error {
+		e.deps.ShutdownRegistry.Register(func(context.Context) error {
 			err := h3Server.Close()
 			_ = ln.Close() // ServeListener leaves closing it to its caller
 			return err
@@ -230,12 +251,6 @@ func (e *httpEntrypoint) startHTTP3(h http.Handler) http.Handler {
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			logger.L.LogError("HTTP/3 server failed", "error", err, "addr", addr)
 		}
-	})
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.ProtoMajor < 3 {
-			_ = h3Server.SetQUICHeaders(w.Header())
-		}
-		h.ServeHTTP(w, r)
 	})
 }
 
@@ -302,14 +317,16 @@ func (e *httpEntrypoint) newServer(h http.Handler) *http.Server {
 // than its accept.
 func (e *httpEntrypoint) serveTCP(server *http.Server) {
 	addr := e.ep.Address
-	l, err := net.Listen("tcp", addr)
-	if err != nil {
-		logger.L.LogError("HTTP/S listen failed; the entrypoint is not serving and /readyz reports it",
-			"error", err, "addr", addr, "ep", e.ep.Id)
-		readiness.ListenerFailed(e.ep.Id, addr, err)
-		return
-	}
-	readiness.ListenerBound(e.ep.Id, addr)
+	bindListener(e.deps, e.wg, listenerSpec[net.Listener]{
+		ep: e.ep.Id, addr: addr,
+		listen: func() (net.Listener, error) { return net.Listen("tcp", addr) },
+		serve:  func(l net.Listener) { e.serveTCPOn(server, l) },
+	})
+}
+
+// serveTCPOn serves server on the bound listener l.
+func (e *httpEntrypoint) serveTCPOn(server *http.Server, l net.Listener) {
+	addr := e.ep.Address
 	if e.deps.Phantom != nil {
 		l = e.deps.Phantom.OptimizeListener(l)
 	}
