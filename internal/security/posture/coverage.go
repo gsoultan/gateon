@@ -36,6 +36,8 @@ const (
 	typeWAF           = "waf"
 	typeFileSecurity  = "file_security"
 	typeBotManagement = "bot_management"
+	typeRateLimit     = "ratelimit"
+	typeInflight      = "inflightreq"
 	keyAuditOnly      = "audit_only"
 	keySignatureScan  = "enable_signature_scan"
 )
@@ -74,6 +76,10 @@ type RouteCoverage struct {
 	// global bot-management settings only supply defaults to that middleware;
 	// they protect no route that does not carry it.
 	BotManagement int `json:"botManagement"`
+	// RateLimited is how many routes carry a ratelimit or inflightreq
+	// middleware: the controls that bound what one bursty client costs a
+	// backend. The WAF's dos_protection flag selects no rule (ADR 0044).
+	RateLimited int `json:"rateLimited"`
 }
 
 // GlobalWAFMode is the mode the gateway-wide WAF runs in.
@@ -113,6 +119,10 @@ func Coverage(c Config) RouteCoverage {
 		}
 		if len(routeMiddlewares(rt, c.Middlewares, typeBotManagement)) > 0 {
 			cov.BotManagement++
+		}
+		if len(routeMiddlewares(rt, c.Middlewares, typeRateLimit))+
+			len(routeMiddlewares(rt, c.Middlewares, typeInflight)) > 0 {
+			cov.RateLimited++
 		}
 	}
 	return cov

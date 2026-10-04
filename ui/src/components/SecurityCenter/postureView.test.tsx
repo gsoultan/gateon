@@ -16,7 +16,7 @@ const { SecurityPostureCard } = await import("./OverviewTab");
 const waf = (mode: WafPosture["mode"], total: number, enforcing: number, detecting: number): WafPosture => ({
   enabled: mode !== "off",
   mode,
-  routes: { total, enforcing, detecting, unprotected: total - enforcing - detecting, signatureScanning: 0, botManagement: 0 },
+  routes: { total, enforcing, detecting, unprotected: total - enforcing - detecting, signatureScanning: 0, botManagement: 0, rateLimited: 0 },
   customRulesFromDisk: false,
 });
 

@@ -129,6 +129,19 @@ func TestBotCoverageCountsTheRoutesThatCarryIt(t *testing.T) {
 	}
 }
 
+// TestRateLimitCoverageCountsTheRoutesThatCarryIt: what replaces the
+// advisory's removed DoS-switch check (NEW-6) is counted on the routes that
+// carry a ratelimit or inflightreq middleware, once per route.
+func TestRateLimitCoverageCountsTheRoutesThatCarryIt(t *testing.T) {
+	mws := index(mw("rl", "ratelimit", nil), mw("inflight", "inflightreq", nil), mw("waf", "waf", nil))
+	cov := Coverage(Config{Global: &gateonv1.GlobalConfig{}, Middlewares: mws, Routes: []*gateonv1.Route{
+		httpRoute("a", "rl"), httpRoute("b", "inflight"), httpRoute("c", "rl", "inflight"), httpRoute("d", "waf"),
+	}})
+	if cov.RateLimited != 3 {
+		t.Fatalf("RateLimited = %d, want 3 (routes a, b and c; d carries only a WAF)", cov.RateLimited)
+	}
+}
+
 func controlByID(t *testing.T, s Score, id string) Control {
 	t.Helper()
 	for _, c := range s.Controls {

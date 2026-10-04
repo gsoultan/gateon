@@ -114,6 +114,7 @@ func analyzeConfig(ctx context.Context, cfg *gateonv1.GlobalConfig, routes wafCo
 	insights = append(insights, tlsInsights(cfg.GetTls())...)
 	insights = append(insights, wafInsights(cfg.GetWaf(), routes)...)
 	insights = append(insights, botInsights(routes)...)
+	insights = append(insights, rateLimitInsights(routes)...)
 	insights = append(insights, managementExposureInsights(cfg.GetManagement())...)
 	insights = append(insights, auditInsights(cfg.GetAudit())...)
 	insights = append(insights, detectionInsights(cfg)...)
@@ -259,16 +260,30 @@ func globalWAFInsights(waf *gateonv1.WafConfig) []aiInsight {
 			SuggestedConfig: "waf:\n  paranoia_level: 2",
 		})
 	}
-	if !waf.GetDosProtection() {
-		out = append(out, aiInsight{
-			Title:          "DoS protection is off",
-			Description:    "WAF DoS protection is disabled; bursty abusive clients can exhaust backend capacity.",
-			Severity:       insightWarning,
-			Category:       categoryAvailability,
-			Recommendation: "Enable WAF DoS protection (and consider eBPF/XDP rate limiting) on public entrypoints.",
-		})
-	}
 	return out
+}
+
+// rateLimitInsights reports which routes bound what one client may cost them.
+// It replaces a "DoS protection is off" warning that recommended the WAF's
+// dos_protection flag, which selects no rule and which ADR 0044 removed from
+// the dashboard: setting it cleared the warning and protected nothing (truth
+// NEW-6). A ratelimit or inflightreq middleware is what does.
+func rateLimitInsights(cov wafCoverage) []aiInsight {
+	if cov.Total == 0 || cov.RateLimited == cov.Total {
+		return nil
+	}
+	title := "Rate limiting covers no route"
+	if cov.RateLimited > 0 {
+		title = fmt.Sprintf("Rate limiting covers %d of %d routes", cov.RateLimited, cov.Total)
+	}
+	return []aiInsight{{
+		Title: title,
+		Description: fmt.Sprintf("%d of %d routes carry no ratelimit or inflightreq middleware, so one bursty "+
+			"client can use as much of their backends' capacity as it can send.", cov.Total-cov.RateLimited, cov.Total),
+		Severity:       insightInfo,
+		Category:       categoryAvailability,
+		Recommendation: "Attach a ratelimit middleware (requests per client) or an inflightreq middleware (concurrent requests) to public routes.",
+	}}
 }
 
 // botInsights reports which routes carry a bot_management middleware. It used
