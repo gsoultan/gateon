@@ -53,6 +53,21 @@ export function tlsBindingProblem(config: Record<string, string>): string | unde
   return secret.length >= 32 ? undefined : TLS_BINDING_SECRET_REQUIRED;
 }
 
+/**
+ * Why a tarpit config cannot be saved, or undefined. The factory reads an
+ * unset threshold as 0, and the delay is the base delay scaled by the score
+ * over the threshold: at 0 every client, a clean one included, meets it and
+ * the delay is a division by zero.
+ */
+export function tarpitProblem(config: Record<string, string>): string | undefined {
+  const t = Number(config.threshold);
+  if (!config.threshold || !Number.isFinite(t) || t <= 0) {
+    return "Set a threat score threshold above 0: at 0 every client is delayed.";
+  }
+  if (!config.max_delay) return "Set a maximum delay, so no request is held indefinitely.";
+  return undefined;
+}
+
 /** The first reason a middleware of this type cannot be saved, or undefined. */
 export function middlewareConfigProblem(type: string, config: Record<string, string>): string | undefined {
   switch (type) {
@@ -65,6 +80,8 @@ export function middlewareConfigProblem(type: string, config: Record<string, str
       return xfccProblem(config);
     case "tls_binding":
       return tlsBindingProblem(config);
+    case "tarpit":
+      return tarpitProblem(config);
     default:
       return undefined;
   }

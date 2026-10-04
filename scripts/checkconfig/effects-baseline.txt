@@ -120,3 +120,17 @@ min_requests  # circuit_breaker: as error_threshold; proven by TestAnUnsetMinimu
 sleep_window  # circuit_breaker: time-based; proven by TestFailedProbeReopensForAFullSleepWindow and TestRetryAfterIsTheTimeLeftInTheSleepWindow
 window_size  # circuit_breaker: time-based; proven by TestBreakerJudgesAWindowOnlyOnceItHoldsMinRequests
 per_ip  # inflightreq: differs only under concurrent requests, which the registry probe does not send; proven by TestInflightTotalCapIsATotal and TestInflightPerAddressIsPerAddress
+base_delay  # unproven: written by an editor added for NEW-8 (pow, tarpit, entropy, graphql_firewall, deception)
+canary_header  # unproven: written by an editor added for NEW-8 (pow, tarpit, entropy, graphql_firewall, deception)
+canary_token  # unproven: written by an editor added for NEW-8 (pow, tarpit, entropy, graphql_firewall, deception)
+difficulty  # unproven: written by an editor added for NEW-8 (pow, tarpit, entropy, graphql_firewall, deception)
+enable_troll_response  # unproven: written by an editor added for NEW-8 (pow, tarpit, entropy, graphql_firewall, deception)
+honey_forms  # unproven: written by an editor added for NEW-8 (pow, tarpit, entropy, graphql_firewall, deception)
+honeypot_paths  # unproven: written by an editor added for NEW-8 (pow, tarpit, entropy, graphql_firewall, deception)
+inject_invisible_links  # unproven: written by an editor added for NEW-8 (pow, tarpit, entropy, graphql_firewall, deception)
+introspection  # unproven: written by an editor added for NEW-8 (pow, tarpit, entropy, graphql_firewall, deception)
+invisible_link_paths  # unproven: written by an editor added for NEW-8 (pow, tarpit, entropy, graphql_firewall, deception)
+max_complexity  # unproven: written by an editor added for NEW-8 (pow, tarpit, entropy, graphql_firewall, deception)
+max_delay  # unproven: written by an editor added for NEW-8 (pow, tarpit, entropy, graphql_firewall, deception)
+max_depth  # unproven: written by an editor added for NEW-8 (pow, tarpit, entropy, graphql_firewall, deception)
+threshold  # unproven: written by an editor added for NEW-8 (pow, tarpit, entropy, graphql_firewall, deception)

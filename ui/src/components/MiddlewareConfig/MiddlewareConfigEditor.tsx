@@ -54,6 +54,14 @@ import {
   ReplacePathRegexConfigEditor,
   CORS_PRESETS,
 } from "./MiscConfigEditors";
+import {
+  PowConfigEditor,
+  TarpitConfigEditor,
+  EntropyConfigEditor,
+  GraphQLFirewallConfigEditor,
+  DeceptionConfigEditor,
+  RecognitionConfigEditor,
+} from "./ChallengeConfigEditors";
 
 interface MiddlewareConfigEditorProps {
   type: string;
@@ -469,6 +477,26 @@ export function MiddlewareConfigEditor({
 
     case "policy":
       return <PolicyConfigEditor config={config} onChange={onChange} />;
+
+    case "pow":
+      return <PowConfigEditor config={config} updateConfig={updateConfig} />;
+
+    case "tarpit":
+      return <TarpitConfigEditor config={config} updateConfig={updateConfig} />;
+
+    case "entropy":
+      return <EntropyConfigEditor config={config} updateConfig={updateConfig} />;
+
+    case "graphql_firewall":
+      return <GraphQLFirewallConfigEditor config={config} updateConfig={updateConfig} />;
+
+    case "deception":
+      return <DeceptionConfigEditor config={config} updateConfig={updateConfig} />;
+
+    case "xss_recognition":
+    case "sqli_recognition":
+    case "threat_recognition":
+      return <RecognitionConfigEditor type={type} />;
 
     case "cache":
       return <CacheConfigEditor config={config} updateConfig={updateConfig} />;
