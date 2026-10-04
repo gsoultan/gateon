@@ -89,7 +89,15 @@ func NewWebhookDispatcher(webhookURL string) *WebhookDispatcher {
 	return &WebhookDispatcher{webhookURL: webhookURL}
 }
 
+// Send posts the threat record without its request and response bodies (ADR
+// 0060). The bodies are what a debugger captured from a client and a backend,
+// already redacted by the telemetry store but still other people's data, and
+// a webhook is usually a third party; the record's id, type, source and URI
+// are what raises an alarm, and the dashboard holds the rest. The fields stay
+// in the payload, empty, so its shape does not change under a consumer. There
+// is no setting to send them: none is needed to triage from the dashboard.
 func (d *WebhookDispatcher) Send(ctx context.Context, threat telemetry.SecurityThreat) error {
+	threat.RequestBody, threat.ResponseBody = "", ""
 	return sendWebhook(ctx, d.webhookURL, threat)
 }
 
