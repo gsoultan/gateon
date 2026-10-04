@@ -34,6 +34,7 @@ import (
 	"github.com/gsoultan/gateon/internal/security/mitigation"
 	"github.com/gsoultan/gateon/internal/security/redact"
 	"github.com/gsoultan/gateon/internal/syncutil"
+	"github.com/gsoultan/gateon/internal/telemetry/blocklist"
 	"github.com/gsoultan/gateon/internal/telemetry/lookupgate"
 	"github.com/gsoultan/gateon/internal/telemetry/repid"
 	"github.com/gsoultan/gateon/internal/telemetry/tracebudget"
@@ -617,7 +618,12 @@ type pathStatsStore struct {
 	userMitigationCache         *lru.ARCCache
 	// lookups reads the block list on the request path under a deadline,
 	// one query per key and a bounded number in flight (ADR 0054).
-	lookups           *blockLookups
+	lookups *blockLookups
+	// blocks is every block in force, read at start-up and every minute, so
+	// one is enforced without a lookup (ADR 0058); blockListLoaded is closed
+	// once the first read has ended.
+	blocks            *blocklist.List
+	blockListLoaded   chan struct{}
 	traceStoreEnabled atomic.Bool
 	// traceGuard stops trace writes while the disk holding the store is
 	// nearly full and backs Pebble off a full one (ADR 0049).
@@ -659,13 +665,23 @@ func PathStatsStoreReady() bool {
 // databaseURL: sqlite:path, postgres://..., mysql://..., mariadb://...
 // Plain path (e.g. "gateon.db") is treated as SQLite.
 // It is safe to call multiple times; only the first call takes effect.
+//
+// It returns once the block list has been read (ADR 0058), or
+// blockListStartWait has passed, waiting outside the store lock so nothing
+// that asks for the store waits with it.
 func InitPathStatsStore(databaseURL string, retentionDays int) error {
 	storeMu.Lock()
-	defer storeMu.Unlock()
 	if store != nil {
+		storeMu.Unlock()
 		return nil
 	}
-	return initStore(databaseURL, retentionDays)
+	err := initStore(databaseURL, retentionDays)
+	st := store
+	storeMu.Unlock()
+	if err == nil && st != nil {
+		st.awaitBlockList()
+	}
+	return err
 }
 
 // resolveTraceDir picks the directory for the Pebble trace store.
@@ -773,6 +789,8 @@ func initStore(databaseURL string, retentionDays int) error {
 		st.userMitigationCache = cache
 	}
 	st.lookups = newBlockLookups(st)
+	st.blocks = blocklist.New(blockListBounds)
+	st.blockListLoaded = make(chan struct{})
 
 	if err := db.Migrate(database, dialect); err != nil {
 		_ = pdb.Close()
@@ -803,6 +821,7 @@ func initStore(databaseURL string, retentionDays int) error {
 
 	st.wg.Go(st.loop)
 	st.wg.Go(st.dailyResetLoop)
+	st.wg.Go(func() { st.blockListLoop(st.blockListLoaded) })
 
 	return nil
 }
@@ -2338,18 +2357,21 @@ func IPMitigationFromCache(ip string) (blocked, ok bool) {
 }
 
 func (s *pathStatsStore) cachedIPMitigation(ip string) (blocked, ok bool) {
-	if s.unmitigatedCache == nil {
-		return false, false
+	age := answerNone
+	if s.unmitigatedCache != nil {
+		if val, hit := s.unmitigatedCache.Get(addressCacheKey(ip)); hit {
+			blocked, age = cachedIPAnswer(val)
+		}
 	}
-	val, hit := s.unmitigatedCache.Get(addressCacheKey(ip))
-	if !hit {
-		return false, false
-	}
-	blocked, age := cachedIPAnswer(val)
-	switch age {
-	case answerFresh:
+	switch {
+	case age == answerFresh:
 		return blocked, true
-	case answerStale:
+	case !blocked && s.listedIPBlock(ip):
+		// The block list holds a shun the cache does not know of: one read
+		// before a restart, or written on another node since this answer
+		// (ADR 0058). Enforced without a lookup, whether or not one could run.
+		return true, true
+	case age == answerStale:
 		s.lookups.ip.Refresh(repid.AddressKey(ip))
 		return blocked, true
 	}
@@ -2728,6 +2750,7 @@ func (s *pathStatsStore) applyAutoShun(ip, reason string, now, until time.Time) 
 	if s.unmitigatedCache != nil {
 		s.unmitigatedCache.Add(addressCacheKey(ip), shunUntil(until.UnixNano()))
 	}
+	s.noteIPBlock(ip, until.UnixNano())
 	// An automatic shun -- an SSH brute-forcer, a scanner -- reaches open L4
 	// sessions too, not only connections accepted after it (ADR 0036).
 	// ShunAutomatically already refused loopback and the allowlist, so the
@@ -2897,6 +2920,9 @@ func markIPMitigated(ip string, reason string, duration time.Duration) error {
 	if err == nil && s.unmitigatedCache != nil {
 		s.unmitigatedCache.Add(addressCacheKey(ip), cacheEnd)
 	}
+	if err == nil {
+		s.noteIPBlock(ip, int64(cacheEnd))
+	}
 
 	// A block reaches the entrypoints' open sessions, not only connections
 	// accepted after it. Fired only on a successful write, after the cache is
@@ -2959,6 +2985,9 @@ func MarkIPUnmitigated(ip string) error {
 	}
 	if err == nil && s.unmitigatedCache != nil {
 		s.unmitigatedCache.Add(addressCacheKey(ip), notBlocked())
+	}
+	if err == nil {
+		s.noteIPBlock(ip, blocklist.Released)
 	}
 	// A release is a ruling on the evidence that earned the shun, so none of
 	// it may count towards another (ADR 0029).
@@ -3109,10 +3138,14 @@ func (s *pathStatsStore) cachedUserMitigation(ja4plus string) (blocked, ok bool)
 	// request, which put a database round trip on every request a blocked
 	// client made (dataplane F7).
 	blocked, age := s.cachedUserAnswer(ja4plus)
-	switch age {
-	case answerFresh:
+	switch {
+	case age == answerFresh:
 		return blocked, true
-	case answerStale:
+	case !blocked && s.blocks.HasKeys() && s.blocks.KeyBlocked(ja4plus):
+		// 3. The block list holds a block the cache does not know of (ADR
+		// 0058), enforced without a lookup.
+		return true, true
+	case age == answerStale:
 		s.lookups.user.Refresh(ja4plus)
 		return blocked, true
 	}
@@ -3309,6 +3342,202 @@ func WaitBlockLookupsForTest() {
 	}
 }
 
+// The block list (ADR 0058): every block in force, read at start-up and every
+// blockListRefreshEvery, so a block is enforced without a lookup -- after a
+// restart, and while the lookups are saturated or the database does not
+// answer -- which the cache, learning blocks one lookup at a time, could not.
+const (
+	// blockListRefreshEvery is how often the list is read again: the epoch a
+	// cached answer is trusted for, so a block or release written on another
+	// node reaches the list as soon as it reaches the cache.
+	blockListRefreshEvery = mitigationEpochLength
+	// blockListReadTimeout bounds one read where the driver honours it.
+	blockListReadTimeout = 30 * time.Second
+	// blockListStartWait is how long opening the store waits for the first
+	// read. The database answered the migrations a moment before; one that
+	// stops answering now does not hold start-up longer than this, and the
+	// list is read on the next refresh.
+	blockListStartWait = 5 * time.Second
+)
+
+// blockListBounds is what the list holds: 20,000 address shuns (an IPv4
+// address or IPv6 /64 and an end; 1.3 MB at the bound, measured) and 20,000
+// fingerprint blocks (a key of at most 128 bytes -- repid.For writes under 100
+// -- and an end; 2.8 MB at the bound with keys of that length, about 3.7 MB
+// with every key at 128): at most 5 MB for one read, and a refresh holds two
+// reads for a moment. A list larger than that is read
+// newest first and the rest is left to the lookups, as before the list
+// existed (reported in gateon_mitigation_block_list_complete). Not a
+// tunable: it is a bound on an attack's worth of blocks, not a size an
+// operator chooses. A var so a test can make it small.
+var blockListBounds = blocklist.Bounds{Entries: 20_000, KeyBytes: 128, Edits: 4_096}
+
+var (
+	// BlockListEntries is how many blocks the last read of the block list
+	// holds, by kind ("ip" or "user").
+	BlockListEntries = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "gateon_mitigation_block_list_entries",
+		Help: "Blocks in force this node enforces without a database lookup, by kind (ip, user), as of the last read.",
+	}, []string{"kind"})
+	// BlockListComplete is 1 while the block list holds every block in force
+	// of a kind, and 0 when there were more than blockListBounds.Entries: the
+	// oldest are then enforced only by a lookup.
+	BlockListComplete = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "gateon_mitigation_block_list_complete",
+		Help: "1 if the block list holds every block in force of a kind (ip, user); 0 if some are enforced only by a database lookup.",
+	}, []string{"kind"})
+)
+
+// blockListLoop reads the block list at once, closes loaded, and reads it
+// again every blockListRefreshEvery until the store stops.
+func (s *pathStatsStore) blockListLoop(loaded chan<- struct{}) {
+	complete := s.readBlockList(true)
+	close(loaded)
+	ticker := time.NewTicker(blockListRefreshEvery)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-s.stopCh:
+			return
+		case <-ticker.C:
+			complete = s.readBlockList(complete)
+		}
+	}
+}
+
+// readBlockList reads every block in force into the list. A read that fails
+// leaves the last one in force -- its automatic shuns still lapse when they
+// end -- and is logged. It returns whether the list holds every block,
+// logging when that changes from wasComplete.
+func (s *pathStatsStore) readBlockList(wasComplete bool) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), blockListReadTimeout)
+	defer cancel()
+	t := s.blocks.Begin()
+	b := s.blocks.NewBase()
+	err := s.readIPShunsInto(ctx, b)
+	if err == nil {
+		err = s.readUserBlocksInto(ctx, b)
+	}
+	if err != nil {
+		logger.Default().LogError("block list: read failed; enforcing the last list read", "error", err)
+		return wasComplete
+	}
+	s.blocks.Replace(t, b)
+	ips, keys, ipsComplete, keysComplete := s.blocks.Size()
+	BlockListEntries.WithLabelValues(mitigationLookupIP).Set(float64(ips))
+	BlockListEntries.WithLabelValues(mitigationLookupUser).Set(float64(keys))
+	BlockListComplete.WithLabelValues(mitigationLookupIP).Set(boolGauge(ipsComplete))
+	BlockListComplete.WithLabelValues(mitigationLookupUser).Set(boolGauge(keysComplete))
+	complete := ipsComplete && keysComplete
+	if wasComplete && !complete {
+		logger.Default().LogWarn("block list: more blocks in force than it holds; the oldest are enforced only by a lookup",
+			"bound", blockListBounds.Entries)
+	}
+	return complete
+}
+
+func boolGauge(b bool) float64 {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+// readIPShunsInto adds every address shun in force to b, newest first. A row
+// whose key is not an address, or whose end does not scan, is left to the
+// lookup, which reads it as it always has.
+func (s *pathStatsStore) readIPShunsInto(ctx context.Context, b *blocklist.Base) error {
+	rows, err := s.db.QueryContext(ctx, s.dialect.Rebind(QueryBlockListIPShuns), sqlUTC(time.Now()), blockListBounds.Entries+1)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var ip string
+		var end sql.NullTime
+		if rows.Scan(&ip, &end) != nil {
+			b.AddressesCut()
+			continue
+		}
+		a, ok := repid.Address(ip)
+		if !ok {
+			continue
+		}
+		until := blocklist.Forever
+		if end.Valid {
+			until = end.Time.UnixNano()
+		}
+		if !b.AddAddress(a, until) {
+			break
+		}
+	}
+	return rows.Err()
+}
+
+// readUserBlocksInto adds every fingerprint block in force to b: each scoped
+// key whose latest row inside the TTL is a block, until that row's TTL ends.
+func (s *pathStatsStore) readUserBlocksInto(ctx context.Context, b *blocklist.Base) error {
+	limit := blockListBounds.Entries + 1
+	rows, err := s.db.QueryContext(ctx, s.dialect.Rebind(QueryBlockListUserMitigations), mitigationCutoff(), limit)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	seen := make(map[string]struct{})
+	n := 0
+	for rows.Next() {
+		n++
+		var key, status string
+		var at time.Time
+		if rows.Scan(&key, &status, &at) != nil {
+			b.KeysCut()
+			continue
+		}
+		if _, decided := seen[key]; decided {
+			continue
+		}
+		seen[key] = struct{}{}
+		if status == statusMitigated && !b.AddKey(key, at.Add(mitigationTTL).UnixNano()) {
+			break
+		}
+	}
+	if n >= limit {
+		b.KeysCut()
+	}
+	return rows.Err()
+}
+
+// awaitBlockList waits for the store's first read of the block list, at most
+// blockListStartWait.
+func (s *pathStatsStore) awaitBlockList() {
+	timer := time.NewTimer(blockListStartWait)
+	defer timer.Stop()
+	select {
+	case <-s.blockListLoaded:
+	case <-timer.C:
+		logger.Default().LogWarn("block list: not read within the start-up wait; blocks are enforced by lookup until it is",
+			"wait", blockListStartWait)
+	}
+}
+
+// listedIPBlock reports whether the block list holds a shun in force for ip.
+// An empty list -- most installs, most of the time -- costs a load.
+func (s *pathStatsStore) listedIPBlock(ip string) bool {
+	if !s.blocks.HasAddresses() {
+		return false
+	}
+	a, ok := repid.Address(ip)
+	return ok && s.blocks.AddressBlocked(a)
+}
+
+// noteIPBlock records this node's write of ip's block (until its end) or
+// release (blocklist.Released) in the block list.
+func (s *pathStatsStore) noteIPBlock(ip string, until int64) {
+	if a, ok := repid.Address(ip); ok {
+		s.blocks.NoteAddress(a, until)
+	}
+}
+
 // unmitigationHoldWindow is how long a manual release of a fingerprint holds
 // before escalateMitigation may block it again.
 const unmitigationHoldWindow = 24 * time.Hour
@@ -3467,6 +3696,8 @@ func MarkUserMitigated(ja4plus string, fpType string, reason string, category st
 	_, err := s.db.Exec(query, ja4plus, fpType, reason, category, now, reason, category, now)
 	if err != nil {
 		logger.Default().LogError("failed to mark user as mitigated", "ja4plus", ja4plus, "error", err)
+	} else {
+		s.blocks.NoteKey(ja4plus, now.Add(mitigationTTL).UnixNano())
 	}
 	s.lookups.noteWrite()
 	if s.userMitigationCache != nil {
@@ -3519,6 +3750,9 @@ func MarkUserUnmitigated(ja4plus string) bool {
 	if err != nil {
 		logger.Default().LogError("failed to mark user as unmitigated", "ja4plus", ja4plus, "error", err)
 	}
+	// Whether or not the marker was written, the block is gone from the
+	// table: the list must not keep it either.
+	s.blocks.NoteKey(ja4plus, blocklist.Released)
 	return released
 }
 
@@ -4469,12 +4703,27 @@ func GetSecurityThreatsLite(ctx context.Context, limit, offset int, filter *Thre
 		if sourceIPs != "" {
 			th.SourceIPs = strings.Split(sourceIPs, ",")
 		}
+		mitigationStatus = s.ipv6ShunStatus(th.SourceIP, mitigationStatus)
 		th.Mitigated = mitigationStatus == statusMitigated || fm4Status == statusMitigated ||
 			((isMitigatingAction(th.ActionTaken)) &&
 				mitigationStatus != "unmitigated" && fm4Status != "unmitigated")
 		res = append(res, th)
 	}
 	return res
+}
+
+// ipv6ShunStatus is the shun status a threat from ip is listed with. The
+// join reads the row keyed by the threat's own address, and an IPv6 address
+// is shunned under its /64's key (ADR 0058), which SQL cannot compute: so an
+// IPv6 threat the join found nothing for is shown as shunned when the block
+// list holds its /64. A release there is not shown -- the threat reads as
+// one never shunned -- and the dashboard's "mitigated" filter, which runs in
+// SQL, still matches IPv6 threats by their own address.
+func (s *pathStatsStore) ipv6ShunStatus(ip, joined string) string {
+	if joined != "" || strings.IndexByte(ip, ':') < 0 || !s.listedIPBlock(ip) {
+		return joined
+	}
+	return statusMitigated
 }
 
 // CountSecurityThreats returns the total number of security threats in the store.

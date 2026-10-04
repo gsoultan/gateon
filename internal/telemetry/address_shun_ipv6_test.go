@@ -97,3 +97,37 @@ func TestAVFourMappedAddressIsTheIPv4Address(t *testing.T) {
 		}
 	})
 }
+
+// The threat list shows whether each threat's source is shunned by joining
+// the row keyed by its address; an IPv6 source is shunned under its /64's key,
+// so a threat from another address of a shunned /64 is shown as shunned from
+// the block list.
+func TestAThreatFromAShunnedSlashSixtyFourIsListedAsShunned(t *testing.T) {
+	shunTestStore(t)
+	if err := MarkIPMitigated("2001:db8:a:b::1", "test"); err != nil {
+		t.Fatal(err)
+	}
+	for _, ip := range []string{"2001:db8:a:b::99", "2001:db8:a:c::99"} {
+		RecordSecurityThreat(SecurityThreat{Type: "bot_detected", Category: "bot",
+			ActionTaken: ActionDetected, SourceIP: ip, Time: time.Now()})
+	}
+	FlushThreats()
+	seen := 0
+	for _, th := range GetSecurityThreatsLite(t.Context(), 10, 0, nil) {
+		switch th.SourceIP {
+		case "2001:db8:a:b::99":
+			seen++
+			if !th.Mitigated {
+				t.Error("a threat from a shunned /64 is listed as not shunned")
+			}
+		case "2001:db8:a:c::99":
+			seen++
+			if th.Mitigated {
+				t.Error("a threat from the neighbouring /64 is listed as shunned")
+			}
+		}
+	}
+	if seen != 2 {
+		t.Fatalf("listed %d of the 2 threats", seen)
+	}
+}

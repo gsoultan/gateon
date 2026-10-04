@@ -96,6 +96,10 @@ func ageIPShun(t *testing.T, ip string, d time.Duration) {
 		}
 	}
 	purgeShunCache()
+	// The block list holds this node's write with the end it had; d passing
+	// would have ended it there too. Read the list again, as the next minute
+	// does, so it holds what the aged row says (ADR 0058).
+	s.readBlockList(true)
 }
 
 // An automatic shun lifts when it lapses, with nothing sweeping the row: the

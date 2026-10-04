@@ -193,3 +193,21 @@ const (
 
 	QueryPruneUserMitigations = `DELETE FROM user_mitigations WHERE updated_at < ?`
 )
+
+// The block list's read (ADR 0058): every block in force, newest first, one
+// row more than the list holds so a read can tell it was cut short.
+const (
+	// QueryBlockListIPShuns is every address shun in force and when it ends.
+	QueryBlockListIPShuns = `SELECT ip, expires_at FROM ip_mitigations
+		WHERE ` + inForceIPMitigation + `
+		ORDER BY mitigated_at DESC
+		LIMIT ?`
+
+	// QueryBlockListUserMitigations is every scoped key's rows inside the TTL,
+	// latest first and a release first in a tie, as queryReadUserMitigated
+	// orders them: a key's first row is its decision.
+	QueryBlockListUserMitigations = `SELECT fingerprint, status, updated_at FROM user_mitigations
+		WHERE fingerprint LIKE '%|%' AND updated_at > ?
+		ORDER BY updated_at DESC, CASE status WHEN 'unmitigated' THEN 0 ELSE 1 END
+		LIMIT ?`
+)

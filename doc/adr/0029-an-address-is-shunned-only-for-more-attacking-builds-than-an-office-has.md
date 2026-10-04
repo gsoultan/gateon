@@ -151,7 +151,8 @@ can:
   -- is never shunned by this path, however many builds send it.
 - **IPv6 is counted per address, as before.** A client rotating addresses
   within its /64 is not shunned by this path; the honeypot keys its bans on
-  the /64 (ADR 0024).
+  the /64 (ADR 0024). *Superseded by ADR 0058: the evidence, the shun and its
+  enforcement key an IPv6 client by its /64.*
 - **The Playwright suite's single Node client** is one class per address, so
   no spec can now shun its own source address by varying its requests.
 - **Found, not changed**: the automatic shun, the anomaly detector's and a

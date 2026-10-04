@@ -8,6 +8,10 @@ Accepted. `perf` drives; `data` co-signs the queries, the pool share and the
 driver behaviour, `sec` the order of the exemption and what a lookup that
 cannot finish decides, `conc` the goroutine and its bound.
 
+The saturated case below is narrowed by ADR 0058: every block in force is read
+into a list at start-up and every minute, and enforced from it without a
+lookup. A lookup that cannot finish still decides as here.
+
 ## Context
 
 The 2026-10-04 review (DP-N1, confirmed on Postgres) found that the block
