@@ -221,6 +221,51 @@ func partContent(s string, i int) (from, to int) {
 	return from, to
 }
 
+// headerLineSpans masks the value of every line of s that reads as a
+// credential header ("Cookie: sid=...", "X-Api-Key: ..."): a body or a log
+// line quoting a request's headers back.
+func headerLineSpans(s string, spans []span) []span {
+	for start := 0; start < len(s); {
+		end := strings.IndexByte(s[start:], '\n')
+		if end < 0 {
+			end = len(s)
+		} else {
+			end += start
+		}
+		line := s[start:end]
+		if colon := strings.IndexByte(line, ':'); colon > 0 && isHeaderName(line[:colon]) && IsCredentialHeader(line[:colon]) {
+			from := skipBlank(s, start+colon+1)
+			to := end
+			if to > from && s[to-1] == '\r' {
+				to--
+			}
+			if to > from {
+				spans = append(spans, span{start: from, end: to, repl: Mask})
+			}
+		}
+		start = end + 1
+	}
+	return spans
+}
+
+// isHeaderName reports whether s is a plausible header field name: letters,
+// digits and '-', so a JSON member ("token": ...) is not taken for a header.
+func isHeaderName(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if !isAlnum(s[i]) && s[i] != '-' {
+			return false
+		}
+	}
+	return true
+}
+
+func skipBlank(s string, i int) int {
+	for i < len(s) && (s[i] == ' ' || s[i] == '\t') {
+		i++
+	}
+	return i
+}
+
 // minBearerLen is the shortest run after "Bearer" taken for a token. Shorter
 // than any issued token, long enough that "bearer of" in a sentence is not one.
 const minBearerLen = 8

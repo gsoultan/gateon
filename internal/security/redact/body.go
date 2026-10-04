@@ -78,6 +78,7 @@ func isText(s string) bool {
 //
 //   - a JSON member named like a credential ("password": "...",
 //     "access_token": ..., "api_key": {...}): the value, whatever its type;
+//   - a line quoting a credential header ("Cookie: sid=..."): the rest of it;
 //   - a name=value pair named like one, as in a form body, a query string or a
 //     log line quoting either;
 //   - a multipart/form-data part named like one;
@@ -91,6 +92,7 @@ func isText(s string) bool {
 func Text(s string) string {
 	var spans []span
 	spans = jsonSpans(s, spans)
+	spans = headerLineSpans(s, spans)
 	spans = pairSpans(s, spans)
 	spans = multipartSpans(s, spans)
 	spans = schemeSpans(s, spans)

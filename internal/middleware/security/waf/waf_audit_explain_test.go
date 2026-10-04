@@ -114,7 +114,7 @@ func TestExplainCopiesMatchedBytes(t *testing.T) {
 		if !d.Blocked() {
 			t.Fatalf("expected XSS to be blocked")
 		}
-		explain(&rec, d.Explain())
+		explain(&rec, d.Explain(), false)
 	}()
 	first := rec.MatchedBytes
 	if first == "" {

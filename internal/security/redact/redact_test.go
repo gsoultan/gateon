@@ -116,8 +116,8 @@ func TestTextMasksEveryCredentialShape(t *testing.T) {
 			`{"credentials":"[REDACTED]"`,
 		},
 		"bearer and basic": {
-			"Authorization: Bearer abcdefgh12345 and Basic " + basic + " end",
-			"Authorization: Bearer [REDACTED] and Basic [REDACTED] end",
+			"sent Bearer abcdefgh12345 and Basic " + basic + " end",
+			"sent Bearer [REDACTED] and Basic [REDACTED] end",
 		},
 		"bearer and basic in prose are left alone": {
 			"the bearer of bad news has basic rights", "the bearer of bad news has basic rights",
@@ -131,6 +131,14 @@ func TestTextMasksEveryCredentialShape(t *testing.T) {
 			"t gateon_tok_[REDACTED] and v4.local.[REDACTED]",
 		},
 		"quoted pair value": {`token="abc def" q=1`, `token="[REDACTED]" q=1`},
+		"quoted headers": {
+			"GET / HTTP/1.1\r\nCookie: sid=abc; theme=dark\r\nX-Api-Key:k1\r\nAccept: */*\r\n",
+			"GET / HTTP/1.1\r\nCookie: [REDACTED]\r\nX-Api-Key:[REDACTED]\r\nAccept: */*\r\n",
+		},
+		"pretty-printed json is not a header block": {
+			"{\n  \"token\": \"t1\",\n  \"n\": 1\n}",
+			"{\n  \"token\": \"[REDACTED]\",\n  \"n\": 1\n}",
+		},
 		"multipart": {
 			"--b\r\nContent-Disposition: form-data; name=\"user\"\r\n\r\nalice\r\n" +
 				"--b\r\nContent-Disposition: form-data; name=\"password\"\r\n\r\nM1\r\n--b--\r\n",
