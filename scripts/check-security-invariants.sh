@@ -576,6 +576,29 @@ else
 	echo "  ok - no client address is resolved with trust forced on"
 fi
 
+# The same rule one step earlier: nothing outside the resolver reads a
+# forwarding header the client writes. GetIPFingerprint fell back to the
+# leftmost X-Forwarded-For, read raw, and that string became the class half of
+# the reputation identity -- a score the client could name (dataplane F10, ADR
+# 0058). The resolver (internal/request) believes the header only from a
+# trusted peer. The proxy and forward auth read it to *forward* it, which is
+# their job, never to decide who the client is.
+fwd_allowed='^(internal/request/|pkg/proxy/(proxy|websocket)\.go:|internal/middleware/auth/forwardauth\.go:)'
+fwd_reads=$( (find internal cmd pkg -name '*.go' -not -name '*_test.go' -print0 |
+	xargs -0 grep -nE 'Header(\.(Get|Values)\(|\[)"X-(Forwarded-For|Real-I[Pp])"' 2>/dev/null |
+	drop_comment_hits |
+	grep -vE "$fwd_allowed") || true)
+
+if [ -n "$fwd_reads" ]; then
+	err "a forwarding header the client writes is read outside the resolver"
+	printf '%s\n' "$fwd_reads"
+	printf '  X-Forwarded-For and X-Real-IP are whatever the client sent unless\n'
+	printf '  the peer is a trusted proxy. Read the client with request.ClientAddr(r)\n'
+	printf '  or telemetry.ClientIPOf(r), which ask the resolver.\n'
+else
+	echo "  ok - forwarding headers are read only by the resolver and the forwarders"
+fi
+
 printf '\n'
 if [ "$fail" -ne 0 ]; then
 	printf '\033[31msecurity invariant check failed\033[0m\n'
