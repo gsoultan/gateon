@@ -185,6 +185,13 @@ func CreateBaseHandler(
 	mgmtHandler = deps.MgmtOrigins.Guard(mgmtHandler)
 
 	mainHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// A path the backend may resolve to a different resource than the
+		// router would ("..;", a backslash) has no right route; refused before
+		// selection and before any route middleware, the WAF included (DP-F8).
+		if router.AmbiguousPath(r.URL.Path) {
+			http.Error(w, "Bad Request: ambiguous path", http.StatusBadRequest)
+			return
+		}
 		// Limit request body size to prevent DoS via large payloads.
 		// Default is 10MB, but GeoIP database uploads can be much larger.
 		limit := int64(10 * 1024 * 1024)

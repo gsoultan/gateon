@@ -161,6 +161,14 @@ func SelectRoute(r *http.Request, store config.RouteStore) *gateonv1.Route {
 	// is also what keeps the route the gateway chose and the path the backend
 	// receives from disagreeing. r.RequestURI keeps the original, so the WAF and
 	// the access log still see what the client actually sent.
+	//
+	// A path some backends resolve differently from this router ("..;", a
+	// backslash) selects no route at all (DP-F8): there is no route that is
+	// right for it. The base handler refuses it with 400 before getting here;
+	// this is the backstop for any caller that does not.
+	if AmbiguousPath(r.URL.Path) {
+		return nil
+	}
 	if clean := NormalizePath(r.URL.Path); clean != r.URL.Path {
 		r.URL.Path = clean
 		r.URL.RawPath = ""

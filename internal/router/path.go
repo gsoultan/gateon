@@ -3,7 +3,10 @@
 
 package router
 
-import "path"
+import (
+	"path"
+	"strings"
+)
 
 // NormalizePath resolves "." and ".." segments and collapses repeated slashes,
 // returning its input unchanged when there is nothing to resolve.
@@ -44,6 +47,42 @@ func NormalizePath(p string) string {
 		cleaned += "/"
 	}
 	return cleaned
+}
+
+// AmbiguousPath reports whether common backends resolve p to a different
+// resource than this router does, so that no normalisation here can make the
+// route the gateway chose and the resource the backend serves agree (DP-F8).
+//
+// Two shapes, both refused rather than rewritten:
+//
+//   - a dot segment carrying path parameters, "..;" or ".;" (/public/..;/admin).
+//     Tomcat and Spring strip ";params" from each segment and then resolve the
+//     dots, serving /admin; to this router and to RFC 3986 "..;" is an ordinary
+//     segment name, so the request ran /public's chain. Resolving it here would
+//     be wrong for every backend that does not strip parameters, and there is
+//     no legitimate reason for a client to send one.
+//   - a backslash (also %5C, since r.URL.Path is decoded). IIS and ASP.NET treat
+//     it as a separator, so /public\..\admin is /admin to them and one segment
+//     to everything else. Rewriting it to "/" would change the path for the
+//     backends that take it literally.
+//
+// "/admin;x=1" is not refused: a parameter on an ordinary segment is legal and
+// meaningful to JAX-RS and others (see TestSelectRouteLeavesPathParametersAlone).
+//
+// Runs on every request: one scan, no allocation.
+func AmbiguousPath(p string) bool {
+	for i := 0; i < len(p); i++ {
+		switch p[i] {
+		case '\\':
+			return true
+		case ';':
+			start := strings.LastIndexByte(p[:i], '/') + 1
+			if seg := p[start:i]; seg == "." || seg == ".." {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // needsNormalizing reports whether p contains anything to resolve.
