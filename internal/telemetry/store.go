@@ -780,6 +780,13 @@ func initStore(databaseURL string, retentionDays int) error {
 		return fmt.Errorf("failed to migrate database: %w", err)
 	}
 
+	// Seed today's counters before the store is published, so no threat can
+	// be counted ahead of the seed. Seeded from dailyResetLoop's goroutine, the
+	// seed's Store overwrote whatever the loop had already counted: the first
+	// threats after a start were lost from "mitigated today", and
+	// TestGetMitigatedRolling24h failed whenever the seed ran late.
+	st.syncDailyBaselines(false)
+
 	// Set global store AFTER migrations are complete to ensure any
 	// background activity (triggered by loops) uses a fully migrated DB.
 	store = st
@@ -985,11 +992,8 @@ func (s *pathStatsStore) dailyResetLoop() {
 	ticker := time.NewTicker(mitigationEpochLength)
 	defer ticker.Stop()
 
-	// Initial seed - load current daily totals from the database into the
-	// in-memory atomic counters. This ensures "Mitigated Today" and traffic
-	// headline figures survive process restarts.
-	s.syncDailyBaselines(false)
-
+	// The initial seed of today's counters runs in InitPathStatsStore, before
+	// anything can count.
 	for {
 		select {
 		case <-s.stopCh:

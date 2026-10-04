@@ -269,7 +269,6 @@ func TestGetMitigatedRolling24h(t *testing.T) {
 		t.Fatalf("init store: %v", err)
 	}
 	defer ClosePathStatsStore(ctx)
-	time.Sleep(100 * time.Millisecond)
 
 	start := GetMitigatedRolling24h(ctx)
 
@@ -280,8 +279,10 @@ func TestGetMitigatedRolling24h(t *testing.T) {
 	// Non-mitigating: must NOT count toward "mitigated rolling 24h".
 	RecordSecurityThreat(SecurityThreat{ID: "m-4", Type: "scan", SourceIP: "9.9.9.4", Category: "recon", Severity: "low", ActionTaken: "detected", Time: time.Now()})
 
-	// Wait for async persistence
-	time.Sleep(2500 * time.Millisecond)
+	// FlushThreats, not a sleep: the counter moves when the store's loop
+	// processes the threat, and a 2.5 s sleep against a 2 s flush timer failed
+	// under a loaded host (seen with several race suites running at once).
+	FlushThreats()
 
 	if got := GetMitigatedRolling24h(ctx) - start; got != 3 {
 		t.Fatalf("GetMitigatedRolling24h delta = %d, want 3 (only blocked/challenged/shunned)", got)
