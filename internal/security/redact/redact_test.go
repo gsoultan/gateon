@@ -23,7 +23,8 @@ func TestURIMasksCredentialParametersAndKeepsTheRest(t *testing.T) {
 			"app.example.com/cb?code=C1&state=S1&session_state=X",
 			"app.example.com/cb?code=[REDACTED]&state=[REDACTED]&session_state=[REDACTED]",
 		},
-		"percent-encoded name": {"/x?api%5Fkey=K2&q=1", "/x?api%5Fkey=[REDACTED]&q=1"},
+		// "pass%77ord" is password to the server; undecoded it names nothing.
+		"percent-encoded name": {"/x?pass%77ord=K2&q=1", "/x?pass%77ord=[REDACTED]&q=1"},
 		"semicolon separator":  {"/x?q=1;secret=Z", "/x?q=1;secret=[REDACTED]"},
 		"value shaped like a credential under an innocent name": {
 			"/x?t=gateon_tok_abc&j=eyJhbGciOi.eyJzdWIi.sig&v=v4.local.xyz&q=ok",
@@ -96,8 +97,8 @@ func TestTextMasksEveryCredentialShape(t *testing.T) {
 	basic := base64.StdEncoding.EncodeToString([]byte("alice:B4SIC"))
 	cases := map[string]struct{ in, want string }{
 		"form body": {
-			"user=alice&password=P%40ss&remember=1",
-			"user=alice&password=[REDACTED]&remember=1",
+			"user=alice&password=P%40ss&pass%77d2=P2&remember=1",
+			"user=alice&password=[REDACTED]&pass%77d2=[REDACTED]&remember=1",
 		},
 		"json, every value type": {
 			`{"user":"alice","password":"P1","pin":1234,"api_key":{"k":"v"},"tokens":["a","b"],"otp":null,"n":2}`,
@@ -149,6 +150,22 @@ func TestTextMasksEveryCredentialShape(t *testing.T) {
 			"<input name=\"password\">\n\nhello\n--x", "<input name=\"password\">\n\nhello\n--x",
 		},
 		"nothing to hide": {"plain text, q=1 & page=2", "plain text, q=1 & page=2"},
+		// Two scanners find the same credential: it is masked once.
+		"json member holding a bearer token": {
+			`{"authorization":"Bearer abcdefgh12345","n":1}`, `{"authorization":"[REDACTED]","n":1}`,
+		},
+		"token parameter holding a jwt": {
+			"token=eyJhbGciOi.eyJzdWIi.c2ln&q=1", "token=[REDACTED]&q=1",
+		},
+		"multipart with bare line feeds": {
+			"Content-Disposition: form-data; name=\"pwd\"\n\nPW1\n--b--", "Content-Disposition: form-data; name=\"pwd\"\n\n[REDACTED]\n--b--",
+		},
+		"multipart part cut before its content": {
+			`Content-Disposition: form-data; name="pwd"`, `Content-Disposition: form-data; name="pwd"`,
+		},
+		"basic that decodes to no password": {"Basic dXNlcg== here", "Basic dXNlcg== here"},
+		"unterminated quoted pair":          {`x token="abc def`, `x token="[REDACTED]`},
+		"eyJ that is not a token":           {"eyJabc and eyJabcdef.x", "eyJabc and eyJabcdef.x"},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -187,6 +204,9 @@ func TestBodyCapsAndRefusesWhatItCannotRead(t *testing.T) {
 	// A capture limit can cut a character in half; that is still text.
 	if got := Body("password=x é"[:len("password=x é")-1]); got != "password=[REDACTED] " {
 		t.Errorf("a body cut mid-character was not kept as text: %q", got)
+	}
+	if got := Body("password=x é"); got != "password=[REDACTED] é" {
+		t.Errorf("a body ending in a whole multi-byte character lost it: %q", got)
 	}
 }
 
