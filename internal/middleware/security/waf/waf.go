@@ -1081,6 +1081,11 @@ func peekBody(r *http.Request, n int64) ([]byte, error) {
 	// client's stream; returning early without them forwards a body with a
 	// hole at the front. Callers treat a peek error as "nothing suspicious"
 	// and continue, so the truncated request goes upstream.
+	//
+	// Restored exactly once. A second restore after the error check (DP-F4)
+	// sent the head of every peeked body twice under the client's own
+	// Content-Length: the proxy refused it with 502 and the engine inspected
+	// a body the client never sent.
 	if len(peeked) > 0 {
 		r.Body = struct {
 			io.Reader
@@ -1092,13 +1097,6 @@ func peekBody(r *http.Request, n int64) ([]byte, error) {
 	}
 	if err != nil {
 		return nil, err
-	}
-	r.Body = struct {
-		io.Reader
-		io.Closer
-	}{
-		Reader: io.MultiReader(bytes.NewReader(peeked), r.Body),
-		Closer: r.Body,
 	}
 	return peeked, nil
 }
@@ -1633,8 +1631,33 @@ func (w *wafResponseWriter) block(d gwaf.Decision) {
 	if status == 0 {
 		status = http.StatusForbidden
 	}
+	frameRefusal(w.Header(), len(responseBlockedBody))
 	w.ResponseWriter.WriteHeader(status)
-	_, _ = w.ResponseWriter.Write([]byte("Forbidden by Security Policy (response blocked)"))
+	_, _ = w.ResponseWriter.Write(responseBlockedBody)
+}
+
+// responseBlockedBody is what a refused response is replaced with.
+var responseBlockedBody = []byte("Forbidden by Security Policy (response blocked)")
+
+// originRepresentationHeaders describe the origin's body. A refusal is a
+// different body, so none of them may travel with it.
+var originRepresentationHeaders = [...]string{
+	"Content-Length", "Content-Encoding", "Content-Range", "Content-Disposition",
+	"Content-Md5", "Digest", "Etag", "Last-Modified", "Accept-Ranges",
+}
+
+// frameRefusal replaces the origin's description of its body with one of the
+// refusal (T39). Under the origin's Content-Length the 47-byte refusal of an
+// 83-byte leak read as a truncated response -- an IncompleteRead to the
+// client, and an HTTP/1.1 connection left waiting for the missing bytes --
+// and under its Content-Encoding no client could decode it at all.
+func frameRefusal(h http.Header, n int) {
+	for _, name := range originRepresentationHeaders {
+		h.Del(name)
+	}
+	h.Set("Content-Type", "text/plain; charset=utf-8")
+	h.Set("X-Content-Type-Options", "nosniff")
+	h.Set("Content-Length", strconv.Itoa(n))
 }
 
 func (w *wafResponseWriter) Status() int {
