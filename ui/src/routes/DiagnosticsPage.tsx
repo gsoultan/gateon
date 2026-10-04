@@ -70,6 +70,7 @@ import { useDiagnostics } from "../hooks/useGateon";
 import { SecurityAnomalyModal } from "../components/SecurityAnomalyModal";
 import { useDisclosure } from "@mantine/hooks";
 import { usePermissions } from "../hooks/usePermissions";
+import { dependencySummary } from "../components/Diagnostics/dependencySummary";
 
 const MiddlewareBadge: React.FC<{ mw: MiddlewareDiagnostic }> = ({ mw }) => (
   <Tooltip label={mw.error || `Type: ${mw.type}`}>
@@ -289,6 +290,7 @@ const DiagnosticsPage: React.FC = () => {
     if (!data?.dependencies) return [];
     return [...data.dependencies].sort((a, b) => a.name.localeCompare(b.name));
   }, [data?.dependencies]);
+  const dependencyBadge = dependencySummary(sortedDependencies);
 
   const sortedEntrypoints = useMemo(() => {
     if (!data?.entrypoints) return [];
@@ -494,7 +496,7 @@ const DiagnosticsPage: React.FC = () => {
                    <IconServer size={24} color={theme.colors.teal[6]} />
                    <Title order={3} fw={900}>Infrastructure Dependencies</Title>
                 </Group>
-                <Badge variant="light" color="teal">All checks active</Badge>
+                <Badge variant="light" color={dependencyBadge.color}>{dependencyBadge.label}</Badge>
              </Group>
              <SimpleGrid cols={{ base: 1, md: 3 }} spacing="md">
                 {sortedDependencies.map((dep: any) => (
