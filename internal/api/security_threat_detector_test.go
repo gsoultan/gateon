@@ -13,6 +13,7 @@ import (
 	"github.com/gsoultan/gateon/internal/telemetry"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestSecurityThreatDetector_Comprehensive(t *testing.T) {
@@ -170,7 +171,8 @@ func TestSecurityThreatDetector_WAFHits(t *testing.T) {
 			{SourceIP: "8.8.8.8", Path: "/api", Method: "POST", Status: "403 Forbidden", Timestamp: now},
 		},
 		SecurityThreats: []*telemetry.SecurityThreat{
-			{SourceIP: "8.8.8.8", Type: "waf_violation", Time: now, Mitigated: true},
+			// As the store reads back a request the WAF refused.
+			{SourceIP: "8.8.8.8", Type: "waf_blocked", Time: now, ActionTaken: telemetry.ActionBlocked, Mitigated: true},
 		},
 	}
 
@@ -184,7 +186,7 @@ func TestSecurityThreatDetector_WAFHits(t *testing.T) {
 		}
 	}
 
-	assert.NotNil(t, wafAnom, "Should detect waf_violation anomaly")
+	require.NotNil(t, wafAnom, "Should detect waf_violation anomaly")
 	assert.Contains(t, wafAnom.Description, "WAF security rules triggered")
 	assert.GreaterOrEqual(t, wafAnom.Score, 20.0)
 }

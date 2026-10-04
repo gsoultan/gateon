@@ -469,8 +469,23 @@ func countCredentialFailure(stats *IPStats, path string) {
 }
 
 // aggregateThreat folds one recorded threat into its address's record.
+//
+// Only an attack decision held against its source counts (attackEvidenceWeight,
+// ADR 0055, 0059): a request the WAF refused on an attack payload, a trap
+// sprung, a malware upload, a brute-force or exploit-scan detection. A hit is
+// one the request path refused when it recorded it; a warning is one it
+// recorded and let through. Every stored threat used to count -- a hit when it
+// was mitigated, which on read includes "the address is shunned now", a
+// warning otherwise -- so a refusal of an earlier shun, a rate limit or a
+// geofence block was a WAF hit worth eight warnings, a detection the gateway
+// let through was a warning, and so was this engine's own finding from the
+// last pass. The stored row says which are held (migration 68).
 func aggregateThreat(data *DiagnosticData, th *telemetry.SecurityThreat, evidenceSince time.Time) {
 	if th == nil || th.SourceIP == "" {
+		return
+	}
+	weight := attackEvidenceWeight(th)
+	if weight == 0 {
 		return
 	}
 	stats, ok := data.IPStats[th.SourceIP]
@@ -478,7 +493,7 @@ func aggregateThreat(data *DiagnosticData, th *telemetry.SecurityThreat, evidenc
 		stats = newIPStats(th.CountryCode)
 		data.IPStats[th.SourceIP] = stats
 	}
-	if th.Mitigated {
+	if th.RefusedWhenRecorded() {
 		stats.WAFHits++
 	} else {
 		stats.WAFWarnings++
@@ -490,7 +505,7 @@ func aggregateThreat(data *DiagnosticData, th *telemetry.SecurityThreat, evidenc
 		stats.LastSeen = th.Time
 	}
 	if !th.Time.Before(evidenceSince) {
-		stats.AttackEvidence += attackEvidenceWeight(th)
+		stats.AttackEvidence += weight
 	}
 }
 
