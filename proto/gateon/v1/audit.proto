@@ -87,4 +87,17 @@ message VerifyAuditChainResponse {
   bool complete = 5;
   // last_timestamp is the newest entry checked, "" when none was.
   string last_timestamp = 6;
+  // The chain cannot show that entries were removed from its end: what is
+  // left still verifies. The tail anchor is the newest entry this gateway
+  // has written, or found when it started, and it is checked when a range
+  // that runs to now is complete (ADR 0057).
+  //
+  // tail_anchor_timestamp is that entry's time; "" when there is none to
+  // check -- nothing written since start on an empty log, or a range that
+  // does not run to now.
+  string tail_anchor_timestamp = 7;
+  // tail_missing is true when the anchor is no longer in the log and
+  // retention cannot have removed it: entries were deleted from the end
+  // since this gateway started. intact is false with it.
+  bool tail_missing = 8;
 }

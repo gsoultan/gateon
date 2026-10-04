@@ -242,12 +242,12 @@ func (h *Holder) Verify2FA(challenge, id, code string) (bool, string, *gateonv1.
 	return s.Verify2FA(challenge, id, code)
 }
 
-func (h *Holder) Disable2FA(id string) error {
+func (h *Holder) ResetTwoFactor(id string) error {
 	s := h.Get()
 	if s == nil {
 		return ErrUnavailable
 	}
-	return s.Disable2FA(id)
+	return s.ResetTwoFactor(id)
 }
 
 func (h *Holder) Close() error {

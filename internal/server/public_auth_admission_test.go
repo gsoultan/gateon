@@ -165,6 +165,9 @@ func TestOneClientCannotFloodThePublicAuthEndpoints(t *testing.T) {
 		"/v1/setup",
 		"/v1/setup/test-db",
 		"/gateon.v1.ApiService/Setup",
+		// It checks the setup token (ADR 0057): unbudgeted, it was a way to
+		// guess one that skipped Setup's budget.
+		"/gateon.v1.ApiService/IsSetupRequired",
 	}
 	for i, path := range paths {
 		// An address per path: the budget is the client's, shared by all of them.

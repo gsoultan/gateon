@@ -14,10 +14,38 @@ message LoginRequest {
   string password = 2;
 }
 
-message IsSetupRequiredRequest {}
+message IsSetupRequiredRequest {
+  // setup_token, when it is the first-run setup token, asks for
+  // database_description as well. Without it the answer says only whether a
+  // database is configured and which engine: the question is public, and the
+  // address of a configuration database is not for whoever reaches the
+  // management port first. See ADR 0057.
+  string setup_token = 1;
+}
 
 message IsSetupRequiredResponse {
   bool required = 1;
+  // database_configured is true when this gateway already has its user
+  // database open -- the one its configuration names, the Helm chart's
+  // externalDatabase among them. Setup creates the administrator there and
+  // keeps it: a SetupRequest naming a different management or logging
+  // database is refused. Only answered while setup is required. ADR 0057.
+  bool database_configured = 2;
+  // database_driver is the configured database's engine ("postgres",
+  // "sqlite"), when database_configured.
+  string database_driver = 3;
+  // database_description names the configured database without its
+  // credentials (host, port and database, or the SQLite file), and only to a
+  // request that carries the setup token.
+  string database_description = 4;
+  // logging_database_description is the configured audit database when it is
+  // not the management database, under the same rule.
+  string logging_database_description = 5;
+  // session_key_from_environment is true when the configuration names the
+  // session key by reference (GATEON_SESSION_KEY, ADR 0056). Setup keeps that
+  // key and ignores SetupRequest.paseto_secret, so a wizard must not show a
+  // generated key as the one in use.
+  bool session_key_from_environment = 6;
 }
 
 // SetupRequest is the initial configuration request to initialize the Gateon server.
@@ -109,6 +137,19 @@ message DeleteUserRequest {
 }
 
 message DeleteUserResponse {
+  bool success = 1;
+}
+
+// ResetUserTwoFactorRequest removes another account's second factor: its TOTP
+// secret and recovery codes. The account must enrol a new authenticator at its
+// next sign-in, and every session it has ends. Administrators only, and never
+// for the caller's own account, which re-enrols from its profile with its
+// password. See ADR 0057.
+message ResetUserTwoFactorRequest {
+  string id = 1;
+}
+
+message ResetUserTwoFactorResponse {
   bool success = 1;
 }
 

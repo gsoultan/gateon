@@ -110,6 +110,38 @@ func (s *ApiService) DeleteUser(ctx context.Context, req *gateonv1.DeleteUserReq
 	return &gateonv1.DeleteUserResponse{Success: true}, nil
 }
 
+// ResetUserTwoFactor removes another account's second factor, requires it to
+// enrol again at its next sign-in, and ends its sessions (MGMT-N5, ADR 0057).
+//
+// An account whose authenticator was lost could not be helped: the only
+// administrator remedy was deleting the account. Refused for the caller's own
+// account -- that is self-service, re-enrolment from the profile, which asks
+// for the password; a session alone must not be able to strip the factor that
+// protects it.
+func (s *ApiService) ResetUserTwoFactor(ctx context.Context, req *gateonv1.ResetUserTwoFactorRequest) (*gateonv1.ResetUserTwoFactorResponse, error) {
+	if err := s.requireAdmin(ctx); err != nil {
+		return nil, err
+	}
+	if req.GetId() == "" {
+		return nil, status.Error(codes.InvalidArgument, "a user id is required")
+	}
+	if claims, _ := callerClaims(ctx); claims.ID == req.GetId() {
+		return nil, status.Error(codes.PermissionDenied,
+			"reset your own two-factor authentication by enrolling again from your profile, which asks for your password")
+	}
+	if !auth.Available(s.Auth) {
+		return nil, status.Error(codes.Unavailable, "user management is unavailable until setup has run")
+	}
+	if err := s.Auth.ResetTwoFactor(req.GetId()); err != nil {
+		if errors.Is(err, auth.ErrNoSuchUser) {
+			return nil, status.Error(codes.NotFound, "no such user")
+		}
+		return nil, err
+	}
+	s.logAudit(ctx, "reset_2fa", "user", fmt.Sprintf("Reset two-factor authentication for user %s and ended its sessions", req.GetId()))
+	return &gateonv1.ResetUserTwoFactorResponse{Success: true}, nil
+}
+
 func (s *ApiService) ChangePassword(ctx context.Context, req *gateonv1.ChangePasswordRequest) (*gateonv1.ChangePasswordResponse, error) {
 	if !auth.Available(s.Auth) || req == nil || req.Id == "" || req.Password == "" {
 		return &gateonv1.ChangePasswordResponse{Success: false}, nil

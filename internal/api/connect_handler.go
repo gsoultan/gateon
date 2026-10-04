@@ -95,6 +95,16 @@ func (h *ConnectHandler) RevokeApiToken(ctx context.Context, req *connect.Reques
 	return connect.NewResponse(res), nil
 }
 
+// --- Users ---
+
+func (h *ConnectHandler) ResetUserTwoFactor(ctx context.Context, req *connect.Request[gateonv1.ResetUserTwoFactorRequest]) (*connect.Response[gateonv1.ResetUserTwoFactorResponse], error) {
+	res, err := h.s.ResetUserTwoFactor(ctx, req.Msg)
+	if err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(res), nil
+}
+
 // --- Diagnostics & Threats ---
 
 func (h *ConnectHandler) GetDiagnostics(ctx context.Context, req *connect.Request[gateonv1.GetDiagnosticsRequest]) (*connect.Response[gateonv1.GetDiagnosticsResponse], error) {
@@ -161,6 +171,16 @@ func (h *ConnectHandler) ApplyRecommendation(ctx context.Context, req *connect.R
 // create the administrator, and the trace visualizer, the CORS validator and
 // the Cloudflare trust-list import failed with "unimplemented". Authorization
 // is the RBAC interceptor's, which already maps each procedure.
+
+// IsSetupRequired is forwarded so the wizard can send the setup token in a
+// body rather than a URL; the REST GET the dashboard polls carries none.
+func (h *ConnectHandler) IsSetupRequired(ctx context.Context, req *connect.Request[gateonv1.IsSetupRequiredRequest]) (*connect.Response[gateonv1.IsSetupRequiredResponse], error) {
+	res, err := h.s.IsSetupRequired(ctx, req.Msg)
+	if err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(res), nil
+}
 
 func (h *ConnectHandler) Setup(ctx context.Context, req *connect.Request[gateonv1.SetupRequest]) (*connect.Response[gateonv1.SetupResponse], error) {
 	res, err := h.s.Setup(ctx, req.Msg)

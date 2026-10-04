@@ -966,6 +966,22 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 		data, _ := ProtojsonOptions().Marshal(resp)
 		_, _ = w.Write(data)
 	})
+	// Another account's second factor (ADR 0057). The rules -- administrators
+	// only, never the caller's own account, sessions ended, audited -- are the
+	// service's, so REST, Connect and gRPC give the same answer.
+	mux.HandleFunc("POST /v1/users/{id}/2fa/reset", func(w http.ResponseWriter, r *http.Request) {
+		if !RequirePermission(w, r, auth.ActionWrite, auth.ResourceUsers) {
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		resp, err := svc.ResetUserTwoFactor(r.Context(), &gateonv1.ResetUserTwoFactorRequest{Id: r.PathValue("id")})
+		if err != nil {
+			writeServiceRefusal(w, err)
+			return
+		}
+		data, _ := ProtojsonOptions().Marshal(resp)
+		_, _ = w.Write(data)
+	})
 	mux.HandleFunc("DELETE /v1/users/{id}", func(w http.ResponseWriter, r *http.Request) {
 		if !RequirePermission(w, r, auth.ActionWrite, auth.ResourceUsers) {
 			return

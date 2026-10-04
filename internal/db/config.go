@@ -182,3 +182,42 @@ func BuildURLFromConfig(cfg *gateonv1.DatabaseConfig) string {
 		return ""
 	}
 }
+
+// Describe names the database a URL opens without its credentials: the engine
+// ("sqlite", "postgres"; "" for a URL Open would refuse) and where it is -- the
+// SQLite file, or a Postgres server's host, port and database. The where is ""
+// for a form that cannot be taken apart without risking a credential (a
+// key=value DSN). It is what the setup wizard shows an operator whose
+// configuration already names a database (ADR 0057).
+func Describe(databaseURL string) (driver, where string) {
+	driver, dsn := parseURL(databaseURL)
+	switch driver {
+	case DriverSQLite:
+		file, _, _ := strings.Cut(dsn, "?")
+		// A key=value Postgres DSN reads as a SQLite path here (Open would
+		// create a file of that name), and it can carry a password.
+		if strings.ContainsAny(file, " =@") {
+			return driver, ""
+		}
+		return driver, file
+	case DriverPostgres:
+		u, err := url.Parse(strings.TrimSpace(databaseURL))
+		if err != nil || u.Host == "" {
+			return driver, ""
+		}
+		return driver, u.Host + u.Path
+	}
+	return "", ""
+}
+
+// SameDatabase reports whether two database URLs open the same database: the
+// same URL, or two spellings of one SQLite file ("gateon.db",
+// "sqlite:gateon.db", "sqlite://gateon.db").
+func SameDatabase(a, b string) bool {
+	if strings.TrimSpace(a) == strings.TrimSpace(b) {
+		return true
+	}
+	fa, okA := SQLiteFile(a)
+	fb, okB := SQLiteFile(b)
+	return okA && okB && filepath.Clean(fa) == filepath.Clean(fb)
+}

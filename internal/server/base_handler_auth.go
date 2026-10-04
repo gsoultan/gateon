@@ -260,16 +260,20 @@ func isHealthPath(path string) bool {
 // costs one too, ADR 0050), never once 429. One budget for all of them, so a
 // client cannot spend five on each.
 //
-// IsSetupRequired and /v1/setup/required are absent: they read one row and
-// the dashboard polls them.
+// /v1/setup/required is absent: it reads one row, the dashboard polls it, and
+// it carries no setup token. The IsSetupRequired RPC is here because it does
+// carry one -- it answers the configured database's address to a caller with
+// the token (ADR 0057) -- and an unbudgeted token check is a way to guess one
+// that skips the budget Setup spends from.
 var passwordCheckPaths = map[string]struct{}{
-	"/v1/login":                   {},
-	"/gateon.v1.ApiService/Login": {},
-	"/v1/auth/2fa/enroll":         {},
-	"/v1/auth/2fa/verify":         {},
-	"/v1/setup":                   {},
-	"/v1/setup/test-db":           {},
-	"/gateon.v1.ApiService/Setup": {},
+	"/v1/login":                             {},
+	"/gateon.v1.ApiService/Login":           {},
+	"/v1/auth/2fa/enroll":                   {},
+	"/v1/auth/2fa/verify":                   {},
+	"/v1/setup":                             {},
+	"/v1/setup/test-db":                     {},
+	"/gateon.v1.ApiService/Setup":           {},
+	"/gateon.v1.ApiService/IsSetupRequired": {},
 }
 
 // publicAuthRefusal is what a refused client is told, on every protocol.

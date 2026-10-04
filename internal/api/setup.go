@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/gsoultan/gateon/internal/audit"
 	"github.com/gsoultan/gateon/internal/auth"
@@ -19,13 +20,23 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-func (s *ApiService) IsSetupRequired(ctx context.Context, _ *gateonv1.IsSetupRequiredRequest) (*gateonv1.IsSetupRequiredResponse, error) {
+func (s *ApiService) IsSetupRequired(ctx context.Context, req *gateonv1.IsSetupRequiredRequest) (*gateonv1.IsSetupRequiredResponse, error) {
+	if !s.setupRequired() {
+		return &gateonv1.IsSetupRequiredResponse{}, nil
+	}
+	resp := &gateonv1.IsSetupRequiredResponse{Required: true}
+	s.describeSetup(ctx, req.GetSetupToken(), resp)
+	return resp, nil
+}
+
+// setupRequired is whether first-run setup is still open.
+func (s *ApiService) setupRequired() bool {
 	// First run: no global.json file — setup required
 	if s.Globals != nil && !s.Globals.ConfigFileExists() {
-		return &gateonv1.IsSetupRequiredResponse{Required: true}, nil
+		return true
 	}
 	if !auth.Available(s.Auth) {
-		return &gateonv1.IsSetupRequiredResponse{Required: true}, nil
+		return true
 	}
 
 	// Setup is required only while no administrator exists.
@@ -38,7 +49,91 @@ func (s *ApiService) IsSetupRequired(ctx context.Context, _ *gateonv1.IsSetupReq
 	// authentication -- on a configured gateway, and Setup reuses the id of an
 	// existing administrator with the requested username and overwrites their
 	// password. That turned a global-config write into an administrator account.
-	return &gateonv1.IsSetupRequiredResponse{Required: !s.Auth.IsSetupDone()}, nil
+	return !s.Auth.IsSetupDone()
+}
+
+// describeSetup tells a wizard what Setup will keep rather than take from it:
+// a database already open, and a session key the configuration names by
+// reference. The database's address is for a caller with the setup token
+// only; that it is configured, and its engine, is for anyone who can ask
+// whether setup is required (ADR 0057).
+func (s *ApiService) describeSetup(ctx context.Context, token string, resp *gateonv1.IsSetupRequiredResponse) {
+	resp.SessionKeyFromEnvironment = s.setupSessionKey(ctx, "") != ""
+	mgmt, logs, fixed := s.fixedDatabases(ctx)
+	if !fixed {
+		return
+	}
+	resp.DatabaseConfigured = true
+	driver, where := db.Describe(mgmt)
+	resp.DatabaseDriver = driver
+	if !s.SetupToken.Matches(token) {
+		return
+	}
+	resp.DatabaseDescription = where
+	if !db.SameDatabase(mgmt, logs) {
+		_, resp.LoggingDatabaseDescription = db.Describe(logs)
+	}
+}
+
+// fixedDatabases are the management and audit databases Setup cannot change,
+// and false when it can choose them.
+//
+// When the auth service is already up, the user database it opened is the one
+// the configuration names -- global.json, or the Helm chart's externalDatabase
+// rendered into it -- and Setup creates the administrator in it. Setup used to
+// write the wizard's database (SQLite, by default) over that configuration
+// anyway: the administrator went into the database that was open, global.json
+// named another, and the next start refused to run because the database it now
+// named had no administrator. The audit log is opened at start from the same
+// configuration, so it is kept for the same reason.
+func (s *ApiService) fixedDatabases(ctx context.Context) (mgmt, logs string, fixed bool) {
+	if !auth.Available(s.Auth) {
+		return "", "", false
+	}
+	var live *gateonv1.GlobalConfig
+	if s.Globals != nil {
+		live = s.Globals.Get(ctx)
+	}
+	return db.AuthDatabaseURL(live.GetAuth()), db.AuditDatabaseURL(live.GetAudit(), live.GetAuth()), true
+}
+
+// errDatabaseConfigured refuses a SetupRequest that names a database other than
+// the one this gateway's configuration already has open.
+var errDatabaseConfigured = errors.New("this gateway's configuration already names its database, and setup keeps it")
+
+// keepConfiguredDatabases refuses a request naming a management or logging
+// database other than the ones already open. One naming the same database, or
+// none, changes nothing.
+func keepConfiguredDatabases(req *gateonv1.SetupRequest, mgmt, logs string) error {
+	if u, named := requestedDatabase(req.GetDatabaseUrl(), req.GetDatabaseConfig()); named && !db.SameDatabase(u, mgmt) {
+		return refuseDatabase("", mgmt)
+	}
+	if u, named := requestedDatabase(req.GetLoggingDatabaseUrl(), req.GetLoggingDatabaseConfig()); named && !db.SameDatabase(u, logs) {
+		return refuseDatabase("logging ", logs)
+	}
+	return nil
+}
+
+// refuseDatabase is errDatabaseConfigured, naming the database that stays.
+func refuseDatabase(which, kept string) error {
+	driver, where := db.Describe(kept)
+	name := strings.TrimSpace(driver + " " + where)
+	return fmt.Errorf("%w: its %sdatabase is %s. Leave the %sdatabase out of setup, or change the "+
+		"configuration (global.json, or the Helm chart's externalDatabase) and restart",
+		errDatabaseConfigured, which, name, which)
+}
+
+// requestedDatabase is the database URL a request's url or config opens, as
+// AuthDatabaseURL would resolve it, and false when it names none.
+func requestedDatabase(databaseURL string, cfg *gateonv1.DatabaseConfig) (string, bool) {
+	if databaseURL == "" && cfg == nil {
+		return "", false
+	}
+	u, c := chosenDatabase(databaseURL, cfg)
+	if u != "" {
+		return db.ResolveSQLitePath(u, config.DataDir()), true
+	}
+	return db.BuildURLFromConfig(c), true
 }
 
 func (s *ApiService) Setup(ctx context.Context, req *gateonv1.SetupRequest) (*gateonv1.SetupResponse, error) {
@@ -75,7 +170,7 @@ func (s *ApiService) Setup(ctx context.Context, req *gateonv1.SetupRequest) (*ga
 	// After the guard, never before it: this writes the auth and audit
 	// databases, and on a configured gateway that would let an unauthenticated
 	// caller point both at a server it controls.
-	if err := applySetupDatabases(ctx, s.Globals, req); err != nil {
+	if err := s.setupDatabases(ctx, req); err != nil {
 		return &gateonv1.SetupResponse{Success: false, Error: err.Error()}, nil
 	}
 
@@ -235,6 +330,15 @@ func recordFromTheStart(conf *gateonv1.GlobalConfig) {
 	if conf.Audit.SignatureKey == "" {
 		conf.Audit.SignatureKey = audit.GenerateSignatureKey()
 	}
+}
+
+// setupDatabases keeps the databases already open (see fixedDatabases), or
+// applies the ones the request chose when there are none.
+func (s *ApiService) setupDatabases(ctx context.Context, req *gateonv1.SetupRequest) error {
+	if mgmt, logs, fixed := s.fixedDatabases(ctx); fixed {
+		return keepConfiguredDatabases(req, mgmt, logs)
+	}
+	return applySetupDatabases(ctx, s.Globals, req)
 }
 
 // errPersistSetupDatabases is what a caller sees when the chosen databases
