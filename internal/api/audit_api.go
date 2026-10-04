@@ -119,6 +119,10 @@ func (s *ApiService) VerifyAuditChain(ctx context.Context, req *gateonv1.VerifyA
 	if res.Break != nil {
 		s.logAudit(ctx, "verify_failed", "audit_chain", "Audit chain broken at entry "+res.Break.ID+": "+res.Break.Reason)
 	}
+	if res.TailMissing {
+		s.logAudit(ctx, "verify_failed", "audit_chain", "The newest audit entries were removed: the entry written at "+
+			res.TailAnchor.UTC().Format(time.RFC3339)+" is no longer in the log")
+	}
 	return verifyResponse(res), nil
 }
 
@@ -143,10 +147,14 @@ func verifyRequestFrom(req *gateonv1.VerifyAuditChainRequest) (audit.VerifyReque
 
 func verifyResponse(res audit.VerifyResult) *gateonv1.VerifyAuditChainResponse {
 	out := &gateonv1.VerifyAuditChainResponse{
-		Intact:      res.Break == nil,
+		Intact:      res.Break == nil && !res.TailMissing,
 		Checked:     int32(res.Checked), //nolint:gosec // at most audit.MaxVerifyLimit
 		NextAfterId: res.NextAfterID,
 		Complete:    res.Complete,
+		TailMissing: res.TailMissing,
+	}
+	if !res.TailAnchor.IsZero() {
+		out.TailAnchorTimestamp = res.TailAnchor.UTC().Format(time.RFC3339Nano)
 	}
 	if !res.Last.IsZero() {
 		out.LastTimestamp = res.Last.UTC().Format(time.RFC3339Nano)

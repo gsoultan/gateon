@@ -52,6 +52,12 @@ type VerifyResult struct {
 	Complete    bool
 	// Last is the newest entry checked; zero when none was.
 	Last time.Time
+	// TailAnchor is the time of the tail anchor checked (see checkTail); zero
+	// when none was.
+	TailAnchor time.Time
+	// TailMissing is true when the anchor is no longer in the log and retention
+	// cannot have removed it: entries were deleted from the end.
+	TailMissing bool
 }
 
 // VerifyRange checks the HMAC chain over one window of the stored log, oldest
@@ -83,7 +89,44 @@ func VerifyRange(ctx context.Context, req VerifyRequest) (VerifyResult, error) {
 		entries = entries[:limit]
 	}
 	orderTies(entries, genesis)
-	return verdict(entries, key, genesis, more), nil
+	res := verdict(entries, key, genesis, more)
+	if res.Complete && res.Break == nil && req.To.IsZero() {
+		if err := m.checkTail(ctx, &res); err != nil {
+			return VerifyResult{}, err
+		}
+	}
+	return res, nil
+}
+
+// checkTail looks for the tail anchor -- the newest entry this gateway has
+// written, or found newest when it started -- in the log (ADR 0057).
+//
+// A chain cannot show that entries were removed from its end: what is left
+// still verifies, and the dashboard said "The audit log verifies" over a log
+// whose newest entries had been deleted. The next entry written would break
+// the chain, but until then nothing did. The anchor closes that gap for as
+// long as this process runs. It cannot close it across a restart: the anchor
+// is then read from the log, truncated or not.
+//
+// An anchor older than the retention period is not looked for: retention may
+// have deleted it, and that is not tampering.
+func (m *AuditManager) checkTail(ctx context.Context, res *VerifyResult) error {
+	m.mu.RLock()
+	id, at, days := m.anchorID, m.anchorAt, m.config.GetRetentionDays()
+	m.mu.RUnlock()
+	if id == "" || (days > 0 && at.Before(time.Now().AddDate(0, 0, -int(days)))) {
+		return nil
+	}
+	var one int
+	err := m.db.QueryRowContext(ctx, m.dialect.Rebind("SELECT 1 FROM audit_logs WHERE id = ?"), id).Scan(&one)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		res.TailMissing = true
+	case err != nil:
+		return fmt.Errorf("audit: look for the newest entry written: %w", err)
+	}
+	res.TailAnchor = at
+	return nil
 }
 
 func verdict(entries []AuditEntry, key, genesis string, more bool) VerifyResult {

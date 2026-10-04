@@ -47,9 +47,14 @@ type AuditManager struct {
 	dialect     db.Dialect
 	Broadcaster *Broadcaster
 	lastHash    string
-	stop        chan struct{}
-	stmtInsert  *sql.Stmt
-	stmtMu      sync.RWMutex
+	// anchorID and anchorAt are the tail anchor VerifyRange looks for: the
+	// newest entry stored by this process, or found newest when it started.
+	// Guarded by mu. See checkTail.
+	anchorID   string
+	anchorAt   time.Time
+	stop       chan struct{}
+	stmtInsert *sql.Stmt
+	stmtMu     sync.RWMutex
 }
 
 // GenerateSignatureKey returns a cryptographically-random 256-bit key as a hex
@@ -178,11 +183,24 @@ func (m *AuditManager) prepareStatements() {
 }
 
 func (m *AuditManager) loadLastHash() {
-	query := m.dialect.Rebind("SELECT signature FROM audit_logs ORDER BY timestamp DESC LIMIT 1")
-	var lastHash string
-	err := m.db.QueryRow(query).Scan(&lastHash)
+	query := m.dialect.Rebind("SELECT signature, id, timestamp FROM audit_logs ORDER BY timestamp DESC LIMIT 1")
+	var lastHash, id string
+	var at time.Time
+	err := m.db.QueryRow(query).Scan(&lastHash, &id, &at)
 	if err == nil {
 		m.lastHash = lastHash
+		m.anchorID, m.anchorAt = id, at
+	}
+}
+
+// noteStored moves the tail anchor to an entry once it is stored, never
+// before: an anchor the log does not hold yet would read as a deleted one.
+// Concurrent writers can store out of order; the anchor only moves forward.
+func (m *AuditManager) noteStored(e AuditEntry) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if !e.Timestamp.Before(m.anchorAt) {
+		m.anchorID, m.anchorAt = e.ID, e.Timestamp
 	}
 }
 
@@ -281,6 +299,7 @@ func (m *AuditManager) log(ctx context.Context, userID, action, resource, detail
 		logger.L.LogError("audit: failed to write log", "error", err)
 		return
 	}
+	m.noteStored(entry)
 	// Broadcast to real-time subscribers (for Command Center etc)
 	if m.Broadcaster != nil {
 		m.Broadcaster.Broadcast(entry)
