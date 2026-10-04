@@ -32,6 +32,7 @@ import (
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/security/mitigation"
+	"github.com/gsoultan/gateon/internal/security/redact"
 	"github.com/gsoultan/gateon/internal/syncutil"
 	"github.com/gsoultan/gateon/internal/telemetry/lookupgate"
 	"github.com/gsoultan/gateon/internal/telemetry/repid"
@@ -95,44 +96,21 @@ func isMitigatingAction(action string) bool {
 	}
 }
 
-// credentialHeaders name the headers whose values are credentials -- by
-// standard, or by a convention common enough to assume -- lower-cased. A trace
-// keeps that one was sent, which is what a debugging session needs, and not
-// what it said: the trace store is read from the dashboard, kept for days, and
-// with the trace archive on, for months.
-var credentialHeaders = [...]string{
-	"authorization",
-	"proxy-authorization",
-	"cookie",
-	"set-cookie",
-	"x-api-key",
-	"x-auth-token",
-	"x-access-token",
-	"x-refresh-token",
-	"x-amz-security-token",      // AWS STS session token
-	"x-goog-api-key",            // Google APIs
-	"api-key",                   // Azure OpenAI and Cognitive Services
-	"ocp-apim-subscription-key", // Azure API Management
-	"x-functions-key",           // Azure Functions
-	"x-vault-token",             // HashiCorp Vault
-	"private-token",             // GitLab
-	"x-csrf-token",
-	"x-xsrf-token",
-}
-
-func isCredentialHeader(name string) bool {
-	for _, h := range credentialHeaders {
-		if len(name) == len(h) && strings.EqualFold(name, h) {
-			return true
-		}
-	}
-	return false
-}
-
 // RedactHeaders replaces the value of each credential header in a header
 // block -- one "Name: value" per line, as FormatHeaders writes it -- with
-// [REDACTED]. It runs on the store's goroutine, and builds into a pooled
-// strings.Builder rather than splitting the block.
+// [REDACTED], and masks the credentials in the query string of each header
+// whose value is a URI (Referer, Location, X-Forwarded-Uri; redact.URI). It
+// runs on the store's goroutine, and builds into a pooled strings.Builder
+// rather than splitting the block.
+//
+// A trace keeps that a credential was sent, which is what a debugging session
+// needs, and not what it said: the trace store is read from the dashboard,
+// kept for days, and with the trace archive on, for months. Which headers carry
+// one is redact.IsCredentialHeader -- Authorization, Cookie, and anything named
+// like a key, token, secret, session or signature -- the vocabulary every other
+// redaction uses (ADR 0060). An explicit list of seventeen names preceded it,
+// and X-Session-Token, X-Amz-Signature and every vendor header nobody had
+// thought of were stored as sent.
 func RedactHeaders(headers string) string {
 	if headers == "" {
 		return ""
@@ -149,12 +127,7 @@ func RedactHeaders(headers string) string {
 		if end != -1 {
 			line = headers[start : start+end]
 		}
-		if colon := strings.IndexByte(line, ':'); colon > 0 && isCredentialHeader(line[:colon]) {
-			sb.WriteString(line[:colon])
-			sb.WriteString(": [REDACTED]")
-		} else {
-			sb.WriteString(line)
-		}
+		writeRedactedHeaderLine(sb, line)
 		if end == -1 {
 			break
 		}
@@ -162,6 +135,24 @@ func RedactHeaders(headers string) string {
 		start += end + 1
 	}
 	return sb.String()
+}
+
+// writeRedactedHeaderLine writes one "Name: value" line of a header block with
+// its credential, if any, masked.
+func writeRedactedHeaderLine(sb *strings.Builder, line string) {
+	colon := strings.IndexByte(line, ':')
+	switch {
+	case colon <= 0:
+		sb.WriteString(line)
+	case redact.IsCredentialHeader(line[:colon]):
+		sb.WriteString(line[:colon])
+		sb.WriteString(": " + redact.Mask)
+	case redact.IsURIHeader(line[:colon]):
+		sb.WriteString(line[:colon+1])
+		sb.WriteString(redact.URI(line[colon+1:]))
+	default:
+		sb.WriteString(line)
+	}
 }
 
 // ParseHeaders parses a plain text header block (formatted by FormatHeaders) back into a map.
@@ -1888,9 +1879,15 @@ func (s *pathStatsStore) processTrace(tr *TraceRecord) {
 		tr.rawRespHeader = nil // Release map for GC
 	}
 
-	// Redact sensitive headers in the background
+	// Every trace passes here before it is stored, and so before the
+	// dashboard, the trace archive or a threat built from it can read it: the
+	// one place its credentials are taken out (ADR 0060). Off the request path.
 	tr.RequestHeaders = RedactHeaders(tr.RequestHeaders)
 	tr.ResponseHeaders = RedactHeaders(tr.ResponseHeaders)
+	tr.RequestURI = redact.URI(tr.RequestURI)
+	tr.Referer = redact.URI(tr.Referer)
+	tr.RequestBody = redact.Body(tr.RequestBody)
+	tr.ResponseBody = redact.Body(tr.ResponseBody)
 }
 
 // RecordSecurityThreatWithJA4 is a helper that populates JA4 and JA4H from the request before recording.
@@ -1981,8 +1978,10 @@ const (
 	typeBruteForce = "brute_force_attempt"
 )
 
-// normalizeThreatHeaders formats the captured headers and redacts them before
-// anything persists or broadcasts the threat. The raw maps are dropped so the
+// normalizeThreatHeaders formats the captured headers and takes every
+// credential out of the threat before anything persists, broadcasts, alerts,
+// ships or correlates it (ADR 0060): header values, the query string of its
+// request URI, its bodies, and its details. The raw maps are dropped so the
 // pooled record does not hold request memory alive.
 func normalizeThreatHeaders(st *SecurityThreat) {
 	if st.rawReqHeader != nil {
@@ -1995,8 +1994,12 @@ func normalizeThreatHeaders(st *SecurityThreat) {
 	}
 	st.RequestHeaders = RedactHeaders(st.RequestHeaders)
 	st.ResponseHeaders = RedactHeaders(st.ResponseHeaders)
-	// Details is redacted too: it frequently quotes the offending header back.
-	st.Details = RedactHeaders(st.Details)
+	// Details is redacted too: it frequently quotes the offending header back,
+	// and sometimes the parameter.
+	st.Details = redact.Text(RedactHeaders(st.Details))
+	st.RequestURI = redact.URI(st.RequestURI)
+	st.RequestBody = redact.Body(st.RequestBody)
+	st.ResponseBody = redact.Body(st.ResponseBody)
 }
 
 // escalateMitigation blocks the actor behind a threat, not just the request.
