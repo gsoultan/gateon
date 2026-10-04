@@ -37,24 +37,25 @@ const (
 // hasPass reports whether the request carries a current pass this route
 // issued to this client.
 func (c powChallenge) hasPass(r *http.Request) bool {
-	if len(c.key) == 0 {
+	if c.passKey == "" {
 		return false
 	}
 	cookie, err := r.Cookie(PowPassCookieName)
 	if err != nil {
 		return false
 	}
-	age, ok := tokenAge(powPassContext, cookie.Value, string(c.key), r.UserAgent(), telemetry.ClientIPOf(r), time.Now())
+	age, ok := tokenAge(powPassContext, cookie.Value, c.passKey, r.UserAgent(), telemetry.ClientIPOf(r), time.Now())
 	return ok && age <= powPassLifetime
 }
 
 // setPass hands a client that has just proved work a pass for powPassLifetime,
-// bound to its address and User-Agent as the challenge was.
+// bound to its address and User-Agent as the challenge was, and -- through
+// passKey -- to this route and this difficulty.
 func (c powChallenge) setPass(w http.ResponseWriter, r *http.Request) {
 	// #nosec G124 -- Secure is set from the resolved scheme just below.
 	http.SetCookie(w, &http.Cookie{
 		Name:     PowPassCookieName,
-		Value:    signBotToken(powPassContext, string(c.key), r.UserAgent(), telemetry.ClientIPOf(r), time.Now()),
+		Value:    signBotToken(powPassContext, c.passKey, r.UserAgent(), telemetry.ClientIPOf(r), time.Now()),
 		Path:     "/",
 		HttpOnly: true,
 		Secure:   request.IsSecure(r),
