@@ -196,6 +196,9 @@ func wafInsights(waf *gateonv1.WafConfig, cov wafCoverage) []aiInsight {
 	if cov.Off > 0 {
 		out = append(out, wafPartialInsight(cov))
 	}
+	if cov.CategoriesOff > 0 {
+		out = append(out, wafNoCategoriesInsight(cov))
+	}
 	if waf.GetEnabled() {
 		out = append(out, globalWAFInsights(waf)...)
 	}
@@ -241,6 +244,19 @@ func wafPartialInsight(cov wafCoverage) aiInsight {
 		Category:        categorySecurity,
 		Recommendation:  "Attach a WAF middleware to the remaining routes, or enable the gateway-wide WAF, which covers every route without one.",
 		SuggestedConfig: wafEnableSuggestion,
+	}
+}
+
+// wafNoCategoriesInsight: a route WAF with every attack category switched off
+// runs, and refuses none of SQLi, XSS, LFI or RCE (truth NEW-13).
+func wafNoCategoriesInsight(cov wafCoverage) aiInsight {
+	return aiInsight{
+		Title: fmt.Sprintf("A WAF with every attack category off runs on %d of %d routes", cov.CategoriesOff, cov.Total),
+		Description: fmt.Sprintf("On %d of %d routes the route's WAF middleware has every attack category switched off: "+
+			"SQL injection, XSS, path traversal and code execution reach the backend.", cov.CategoriesOff, cov.Total),
+		Severity:       insightWarning,
+		Category:       categorySecurity,
+		Recommendation: "Switch the categories the application needs back on in the route's WAF middleware, or remove it so the gateway-wide WAF inspects the route.",
 	}
 }
 

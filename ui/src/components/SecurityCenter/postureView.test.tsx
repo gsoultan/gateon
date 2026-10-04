@@ -33,6 +33,19 @@ describe("the WAF card (T12)", () => {
     expect(view.wafDetectsSomewhere(waf("enforce", 2, 1, 1))).toBe(true);
   });
 
+  test("a WAF with every attack category off is not blocking (NEW-13)", () => {
+    const w = waf("enforce", 2, 1, 0);
+    w.routes.unprotected = 0;
+    w.routes.categoriesOff = 1;
+    const s = view.wafStatus(w);
+    expect(s.label).toBe("Blocking on 1 of 2 routes");
+    expect(s.detail).toContain("1 with every attack category off");
+    const none = waf("enforce", 1, 0, 0);
+    none.routes.unprotected = 0;
+    none.routes.categoriesOff = 1;
+    expect(view.wafStatus(none).label).toBe("Not blocking attacks");
+  });
+
   test("blocking everywhere says so, and no WAF is disabled", () => {
     expect(view.wafStatus(waf("enforce", 2, 2, 0)).label).toBe("Blocking on all 2 routes");
     expect(view.wafStatus(waf("off", 2, 0, 0)).label).toBe("Disabled");

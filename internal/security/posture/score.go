@@ -115,9 +115,12 @@ func wafControl(c Config) Control {
 			fmt.Sprintf("No HTTP route yet; the gateway-wide WAF is %s.", modeWords(mode)))
 	}
 	credit := (float64(cov.Enforcing) + halfCredit*float64(cov.Detecting)) / float64(cov.Total)
-	return newControl(id, label, weightWAF, credit,
-		fmt.Sprintf("%d of %d routes blocking, %d detecting only (audit), %d with no WAF.",
-			cov.Enforcing, cov.Total, cov.Detecting, cov.Off))
+	detail := fmt.Sprintf("%d of %d routes blocking, %d detecting only (audit), %d with no WAF.",
+		cov.Enforcing, cov.Total, cov.Detecting, cov.Off)
+	if cov.CategoriesOff > 0 {
+		detail += fmt.Sprintf(" %d run a WAF with every attack category switched off, which earns nothing.", cov.CategoriesOff)
+	}
+	return newControl(id, label, weightWAF, credit, detail)
 }
 
 // modeWords is a mode as the dashboard says it.

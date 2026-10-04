@@ -19,7 +19,6 @@ interface WafSettingsCardProps {
   canEdit: boolean;
   saving: boolean;
   onSave: () => void | Promise<void>;
-  onUpdateRules: () => void;
   status: StatusResponse | undefined;
   installing: boolean;
   uninstalling: boolean;
@@ -36,7 +35,6 @@ export function WafSettingsCard({
   canEdit,
   saving,
   onSave,
-  onUpdateRules,
   status,
   installing,
   uninstalling,
@@ -256,17 +254,6 @@ export function WafSettingsCard({
                   onInstall={onInstall}
                   onUninstall={onUninstall}
                 />
-
-                <Button
-                  variant="light"
-                  color="blue"
-                  onClick={onUpdateRules}
-                  loading={saving}
-                  disabled={disabled}
-                  mt="xs"
-                >
-                  Update WAF Rules Now
-                </Button>
 
                 <BotManagementSection waf={waf} onChange={onChange} disabled={disabled} />
               </>

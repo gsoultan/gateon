@@ -154,19 +154,33 @@ func postureConfig(ctx context.Context, d postureDeps) posture.Config {
 	// A route WAF's mode as the WAF package builds it, so the coverage the
 	// Security Hub shows and the engine that runs agree by construction.
 	pc.RouteWAF = func(cfg map[string]string) posture.Mode {
-		switch wafmw.EffectiveRoute(ctx, cfg, d.globalStore).Mode {
-		case wafmw.ModeAuditOnly:
-			return posture.ModeDetect
-		case wafmw.ModeOff:
-			return posture.ModeOff
-		default:
-			return posture.ModeEnforce
-		}
+		return effectiveRouteMode(wafmw.EffectiveRoute(ctx, cfg, d.globalStore))
 	}
 	mgmt := pc.Global.GetManagement()
 	pc.ManagementWorldOpen = epserver.ManagementListenerWorldOpen(mgmt)
 	pc.PublicManagement = managementOnEveryEntrypoint(mgmt)
 	return pc
+}
+
+// effectiveRouteMode is the posture mode of a route WAF the engine runs as e.
+// A WAF that runs no attack category refuses none of the attacks the WAF
+// control is about (truth NEW-13), whatever its mode.
+func effectiveRouteMode(e wafmw.Effective) posture.Mode {
+	if e.Mode == wafmw.ModeOff {
+		return posture.ModeOff
+	}
+	runsAny := false
+	for _, k := range posture.AttackCategoryKeys {
+		runsAny = runsAny || e.Categories[k]
+	}
+	switch {
+	case !runsAny:
+		return posture.ModeNoCategories
+	case e.Mode == wafmw.ModeAuditOnly:
+		return posture.ModeDetect
+	default:
+		return posture.ModeEnforce
+	}
 }
 
 // managementOnEveryEntrypoint mirrors isPublicManagementAllowed for a request

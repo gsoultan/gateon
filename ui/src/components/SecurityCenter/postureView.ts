@@ -36,10 +36,14 @@ export function wafStatus(waf: WafPosture): StatusView {
         return { label: "Disabled", color: "gray", detail: "No WAF inspects requests." };
     }
   }
+  const catsOff = r.categoriesOff ?? 0;
   const detail =
     `${r.enforcing} of ${r.total} routes blocking, ${r.detecting} detecting only (audit), ` +
-    `${r.unprotected} with no WAF.`;
+    `${r.unprotected} with no WAF` +
+    (catsOff > 0 ? `, ${catsOff} with every attack category off.` : ".");
   if (r.unprotected === r.total) return { label: "Disabled", color: "gray", detail };
+  // A WAF with every attack category off runs but refuses none of them.
+  if (r.enforcing === 0 && r.detecting === 0) return { label: "Not blocking attacks", color: "red", detail };
   if (r.enforcing === 0) return { label: DETECTING_ONLY, color: "orange", detail };
   if (r.enforcing === r.total) return { label: `Blocking on all ${plural(r.total, "route")}`, color: "teal", detail };
   return { label: `Blocking on ${r.enforcing} of ${plural(r.total, "route")}`, color: "yellow", detail };

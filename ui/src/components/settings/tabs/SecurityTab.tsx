@@ -26,7 +26,6 @@ export default function SecurityTab({ settings }: SettingsTabProps) {
         canEdit={canEditGlobal}
         saving={saving}
         onSave={saveGatewayConfig}
-        onUpdateRules={settings.triggerWafUpdate}
         status={settings.status}
         installing={settings.installing}
         uninstalling={settings.uninstalling}

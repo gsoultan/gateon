@@ -29,6 +29,9 @@ const (
 	ModeDetect Mode = "detect"
 	// ModeOff means no WAF inspects the request at all.
 	ModeOff Mode = "off"
+	// ModeNoCategories is a WAF with every attack-category switch off: it
+	// inspects, but refuses none of the attacks the categories name.
+	ModeNoCategories Mode = "no_categories"
 )
 
 // Middleware types and keys read here, spelled as the factory spells them.
@@ -80,6 +83,18 @@ type RouteCoverage struct {
 	// middleware: the controls that bound what one bursty client costs a
 	// backend. The WAF's dos_protection flag selects no rule (ADR 0044).
 	RateLimited int `json:"rateLimited"`
+	// CategoriesOff is how many routes run a WAF with every attack-category
+	// switch off. Such a WAF still runs the rules no switch names (malware,
+	// cloud-metadata SSRF), but blocks none of SQLi, XSS, LFI, RCE and the
+	// rest, so it earns no WAF credit and is not counted as blocking.
+	CategoriesOff int `json:"categoriesOff"`
+}
+
+// AttackCategoryKeys are a route WAF's attack-category switches, spelled as
+// its config keys. A WAF with all of them off blocks none of the attacks the
+// posture's WAF control is about.
+var AttackCategoryKeys = []string{
+	"sqli", "xss", "lfi", "rce", "php", "java", "nodejs", "scanner", "protocol", "wordpress",
 }
 
 // GlobalWAFMode is the mode the gateway-wide WAF runs in.
@@ -111,6 +126,8 @@ func Coverage(c Config) RouteCoverage {
 			cov.Enforcing++
 		case ModeDetect:
 			cov.Detecting++
+		case ModeNoCategories:
+			cov.CategoriesOff++
 		default:
 			cov.Off++
 		}
@@ -147,12 +164,16 @@ func routeWAFMode(rt *gateonv1.Route, mws map[string]*gateonv1.Middleware, globa
 	if resolve == nil {
 		resolve = func(cfg map[string]string) Mode { return routeWAFConfigMode(cfg, global) }
 	}
+	best := ModeNoCategories
 	for _, mw := range own {
-		if resolve(mw.GetConfig()) == ModeEnforce {
+		switch resolve(mw.GetConfig()) {
+		case ModeEnforce:
 			return ModeEnforce
+		case ModeDetect:
+			best = ModeDetect
 		}
 	}
-	return ModeDetect
+	return best
 }
 
 // routeWAFConfigMode reads a route WAF's audit_only the way the WAF factory
@@ -161,6 +182,9 @@ func routeWAFMode(rt *gateonv1.Route, mws map[string]*gateonv1.Middleware, globa
 // mergeGlobalWAF), so an unset audit_only under an enabled audit-only global
 // WAF detects. It used to inherit only with use_crs on, which ADR 0044 removed.
 func routeWAFConfigMode(cfg map[string]string, global *gateonv1.WafConfig) Mode {
+	if everyCategoryOff(cfg) {
+		return ModeNoCategories
+	}
 	v := strings.ToLower(strings.TrimSpace(cfg[keyAuditOnly]))
 	if v == "" && global.GetEnabled() {
 		if global.GetAuditOnly() {
@@ -174,6 +198,19 @@ func routeWAFConfigMode(cfg map[string]string, global *gateonv1.WafConfig) Mode 
 	default:
 		return ModeEnforce
 	}
+}
+
+// everyCategoryOff reports whether a route WAF config switches off every
+// attack category, read as the WAF factory reads a switch: only an explicit
+// "false" turns one off, and an unset key inherits the global WAF, which runs
+// every category (ADR 0044).
+func everyCategoryOff(cfg map[string]string) bool {
+	for _, k := range AttackCategoryKeys {
+		if strings.ToLower(strings.TrimSpace(cfg[k])) != "false" {
+			return false
+		}
+	}
+	return true
 }
 
 // routeScansSignatures reports whether rt runs a file_security middleware

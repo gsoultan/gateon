@@ -36,7 +36,6 @@ export interface SettingsState {
   error: string | null;
   savedOk: boolean;
   saveGatewayConfig: () => Promise<void>;
-  triggerWafUpdate: () => Promise<void>;
   applyPreset: (preset: SettingsPreset) => void;
 
   installing: boolean;
@@ -267,27 +266,6 @@ export function useSettingsState(): SettingsState {
     }
   };
 
-  const triggerWafUpdate = async () => {
-    setSaving(true);
-    setError(null);
-    try {
-      const res = await apiFetch("/v1/waf/update", {
-        method: "POST",
-      });
-      if (!res.ok) throw new Error(await res.text());
-      const data = await res.json();
-      if (data.success) {
-        setSavedOk(true);
-      } else {
-        setError(data.message || "Failed to update WAF rules");
-      }
-    } catch (e: unknown) {
-      setError(errorMessage(e) || "Failed to trigger WAF update");
-    } finally {
-      setSaving(false);
-    }
-  };
-
   return {
     config,
     setConfig,
@@ -303,7 +281,6 @@ export function useSettingsState(): SettingsState {
     error,
     savedOk,
     saveGatewayConfig,
-    triggerWafUpdate,
     applyPreset: (preset) => setConfig(withPreset(config, preset)),
     ...clamav,
     apiUrlDraft,

@@ -29,6 +29,17 @@ func TestAnalyzeConfigDoesNotRecommendTheRemovedDoSSwitch(t *testing.T) {
 	}
 }
 
+// TestAnalyzeConfigNamesAWAFThatRunsNoCategory is truth NEW-13 in the
+// advisory: a route WAF with every attack category off is not coverage, so the
+// advisory says so instead of staying silent as it did for a "blocking" route.
+func TestAnalyzeConfigNamesAWAFThatRunsNoCategory(t *testing.T) {
+	cfg := &gateonv1.GlobalConfig{Waf: &gateonv1.WafConfig{Enabled: true}}
+	cov := wafCoverage{Total: 2, Enforcing: 1, CategoriesOff: 1, RateLimited: 2}
+	if !hasInsight(analyzeConfig(t.Context(), cfg, cov), "A WAF with every attack category off runs on 1 of 2 routes") {
+		t.Fatal("no insight names the route whose WAF runs no attack category")
+	}
+}
+
 // TestAnalyzeConfigRateLimitInsightCountsRoutes replaces that check with the
 // control that does bound a bursty client: a ratelimit or inflightreq
 // middleware on the route. Like bot management (ADR 0048), it is counted on
