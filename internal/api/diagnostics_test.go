@@ -398,17 +398,15 @@ func TestApplyRecommendation(t *testing.T) {
 		})
 		assert.NoError(t, err)
 		assert.True(t, resp.Success)
-		assert.Contains(t, resp.Message, "1.2.3.4 blocked via middleware")
+		assert.Contains(t, resp.Message, "1.2.3.4 is blocked on every entrypoint")
 
-		// Verify middleware created
-		mw, ok := mwStore.Get(ctx, "block-ip-1-2-3-4")
-		assert.True(t, ok)
-		assert.Equal(t, "ipfilter", mw.Type)
-		assert.Equal(t, "1.2.3.4", mw.Config["deny_list"])
-
-		// Verify route updated
+		// The block list is the mechanism (NEW-7): no per-IP ipfilter, and
+		// no route gains a middleware.
+		_, ok := mwStore.Get(ctx, "block-ip-1-2-3-4")
+		assert.False(t, ok)
 		rt, _ := routeStore.Get(ctx, "rt1")
-		assert.Contains(t, rt.Middlewares, "block-ip-1-2-3-4")
+		assert.Empty(t, rt.GetMiddlewares())
+		assert.True(t, telemetry.IsIPMitigatedContext(ctx, "1.2.3.4"))
 	})
 
 	t.Run("Disable Management", func(t *testing.T) {

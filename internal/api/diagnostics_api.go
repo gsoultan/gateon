@@ -676,6 +676,12 @@ func (s *ApiService) ApplyRecommendation(ctx context.Context, req *gateonv1.Appl
 	return resp, nil
 }
 
+// recommendationBlockDuration is how long an "Apply fix" block holds: one of
+// the manual-block durations the mitigation dashboard offers (ADR 0037). A
+// recommendation is applied from a finding, not a decision about the address,
+// so it lapses on its own; the operator extends it from Mitigations.
+const recommendationBlockDuration = 24 * time.Hour
+
 func (s *ApiService) applyBlockIPRecommendation(ctx context.Context, sourceIP string) (*gateonv1.ApplyRecommendationResponse, error) {
 	if sourceIP == "" {
 		return &gateonv1.ApplyRecommendationResponse{Success: false, Message: "Source IP is required to block"}, nil
@@ -690,59 +696,43 @@ func (s *ApiService) applyBlockIPRecommendation(ctx context.Context, sourceIP st
 		return applyFingerprintBlock(sourceIP), nil
 	}
 
-	mwID := "block-ip-" + strings.ReplaceAll(sourceIP, ".", "-")
-	mwID = strings.ReplaceAll(mwID, ":", "-")
-
-	mw := &gateonv1.Middleware{
-		Id:   mwID,
-		Name: "Auto-Block: " + sourceIP,
-		Type: "ipfilter",
-		Config: map[string]string{
-			"deny_list": sourceIP,
-		},
+	// One bounded entry on the block list every entrypoint and route enforces
+	// (identity.AddressBlocked), which Remove Mitigation lifts and the
+	// dashboard counts down. This used to add a block-ip-* ipfilter to every
+	// route, one more per fix, with no expiry and outside that list, and to
+	// announce an XDP shun that, with eBPF off, never happened (truth NEW-7).
+	// The kernel entry, when eBPF is attached, is leased by the same write.
+	if err := telemetry.MarkIPMitigatedFor(sourceIP, "Recommendation applied via API", recommendationBlockDuration); err != nil {
+		return refuseFix(fmt.Sprintf("IP %s was not blocked: the mitigation could not be recorded (%v)", sourceIP, err)), nil
 	}
-
-	if err := s.Middlewares.Update(ctx, mw); err != nil {
-		return &gateonv1.ApplyRecommendationResponse{Success: false, Message: "Failed to create block middleware: " + err.Error()}, nil
+	if !telemetry.IsIPMitigatedContext(ctx, sourceIP) {
+		return refuseFix(fmt.Sprintf("IP %s was not blocked: the block is not in force.", sourceIP)), nil
 	}
-
-	routes := s.Routes.List(ctx)
-	updatedCount := 0
-	for _, rt := range routes {
-		if !slices.Contains(rt.Middlewares, mwID) {
-			rt.Middlewares = append(rt.Middlewares, mwID)
-			if err := s.Routes.Update(ctx, rt); err == nil {
-				updatedCount++
-			}
-		}
+	//nolint:contextcheck // the same request-path predicate MitigateThreat asks; it takes no context.
+	if res := exemptAddressAnswer(sourceIP); res != nil {
+		return refuseFix(res.GetMessage()), nil
 	}
-
-	if s.Invalidator != nil {
-		s.Invalidator.InvalidateRoutes(func(*gateonv1.Route) bool { return true })
-	}
-
-	if s.EbpfManager != nil {
-		if err := s.EbpfManager.ShunIP(sourceIP); err != nil {
-			logger.L.LogError("Failed to shun IP at XDP level", "error", err, "ip", sourceIP)
-		} else {
-			logger.L.LogInfo("IP shunned at XDP level for DDoS mitigation", "ip", sourceIP)
-		}
-	}
-
-	// Record mitigation in telemetry. Reported rather than logged: announcing
-	// "blocked via middleware and shunned at XDP level" for a write that failed
-	// leaves the operator believing a security control is on.
-	if err := telemetry.MarkIPMitigated(sourceIP, "Manual recommendation applied via API"); err != nil {
-		return &gateonv1.ApplyRecommendationResponse{
-			Success: false,
-			Message: fmt.Sprintf("IP %s was not blocked: the mitigation could not be recorded (%v)", sourceIP, err),
-		}, nil
-	}
-
 	return &gateonv1.ApplyRecommendationResponse{
 		Success: true,
-		Message: fmt.Sprintf("IP %s blocked via middleware and shunned at XDP level.", sourceIP),
+		Message: fmt.Sprintf("IP %s is blocked on every entrypoint for %s%s. Extend or lift it under Mitigations.",
+			sourceIP, recommendationBlockWords, s.kernelBlockWords()),
 	}, nil
+}
+
+// recommendationBlockWords is recommendationBlockDuration as the message says it.
+const recommendationBlockWords = "24 hours"
+
+// kernelBlockWords says the kernel drops the address too, only when the XDP
+// program is attached: the Holder answers a shun with nil when eBPF is off,
+// which is how "shunned at XDP level" was reported with nothing in the kernel.
+func (s *ApiService) kernelBlockWords() string {
+	if s.EbpfManager == nil {
+		return ""
+	}
+	if st, err := s.EbpfManager.GetMapStats(); err == nil && st.Attached {
+		return ", and dropped in the kernel (eBPF) for the same time"
+	}
+	return ""
 }
 
 // applyFingerprintBlock blocks a fingerprint a finding names, on the network
@@ -1697,27 +1687,41 @@ func (s *ApiService) applyWafHardeningRecommendation(ctx context.Context, reason
 		return &gateonv1.ApplyRecommendationResponse{Success: false, Message: "Global config service not available"}, nil
 	}
 
+	// What the fix can change is whether the gateway-wide WAF runs and whether
+	// it blocks. It used to set the global category booleans, which the global
+	// WAF ignores -- it runs every category (ADR 0044) -- and to report "core
+	// protections and OWASP CRS" enabled while an audit-only WAF stayed
+	// audit-only and blocked nothing (truth NEW-7).
+	var changed []string
 	err := s.editGlobal(ctx, func(globalCfg *gateonv1.GlobalConfig) {
+		changed = changed[:0]
 		if globalCfg.Waf == nil {
-			globalCfg.Waf = &gateonv1.WafConfig{}
+			globalCfg.Waf = &gateonv1.WafConfig{UseCrs: true}
 		}
-		globalCfg.Waf.Enabled = true
-		globalCfg.Waf.UseCrs = true
-		// Enable core protections if they are off
-		globalCfg.Waf.Sqli = true
-		globalCfg.Waf.Xss = true
-		globalCfg.Waf.Lfi = true
-		globalCfg.Waf.Rce = true
-		globalCfg.Waf.Scanner = true
+		if !globalCfg.Waf.Enabled {
+			globalCfg.Waf.Enabled = true
+			changed = append(changed, "turned the gateway-wide WAF on")
+		}
+		if globalCfg.Waf.AuditOnly {
+			globalCfg.Waf.AuditOnly = false
+			changed = append(changed, "turned audit-only off, so it now refuses what it matches")
+		}
 	})
 	if err != nil {
-		return &gateonv1.ApplyRecommendationResponse{Success: false, Message: "Failed to update config: " + errorMessage(err)}, nil
+		return refuseFix("Failed to update config: " + errorMessage(err)), nil
 	}
+	return &gateonv1.ApplyRecommendationResponse{Success: true, Message: hardeningMessage(changed)}, nil
+}
 
-	return &gateonv1.ApplyRecommendationResponse{
-		Success: true,
-		Message: "WAF has been enabled with core security protections (SQLi, XSS, etc.) and OWASP CRS.",
-	}, nil
+// hardeningMessage says what the WAF hardening fix changed, and what it does
+// not touch.
+func hardeningMessage(changed []string) string {
+	const scope = " The gateway-wide WAF runs every attack category on routes without a WAF of their own; " +
+		"a route's WAF middleware keeps its own settings, including its own audit-only."
+	if len(changed) == 0 {
+		return "The gateway-wide WAF was already on and blocking; nothing changed." + scope
+	}
+	return "Applied: " + strings.Join(changed, "; ") + "." + scope
 }
 
 func (s *ApiService) TriggerWafUpdate(ctx context.Context, _ *gateonv1.TriggerWafUpdateRequest) (*gateonv1.TriggerWafUpdateResponse, error) {
