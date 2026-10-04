@@ -124,6 +124,30 @@ test.describe('two-factor sign-in', () => {
     await page.context().close();
   });
 
+  // MGMT-N5 (ADR 0057): once the account had enrolled, the Users page's
+  // two-factor control was disabled, and an account whose authenticator was
+  // lost could only be deleted.
+  test('an administrator resets the second factor from Users, and the account enrols again', async ({ page, browser }) => {
+    test.skip(!secret, 'needs the enrolment above');
+    await page.goto('/users');
+    await page.getByPlaceholder('Search users...').fill(USER);
+    const control = page.getByRole('button', { name: `Two-factor authentication for ${USER}` });
+    await expect(control).toBeEnabled();
+    await control.click();
+    const dialog = page.getByRole('dialog', { name: 'Reset two-factor authentication' });
+    await expect(dialog).toContainText(`Reset two-factor authentication for "${USER}"?`);
+    const reset = page.waitForResponse((r) => r.url().endsWith('/gateon.v1.ApiService/ResetUserTwoFactor'));
+    await dialog.getByRole('button', { name: `Reset 2FA for "${USER}"` }).click();
+    expect((await reset).status()).toBe(200);
+    await expect(page.getByText(`Two-factor authentication for "${USER}" was reset`)).toBeVisible();
+
+    // The old authenticator is gone and the account is not left password-only.
+    const fresh = await freshPage(browser);
+    await submitPassword(fresh);
+    await expect(fresh.getByRole('heading', { name: 'Set Up Two-Factor' })).toBeVisible();
+    await fresh.context().close();
+  });
+
   test('an id and a valid code without the password step are refused', async ({ playwright }) => {
     test.skip(!secret || !userId, 'needs the enrolment above');
     const ctx = await playwright.request.newContext({

@@ -53,6 +53,13 @@ import { ConfirmDeleteModal } from "../components/ConfirmDelete";
 import { notifyError, notifySuccess } from "../utils/notify";
 import { userSaveRefusalMessage } from "../components/userSaveMessages";
 import { PASSWORD_RULE, passwordPolicyError } from "../components/passwordPolicy";
+import {
+  resetConfirmation,
+  resetRefusalMessage,
+  twoFactorAction,
+  twoFactorActionLabel,
+} from "../components/twoFactorReset";
+import { api } from "../services/client";
 
 export default function UsersPage() {
   const [search, setSearch] = useState("");
@@ -71,6 +78,8 @@ export default function UsersPage() {
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [targetUser, setTargetUser] = useState<User | null>(null);
   const [pendingDelete, setPendingDelete] = useState<User | null>(null);
+  const [pendingReset, setPendingReset] = useState<User | null>(null);
+  const [resetting, setResetting] = useState(false);
   const currentUser = useAuthStore((state) => state.user);
   const token = useAuthStore((state) => state.token);
   const logout = useAuthStore((state) => state.logout);
@@ -167,18 +176,42 @@ export default function UsersPage() {
   };
 
   const handle2FA = (user: User) => {
-    // Self-service: the account owner manages their own 2FA via the enrollment
-    // modal (only they ever see the secret).
-    if (currentUser?.id === user.id) {
-      setTargetUser(user);
-      tfaOpen();
-      return;
+    switch (twoFactorAction(user, currentUser?.id, isAdmin)) {
+      case "self":
+        // Self-service: the account owner manages their own 2FA via the
+        // enrollment modal (only they ever see the secret).
+        setTargetUser(user);
+        tfaOpen();
+        return;
+      case "reset":
+        // An enrolled account whose authenticator is lost (ADR 0057). The
+        // administrator never sees a secret: the account enrols again itself.
+        setPendingReset(user);
+        return;
+      case "require":
+      case "cancel-requirement":
+        // Mandate 2FA (set/clear the pending requirement); the user enrols on
+        // their next login.
+        putUser(user, { twoFactorPending: !user.twoFactorPending });
+        return;
+      default:
+        return;
     }
-    // Admin acting on another user: an admin can only MANDATE 2FA (set/clear the
-    // pending requirement); they never see the secret. The user enrolls on their
-    // next login. Mandating is a no-op once 2FA is already enabled.
-    if (isAdmin && !user.twoFactorEnabled) {
-      putUser(user, { twoFactorPending: !user.twoFactorPending });
+  };
+
+  const confirmReset = async () => {
+    const user = pendingReset;
+    if (!user) return;
+    setResetting(true);
+    try {
+      await api.resetUserTwoFactor({ id: user.id });
+      notifySuccess(`Two-factor authentication for "${user.username}" was reset. Their sessions ended.`);
+      refetch();
+    } catch (err) {
+      notifyError(null, { title: `Could not reset 2FA for "${user.username}"`, message: resetRefusalMessage(err) });
+    } finally {
+      setResetting(false);
+      setPendingReset(null);
     }
   };
 
@@ -294,17 +327,7 @@ export default function UsersPage() {
               <IconKey size={16} />
             </ActionIcon>
           </Tooltip>
-          <Tooltip
-            label={
-              currentUser?.id === user.id
-                ? "Manage your two-factor authentication"
-                : user.twoFactorEnabled
-                  ? "User has 2FA enabled"
-                  : user.twoFactorPending
-                    ? "2FA required — click to cancel requirement"
-                    : "Require this user to set up 2FA"
-            }
-          >
+          <Tooltip label={twoFactorActionLabel(twoFactorAction(user, currentUser?.id, isAdmin))}>
             <ActionIcon
               variant="subtle"
               color={
@@ -316,12 +339,7 @@ export default function UsersPage() {
               }
               onClick={() => handle2FA(user)}
               aria-label={`Two-factor authentication for ${user.username}`}
-              disabled={
-                !(
-                  currentUser?.id === user.id ||
-                  (isAdmin && !user.twoFactorEnabled)
-                )
-              }
+              disabled={twoFactorAction(user, currentUser?.id, isAdmin) === "none"}
             >
               <IconShieldLock size={16} />
             </ActionIcon>
@@ -461,7 +479,7 @@ export default function UsersPage() {
                         color={user.twoFactorEnabled ? "green" : user.twoFactorPending ? "orange" : "gray"}
                         onClick={() => handle2FA(user)}
               aria-label={`Two-factor authentication for ${user.username}`}
-                        disabled={!(currentUser?.id === user.id || (isAdmin && !user.twoFactorEnabled))}
+                        disabled={twoFactorAction(user, currentUser?.id, isAdmin) === "none"}
                       >
                         <IconShieldLock size={16} />
                       </ActionIcon>
@@ -660,6 +678,27 @@ export default function UsersPage() {
         onCancel={() => setPendingDelete(null)}
         onConfirm={() => void confirmDelete()}
       />
+      <Modal
+        opened={pendingReset !== null}
+        onClose={() => setPendingReset(null)}
+        title={resetConfirmation(pendingReset?.username ?? "").title}
+        centered
+        radius="md"
+      >
+        {pendingReset && (
+          <Stack gap="md">
+            <Text size="sm">{resetConfirmation(pendingReset.username).question}</Text>
+            <Group justify="flex-end">
+              <Button variant="default" onClick={() => setPendingReset(null)}>
+                Cancel
+              </Button>
+              <Button color="red" loading={resetting} onClick={() => void confirmReset()}>
+                {resetConfirmation(pendingReset.username).confirm}
+              </Button>
+            </Group>
+          </Stack>
+        )}
+      </Modal>
     </Stack>
   );
 }
