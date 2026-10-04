@@ -7,6 +7,7 @@ import (
 	"cmp"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -126,31 +127,68 @@ func recordWAFDecision(o wafObservation) {
 	telemetry.RecordSecurityThreat(telemetry.RecordSecurityThreatWithJA4(o.request, o.threat(clientIP)))
 }
 
+// wafLinesPerSecond is how many "WAF blocked" lines, and separately how many
+// "WAF would have blocked" lines, are written a second; wafLinesReportEvery is
+// how often, at most, the rest are reported, one line per rule and route.
+//
+// One line was written per decision, so one client sending attacks wrote 20000
+// INFO lines a second, past journald's budget of ~333, which then dropped the
+// service's ERRORs as well: the access-log cap of ADR 0049 bounded the one
+// per-request line and left this one open (DP-N3, ADR 0061). The counters, the
+// threat record and the Security Hub still count every decision; the log
+// shows the first ten a second and how many more there were.
+const (
+	wafLinesPerSecond   = 10
+	wafLinesReportEvery = 30 * time.Second
+)
+
+// wafBlockLines and wafWouldBlockLines rate-limit the two decision lines.
+var (
+	wafBlockLines      = newWAFLines("WAF blocked requests whose lines were not written (over the per-second limit; each is in gateon_request_failures_total and the Security Hub)")
+	wafWouldBlockLines = newWAFLines("WAF would have blocked requests whose lines were not written (over the per-second limit; each is in gateon_middleware_waf_would_block_total)")
+)
+
+// newWAFLines is the limiter for one kind of WAF decision line.
+func newWAFLines(summary string) *logger.LineLimiter {
+	return logger.NewLineLimiter(logger.LineLimit{
+		Level: slog.LevelInfo, Summary: summary, PerSecond: wafLinesPerSecond,
+		Every: wafLinesReportEvery, Labels: [2]string{"rule", "route"},
+	})
+}
+
 // countDecision feeds the would-block counter, the block log line and the
-// failure counter -- the same for both phases.
+// failure counter -- the same for both phases. The counters see every
+// decision; the lines are rate-limited.
 func (o wafObservation) countDecision(blocked bool) {
 	if o.cfg.AuditOnly && wouldHaveBlocked(o.decision) {
 		// Audit-only: record the refusal that did not happen. This is the number
 		// an operator needs before enforcing, and the one nothing reported.
 		telemetry.MiddlewareWAFWouldBlockTotal.
 			WithLabelValues(o.routeID, o.decision.RuleID().String(), o.phaseOrRequest()).Inc()
-		logger.L.LogInfo("WAF would have blocked a request (audit-only)",
-			"rule", o.decision.RuleID(),
-			"reason", o.decision.Reason(),
-			"score", o.decision.Score(),
-			"phase", o.phaseOrRequest(),
-			"route", o.routeID)
+		o.logDecision(wafWouldBlockLines, "WAF would have blocked a request (audit-only)")
 	}
 
 	if blocked {
-		logger.L.LogInfo("WAF blocked a request",
-			"rule", o.decision.RuleID(),
-			"reason", o.decision.Reason(),
-			"score", o.decision.Score(),
-			"route", o.routeID)
+		o.logDecision(wafBlockLines, "WAF blocked a request")
 		telemetry.RequestFailuresTotal.
 			WithLabelValues(o.routeID, "waf:"+o.decision.RuleID().String()).Inc()
 	}
+}
+
+// logDecision writes msg about the decision when lines allows one now, and
+// counts it under its rule and route when not.
+func (o wafObservation) logDecision(lines *logger.LineLimiter, msg string) {
+	now := time.Now()
+	if !lines.Allow(now) {
+		lines.Skip(now, o.decision.RuleID().String(), o.routeID)
+		return
+	}
+	logger.L.LogInfo(msg,
+		"rule", o.decision.RuleID(),
+		"reason", o.decision.Reason(),
+		"score", o.decision.Score(),
+		"phase", o.phaseOrRequest(),
+		"route", o.routeID)
 }
 
 // threat builds the dashboard record for a decision.
