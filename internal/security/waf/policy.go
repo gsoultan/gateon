@@ -279,7 +279,7 @@ func (p Policy) Ruleset() rules.Set {
 		if !p.ResponseInspection && s.phase == types.PhaseResponseBody {
 			continue
 		}
-		if p.DisabledCategories[s.category] || p.tagDisabled(s.tags) {
+		if p.DisabledCategories[s.category] || p.tagRemoves(s) {
 			continue
 		}
 		set = append(set, s.rule())
@@ -364,6 +364,49 @@ func anyTagIn(tags []string, set map[string]bool) bool {
 
 func (p Policy) tagDisabled(tags []string) bool {
 	return anyTagIn(tags, p.DisabledTags)
+}
+
+// tagFamily names the category a family tag belongs to. A rule is filed under
+// one category but may carry the tags of others -- the web-shell rule is
+// malware and carries "rce" -- and a switch turns a family off by its tags as
+// well as its category. Without this, the RCE switch removed the web-shell
+// rule while malware detection was reported on (truth NEW-9). PHP, Java and
+// Node.js are code execution, so their tags belong to RCE (ADR 0044).
+var tagFamily = map[string]string{
+	TagAttackSqli: CategorySQLi, TagAttackXss: CategoryXSS,
+	TagAttackRce: CategoryRCE, TagRce: CategoryRCE, TagPhp: CategoryRCE, TagJava: CategoryRCE, "nodejs": CategoryRCE,
+	TagScanner: CategoryScanner, TagProtocol: CategoryProtocol, TagWpScan: CategoryWordPress,
+	TagMalware: CategoryMalware, TagRansomware: CategoryRansomware,
+	TagDlp: CategoryDLP, TagReputation: CategoryReputation,
+}
+
+// switchedCategory reports whether a category has a switch of its own, which
+// is when a rule filed under it belongs to that family alone.
+func switchedCategory(c string) bool {
+	for _, f := range tagFamily {
+		if f == c {
+			return true
+		}
+	}
+	return false
+}
+
+// tagRemoves reports whether a disabled tag removes s. A tag of another
+// family does not remove a rule filed under a switched category: switching
+// RCE off leaves the malware family's web-shell rule in force. A tag of no
+// family (dlp-inbound, ssrf, a CVE tag) removes whatever carries it.
+func (p Policy) tagRemoves(s spec) bool {
+	own := switchedCategory(s.category)
+	for _, t := range s.tags {
+		if !p.DisabledTags[t] {
+			continue
+		}
+		f, family := tagFamily[t]
+		if !own || !family || f == s.category {
+			return true
+		}
+	}
+	return false
 }
 
 // Options renders the policy as gwaf options.

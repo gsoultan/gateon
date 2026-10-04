@@ -130,3 +130,30 @@ func TestRouteWAFAllCategoriesOffStillBlocksWhatNoSwitchNames(t *testing.T) {
 		t.Errorf("cloud-metadata SSRF with every category off: got %d, want 403", got)
 	}
 }
+
+// TestRouteWAFCategorySwitchKeepsWebShellDetection is truth NEW-9: a route WAF
+// with rce=false answered /c99.php and /shell.jsp with 200 while
+// /v1/waf/effective said malware detection ran. The web-shell rule is a
+// malware rule that also carries the "rce" tag, and the RCE switch removed
+// rules by tag. No category switch may remove another family's rules, so a
+// web-shell request is refused whichever family is switched off.
+func TestRouteWAFCategorySwitchKeepsWebShellDetection(t *testing.T) {
+	InvalidateWAFCache()
+	t.Cleanup(InvalidateWAFCache)
+	// Malware detection is forced on by the global WAF a route WAF inherits.
+	d := dashboardGlobalWAF()
+	if got := routeWAFStatus(t, map[string]string{"route": "webshell-default"}, d, webshellProbe); got != http.StatusForbidden {
+		t.Fatalf("precondition: a default route WAF gives /c99.php %d, want 403", got)
+	}
+	switches := []string{"sqli", "xss", "lfi", "rce", "php", "java", "nodejs", "scanner", "protocol", "wordpress"}
+	for _, sw := range switches {
+		for _, path := range []string{"/c99.php", "/shell.jsp"} {
+			cfg := map[string]string{"route": "webshell-" + sw, sw: "false"}
+			probe := func() *http.Request { return probeGET(path) }
+			if got := routeWAFStatus(t, cfg, d, probe); got != http.StatusForbidden {
+				t.Errorf("%s=false: GET %s got %d, want 403 -- the %s switch removed a malware rule",
+					sw, path, got, sw)
+			}
+		}
+	}
+}

@@ -243,6 +243,40 @@ func TestCategoryAndTagDisablingWorks(t *testing.T) {
 	}
 }
 
+// TestFamilyTagLeavesOtherFamiliesRules is truth NEW-9 over the whole corpus:
+// disabling one family's tag must leave every rule filed under another
+// switched category in place. The RCE switch's "rce" tag removed the malware
+// family's web-shell rule (1100008) and PHP-upload rule (1100005); the PHP
+// switch removed a DLP rule.
+func TestFamilyTagLeavesOtherFamiliesRules(t *testing.T) {
+	t.Parallel()
+	base := Policy{ParanoiaLevel: 4, ResponseInspection: true}
+	for tag, family := range tagFamily {
+		p := base
+		p.DisabledTags = map[string]bool{tag: true}
+		kept := map[uint32]bool{}
+		for _, r := range p.Ruleset() {
+			kept[uint32(r.ID)] = true
+		}
+		for _, s := range defaultSpecs {
+			if s.pl > 4 || !switchedCategory(s.category) || s.category == family {
+				continue
+			}
+			if !kept[s.id] {
+				t.Errorf("disabling tag %q (family %s) removed rule %d, filed under %s", tag, family, s.id, s.category)
+			}
+		}
+	}
+	// The family's own rules still go.
+	p := base
+	p.DisabledTags = map[string]bool{TagRce: true, TagAttackRce: true}
+	for _, r := range p.Ruleset() {
+		if r.ID == 1100010 {
+			t.Errorf("rule 1100010 (RCE) survived the RCE tags being disabled")
+		}
+	}
+}
+
 // TestThresholdScalesWithReputation pins the behaviour that four SecLang rules
 // used to encode by mutating a transaction variable in load order.
 func TestThresholdScalesWithReputation(t *testing.T) {
