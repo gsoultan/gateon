@@ -172,7 +172,7 @@ func AccessLogSampled(routeID string, sampleRate uint32) Middleware {
 	if sampleRate == 0 {
 		return func(next http.Handler) http.Handler { return next }
 	}
-	accessLogs.max.Store(accessLogMaxPerSecond())
+	accessLogs.setMax(accessLogMaxPerSecond())
 	var counter uint64
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -198,13 +198,16 @@ func AccessLogSampled(routeID string, sampleRate uint32) Middleware {
 				}
 				rs.AccessLogged = true
 			}
-			sampled := sampleRate == 1 || (atomic.AddUint64(&counter, 1)%uint64(sampleRate) == 0)
-			if sampled && accessLogs.allow(start) {
+			if sampleRate != 1 && atomic.AddUint64(&counter, 1)%uint64(sampleRate) != 0 {
+				return
+			}
+			// Counted when the line is written, not when the request began.
+			if now := time.Now(); accessLogs.allow(now) {
 				statusCode := sw.Status
 				if statusCode == 0 {
 					statusCode = http.StatusOK
 				}
-				duration := time.Since(start)
+				duration := now.Sub(start)
 				logger.L.LogInfo("access log",
 					"host", origHost,
 					"method", origMethod,
@@ -246,45 +249,56 @@ func accessLogMaxPerSecond() int64 {
 // request; the access log is a convenience, and is what gives.
 var accessLogs accessLogCap
 
-// accessLogCap counts the access-log lines of the current second. It is
-// approximate at the second's edge -- two requests can both reset it -- and
-// that is the price of no lock on the request path.
+// accessLogCap counts the access-log lines of the current second, exactly:
+// the window and its count move together in one atomic word, and the window
+// only moves forwards (logger.PerSecond). It used to be keyed on the time a
+// request started and reset whenever that time differed from the window it
+// held, so a slow request finishing beside fast ones moved the window back and
+// the next fast one moved it forward, each move starting the count over -- 737
+// lines a second through a cap of 100 (OPS-N2, ADR 0061).
 type accessLogCap struct {
-	max        atomic.Int64
-	second     atomic.Int64
-	written    atomic.Int64
+	window     logger.PerSecond
 	suppressed atomic.Int64
-	minute     atomic.Int64
+	// reported is when the cap last said what it left out, in nanoseconds of
+	// the monotonic clock since accessLogEpoch.
+	reported atomic.Int64
 }
 
-// allow reports whether an access-log line may be written at now.
+// accessLogEpoch is what accessLogCap measures its report interval from; a
+// time from time.Now carries the monotonic clock.
+var accessLogEpoch = time.Now()
+
+// accessLogReportEvery is how often, at most, the cap says how many lines it
+// left out.
+const accessLogReportEvery = time.Minute
+
+// setMax sets the cap; zero lifts it.
+func (c *accessLogCap) setMax(n int64) { c.window.SetMax(n) }
+
+// allow reports whether an access-log line may be written at now, the moment
+// the line would be written.
 func (c *accessLogCap) allow(now time.Time) bool {
-	limit := c.max.Load()
-	if limit <= 0 {
-		return true
+	ok := c.window.Allow(now)
+	if !ok {
+		c.suppressed.Add(1)
 	}
-	sec := now.Unix()
-	if cur := c.second.Load(); cur != sec && c.second.CompareAndSwap(cur, sec) {
-		c.written.Store(0)
-		c.reportSuppressed(sec, limit)
+	if c.suppressed.Load() > 0 {
+		c.reportSuppressed(now)
 	}
-	if c.written.Add(1) <= limit {
-		return true
-	}
-	c.suppressed.Add(1)
-	return false
+	return ok
 }
 
 // reportSuppressed logs, at most once a minute, how many lines the cap left
 // out since it last said so.
-func (c *accessLogCap) reportSuppressed(sec, limit int64) {
-	minute := sec / 60
-	if cur := c.minute.Load(); cur == minute || !c.minute.CompareAndSwap(cur, minute) {
+func (c *accessLogCap) reportSuppressed(now time.Time) {
+	at := int64(now.Sub(accessLogEpoch))
+	last := c.reported.Load()
+	if at-last < int64(accessLogReportEvery) || !c.reported.CompareAndSwap(last, at) {
 		return
 	}
 	if n := c.suppressed.Swap(0); n > 0 {
 		logger.L.LogWarn("access log: lines over the per-second cap were not written; every request is still "+
-			"in the trace store", "not_written", n, "max_per_second", limit, "env", accessLogMaxPerSecondEnv)
+			"in the trace store", "not_written", n, "max_per_second", c.window.Max(), "env", accessLogMaxPerSecondEnv)
 	}
 }
 
