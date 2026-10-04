@@ -402,7 +402,7 @@ func (f *Factory) Create(m *gateonv1.Middleware, routeID string) (Middleware, er
 	case "circuit_breaker":
 		return circuitBreakerFromConfig(cfg, routeID, cfg[kind.RouteStateKey])
 	case "wasm":
-		return transform.Wasm(context.Background(), m.WasmBlob)
+		return transform.Wasm(context.Background(), m.WasmBlob, routeID)
 	default:
 		return nil, fmt.Errorf("unknown middleware type: %s", m.Type)
 	}

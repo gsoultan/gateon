@@ -58,7 +58,7 @@ var namedGuest = []byte{
 // backend without the guest having run. A guest that filters or tags traffic
 // did so for one request at a time and waved the rest through.
 func TestWasmRunsForConcurrentRequests(t *testing.T) {
-	mw, err := Wasm(t.Context(), namedGuest)
+	mw, err := Wasm(t.Context(), namedGuest, "")
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}

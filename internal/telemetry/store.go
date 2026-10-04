@@ -500,11 +500,13 @@ type SecurityThreat struct {
 	// Details say it instead.
 	Unattributed bool `json:"unattributed,omitzero"`
 	// Observed marks a match a control recorded and did not act on: a WAF in
-	// audit-only mode, or a WAF match the engine scored below the route's
-	// blocking threshold. It is recorded, counted, broadcast and shipped, and
-	// held against nobody -- the operator has said not to act on it, or the
-	// control itself judged it short of a refusal, so it is not evidence
-	// (ADR 0025, 0055). Not persisted; the type (waf_detected) says it.
+	// audit-only mode, a WAF match the engine scored below the route's
+	// blocking threshold, and every detection-only control -- the XSS, SQLi
+	// and threat recognisers, body entropy, behavioural profiling, a device
+	// posture change, a WASM guest, the analysis engine's own findings. It is
+	// recorded, counted, broadcast and shipped, and held against nobody -- the
+	// operator has said not to act on it, or the control let the request
+	// through, so it is not evidence (ADR 0025, 0055, 0059).
 	Observed bool `json:"observed,omitzero"`
 	// Internal fields for lazy formatting in background worker
 	rawReqHeader  map[string][]string
@@ -2220,7 +2222,10 @@ func (s *pathStatsStore) processThreat(st *SecurityThreat) {
 	if isMitigated {
 		recordMitigationFunnel(st)
 	}
-	if s.scoreCache != nil {
+	// The per-address score the alerting manager's autonomous shun reads
+	// (GetIPThreatScore). A threat not held against its source -- one a
+	// control let through, among others -- is no evidence towards it either.
+	if s.scoreCache != nil && st.HeldAgainstSource() {
 		current, ok := s.scoreCache.Get(st.SourceIP)
 		score := st.Score
 		if ok {

@@ -147,6 +147,9 @@ func checkEntropy(next http.Handler, w http.ResponseWriter, r *http.Request, thr
 				Category:    "advanced",
 				Severity:    kind.SeverityHigh,
 				ActionTaken: kind.ActionDetected,
+				// Measured and let through: a compressed upload or an
+				// encrypted blob is high-entropy too (ADR 0059).
+				Observed: true,
 			})
 		}
 	}
@@ -303,6 +306,15 @@ func (rc recognition) serve(next http.Handler, w http.ResponseWriter, r *http.Re
 			Category:    rc.category,
 			Severity:    rc.severity,
 			ActionTaken: kind.ActionDetected,
+			// The request goes on to the next handler whatever matched: a
+			// substring hit ("update ", "--", "<img") is not a refusal, and a
+			// detection that is not one is no evidence against the client
+			// (ADR 0059). It used to take half its score off the client's
+			// reputation: these three run on the management plane too, so an
+			// operator's fourth dashboard save whose body held "--" left their
+			// browser on their network refused by every route's reputation
+			// blocker.
+			Observed: true,
 		})
 	}
 
@@ -398,6 +410,7 @@ func ThreatRecognition(routeID string) kind.Middleware {
 					Category:    "advanced",
 					Severity:    severity,
 					ActionTaken: kind.ActionDetected,
+					Observed:    true, // let through; see recognition.serve
 				})
 			}
 

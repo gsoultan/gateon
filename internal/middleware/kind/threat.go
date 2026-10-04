@@ -31,6 +31,12 @@ type Threat struct {
 	Severity    string // one of the Severity* constants
 	ActionTaken string // one of the Action* constants
 	Score       float64
+	// Observed marks a detection the recording middleware let through: it is
+	// counted and shown, and held against nobody -- no reputation penalty, no
+	// evidence towards a block, no correlation signal (ADR 0055, 0059). A
+	// control that does not refuse has not judged the request an attack, and
+	// its score must not let the reputation blocker refuse the client for it.
+	Observed bool
 }
 
 // RecordThreat files a threat for the dashboard, the alerting pipeline and the
@@ -64,5 +70,6 @@ func RecordThreat(r *http.Request, t Threat) {
 		ActionTaken: t.ActionTaken,
 		Method:      r.Method,
 		UserAgent:   r.UserAgent(),
+		Observed:    t.Observed,
 	}))
 }

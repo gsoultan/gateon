@@ -87,9 +87,12 @@ func CheckZeroTrust(userID string, currentFingerprint string, ip string, r *http
 			Score:       60,
 			Details:     fmt.Sprintf("Fingerprint changed for user %s (Previous: %s, Current: %s)", userID, last.Fingerprint, currentFingerprint),
 			RequestURI:  r.URL.Path,
+			// Recorded and let through, so it is no evidence against the
+			// client (ADR 0059): a browser update or a second device changes
+			// the fingerprint of a user doing nothing wrong, and this was held
+			// against the new one as if it had been refused.
+			Observed: true,
 		})
-		// We don't necessarily block, but we record it.
-		// In a stricter mode, we might require re-auth.
 	}
 
 	// Update cache
