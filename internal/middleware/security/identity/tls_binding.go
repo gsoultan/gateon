@@ -88,8 +88,8 @@ type tlsBinder struct {
 
 func (b tlsBinder) serve(next http.Handler, w http.ResponseWriter, r *http.Request) {
 	cert := clientCertificateHash(r)
-	if session, err := r.Cookie(b.cookie); err == nil {
-		if reason := b.refusal(r, cert, session.Value); reason != "" {
+	if sessions := r.CookiesNamed(b.cookie); len(sessions) > 0 {
+		if reason := b.refusal(r, cert, sessions); reason != "" {
 			refuseBinding(w, r, reason)
 			return
 		}
@@ -105,20 +105,30 @@ func (b tlsBinder) serve(next http.Handler, w http.ResponseWriter, r *http.Reque
 	bw.commit()
 }
 
-// refusal says why a request presenting session must be refused, or "".
-func (b tlsBinder) refusal(r *http.Request, cert []byte, session string) string {
+// refusal says why a request presenting sessions must be refused, or "".
+//
+// The session cookie, and its binding, must each appear once (TRUTH-NEW-5).
+// Only the first used to be checked, so `session=OWN; session_binding=OWN;
+// session=STOLEN` passed, and a backend that reads the last value served the
+// stolen session. Which duplicate a backend reads is its own choice, so there
+// is no "one that counts" to check here.
+func (b tlsBinder) refusal(r *http.Request, cert []byte, sessions []*http.Cookie) string {
 	if cert == nil {
 		return "Session cookie presented without a client certificate; the session is bound to the " +
 			"certificate it was issued to"
 	}
-	got, err := r.Cookie(b.binding)
-	if err != nil {
+	bindings := r.CookiesNamed(b.binding)
+	if len(sessions) > 1 || len(bindings) > 1 {
+		return "Session or binding cookie presented more than once; a backend may read a different " +
+			"one from the one checked"
+	}
+	if len(bindings) == 0 {
 		return "Session cookie presented with no binding cookie; a session must be bound on the " +
 			"connection that issued it"
 	}
 	// Constant time: the comparison is against a value derived from a secret
 	// the client is trying to guess.
-	if !hmac.Equal([]byte(got.Value), []byte(b.mac(cert, session))) {
+	if !hmac.Equal([]byte(bindings[0].Value), []byte(b.mac(cert, sessions[0].Value))) {
 		return "Session cookie presented with a binding for another client certificate (binding mismatch)"
 	}
 	return ""
