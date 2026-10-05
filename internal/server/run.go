@@ -362,6 +362,9 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 	_ = s.Close()
 	close(metricsStop)
 	wg.Wait()
+	// Last, once no listener is serving: a request still in a WASM middleware
+	// would find its guest closed.
+	transform.CloseWasmModules(shutdownCtx)
 	logger.L.LogInfo("shutdown complete")
 }
 
