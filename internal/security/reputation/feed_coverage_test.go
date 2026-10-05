@@ -26,10 +26,14 @@ func slashEights(first, n int) string {
 // to a /8, but nothing bounded them together: 256 lines "N.0.0.0/8" -- far
 // inside every tier's entry bound -- refused every IPv4 client on every
 // entrypoint, which ADR 0061's title says a feed cannot do. The address space
-// every feed covers together is bounded per family, by default one /8's worth
-// of IPv4 and one /32's worth of IPv6; entries past it are refused and counted
-// as coverage.
+// every feed covers together is bounded per family, by default one /4's worth
+// of IPv4 (sixteen /8s) and one /32's worth of IPv6; entries past it are
+// refused and counted as coverage.
 func TestFeedsTogetherCannotListEveryone(t *testing.T) {
+	slash8s := int(currentFeedLimits().cover4 >> 24) // /8s the default admits
+	if slash8s < 1 || slash8s >= 256 {
+		t.Fatalf("setup: the default IPv4 coverage admits %d /8s; the test needs some admitted and some refused", slash8s)
+	}
 	before := refusedCount(t, refusedCoverage)
 	var v6 strings.Builder
 	for i := range 300 {
@@ -37,18 +41,39 @@ func TestFeedsTogetherCannotListEveryone(t *testing.T) {
 	}
 	s := loadedStore(t, serveFeed(t, slashEights(0, 256)+v6.String()))
 
-	for _, ip := range []string{"8.8.8.8", "200.1.2.3", "255.255.255.1", "2100::1", "2128::1"} {
+	firstRefused := fmt.Sprintf("%d.1.2.3", slash8s)
+	for _, ip := range []string{firstRefused, "200.1.2.3", "255.255.255.1", "2100::1", "2128::1"} {
 		if bad, _ := s.IsBad(ip); bad {
-			t.Errorf("%s is listed: the feed covers more than one /8 of IPv4 or one /32 of IPv6", ip)
+			t.Errorf("%s is listed: the feed covers more than the IPv4 or IPv6 coverage bound", ip)
 		}
 	}
-	for _, ip := range []string{"0.1.2.3", "2000::1"} {
+	lastAdmitted := fmt.Sprintf("%d.1.2.3", slash8s-1)
+	for _, ip := range []string{"0.1.2.3", lastAdmitted, "2000::1"} {
 		if bad, _ := s.IsBad(ip); !bad {
-			t.Errorf("%s, in the first entry of its family, is not listed", ip)
+			t.Errorf("%s, inside the coverage bound, is not listed", ip)
 		}
 	}
-	if got := refusedCount(t, refusedCoverage) - before; got != 255+299 {
-		t.Errorf("coverage counter moved by %v, want %d", got, 255+299)
+	if got, want := refusedCount(t, refusedCoverage)-before, float64(256-slash8s+299); got != want {
+		t.Errorf("coverage counter moved by %v, want %v", got, want)
+	}
+}
+
+// TestTheDefaultCoverageAdmitsTheBogonsOfACommonFeed: FireHOL level 1, the
+// feed most installs start with, lists bogon and private ranges worth four to
+// five /8s. A one-/8 default took entries of it out of force on upgrade.
+func TestTheDefaultCoverageAdmitsTheBogonsOfACommonFeed(t *testing.T) {
+	const bogons = "0.0.0.0/8\n10.0.0.0/8\n100.64.0.0/10\n127.0.0.0/8\n169.254.0.0/16\n" +
+		"172.16.0.0/12\n192.0.0.0/24\n192.0.2.0/24\n192.168.0.0/16\n198.18.0.0/15\n" +
+		"198.51.100.0/24\n203.0.113.0/24\n"
+	before := refusedCount(t, refusedCoverage)
+	s := loadedStore(t, serveFeed(t, bogons))
+	if got := refusedCount(t, refusedCoverage) - before; got != 0 {
+		t.Errorf("the default coverage refused %v of a common feed's bogon entries", got)
+	}
+	for _, ip := range []string{"10.1.1.1", "127.0.0.2", "192.168.1.1", "100.64.0.1"} {
+		if bad, _ := s.IsBad(ip); !bad {
+			t.Errorf("%s, a bogon the feed lists, is not listed", ip)
+		}
 	}
 }
 
@@ -68,8 +93,8 @@ func TestCoverageIsSharedAcrossFeedsAndTunable(t *testing.T) {
 
 	for _, v := range []string{"0", "33", "x"} {
 		t.Setenv(feedCoverageV4Env, v)
-		if got := currentFeedLimits().cover4; got != 1<<24 {
-			t.Errorf("%s=%q gives a coverage of %d addresses, want the default %d", feedCoverageV4Env, v, got, 1<<24)
+		if got := currentFeedLimits().cover4; got != 1<<28 {
+			t.Errorf("%s=%q gives a coverage of %d addresses, want the default %d", feedCoverageV4Env, v, got, 1<<28)
 		}
 	}
 	t.Setenv(feedCoverageV6Env, "16")

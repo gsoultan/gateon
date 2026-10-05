@@ -148,7 +148,8 @@ which encloses the routes'.
 bound held per entry only: 256 lines `N.0.0.0/8`, far inside every tier's
 entry bound, refused every IPv4 client, which this ADR's title says a feed
 cannot do. The address space every feed covers together is now bounded per
-family, by default one /8's worth of IPv4 (16,777,216 addresses) and one
+family, by default one /4's worth of IPv4 (268,435,456 addresses, sixteen /8s)
+and one
 /32's worth of IPv6 (2^32 /64s; an entry narrower than a /64 counts as one),
 in every tier -- it bounds what a feed may refuse, not what it costs. Entries
 draw on it in configured order like the entry bound; coverage is summed per
@@ -157,9 +158,13 @@ than a deduplicated count and costs nothing. An entry past it is refused,
 counted in `gateon_ip_feed_entries_refused_total{reason="coverage"}` and
 logged at ERROR once per feed per refresh; a last good copy draws on it too.
 `GATEON_IP_FEED_COVERAGE_V4` (a prefix length, 1-32) and
-`GATEON_IP_FEED_COVERAGE_V6` (1-64) override it, for a feed that legitimately
-lists more (a full bogon list is the usual case). A feed listing more than a
-/8 of IPv4 in total keeps its first /8's worth.
+`GATEON_IP_FEED_COVERAGE_V6` (1-64) override it. IPv4 is a /4, not the /8
+first proposed: FireHOL level 1, the feed most installs start with, lists bogon
+and private ranges worth four to five /8s, and a /8 budget took entries of it
+out of force on upgrade -- a default that silently re-prices existing installs.
+A /4 still bars the failure the bound exists for: at most a sixteenth of the
+IPv4 space, never everyone. A feed listing more than that in total keeps its
+first /4's worth.
 
 **Suppressed lines are counted without a lock** (review 3, F4).
 `LineLimiter.Skip` took a mutex for every line it left out, and `Allow` took

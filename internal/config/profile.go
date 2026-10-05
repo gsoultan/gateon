@@ -188,8 +188,11 @@ type TierDefaults struct {
 	// /N's worth of each family (ADR 0061). Each entry is already bounded to a
 	// /8 or a /32, but 256 lines "N.0.0.0/8" refused every IPv4 client. The
 	// same in every tier: it is a bound on what a feed may refuse, not on what
-	// it costs. GATEON_IP_FEED_COVERAGE_V4 (1-32) and GATEON_IP_FEED_COVERAGE_V6
-	// (1-64) override them.
+	// it costs. IPv4 is a /4 (one sixteenth of the space), not a /8: FireHOL
+	// level 1, the feed most installs start with, lists bogon and private ranges
+	// (0/8, 10/8, 127/8, 100.64/10, ...) worth four to five /8s, and a /8 budget
+	// took entries of it out of force on upgrade. GATEON_IP_FEED_COVERAGE_V4
+	// (1-32) and GATEON_IP_FEED_COVERAGE_V6 (1-64) override them.
 	IPFeedCoverageV4Prefix int
 	IPFeedCoverageV6Prefix int
 }
@@ -260,7 +263,7 @@ func DefaultsFor(tier Tier) TierDefaults {
 			BlockLookupTimeout:        200 * time.Millisecond,
 			IPFeedMaxEntries:          250_000,
 			IPFeedMaxBytes:            8 << 20, // 8 MiB
-			IPFeedCoverageV4Prefix:    8,
+			IPFeedCoverageV4Prefix:    4,
 			IPFeedCoverageV6Prefix:    32,
 		}
 	case TierEnterprise:
@@ -298,7 +301,7 @@ func DefaultsFor(tier Tier) TierDefaults {
 			BlockLookupTimeout:        50 * time.Millisecond,
 			IPFeedMaxEntries:          4_000_000,
 			IPFeedMaxBytes:            128 << 20, // 128 MiB
-			IPFeedCoverageV4Prefix:    8,
+			IPFeedCoverageV4Prefix:    4,
 			IPFeedCoverageV6Prefix:    32,
 		}
 	default: // TierStandard
@@ -336,7 +339,7 @@ func DefaultsFor(tier Tier) TierDefaults {
 			BlockLookupTimeout:        100 * time.Millisecond,
 			IPFeedMaxEntries:          1_000_000,
 			IPFeedMaxBytes:            32 << 20, // 32 MiB
-			IPFeedCoverageV4Prefix:    8,
+			IPFeedCoverageV4Prefix:    4,
 			IPFeedCoverageV6Prefix:    32,
 		}
 	}
