@@ -26,6 +26,7 @@ import (
 	"github.com/gsoultan/gateon/internal/middleware"
 	"github.com/gsoultan/gateon/internal/middleware/security"
 	"github.com/gsoultan/gateon/internal/middleware/security/identity"
+	wafmw "github.com/gsoultan/gateon/internal/middleware/security/waf"
 	"github.com/gsoultan/gateon/internal/security/waf"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	"github.com/gsoultan/gateon/internal/telemetry/repid"
@@ -1710,7 +1711,22 @@ func (s *ApiService) applyWafHardeningRecommendation(ctx context.Context, reason
 	if err != nil {
 		return refuseFix("Failed to update config: " + errorMessage(err)), nil
 	}
+	if len(changed) > 0 {
+		s.rebuildForGlobalWAF()
+	}
 	return &gateonv1.ApplyRecommendationResponse{Success: true, Message: hardeningMessage(changed)}, nil
+}
+
+// rebuildForGlobalWAF makes a changed global WAF reach the requests it
+// describes. The router builds the global WAF into each route's chain when the
+// chain is built, and caches the chain, so a saved change does nothing until
+// the chain is rebuilt: the hardening fix used to report "audit-only off, so it
+// now refuses what it matches" while every cached route kept the audit-only
+// WAF and forwarded every attack. It drops what UpdateGlobalConfig drops after
+// a WAF change -- the built WAFs, then every route's chain.
+func (s *ApiService) rebuildForGlobalWAF() {
+	wafmw.InvalidateWAFCache()
+	s.invalidator().InvalidateRoutes(func(*gateonv1.Route) bool { return true })
 }
 
 // hardeningMessage says what the WAF hardening fix changed, and what it does
