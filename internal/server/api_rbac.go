@@ -183,14 +183,14 @@ var apiPermissions = map[string]apiPermission{
 	gateonv1connect.ApiServiceRemoveMitigatedThreatProcedure: writeOn(auth.ResourceDiagnostics),
 	gateonv1connect.ApiServiceApplyRecommendationProcedure:   writeOn(auth.ResourceDiagnostics),
 
-	// Host-level security controls. All four mirror /v1/security/clamav/* and
-	// /v1/waf/update, which are guarded on the global resource because they
-	// change the posture of the host the gateway runs on.
+	// Host-level security controls. All four mirror /v1/security/clamav/*,
+	// which are guarded on the global resource because they change the
+	// posture of the host the gateway runs on. TriggerWafUpdate was here and
+	// is gone with its RPC (ADR 0064).
 	gateonv1connect.ApiServiceInstallClamavProcedure:       writeOn(auth.ResourceGlobal),
 	gateonv1connect.ApiServiceUninstallClamavProcedure:     writeOn(auth.ResourceGlobal),
 	gateonv1connect.ApiServiceRunDeepScanProcedure:         writeOn(auth.ResourceGlobal),
 	gateonv1connect.ApiServiceGetClamavScanStatusProcedure: readOn(auth.ResourceGlobal),
-	gateonv1connect.ApiServiceTriggerWafUpdateProcedure:    writeOn(auth.ResourceGlobal),
 
 	// WAF rules. GET/POST/PUT/DELETE /v1/waf/rules.
 	gateonv1connect.ApiServiceListWafRulesProcedure:  readOn(auth.ResourceWafRules),

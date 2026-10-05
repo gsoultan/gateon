@@ -1624,7 +1624,7 @@ func (s *ApiService) applyWafExclusionRecommendation(ctx context.Context, threat
 
 	globalCfg := s.Globals.Get(ctx)
 	if globalCfg.Waf == nil {
-		globalCfg.Waf = &gateonv1.WafConfig{Enabled: true, UseCrs: true}
+		globalCfg.Waf = &gateonv1.WafConfig{Enabled: true}
 	}
 
 	uri := threat.RequestURI
@@ -1718,7 +1718,7 @@ func (s *ApiService) applyWafHardeningRecommendation(ctx context.Context, reason
 	err := s.editGlobal(ctx, func(globalCfg *gateonv1.GlobalConfig) {
 		changed = changed[:0]
 		if globalCfg.Waf == nil {
-			globalCfg.Waf = &gateonv1.WafConfig{UseCrs: true}
+			globalCfg.Waf = &gateonv1.WafConfig{}
 		}
 		if !globalCfg.Waf.Enabled {
 			globalCfg.Waf.Enabled = true
@@ -1753,26 +1753,13 @@ func (s *ApiService) rebuildForGlobalWAF() {
 // hardeningMessage says what the WAF hardening fix changed, and what it does
 // not touch.
 func hardeningMessage(changed []string) string {
-	const scope = " The gateway-wide WAF runs every attack category on routes without a WAF of their own; " +
+	const scope = " The gateway-wide WAF runs every attack family its category switches leave on " +
+		"(ADR 0064; this fix does not change them), on routes without a WAF of their own; " +
 		"a route's WAF middleware keeps its own settings, including its own audit-only."
 	if len(changed) == 0 {
 		return "The gateway-wide WAF was already on and blocking; nothing changed." + scope
 	}
 	return "Applied: " + strings.Join(changed, "; ") + "." + scope
-}
-
-func (s *ApiService) TriggerWafUpdate(ctx context.Context, _ *gateonv1.TriggerWafUpdateRequest) (*gateonv1.TriggerWafUpdateResponse, error) {
-	if s.WafUpdater == nil {
-		return &gateonv1.TriggerWafUpdateResponse{Success: false, Message: "WAF Updater not initialized"}, nil
-	}
-
-	if err := s.WafUpdater.PerformUpdate(true); err != nil {
-		return &gateonv1.TriggerWafUpdateResponse{Success: false, Message: fmt.Sprintf("WAF update failed: %v", err)}, nil
-	}
-
-	s.logAudit(ctx, "update", "waf", "Triggered manual WAF rules update")
-
-	return &gateonv1.TriggerWafUpdateResponse{Success: true, Message: "WAF rules updated successfully"}, nil
 }
 
 // tlsOffersPostQuantumKeyExchange reports whether TLS 1.3 handshakes offer the
