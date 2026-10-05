@@ -453,10 +453,12 @@ export const SecurityAdvancedSettingsCard: React.FC<SecurityAdvancedSettingsCard
               {security.entropy?.enabled && (
                 <NumberInput
                   label="Entropy Threshold"
-                  description="Block if payload Shannon entropy exceeds this. Recommended: 5.5 - 6.0."
-                  value={security.entropy?.threshold}
+                  description="Records (does not block) a request whose body measures above this many bits per byte. Text measures 4 to 5, random or encrypted data close to 8. Above 0, at most 8. Empty: 7.5."
+                  value={security.entropy?.threshold || ""}
                   onChange={(val) => updateSection("entropy", { threshold: val })}
                   disabled={disabled}
+                  min={0}
+                  max={8}
                   decimalScale={2}
                   step={0.1}
                 />

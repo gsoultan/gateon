@@ -58,6 +58,15 @@ func TestBodyEntropyWithNoThresholdUsesTheDefault(t *testing.T) {
 			t.Errorf("an ordinary JSON body was recorded as a high-entropy payload %d time(s) with the threshold unset", n)
 		}
 	})
+	// The gateway-wide Payload Entropy setting stores 0 for an empty field and
+	// builds through the same security.Entropy; so does a route config saved
+	// before the save check refused 0.
+	t.Run("stored zero", func(t *testing.T) {
+		body := `{"order":42,"items":["book","pen"],"note":"leave at the door"}`
+		if n := entropyThreats(t, map[string]string{"threshold": "0"}, body); n != 0 {
+			t.Errorf("an ordinary JSON body was recorded %d time(s) under a stored threshold of 0", n)
+		}
+	})
 	t.Run("random body", func(t *testing.T) {
 		b := make([]byte, 4096)
 		if _, err := rand.Read(b); err != nil {

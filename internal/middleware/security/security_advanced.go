@@ -125,7 +125,15 @@ func CheckEntropySave(cfg map[string]string) error {
 		"measures above 8"))
 }
 
+// Entropy records a request whose body measures above threshold bits per
+// byte. A threshold at or below 0 is the default: every body exceeds it, so it
+// can only mean "unset" -- the gateway-wide Payload Entropy setting stores 0
+// when its field is left empty, and a route config saved before the save check
+// may hold it.
 func Entropy(threshold float64, routeID string) kind.Middleware {
+	if threshold <= 0 {
+		threshold = DefaultEntropyThreshold
+	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			checkEntropy(next, w, r, threshold, routeID)
