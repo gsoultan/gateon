@@ -653,8 +653,14 @@ func fixWAFFinding(s *ApiService, ctx context.Context, req *gateonv1.ApplyRecomm
 	return s.applyBlockIPRecommendation(ctx, req.GetSource())
 }
 
+// fixByBlockingSource blocks the source a finding names, and only that: one
+// bounded entry on the block list (applyBlockIPRecommendation). It used to
+// block the threat's fingerprint first, keyed to the source's /24 (/64), with
+// no expiry and no exemption check -- every client of that browser build on
+// that network, refused for good, while the answer spoke only of a 24-hour
+// address block and, for an allowlisted source, reported failure (review-3 F2).
+// A browser class on a network is not the source the finding names.
 func fixByBlockingSource(s *ApiService, ctx context.Context, req *gateonv1.ApplyRecommendationRequest) (*gateonv1.ApplyRecommendationResponse, error) {
-	s.mitigateFingerprintFromThreat(ctx, req.GetThreatId())
 	return s.applyBlockIPRecommendation(ctx, req.GetSource())
 }
 
@@ -695,6 +701,16 @@ func (s *ApiService) applyBlockIPRecommendation(ctx context.Context, sourceIP st
 	// does enforce it, and only on a network (applyFingerprintBlock).
 	if net.ParseIP(sourceIP) == nil {
 		return applyFingerprintBlock(sourceIP), nil
+	}
+
+	// An address the request path never refuses is refused here before
+	// anything is written. The block is keyed by repid.AddressKey -- the /64
+	// for IPv6 (ADR 0058) -- and the exemption spares only the exact address,
+	// so writing first blocked an allowlisted monitor's whole /64 while the fix
+	// answered that the block was not enforced (review-3 F3). The predicate is
+	// the one every listener asks.
+	if identity.ExemptFromEnforcement(sourceIP) {
+		return refuseFix(fmt.Sprintf("%s was not blocked, and nothing was written: %s.", sourceIP, exemptionReason(sourceIP))), nil
 	}
 
 	// One bounded entry on the block list every entrypoint and route enforces
@@ -986,16 +1002,21 @@ func exemptAddressAnswer(ip string) *gateonv1.MitigateThreatResponse {
 	if identity.AddressBlocked(ip) {
 		return nil
 	}
-	why := "it is in GATEON_MITIGATION_ALLOWLIST, whose addresses are never refused"
-	if httputil.IsLoopback(ip) {
-		why = "it is a loopback address, which is never refused (the gateway's own traffic, " +
-			"and every client behind a local proxy that sets no forwarding header)"
-	}
 	return &gateonv1.MitigateThreatResponse{
 		Success: false,
 		Message: fmt.Sprintf("%s was recorded on the block list but is not enforced: %s. "+
-			"Requests from it are still served.", ip, why),
+			"Requests from it are still served.", ip, exemptionReason(ip)),
 	}
+}
+
+// exemptionReason says why the request path never refuses ip, an address
+// identity.ExemptFromEnforcement exempts.
+func exemptionReason(ip string) string {
+	if httputil.IsLoopback(ip) {
+		return "it is a loopback address, which is never refused (the gateway's own traffic, " +
+			"and every client behind a local proxy that sets no forwarding header)"
+	}
+	return "it is in GATEON_MITIGATION_ALLOWLIST, whose addresses are never refused"
 }
 
 func (s *ApiService) RemoveMitigatedThreat(ctx context.Context, req *gateonv1.RemoveMitigatedThreatRequest) (*gateonv1.RemoveMitigatedThreatResponse, error) {
@@ -1237,25 +1258,6 @@ func (s *ApiService) resetReputationForIP(ctx context.Context, ip string) {
 		// And the fingerprint block, which is the class on this address's
 		// network (ADR 0026): the one this address's clients were refused by.
 		telemetry.MarkUserUnmitigated(repid.For(fp, ip))
-	}
-}
-
-// mitigateFingerprintFromThreat blocks the class a threat came from on the
-// network it came from, never the class everywhere (ADR 0026).
-func (s *ApiService) mitigateFingerprintFromThreat(ctx context.Context, threatID string) {
-	if threatID == "" {
-		return
-	}
-	th, err := telemetry.GetSecurityThreatByID(ctx, threatID)
-	if err != nil || th.SourceIP == "" {
-		return
-	}
-	fp := th.Fingerprint
-	if fp == "" && th.JA4 != "" {
-		fp = th.JA4 + "_" + th.JA4H
-	}
-	if fp != "" {
-		telemetry.MarkUserMitigated(repid.For(fp, th.SourceIP), "JA4+", "Mitigated via recommendation for "+th.Type, th.Category)
 	}
 }
 
