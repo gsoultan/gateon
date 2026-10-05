@@ -32,7 +32,7 @@ func TestGeoEnrichmentKeepsClientAddressesLocal(t *testing.T) {
 	data := &DiagnosticData{}
 	for i := range 5 {
 		ip := fmt.Sprintf("203.0.113.%d", 150+i)
-		data.Traces = append(data.Traces, &telemetry.TraceRecord{
+		data.Traces = append(data.Traces, &telemetry.TraceRecord{ServiceDelay: 1,
 			SourceIP: ip, Path: "/wp-admin/setup-config.php", Method: "GET", Status: "404",
 			Timestamp: time.Now().Add(-time.Minute), UserAgent: "Mozilla/5.0",
 		})

@@ -140,9 +140,11 @@ No new tunable.
 - The analysis engine's trace-side counts (`credentialAttempt`,
   `PostAuthFailures`) read `TraceRecord.Refusal`, which the metrics middleware
   copies from `RequestState.Refused`. A geofence or WAF 403 on a POST leaves no
-  mark there, so it still counts on that side. Recording the trace's refusal
-  from `RequestState.CredentialChecked` is one line in
-  `internal/middleware/standard.go`, owned by another change this round.
+  mark there, so it still counted on that side. *Closed after v1.1.0:* an
+  unmarked refusal now counts only when the trace has time in a backend
+  (`ServiceDelay > 0`, set only when the router timed a call to one) -- the
+  trace-side reading of `RequestState.CredentialChecked`, from a field every
+  trace already carried, so traces written before the change read the same.
 - A DLP block of a response replaces the backend's answer with 403 after the
   request reached its service, so a POST whose response leaked a card number
   counts as a credential refusal.

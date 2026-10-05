@@ -142,40 +142,40 @@ func TestAnomalyAnalysisEngine_RealWorld(t *testing.T) {
 	traces := []*telemetry.TraceRecord{
 		// Brute force from IP 1.2.3.4 (11 failures): a login form is POSTed, and
 		// only a credential attempt counts towards brute force (credentialAttempt).
-		{SourceIP: "1.2.3.4", Method: "POST", Status: "401 Unauthorized", Timestamp: now, Path: "/login", DurationMs: 100},
-		{SourceIP: "1.2.3.4", Method: "POST", Status: "401 Unauthorized", Timestamp: now, Path: "/login", DurationMs: 100},
-		{SourceIP: "1.2.3.4", Method: "POST", Status: "401 Unauthorized", Timestamp: now, Path: "/login", DurationMs: 100},
-		{SourceIP: "1.2.3.4", Method: "POST", Status: "401 Unauthorized", Timestamp: now, Path: "/login", DurationMs: 100},
-		{SourceIP: "1.2.3.4", Method: "POST", Status: "401 Unauthorized", Timestamp: now, Path: "/login", DurationMs: 100},
-		{SourceIP: "1.2.3.4", Method: "POST", Status: "401 Unauthorized", Timestamp: now, Path: "/login", DurationMs: 100},
-		{SourceIP: "1.2.3.4", Method: "POST", Status: "401 Unauthorized", Timestamp: now, Path: "/login", DurationMs: 100},
-		{SourceIP: "1.2.3.4", Method: "POST", Status: "401 Unauthorized", Timestamp: now, Path: "/login", DurationMs: 100},
-		{SourceIP: "1.2.3.4", Method: "POST", Status: "401 Unauthorized", Timestamp: now, Path: "/login", DurationMs: 100},
-		{SourceIP: "1.2.3.4", Method: "POST", Status: "401 Unauthorized", Timestamp: now, Path: "/login", DurationMs: 100},
-		{SourceIP: "1.2.3.4", Status: "403 Forbidden", Timestamp: now, Path: "/admin", DurationMs: 100},
+		{ServiceDelay: 1, SourceIP: "1.2.3.4", Method: "POST", Status: "401 Unauthorized", Timestamp: now, Path: "/login", DurationMs: 100},
+		{ServiceDelay: 1, SourceIP: "1.2.3.4", Method: "POST", Status: "401 Unauthorized", Timestamp: now, Path: "/login", DurationMs: 100},
+		{ServiceDelay: 1, SourceIP: "1.2.3.4", Method: "POST", Status: "401 Unauthorized", Timestamp: now, Path: "/login", DurationMs: 100},
+		{ServiceDelay: 1, SourceIP: "1.2.3.4", Method: "POST", Status: "401 Unauthorized", Timestamp: now, Path: "/login", DurationMs: 100},
+		{ServiceDelay: 1, SourceIP: "1.2.3.4", Method: "POST", Status: "401 Unauthorized", Timestamp: now, Path: "/login", DurationMs: 100},
+		{ServiceDelay: 1, SourceIP: "1.2.3.4", Method: "POST", Status: "401 Unauthorized", Timestamp: now, Path: "/login", DurationMs: 100},
+		{ServiceDelay: 1, SourceIP: "1.2.3.4", Method: "POST", Status: "401 Unauthorized", Timestamp: now, Path: "/login", DurationMs: 100},
+		{ServiceDelay: 1, SourceIP: "1.2.3.4", Method: "POST", Status: "401 Unauthorized", Timestamp: now, Path: "/login", DurationMs: 100},
+		{ServiceDelay: 1, SourceIP: "1.2.3.4", Method: "POST", Status: "401 Unauthorized", Timestamp: now, Path: "/login", DurationMs: 100},
+		{ServiceDelay: 1, SourceIP: "1.2.3.4", Method: "POST", Status: "401 Unauthorized", Timestamp: now, Path: "/login", DurationMs: 100},
+		{ServiceDelay: 1, SourceIP: "1.2.3.4", Status: "403 Forbidden", Timestamp: now, Path: "/admin", DurationMs: 100},
 
 		// Scanner from IP 5.6.7.8 (21 404s)
-		{SourceIP: "5.6.7.8", Status: "404 Not Found", Timestamp: now, Path: "/.env", DurationMs: 50},
-		{SourceIP: "5.6.7.8", Status: "404 Not Found", Timestamp: now, Path: "/wp-admin", DurationMs: 50},
+		{ServiceDelay: 1, SourceIP: "5.6.7.8", Status: "404 Not Found", Timestamp: now, Path: "/.env", DurationMs: 50},
+		{ServiceDelay: 1, SourceIP: "5.6.7.8", Status: "404 Not Found", Timestamp: now, Path: "/wp-admin", DurationMs: 50},
 	}
 
 	// Add 19 more 404s for 5.6.7.8
 	for range 19 {
-		traces = append(traces, &telemetry.TraceRecord{
+		traces = append(traces, &telemetry.TraceRecord{ServiceDelay: 1,
 			SourceIP: "5.6.7.8", Status: "404 Not Found", Timestamp: now, Path: "/scan", DurationMs: 50,
 		})
 	}
 
 	// Slow client from IP 9.9.9.9 (6 requests, 6000ms avg)
 	for range 6 {
-		traces = append(traces, &telemetry.TraceRecord{
+		traces = append(traces, &telemetry.TraceRecord{ServiceDelay: 1,
 			SourceIP: "9.9.9.9", Status: "200 OK", Timestamp: now, Path: "/", DurationMs: 6000,
 		})
 	}
 
 	// High traffic from 10.10.10.10 (201 requests)
 	for range 201 {
-		traces = append(traces, &telemetry.TraceRecord{
+		traces = append(traces, &telemetry.TraceRecord{ServiceDelay: 1,
 			SourceIP: "10.10.10.10", Status: "200 OK", Timestamp: now, Path: "/", DurationMs: 10,
 		})
 	}
@@ -235,27 +235,27 @@ func TestSecurityThreatDetector_Advanced(t *testing.T) {
 
 	// 1. Burst from IP 1.1.1.1 (40 requests in same 10s slot)
 	for range 40 {
-		traces = append(traces, &telemetry.TraceRecord{
+		traces = append(traces, &telemetry.TraceRecord{ServiceDelay: 1,
 			SourceIP: "1.1.1.1", Status: "200 OK", Timestamp: now, Path: "/", Method: "GET",
 		})
 	}
 
 	// 2. Suspicious Referer from IP 2.2.2.2
-	traces = append(traces, &telemetry.TraceRecord{
+	traces = append(traces, &telemetry.TraceRecord{ServiceDelay: 1,
 		SourceIP: "2.2.2.2", Status: "200 OK", Timestamp: now, Path: "/", Method: "GET", Referer: "http://evil.com/exploit",
 	})
 
 	// 3. Coordinated Scan from 3.3.3.3 and 4.4.4.4 on same suspicious path
-	traces = append(traces, &telemetry.TraceRecord{
+	traces = append(traces, &telemetry.TraceRecord{ServiceDelay: 1,
 		SourceIP: "3.3.3.3", Status: "404 Not Found", Timestamp: now, Path: "/.env", Method: "GET",
 	})
-	traces = append(traces, &telemetry.TraceRecord{
+	traces = append(traces, &telemetry.TraceRecord{ServiceDelay: 1,
 		SourceIP: "4.4.4.4", Status: "404 Not Found", Timestamp: now, Path: "/.env", Method: "GET",
 	})
 
 	// 4. Unusual POST-only traffic from 5.5.5.5
 	for range 25 {
-		traces = append(traces, &telemetry.TraceRecord{
+		traces = append(traces, &telemetry.TraceRecord{ServiceDelay: 1,
 			SourceIP: "5.5.5.5", Status: "200 OK", Timestamp: now, Path: "/api/submit", Method: "POST",
 		})
 	}
@@ -305,26 +305,26 @@ func TestSecurityThreatDetector_ComplexScenarios(t *testing.T) {
 
 	// 1. Targeted Brute Force on /login (IP 6.6.6.6)
 	for range 6 {
-		traces = append(traces, &telemetry.TraceRecord{
+		traces = append(traces, &telemetry.TraceRecord{ServiceDelay: 1,
 			SourceIP: "6.6.6.6", Status: "401 Unauthorized", Timestamp: now, Path: "/login", Method: "POST",
 		})
 	}
 
 	// 2. SSRF Attempt (IP 7.7.7.7)
-	traces = append(traces, &telemetry.TraceRecord{
+	traces = append(traces, &telemetry.TraceRecord{ServiceDelay: 1,
 		SourceIP: "7.7.7.7", Status: "200 OK", Timestamp: now, Path: "/api/fetch?url=http://169.254.169.254/latest/meta-data", Method: "GET",
 	})
 
 	// 3. Command Injection Attempt (IP 8.8.8.8)
-	traces = append(traces, &telemetry.TraceRecord{
+	traces = append(traces, &telemetry.TraceRecord{ServiceDelay: 1,
 		SourceIP: "8.8.8.8", Status: "200 OK", Timestamp: now, Path: "/search?q=;whoami", Method: "GET",
 	})
 
 	// 4. JA4 Fingerprint Rotation (IP 9.9.9.9)
-	traces = append(traces, &telemetry.TraceRecord{
+	traces = append(traces, &telemetry.TraceRecord{ServiceDelay: 1,
 		SourceIP: "9.9.9.9", Status: "200 OK", Timestamp: now, Path: "/", Method: "GET", JA4: "fingerprint1",
 	})
-	traces = append(traces, &telemetry.TraceRecord{
+	traces = append(traces, &telemetry.TraceRecord{ServiceDelay: 1,
 		SourceIP: "9.9.9.9", Status: "200 OK", Timestamp: now, Path: "/api", Method: "GET", JA4: "fingerprint2",
 	})
 

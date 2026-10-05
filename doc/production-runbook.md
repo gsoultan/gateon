@@ -58,10 +58,6 @@ more -- each is stated where it applies -- but plan around them:
 - **A block applies to an IPv6 client's whole /64**, as the kernel shun already
   did with eBPF. A provider that puts several customers in one /64 has them
   blocked together (ADR 0058).
-- **Check an address's traces before "Apply fix" on a brute-force finding.** The
-  Security Hub's analysis engine still counts a POST the WAF or the geofence
-  refused towards that finding. The finding blocks nothing by itself; the fix
-  blocks the address for 24 hours.
 - **Sign-in is budgeted per client, loopback included** (10 a minute by default,
   `GATEON_AUTH_ATTEMPTS_PER_MINUTE`): scripts that sign in in a loop from the
   host share one budget.

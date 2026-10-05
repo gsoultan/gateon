@@ -22,8 +22,8 @@ func TestARequestRefusedBeforeRoutingIsNotAnUnlistedRoute(t *testing.T) {
 	ep := "gateon-web"
 	got := (&UnlistedRouteDetector{}).Detect(t.Context(), &DiagnosticData{Traces: []*telemetry.TraceRecord{
 		{ServiceName: ep, Path: "/h/ok", Status: "403", Refusal: "mitigation", SourceIP: "10.0.0.66"},
-		{ServiceName: ep, Path: "/n/ok", Status: "403", SourceIP: "10.0.0.67"}, // an entrypoint filter, unmarked
-		{ServiceName: ep, Path: "/missing", Status: "404", SourceIP: "10.0.0.68"},
+		{ServiceDelay: 1, ServiceName: ep, Path: "/n/ok", Status: "403", SourceIP: "10.0.0.67"}, // an entrypoint filter, unmarked
+		{ServiceDelay: 1, ServiceName: ep, Path: "/missing", Status: "404", SourceIP: "10.0.0.68"},
 		{ServiceName: ep, Path: "/.env", Status: "403", Refusal: "mitigation", SourceIP: "10.0.0.66"},
 	}})
 	types := map[string]string{}
