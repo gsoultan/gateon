@@ -1,136 +1,158 @@
-# Dashboard middleware keys with no row yet in the effect registry,
-# internal/middleware/dashboard_key_effects_test.go. Adopted 2026-10-03
-# (ADR 0048) as debt: the gate fails on a NEW key with neither, and says so when
-# a key here gains a row (delete the line then).
+# Dashboard middleware (type, key) pairs with no row yet in the effect
+# registry, internal/middleware/dashboard_key_effects_test.go. Adopted
+# 2026-10-03 (ADR 0048) as debt; keyed by type since 2026-10-04 (truth NEW-10,
+# ADR 0063): a row proves a key for the type whose factory it builds, and a key
+# two types share needs a row or a line for each.
 #
-# A line here means "not proven to do anything", not "broken". Lines marked
-# INERT name a finding that says the key does nothing today; they are here only
-# because the fix belongs to another change in flight -- when it lands, give the
-# key a row instead.
+# Every line carries a note, and scripts/checkconfig holds it to what it says:
+#   unproven: <why>           -- nothing shows the key works yet;
+#   INERT <finding>           -- a finding says the key does nothing today;
+#   proven by TestX[, TestY]  -- tests that build the middleware through the
+#                                factory the router uses (NewFactory or
+#                                ApplyRouteMiddlewares, directly or through a
+#                                helper in their package). A test that builds
+#                                the config struct directly is not proof: a
+#                                factory that dropped the key would pass it.
 #
-# Format: key [# note]
+# Format: type/key  # note
 
-address
-algorithm
-allow_any_audience
-allow_countries
-allow_credentials
-allowed_headers
-allowed_methods
-allowed_mime_types
-amount
-anomaly_threshold
-app_profiles
-attempts
-audience
-audit_log_path
-audit_log_relevant_only
-auth_request_headers
-auth_response_headers
-blocked_mime_types
-body_limit
-challenge_timeout
-clamav_addr
-client_id
-client_secret
-content_type
-db_path
-deny_countries
-disable_entropy
-dlp
-dlp_action
-dry_run
-enable_browser_integrity
-enable_clamav
-enable_js_challenge
-enable_revocation  # real since ADR 0046 but needs Redis, which this harness does not run; proven in internal/middleware/auth revocation tests
-entropy_threshold
-error_template
-excluded_content_types
-exposed_headers
-force_sts_header
-forward_body
-forward_dns
-forward_hash
-forward_uri
-hashed
-header
-included_content_types
-introspection_url
-ip_reputation
-issuer
-jwks_url
-malware_detection
-max_age
-max_body_kb
-max_body_size
-max_entries
-max_file_size
-methods
-min_response_body_bytes
-paranoia_level
-password
-path
-paths
-pattern
-prefix
-prefixes
-preserve_request_method
-preset
-proto
-protocol  # WAF category switch, real since ADR 0044; no probe in the registry yet
-ransomware_detection
-realm
-redirect_url
-regex
-replacement
-request_body_limit
-request_replace
-request_search
-requests_per_minute  # its effect is over time; the burst row proves the limiter, traffic tests prove the rate
-required_roles
-required_scopes
-response_body_limit
-response_replace
-response_search
-route
-schema
-scopes
-secret
-secret_key
-ssrf_protection
-status_codes
-storage
-strategy
-sts_include_subdomains
-sts_preload
-sts_seconds
-tls_insecure_skip_verify
-token_type_hint
-trust_forward_header
-ttl_seconds
-type
-username
-users
-wordpress  # WAF category switch, real since ADR 0044; no probe in the registry yet
-cookie_name  # tls_binding: the effect is a Set-Cookie on a TLS session, which the registry probe does not record; proven by TestTLSBindingBindsTheIssuedSessionToTheClientCertificate
-revocation_prefix  # needs Redis, which this harness does not run; proven by TestRevokedTokenIsRefusedByEveryTypeThatOffersRevocation
-error_threshold  # circuit_breaker: state is per route across builds, so the registry's two builds share it; proven by TestBreakerJudgesAWindowOnlyOnceItHoldsMinRequests
-min_requests  # circuit_breaker: as error_threshold; proven by TestAnUnsetMinimumDoesNotOpenOnOneFailure
-sleep_window  # circuit_breaker: time-based; proven by TestFailedProbeReopensForAFullSleepWindow and TestRetryAfterIsTheTimeLeftInTheSleepWindow
-window_size  # circuit_breaker: time-based; proven by TestBreakerJudgesAWindowOnlyOnceItHoldsMinRequests
-per_ip  # inflightreq: differs only under concurrent requests, which the registry probe does not send; proven by TestInflightTotalCapIsATotal and TestInflightPerAddressIsPerAddress
-base_delay  # unproven: written by an editor added for NEW-8 (pow, tarpit, entropy, graphql_firewall, deception)
-canary_header  # unproven: written by an editor added for NEW-8 (pow, tarpit, entropy, graphql_firewall, deception)
-canary_token  # unproven: written by an editor added for NEW-8 (pow, tarpit, entropy, graphql_firewall, deception)
-difficulty  # unproven: written by an editor added for NEW-8 (pow, tarpit, entropy, graphql_firewall, deception)
-enable_troll_response  # unproven: written by an editor added for NEW-8 (pow, tarpit, entropy, graphql_firewall, deception)
-honey_forms  # unproven: written by an editor added for NEW-8 (pow, tarpit, entropy, graphql_firewall, deception)
-honeypot_paths  # unproven: written by an editor added for NEW-8 (pow, tarpit, entropy, graphql_firewall, deception)
-inject_invisible_links  # unproven: written by an editor added for NEW-8 (pow, tarpit, entropy, graphql_firewall, deception)
-introspection  # unproven: written by an editor added for NEW-8 (pow, tarpit, entropy, graphql_firewall, deception)
-invisible_link_paths  # unproven: written by an editor added for NEW-8 (pow, tarpit, entropy, graphql_firewall, deception)
-max_complexity  # unproven: written by an editor added for NEW-8 (pow, tarpit, entropy, graphql_firewall, deception)
-max_delay  # unproven: written by an editor added for NEW-8 (pow, tarpit, entropy, graphql_firewall, deception)
-max_depth  # unproven: written by an editor added for NEW-8 (pow, tarpit, entropy, graphql_firewall, deception)
-threshold  # unproven: written by an editor added for NEW-8 (pow, tarpit, entropy, graphql_firewall, deception)
+accesslog/route  # unproven
+addprefix/prefix  # unproven
+auth/allow_any_audience  # unproven
+auth/audience  # unproven
+auth/client_id  # unproven
+auth/client_secret  # unproven
+auth/dry_run  # unproven
+auth/enable_revocation  # proven by TestRevokedTokenIsRefusedByEveryTypeThatOffersRevocation (needs Redis, which the registry harness does not run)
+auth/error_template  # unproven
+auth/hashed  # unproven
+auth/header  # unproven
+auth/introspection_url  # unproven
+auth/issuer  # unproven
+auth/jwks_url  # unproven
+auth/password  # unproven
+auth/realm  # unproven
+auth/required_roles  # unproven
+auth/required_scopes  # unproven
+auth/revocation_prefix  # proven by TestRevokedTokenIsRefusedByEveryTypeThatOffersRevocation (needs Redis, which the registry harness does not run)
+auth/secret  # unproven
+auth/token_type_hint  # unproven
+auth/type  # unproven
+auth/username  # unproven
+auth/users  # unproven
+bot_management/challenge_timeout  # unproven
+bot_management/enable_browser_integrity  # unproven
+bot_management/enable_js_challenge  # unproven
+bot_management/secret_key  # unproven
+cache/max_body_kb  # unproven
+cache/max_entries  # unproven
+cache/storage  # unproven
+cache/ttl_seconds  # unproven
+circuit_breaker/sleep_window  # unproven: time-based; TestFailedProbeReopensForAFullSleepWindow builds the config struct, not through the factory
+circuit_breaker/window_size  # unproven: time-based; TestBreakerJudgesAWindowOnlyOnceItHoldsMinRequests builds the config struct, not through the factory (NEW-10: passing 0 here fails no test)
+compress/algorithm  # unproven
+compress/excluded_content_types  # unproven
+compress/included_content_types  # unproven
+compress/min_response_body_bytes  # unproven
+cors/allow_credentials  # unproven
+cors/allowed_headers  # unproven
+cors/allowed_methods  # unproven
+cors/exposed_headers  # unproven
+cors/max_age  # unproven
+cors/preset  # unproven
+deception/canary_header  # unproven: editor added for NEW-8
+deception/canary_token  # unproven: editor added for NEW-8
+deception/enable_troll_response  # unproven: editor added for NEW-8
+deception/honey_forms  # unproven: editor added for NEW-8
+deception/inject_invisible_links  # unproven: editor added for NEW-8
+deception/invisible_link_paths  # unproven: editor added for NEW-8
+entropy/threshold  # unproven: editor added for NEW-8
+errors/status_codes  # unproven
+file_security/allowed_mime_types  # unproven
+file_security/blocked_mime_types  # unproven
+file_security/clamav_addr  # unproven
+file_security/enable_clamav  # unproven
+file_security/max_file_size  # unproven
+forwardauth/address  # unproven
+forwardauth/auth_request_headers  # unproven
+forwardauth/auth_response_headers  # unproven
+forwardauth/forward_body  # unproven
+forwardauth/max_body_size  # unproven
+forwardauth/preserve_request_method  # unproven
+forwardauth/tls_insecure_skip_verify  # unproven
+forwardauth/trust_forward_header  # unproven
+forwardedheaders/proto  # unproven
+forwardedheaders/trust_forward_header  # unproven
+geoip/allow_countries  # unproven
+geoip/db_path  # unproven
+geoip/deny_countries  # unproven
+graphql_firewall/max_complexity  # unproven: editor added for NEW-8
+grpcweb/allow_credentials  # unproven
+grpcweb/max_age  # unproven
+grpcweb/preset  # unproven
+headers/force_sts_header  # unproven
+headers/sts_include_subdomains  # unproven
+headers/sts_preload  # unproven
+headers/sts_seconds  # unproven
+hmac/body_limit  # unproven
+hmac/header  # unproven
+hmac/methods  # unproven
+hmac/prefix  # unproven
+hmac/secret  # unproven
+inflightreq/amount  # unproven
+inflightreq/per_ip  # unproven: differs only under concurrent requests; TestInflightPerAddressIsPerAddress builds the middleware directly
+metrics/route  # unproven
+oidc/client_id  # unproven
+oidc/client_secret  # unproven
+oidc/issuer  # unproven
+oidc/redirect_url  # unproven
+oidc/scopes  # unproven
+pow/difficulty  # unproven: editor added for NEW-8
+pow/secret  # unproven: editor added for NEW-8
+pow/threshold  # unproven: editor added for NEW-8
+ratelimit/requests_per_minute  # unproven: its effect is over time; the burst row proves the limiter
+ratelimit/storage  # unproven
+ratelimit/strategy  # unproven
+replacepath/path  # unproven
+replacepathregex/pattern  # unproven
+replacepathregex/replacement  # unproven
+retry/attempts  # unproven
+rewrite/path  # unproven
+rewrite/pattern  # unproven
+rewrite/replacement  # unproven
+schema_validation/schema  # unproven
+stripprefix/prefixes  # unproven
+stripprefixregex/regex  # unproven
+tarpit/base_delay  # unproven: editor added for NEW-8
+tarpit/max_delay  # unproven: editor added for NEW-8
+tarpit/threshold  # unproven: editor added for NEW-8
+tls_binding/cookie_name  # unproven: the effect is a Set-Cookie on a TLS session; TestTLSBindingBindsTheIssuedSessionToTheClientCertificate builds the middleware directly
+tls_binding/secret  # unproven
+transform/content_type  # unproven
+transform/request_replace  # unproven
+transform/request_search  # unproven
+transform/response_replace  # unproven
+transform/response_search  # unproven
+turnstile/header  # unproven
+turnstile/methods  # unproven
+turnstile/secret  # unproven
+waf/anomaly_threshold  # unproven
+waf/app_profiles  # unproven
+waf/audit_log_path  # unproven
+waf/audit_log_relevant_only  # unproven
+waf/disable_entropy  # unproven
+waf/dlp  # unproven
+waf/dlp_action  # unproven
+waf/entropy_threshold  # unproven
+waf/ip_reputation  # unproven
+waf/malware_detection  # unproven
+waf/paranoia_level  # unproven
+waf/protocol  # unproven: WAF category switch, real since ADR 0044; no probe in the registry yet
+waf/ransomware_detection  # unproven
+waf/request_body_limit  # unproven
+waf/response_body_limit  # unproven
+waf/ssrf_protection  # unproven
+waf/wordpress  # unproven: WAF category switch, real since ADR 0044; no probe in the registry yet
+xfcc/forward_dns  # unproven
+xfcc/forward_hash  # unproven
+xfcc/forward_uri  # unproven

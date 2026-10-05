@@ -243,7 +243,13 @@ func main() {
 	failed := checkFields(fields, selections)
 	failed = checkSinks(sinks) || failed
 	failed = checkValues(values) || failed
-	failed = checkEffects() || failed
+	idx, err := indexTests("internal")
+	if err != nil {
+		fatalf("indexing tests: %v", err)
+	}
+	failed = checkEffects(idx) || failed
+	failed = checkGlobals(idx) || failed
+	failed = checkPicker() || failed
 	if failed {
 		os.Exit(1)
 	}

@@ -9,11 +9,9 @@ import (
 	"go/parser"
 	"go/token"
 	"os"
-	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
-	"strings"
 )
 
 // The effect registry check (ADR 0048).
@@ -31,12 +29,13 @@ import (
 // therefore arrives with a test that shows it working, or with its absence
 // written down.
 //
-// Limits: keys are matched by name, not by middleware type (a key two
-// editors share is covered by one row); keys are found by the literal first
-// argument of updateConfig(...) or toggle(...), so a key built at run time is
-// not seen; and global settings (the proto *Config messages the settings page
-// writes) have no rows yet -- the dead-field and dead-sink checks are what
-// cover them.
+// Keys are matched by (middleware type, key): a row proves a key for the type
+// whose factory it builds, and nothing else (truth NEW-10 -- cors's
+// allowed_origins row counted for grpcweb, which ignored the key). A baseline
+// note is held to what it claims (notes.go). Keys are found by the literal
+// first argument of updateConfig(...) or toggle(...), so a key built at run
+// time is not seen. The security switches among the global settings have
+// their own registry (globals.go).
 
 const (
 	effectsRegistryPath = "internal/middleware/dashboard_key_effects_test.go"
@@ -48,23 +47,26 @@ const (
 // ...), the two ways the editors write one, across line breaks.
 var dashboardKeyRE = regexp.MustCompile(`\b(?:updateConfig|toggle)\(\s*"([A-Za-z0-9_]+)"`)
 
-// effectRows reads the registry: every key with a row, and whether the row
-// says the key is (still) inert.
+// effectRows reads the registry: every "type/key" with a row, and whether the
+// row says the key is (still) inert.
 func effectRows(path string) (map[string]bool, error) {
 	file, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
 	if err != nil {
 		return nil, err
 	}
-	rows := map[string]bool{} // key -> inert
+	rows := map[string]bool{} // "type/key" -> inert
 	ast.Inspect(file, func(n ast.Node) bool {
 		lit, ok := n.(*ast.CompositeLit)
 		if !ok {
 			return true
 		}
 		fields := literalFields(lit)
-		if key, ok := fields["key"]; ok {
+		key, hasKey := fields["key"]
+		typ, hasType := fields["mwType"]
+		if hasKey && hasType {
 			_, inert := fields["inert"]
-			rows[key] = rows[key] || inert
+			k := typedKey(typ, key)
+			rows[k] = rows[k] || inert
 		}
 		return true
 	})
@@ -90,31 +92,6 @@ func literalFields(lit *ast.CompositeLit) map[string]string {
 		}
 	}
 	return out
-}
-
-// dashboardKeys lists every key the middleware editors write.
-func dashboardKeys(dir string) (map[string]bool, error) {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return nil, err
-	}
-	keys := map[string]bool{}
-	for _, e := range entries {
-		name := e.Name()
-		if e.IsDir() || !strings.HasSuffix(name, ".tsx") || strings.HasSuffix(name, ".test.tsx") {
-			continue
-		}
-		// #nosec G304 -- a build-time developer command; dir is the editorsDir
-		// constant or a t.TempDir() fixture, name comes from ReadDir of it.
-		src, err := os.ReadFile(filepath.Join(dir, name))
-		if err != nil {
-			return nil, err
-		}
-		for _, m := range dashboardKeyRE.FindAllStringSubmatch(string(src), -1) {
-			keys[m[1]] = true
-		}
-	}
-	return keys, nil
 }
 
 // effectsReport is what the check concluded.
@@ -149,40 +126,72 @@ func compareEffects(ui, rows, baseline map[string]bool) effectsReport {
 }
 
 // checkEffects runs the check; true when a dashboard key has no row and no
-// baseline line.
-func checkEffects() bool {
-	ui, err := dashboardKeys(editorsDir)
+// baseline line, when an editor writes a key no type renders, or when a
+// baseline note claims what it cannot show.
+func checkEffects(idx testIndex) bool {
+	ui, orphans, err := dashboardTypeKeys(editorsDir)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "checkconfig: reading the dashboard editors: %v\n", err)
-		os.Exit(2)
+		fatalf("reading the dashboard editors: %v", err)
 	}
 	rows, err := effectRows(effectsRegistryPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "checkconfig: reading the effect registry: %v\n", err)
-		os.Exit(2)
+		fatalf("reading the effect registry: %v", err)
 	}
-	baseline, err := loadBaseline(effectsBaselinePath)
+	notes, err := loadNotedBaseline(effectsBaselinePath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "checkconfig: reading the effects baseline: %v\n", err)
-		os.Exit(2)
+		fatalf("reading the effects baseline: %v", err)
+	}
+	baseline := map[string]bool{}
+	for k := range notes {
+		baseline[k] = true
 	}
 	r := compareEffects(ui, rows, baseline)
 	for _, k := range r.staleBaseline {
 		fmt.Printf("  note - %s has an effect row or is no longer written; delete it from %s\n", k, effectsBaselinePath)
 	}
+	failed := reportList(orphans, "dashboard keys written by an editor no middleware type renders",
+		"Render the editor from MiddlewareConfigEditor's switch, or remove the key.")
+	failed = reportNotes(notes, idx) || failed
 	if len(r.uncovered) == 0 {
-		fmt.Printf("ok - %d dashboard middleware keys: %d proven by an effect test, %d known inert, %d baselined\n",
+		fmt.Printf("ok - %d dashboard (type, key) pairs: %d proven by an effect test, %d known inert, %d baselined\n",
 			len(ui), r.proven, r.inert, r.baselined)
+		return failed
+	}
+	reportList(r.uncovered, "dashboard middleware keys with no effect test (type/key)", fmt.Sprintf(
+		`A setting the dashboard writes needs a row in %s that
+changes it and shows the gateway answering differently -- or, until it has one,
+a line in %s saying why.`, effectsRegistryPath, effectsBaselinePath))
+	return true
+}
+
+// reportNotes fails on a baseline note that claims what it cannot show.
+func reportNotes(notes map[string]string, idx testIndex) bool {
+	var bad []string
+	for k, note := range notes {
+		if p := noteProblem(note, idx); p != "" {
+			bad = append(bad, k+": "+p)
+		}
+	}
+	sort.Strings(bad)
+	return reportList(bad, "effects-baseline notes that do not hold", "")
+}
+
+// reportList prints a titled failure list; true when there is one.
+func reportList(items []string, title, advice string) bool {
+	if len(items) == 0 {
 		return false
 	}
-	fmt.Fprintf(os.Stderr, "\ndashboard middleware keys with no effect test:\n")
-	for _, k := range r.uncovered {
-		fmt.Fprintf(os.Stderr, "  %s\n", k)
+	fmt.Fprintf(os.Stderr, "\n%s:\n", title)
+	for _, it := range items {
+		fmt.Fprintf(os.Stderr, "  %s\n", it)
 	}
-	fmt.Fprintf(os.Stderr, `
-A setting the dashboard writes needs a row in %s that
-changes it and shows the gateway answering differently -- or, until it has one,
-a line in %s saying why.
-`, effectsRegistryPath, effectsBaselinePath)
+	if advice != "" {
+		fmt.Fprintf(os.Stderr, "\n%s\n", advice)
+	}
 	return true
+}
+
+func fatalf(format string, args ...any) {
+	fmt.Fprintf(os.Stderr, "checkconfig: "+format+"\n", args...)
+	os.Exit(2)
 }
