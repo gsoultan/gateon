@@ -441,7 +441,7 @@ func countStatus(stats *IPStats, tr *telemetry.TraceRecord) {
 		if credentialAttempt(tr) {
 			countCredentialFailure(stats, tr.Path)
 		}
-		if post {
+		if post && refusalMayBeAGuess(tr) {
 			stats.PostAuthFailures++
 		}
 	case strings.Contains(tr.Status, "404"):

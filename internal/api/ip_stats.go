@@ -80,8 +80,17 @@ type IPStats struct {
 // did not check its credential and cannot say what it was. So is one the
 // gateway's authentication refused, which it marks as such (ADR 0059).
 func credentialAttempt(tr *telemetry.TraceRecord) bool {
-	return (tr.Refusal == "" || tr.Refusal == authenticationRefusal) &&
-		(tr.Method == http.MethodPost || tr.PasswordAuth)
+	return refusalMayBeAGuess(tr) && (tr.Method == http.MethodPost || tr.PasswordAuth)
+}
+
+// refusalMayBeAGuess reports whether a 401/403's refusal mark leaves it a
+// possible credential guess: no mark (a backend's answer, or a check that
+// marks nothing) or the gateway's authentication's. A refusal of a token the
+// request presented, or of a shunned or blocked source, checked no guess.
+// Both counts of refused attempts read it, credentialAttempt and
+// PostAuthFailures, so the two cannot disagree again (review 3, F5).
+func refusalMayBeAGuess(tr *telemetry.TraceRecord) bool {
+	return tr.Refusal == "" || tr.Refusal == authenticationRefusal
 }
 
 // authenticationRefusal is how a trace records a refusal by the gateway's
