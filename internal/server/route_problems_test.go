@@ -4,11 +4,14 @@
 package server
 
 import (
+	"net/http"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gsoultan/gateon/internal/config"
+	"github.com/gsoultan/gateon/internal/config/mwsecret"
 	"github.com/gsoultan/gateon/internal/router"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
@@ -58,4 +61,64 @@ func TestStartUpWarnsOnceAboutRoutesThatCannotServe(t *testing.T) {
 	if got := cache.RouteProblems(ctx); len(got) != 1 || got[0].Kind != router.ProblemRefuses {
 		t.Fatalf("report = %+v, want the refusing route alone", got)
 	}
+}
+
+// TestRouteProblemsDropARouteWhoseRefusalRecovered is review-3 F4: a route
+// refused because its $env: secret was unreadable at start was reported
+// "refuses", which is right; once the secret was readable the router's retry
+// rebuilt the chain and the route served, but the report was cached by
+// invalidation epoch, which a retry does not move, so the dashboard kept
+// calling the route refused until some unrelated configuration changed.
+func TestRouteProblemsDropARouteWhoseRefusalRecovered(t *testing.T) {
+	f, rt, makeReadable := refusedOnUnreadableSecret(t)
+	if got := f.cache.RouteProblems(t.Context()); len(got) != 1 || got[0].RouteID != "r1" || got[0].Kind != router.ProblemRefuses {
+		t.Fatalf("report = %+v, want r1 refusing", got)
+	}
+	makeReadable()
+	if code := serveThrough(f.cache.GetOrCreate(rt)).Code; code == http.StatusServiceUnavailable {
+		t.Fatal("with the secret readable the retried route still answered 503")
+	}
+	if got := f.cache.RouteProblems(t.Context()); len(got) != 0 {
+		t.Fatalf("report = %+v after the route recovered, want none", got)
+	}
+}
+
+// TestRouteProblemsAreRebuiltOnlyForARecovery holds the F4 fix to its cost:
+// the report is invalidated when a refused chain is replaced by one that
+// serves, and not by the request path's cache hits or by a retry that is
+// refused again, so a polled dashboard still does not rebuild every route's
+// middlewares for nothing.
+func TestRouteProblemsAreRebuiltOnlyForARecovery(t *testing.T) {
+	f, rt, makeReadable := refusedOnUnreadableSecret(t)
+	serveThrough(f.cache.GetOrCreate(rt)) // retried, refused again
+	if n := f.cache.recovered.Load(); n != 0 {
+		t.Fatalf("a retry refused again counted as %d recoveries", n)
+	}
+	makeReadable()
+	serveThrough(f.cache.GetOrCreate(rt)) // retried, serves
+	serveThrough(f.cache.GetOrCreate(rt)) // a cache hit
+	if n := f.cache.recovered.Load(); n != 1 {
+		t.Fatalf("recoveries = %d after one recovery and a cache hit, want 1", n)
+	}
+}
+
+// refusedOnUnreadableSecret is a cache with route r1 behind a jwt middleware
+// whose $env: secret is unset, served once (503) and retried on every request.
+// makeReadable makes the secret readable.
+func refusedOnUnreadableSecret(t *testing.T) (f *cacheFixture, rt *gateonv1.Route, makeReadable func()) {
+	t.Helper()
+	f, release := newCacheFixture(t, "none")
+	release()
+	t.Cleanup(f.cache.Purge)
+	const secretEnv = "GATEON_TEST_F4_JWT_SECRET"
+	t.Setenv(mwsecret.SecretRefsEnv, "$env:"+secretEnv)
+	t.Setenv(secretEnv, "")
+	mustSave(t, f.mws.Update(t.Context(), &gateonv1.Middleware{Id: "jwt", Name: "jwt", Type: "auth",
+		Config: map[string]string{"type": "jwt", "secret": "$env:" + secretEnv}}))
+	rt = f.route(t, "r1", "jwt")
+	f.cache.refusalRetry = time.Nanosecond
+	if code := serveThrough(f.cache.GetOrCreate(rt)).Code; code != http.StatusServiceUnavailable {
+		t.Fatalf("with the secret unreadable the route answered %d, want 503", code)
+	}
+	return f, rt, func() { t.Setenv(secretEnv, "0123456789abcdef0123456789abcdef") }
 }

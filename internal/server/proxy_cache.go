@@ -62,24 +62,35 @@ type ProxyCache struct {
 	// handler so a management session token is never forwarded (ADR 0041).
 	sessions proxy.SessionVerifier
 	// problems is the last route-problem report, reused while no route was
-	// invalidated (epoch unchanged). Building every route's middlewares is not
-	// free -- a WASM middleware compiles a module -- and the dashboard polls,
-	// so it is rebuilt only when configuration changed.
+	// invalidated (epoch unchanged) and no refused chain recovered. Building
+	// every route's middlewares is not free -- a WASM middleware compiles a
+	// module -- and the dashboard polls, so it is rebuilt only when one of
+	// those changed.
 	problems struct {
 		sync.Mutex
-		epoch  uint64
-		report []router.RouteProblem
+		epoch     uint64
+		recovered uint64
+		report    []router.RouteProblem
 	}
+	// recovered counts refused chains a retry replaced with a working one
+	// (storeLocked). A route refused because a secret or an identity provider
+	// was unavailable recovers that way, with no invalidation, so a report
+	// keyed on epoch alone kept calling it refused (review-3 F4). Bumped only
+	// on that replacement -- never on the request path's cache hits, and not
+	// on a retry that is refused again -- so the report is still rebuilt only
+	// when something it reports changed.
+	recovered atomic.Uint64
 }
 
 // RouteProblems reports the enabled routes that cannot serve as configured:
 // those that refuse every request and those whose rule matches nothing
-// (OPS-N4). The report is rebuilt when a route is invalidated.
+// (OPS-N4). The report is rebuilt when a route is invalidated, and when a
+// refused chain is replaced by one that serves.
 func (c *ProxyCache) RouteProblems(ctx context.Context) []router.RouteProblem {
 	c.problems.Lock()
 	defer c.problems.Unlock()
-	epoch := c.epoch.Load()
-	if c.problems.report != nil && c.problems.epoch == epoch {
+	epoch, recovered := c.epoch.Load(), c.recovered.Load()
+	if c.problems.report != nil && c.problems.epoch == epoch && c.problems.recovered == recovered {
 		return slices.Clone(c.problems.report)
 	}
 	report := router.RouteProblems(ctx, c.routeStore.List(ctx), router.ChainDeps{
@@ -88,7 +99,7 @@ func (c *ProxyCache) RouteProblems(ctx context.Context) []router.RouteProblem {
 	if report == nil {
 		report = []router.RouteProblem{}
 	}
-	c.problems.epoch, c.problems.report = epoch, report
+	c.problems.epoch, c.problems.recovered, c.problems.report = epoch, recovered, report
 	return slices.Clone(report)
 }
 
@@ -309,6 +320,9 @@ func (c *ProxyCache) storeIfCurrent(id string, h http.Handler, ph *proxy.ProxyHa
 // refused chain being retried still owns one.
 func (c *ProxyCache) storeLocked(id string, h http.Handler, ph *proxy.ProxyHandler) {
 	m := c.proxies.Load().(map[string]http.Handler)
+	if recoveredFromRefusal(m[id], h) {
+		c.recovered.Add(1)
+	}
 	newProxies := maps.Clone(m)
 	if newProxies == nil {
 		newProxies = make(map[string]http.Handler)
@@ -328,6 +342,14 @@ func (c *ProxyCache) storeLocked(id string, h http.Handler, ph *proxy.ProxyHandl
 	if old != nil && old != ph {
 		go old.DrainAndClose(drainTimeout)
 	}
+}
+
+// recoveredFromRefusal reports whether caching next in place of prev turns a
+// refused route into one that serves.
+func recoveredFromRefusal(prev, next http.Handler) bool {
+	_, wasRefused := prev.(*router.RefusedChain)
+	_, isRefused := next.(*router.RefusedChain)
+	return wasRefused && !isRefused
 }
 
 // inheritHealthLocked starts a newly built handler's targets where the
