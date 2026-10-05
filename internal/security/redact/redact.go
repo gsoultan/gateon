@@ -65,6 +65,38 @@ func IsCredentialHeader(name string) bool {
 	return secretmask.IsCredentialName(name) && !equalsAnyFold(name, publicHeaders)
 }
 
+// challengeHeaders name the credential a server wants, and carry none of the
+// client's; a challenge's parameters (realm=, authorization_uri=) follow the
+// scheme name the way a credential would.
+var challengeHeaders = []string{"www-authenticate", "proxy-authenticate"}
+
+// HeaderValue returns the value of a header whose name does not say it carries
+// a credential, with every credential in it masked by its shape: a JSON Web
+// Token, a gateway API token or a PASETO token (the prefix kept), the
+// credentials after Bearer or Basic, and a value that is wholly an encoded
+// Authorization value -- what IsCredentialValue finds in a query value, found
+// in a header. The rest of a structured value -- Forwarded's for= and proto=,
+// a list's other members -- stays readable. A name says nothing about a value:
+// AWS ALB's X-Amzn-Oidc-Data is a signed user token, and any proxy may forward
+// one under a name of its own (review 3, F4).
+//
+// It returns value itself, allocating nothing, when there is nothing to mask:
+// it runs for every header of every trace and threat the store keeps.
+func HeaderValue(name, value string) string {
+	if equalsAnyFold(name, challengeHeaders) {
+		return value
+	}
+	var spans []span
+	spans = schemeSpans(value, spans)
+	spans = tokenSpans(value, spans)
+	if len(spans) == 0 {
+		if v := strings.TrimLeft(value, " \t"); IsCredentialValue(v) {
+			return value[:len(value)-len(v)] + Mask
+		}
+	}
+	return apply(value, spans)
+}
+
 // uriHeaders are the headers whose value is a URI by definition.
 var uriHeaders = []string{"referer", "location", "content-location"}
 

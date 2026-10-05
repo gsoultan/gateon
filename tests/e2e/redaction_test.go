@@ -204,7 +204,10 @@ func sendCredentialedTraffic(t *testing.T, base string) {
 		redactReq(t, http.MethodGet, base+"/app/profile?api_key=QRY-S3CRET-0001&access_token=QRY-S3CRET-0002"+
 			"&code=QRY-S3CRET-0003&state=QRY-S3CRET-0004&password=QRY-S3CRET-0005&page=visible-page", "", "",
 			"Authorization", "Bearer HDR-S3CRET-0001", "Cookie", "sid=HDR-S3CRET-0002", "X-Api-Key", "HDR-S3CRET-0003",
-			"Referer", "http://ref.example/?token=REF-S3CRET-0001&from=visible-ref"),
+			"Referer", "http://ref.example/?token=REF-S3CRET-0001&from=visible-ref",
+			// Credentials under names that give nothing away, found by shape.
+			"X-Amzn-Oidc-Data", "eyJhbGciOiJFUzI1NiJ9.eyJzdWIiOiJhZGEifQ.SHAPE-S3CRET-0001",
+			"X-Upstream", "gateon_tok_SHAPES3CRET0002", "X-Client-Data", "Bearer SHAPE-S3CRET-0003"),
 		redactReq(t, http.MethodPost, base+"/app/login", "application/x-www-form-urlencoded",
 			"user=visible-user&password=BODY-S3CRET-0001"),
 		redactReq(t, http.MethodPost, base+"/app/login", "application/json",

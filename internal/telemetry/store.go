@@ -120,6 +120,10 @@ func RedactHeaders(headers string) string {
 	sb := builderPool.Get().(*strings.Builder)
 	sb.Reset()
 	defer builderPool.Put(sb)
+	// One buffer of the block's size: the result is rarely longer, and
+	// growing by doubling from empty allocated five times for a browser's
+	// headers.
+	sb.Grow(len(headers))
 
 	start := 0
 	for {
@@ -152,7 +156,9 @@ func writeRedactedHeaderLine(sb *strings.Builder, line string) {
 		sb.WriteString(line[:colon+1])
 		sb.WriteString(redact.URI(line[colon+1:]))
 	default:
-		sb.WriteString(line)
+		// By shape: a token under a name that does not say so (ADR 0060).
+		sb.WriteString(line[:colon+1])
+		sb.WriteString(redact.HeaderValue(line[:colon], line[colon+1:]))
 	}
 }
 

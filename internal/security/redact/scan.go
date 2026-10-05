@@ -340,14 +340,25 @@ func tokenSpans(s string, spans []span) []span {
 			i = end
 		}
 	}
+	return prefixSpans(s, spans)
+}
+
+// plainTokenPrefixes are the tokenPrefixes a text holds as they are; the
+// encoded schemes only occur inside a parameter value. plainPrefixStart marks
+// the bytes one of them starts with, in either case, so the scan below asks
+// about a prefix only where one can start.
+var plainTokenPrefixes, plainPrefixStart = func() ([]string, [256]bool) {
+	var plain []string
+	var start [256]bool
 	for _, p := range tokenPrefixes {
 		if strings.ContainsAny(p, "%+") {
-			continue // encoded schemes only occur inside a parameter value
+			continue
 		}
-		spans = prefixSpans(s, p, spans)
+		plain = append(plain, p)
+		start[p[0]|0x20], start[p[0]&^0x20] = true, true
 	}
-	return spans
-}
+	return plain, start
+}()
 
 // jwtEnd returns the end of the JSON Web Token at k: two base64url segments
 // each followed by a dot, then the signature (possibly empty).
@@ -369,14 +380,20 @@ func jwtEnd(s string, k int) (int, bool) {
 	return j, true
 }
 
-// prefixSpans masks the token run after every occurrence of prefix in s.
-func prefixSpans(s, prefix string, spans []span) []span {
-	for i := 0; ; {
-		k := indexFold(s[i:], prefix)
-		if k < 0 {
-			return spans
+// prefixSpans masks the token run after every plain token prefix in s, in one
+// pass. It searched once per prefix, comparing at every offset, which made
+// masking header values by shape cost six times what the rest of the header
+// redaction did (review 3, F4).
+func prefixSpans(s string, spans []span) []span {
+	for i := 0; i < len(s); i++ {
+		if !plainPrefixStart[s[i]] {
+			continue
 		}
-		from := i + k + len(prefix)
+		n := plainPrefixAt(s[i:])
+		if n == 0 {
+			continue
+		}
+		from := i + n
 		to := from
 		for to < len(s) && (isBase64URL(s[to]) || s[to] == '.') {
 			to++
@@ -384,8 +401,19 @@ func prefixSpans(s, prefix string, spans []span) []span {
 		if to > from {
 			spans = append(spans, span{start: from, end: to, repl: Mask})
 		}
-		i = to
+		i = to - 1
 	}
+	return spans
+}
+
+// plainPrefixAt is the length of the plain token prefix s starts with, or 0.
+func plainPrefixAt(s string) int {
+	for _, p := range plainTokenPrefixes {
+		if hasPrefixFold(s, p) {
+			return len(p)
+		}
+	}
+	return 0
 }
 
 func isAlnum(c byte) bool {
@@ -403,12 +431,27 @@ func hasPrefixFold(s, prefix string) bool {
 	return len(s) >= len(prefix) && strings.EqualFold(s[:len(prefix)], prefix)
 }
 
-// indexFold is strings.Index without regard to ASCII case.
+// indexFold is strings.Index without regard to ASCII case, for an ASCII sub.
+// It compares a whole window only where the first byte matches: a window of
+// len(sub) bytes holding a non-ASCII rune has fewer runes than sub, so
+// EqualFold could never have matched it, and the first-byte test changes no
+// answer. Every header name of every kept trace passes through it.
 func indexFold(s, sub string) int {
+	if sub == "" {
+		return 0
+	}
+	first := lowerASCII(sub[0])
 	for i := 0; i+len(sub) <= len(s); i++ {
-		if strings.EqualFold(s[i:i+len(sub)], sub) {
+		if lowerASCII(s[i]) == first && strings.EqualFold(s[i:i+len(sub)], sub) {
 			return i
 		}
 	}
 	return -1
+}
+
+func lowerASCII(c byte) byte {
+	if 'A' <= c && c <= 'Z' {
+		return c + 'a' - 'A'
+	}
+	return c
 }

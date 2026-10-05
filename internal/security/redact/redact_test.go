@@ -225,6 +225,50 @@ func TestHeaderClassificationAllocatesNothing(t *testing.T) {
 	}
 }
 
+// TestHeaderValueMasksByShape: a credential under a header name that gives
+// nothing away was stored as sent (review 3, F4). The shapes are the ones a
+// query value is masked for; the rest of a structured value stays readable.
+func TestHeaderValueMasksByShape(t *testing.T) {
+	const jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJhZGEifQ.c2lnbmF0dXJl"
+	basic := base64.StdEncoding.EncodeToString([]byte("ada:correct-horse"))
+	for _, tc := range []struct{ name, in, want string }{
+		{"X-Id-Assertion", " " + jwt, " " + Mask},
+		{"Forwarded", " for=192.0.2.60;proto=http;by=" + jwt, " for=192.0.2.60;proto=http;by=" + Mask},
+		{"X-Upstream", " gateon_tok_abc123", " gateon_tok_" + Mask},
+		{"X-Upstream", " GATEON_TOK_abc123", " GATEON_TOK_" + Mask},
+		{"X-Assertion", " v2.local.QAxIpVe-ECVNI1z4", " v2.local." + Mask},
+		{"X-Client-Data", " Bearer 0123456789abcdef", " Bearer " + Mask},
+		{"X-Legacy", " Basic " + basic, " Basic " + Mask},
+		{"X-Hint", " bearer+0123456789abcdef", " " + Mask},
+		{"X-Hint", "basic%20" + basic, Mask},
+		// Not credentials.
+		{"WWW-Authenticate", ` Bearer error_description="the access token expired"`,
+			` Bearer error_description="the access token expired"`},
+		{"Proxy-Authenticate", ` Bearer resource_metadata="https://login.example/.well-known"`,
+			` Bearer resource_metadata="https://login.example/.well-known"`},
+		{"Accept-Encoding", " gzip, deflate, br", " gzip, deflate, br"},
+		{"X-Note", " the bearer of news", " the bearer of news"},
+		{"X-Request-Id", " eyJ-not-a-token", " eyJ-not-a-token"},
+	} {
+		if got := HeaderValue(tc.name, tc.in); got != tc.want {
+			t.Errorf("HeaderValue(%q, %q) = %q, want %q", tc.name, tc.in, got, tc.want)
+		}
+	}
+}
+
+// HeaderValue runs for every header of every kept trace and threat.
+func TestHeaderValueAllocatesNothingWhenThereIsNothingToHide(t *testing.T) {
+	for _, v := range []string{
+		" Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/141.0.0.0 Safari/537.36",
+		" for=198.51.100.17;proto=https;host=shop.example.com",
+		` "Chromium";v="141", "Not?A_Brand";v="8"`,
+	} {
+		if n := testing.AllocsPerRun(100, func() { _ = HeaderValue("X-Anything", v) }); n != 0 {
+			t.Errorf("HeaderValue(%q) allocated %v times", v, n)
+		}
+	}
+}
+
 func TestTextAllocatesNothingWhenThereIsNothingToHide(t *testing.T) {
 	s := `{"user":"alice","n":2} q=1&page=2 the bearer of news`
 	if n := testing.AllocsPerRun(100, func() { _ = Text(s) }); n != 0 {

@@ -67,6 +67,18 @@ URI-valued header or request URI whose query carries one, an argument named or
 shaped like one, a raw body quoting one, or came from a data-leak rule. The
 access log records the path without its query and is unchanged.
 
+*Amended 2026-10-05 (review 3).* Two places did not do what this says. A
+header whose name is not a credential's was kept as sent whatever its value,
+so AWS ALB's `X-Amzn-Oidc-Data` JWT, a `gateon_tok_` token under `X-Upstream`
+and `Bearer ...` in a neutral header reached traces, threats and the webhook's
+`requestHeaders`. `HeaderValue` now masks such a value by shape -- the shapes
+`IsCredentialValue` finds in a query value, plus `Bearer`/`Basic` credentials --
+keeping the rest of a structured value (`Forwarded: for=...;by=[REDACTED]`) and
+leaving a challenge (`WWW-Authenticate`) alone; `RedactHeaders` allocates once
+per block instead of five times, at about 11% more CPU. And the CORS middleware
+alerted on its own unredacted copy of a violation on the request path; it now
+only records it.
+
 **The generic webhook sends no bodies.** The fields stay in the payload,
 empty. There is no setting to send them: the threat id in the payload leads to
 the dashboard, which holds them (redacted), and a webhook is usually a third
@@ -85,7 +97,7 @@ body whatever `max_body_size` says; a smaller value still applies.
   `session_count` are masked too; `X-Api-Key-Id` is now masked in a trace.
   Their names stay readable.
 - Not covered: a credential under a name and in a shape that give nothing
-  away (`?x=<opaque random string>`, `X-Upstream: <token>`), one in a URL
+  away (`?x=<opaque random string>`, `X-Upstream: <opaque token>`), one in a URL
   path (`/reset/<token>`), one inside an encoding redaction does not read
   (base64, a percent-encoded JSON document), and a value in an HTML attribute
   (`<input name="csrf_token" value="...">`).
