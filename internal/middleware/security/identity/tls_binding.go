@@ -89,8 +89,8 @@ type tlsBinder struct {
 func (b tlsBinder) serve(next http.Handler, w http.ResponseWriter, r *http.Request) {
 	cert := clientCertificateHash(r)
 	if sessions := r.CookiesNamed(b.cookie); len(sessions) > 0 {
-		if reason := b.refusal(r, cert, sessions); reason != "" {
-			refuseBinding(w, r, reason)
+		if why := b.refusal(r, cert, sessions); why.reason != "" {
+			refuseBinding(w, r, why)
 			return
 		}
 	}
@@ -105,33 +105,46 @@ func (b tlsBinder) serve(next http.Handler, w http.ResponseWriter, r *http.Reque
 	bw.commit()
 }
 
-// refusal says why a request presenting sessions must be refused, or "".
+// bindingRefusal is why a request presenting sessions is refused: reason is
+// "" when it is not.
+type bindingRefusal struct {
+	reason string
+	// duplicate marks the refusal of a cookie presented more than once. It is
+	// refused, and it is not evidence of theft: a browser holds a cookie under
+	// two paths or domains once a backend changes the cookie's Path, and sends
+	// both. Recorded observed, so it does not lower the client's reputation
+	// (ADR 0059); a mismatch or a missing binding still does.
+	duplicate bool
+}
+
+// refusal says why a request presenting sessions must be refused.
 //
 // The session cookie, and its binding, must each appear once (TRUTH-NEW-5).
 // Only the first used to be checked, so `session=OWN; session_binding=OWN;
 // session=STOLEN` passed, and a backend that reads the last value served the
 // stolen session. Which duplicate a backend reads is its own choice, so there
 // is no "one that counts" to check here.
-func (b tlsBinder) refusal(r *http.Request, cert []byte, sessions []*http.Cookie) string {
+func (b tlsBinder) refusal(r *http.Request, cert []byte, sessions []*http.Cookie) bindingRefusal {
 	if cert == nil {
-		return "Session cookie presented without a client certificate; the session is bound to the " +
-			"certificate it was issued to"
+		return bindingRefusal{reason: "Session cookie presented without a client certificate; the session " +
+			"is bound to the certificate it was issued to"}
 	}
 	bindings := r.CookiesNamed(b.binding)
 	if len(sessions) > 1 || len(bindings) > 1 {
-		return "Session or binding cookie presented more than once; a backend may read a different " +
-			"one from the one checked"
+		return bindingRefusal{reason: "Session or binding cookie presented more than once; a backend may " +
+			"read a different one from the one checked", duplicate: true}
 	}
 	if len(bindings) == 0 {
-		return "Session cookie presented with no binding cookie; a session must be bound on the " +
-			"connection that issued it"
+		return bindingRefusal{reason: "Session cookie presented with no binding cookie; a session must be " +
+			"bound on the connection that issued it"}
 	}
 	// Constant time: the comparison is against a value derived from a secret
 	// the client is trying to guess.
 	if !hmac.Equal([]byte(bindings[0].Value), []byte(b.mac(cert, sessions[0].Value))) {
-		return "Session cookie presented with a binding for another client certificate (binding mismatch)"
+		return bindingRefusal{reason: "Session cookie presented with a binding for another client " +
+			"certificate (binding mismatch)"}
 	}
-	return ""
+	return bindingRefusal{}
 }
 
 // mac is the binding of session to the certificate whose SHA-256 is cert.
@@ -239,14 +252,15 @@ func (w *bindingWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	return nil, nil, http.ErrNotSupported
 }
 
-func refuseBinding(w http.ResponseWriter, r *http.Request, details string) {
+func refuseBinding(w http.ResponseWriter, r *http.Request, why bindingRefusal) {
 	kind.RecordThreat(r, kind.Threat{
 		Type:        "tls_binding_mismatch",
 		Score:       80,
-		Details:     details,
+		Details:     why.reason,
 		Category:    "auth",
 		Severity:    kind.SeverityHigh,
 		ActionTaken: kind.ActionBlocked,
+		Observed:    why.duplicate,
 	})
 	http.Error(w, "Security Check Failed: Session binding mismatch", http.StatusForbidden)
 }
