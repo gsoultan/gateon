@@ -988,8 +988,15 @@ func (s *ApiService) MitigateThreat(ctx context.Context, req *gateonv1.MitigateT
 
 	return &gateonv1.MitigateThreatResponse{
 		Success: true,
-		Message: fmt.Sprintf("Source %s successfully mitigated.", source),
+		Message: fmt.Sprintf("Source %s successfully mitigated.%s", source, ipReach(isIP, source)),
 	}, nil
+}
+
+func ipReach(isIP bool, source string) string {
+	if !isIP {
+		return ""
+	}
+	return blockReach(source)
 }
 
 // exemptAddressAnswer is the answer for an address the block list now names
@@ -1005,8 +1012,20 @@ func exemptAddressAnswer(ip string) *gateonv1.MitigateThreatResponse {
 	return &gateonv1.MitigateThreatResponse{
 		Success: false,
 		Message: fmt.Sprintf("%s was recorded on the block list but is not enforced: %s. "+
-			"Requests from it are still served.", ip, exemptionReason(ip)),
+			"Requests from it are still served.%s", ip, exemptionReason(ip), blockReach(ip)),
 	}
+}
+
+// blockReach names what an address block covers beyond the address, for an
+// answer to say: an IPv6 block is its /64 (ADR 0058), so blocking one
+// allowlisted address of a /64 refuses every other address in it, and an
+// answer that named only the address hid that. Empty for IPv4.
+func blockReach(ip string) string {
+	key := repid.AddressKey(ip)
+	if !strings.Contains(key, ":") {
+		return ""
+	}
+	return fmt.Sprintf(" The block covers %s/64: every other address in it is refused.", key)
 }
 
 // exemptionReason says why the request path never refuses ip, an address
