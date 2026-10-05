@@ -51,10 +51,11 @@ were not so:
    counted in the posture (`rateLimited`).
 3. **Apply fix does what it reports.** Blocking a source writes one entry to
    the mitigation block list for 24 hours (a manual-block duration, ADR 0037),
-   read back and refused for an exempt address; the kernel is mentioned only
-   when the XDP program is attached. No ipfilter, no route edits. The
-   hardening fix turns the global WAF on and audit-only off and reports which
-   it changed. The global category booleans it used to set are unread, and
+   and read back; an exempt address (loopback, `GATEON_MITIGATION_ALLOWLIST`)
+   is refused before anything is written, and no fingerprint block is
+   written. The kernel is mentioned only when the XDP program is attached. No
+   ipfilter, no route edits. The hardening fix turns the global WAF on and
+   audit-only off, rebuilds every route's chain, and reports which it changed. The global category booleans it used to set are unread, and
    baselined as such.
 4. **A category switch removes its own family only.** A family tag removes a
    rule only when the rule is filed under that family or under a category no
@@ -81,7 +82,8 @@ were not so:
    every enabled HTTP route's middlewares as the router does and parses its
    rule; the gateway logs one WARN at start naming each route that refuses or
    matches nothing, `GET /v1/routes/problems` returns them (rebuilt only when a
-   route is invalidated), and the route list marks them.
+   route is invalidated or a refused route's retry succeeds), and the route
+   list marks them.
 
 ## Consequences
 
