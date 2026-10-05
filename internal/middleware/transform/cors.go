@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/gsoultan/gateon/internal/alerting"
 	"github.com/gsoultan/gateon/internal/middleware/kind"
 	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/telemetry"
@@ -310,9 +309,12 @@ func reportCORSViolation(r *http.Request, origin string, cfg CORSConfig) {
 		Recommendation: "Verify if this origin should be allowed in the CORS configuration for this route.",
 	}
 
-	threat = telemetry.RecordSecurityThreatWithJA4(r, threat)
-	telemetry.RecordSecurityThreat(threat)
-	alerting.HandleThreat(&threat)
+	// Recorded, and nothing else: the store's loop redacts it and hands it to
+	// the alert hook, off the request path. This used to call the alerting
+	// manager itself as well, on the unredacted copy -- a webhook received the
+	// query string's credentials -- so every violation was alerted twice and
+	// its playbooks ran on the request path (review 3, F2).
+	telemetry.RecordSecurityThreat(telemetry.RecordSecurityThreatWithJA4(r, threat))
 }
 
 // defaultCORSMethods returns the method list used by every built-in CORS
