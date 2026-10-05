@@ -57,3 +57,26 @@ describe("a tarpit config", () => {
     expect(middlewareConfigProblem("tarpit", { threshold: "50", max_delay: "5s" })).toBeUndefined();
   });
 });
+
+// Review-3 F5: the Body Entropy editor showed 7.5 while the gateway read an
+// empty threshold as 0, so every request body was recorded as a threat. Empty
+// now means 7.5 in the gateway, the editor says so, and a threshold no body
+// can be usefully measured against is refused, as the gateway refuses it.
+describe("a body entropy config", () => {
+  test("refuses a threshold at or below 0 or above 8", () => {
+    for (const threshold of ["0", "-1", "8.5", "Infinity"]) {
+      expect(middlewareConfigProblem("entropy", { threshold })).toContain("above 0 and at most 8");
+    }
+  });
+
+  test("saves empty, which is 7.5, and any value in range", () => {
+    for (const threshold of ["", "7.5", "8", "0.5"]) {
+      expect(middlewareConfigProblem("entropy", { threshold })).toBeUndefined();
+    }
+    expect(middlewareConfigProblem("entropy", {})).toBeUndefined();
+  });
+
+  test("the editor says what empty means", () => {
+    expect(render("entropy")).toContain("Empty: 7.5.");
+  });
+});

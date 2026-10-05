@@ -5,10 +5,12 @@ package security
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -93,6 +95,35 @@ func Tarpit(baseDelay, maxDelay time.Duration, scoreThreshold float64) kind.Midd
 // a useful signal, and bounded because "measure the body" would otherwise mean
 // "hold whatever arrives".
 const entropyPeekLimit = 1024 * 1024
+
+// DefaultEntropyThreshold is the body-entropy threshold, in bits per byte, an
+// unset one means: what the dashboard's editor shows. Random or encrypted data
+// measures close to 8 and text 4 to 5. An unset threshold used to mean 0, which
+// every body exceeds, so every request with a body was recorded as a
+// high-severity threat (review-3 F5).
+const DefaultEntropyThreshold = 7.5
+
+// maxEntropy is the Shannon entropy of a uniformly random byte stream; no body
+// measures above it.
+const maxEntropy = 8.0
+
+// CheckEntropySave refuses, at save, a body-entropy threshold that cannot do
+// what the setting says: at 0 or below every body is recorded, above 8 none
+// is. Empty is the default. A value that is not a number is left to the
+// factory, which refuses it by its parse error.
+func CheckEntropySave(cfg map[string]string) error {
+	v := strings.TrimSpace(cfg["threshold"])
+	if v == "" {
+		return nil
+	}
+	t, err := strconv.ParseFloat(v, 64)
+	if err != nil || (t > 0 && t <= maxEntropy) {
+		return nil
+	}
+	return kind.CfgError("threshold", v, errors.New("set an entropy threshold above 0 and at most 8 bits per "+
+		"byte, or leave it empty for 7.5: at 0 every request body is recorded as a threat, and no body "+
+		"measures above 8"))
+}
 
 func Entropy(threshold float64, routeID string) kind.Middleware {
 	return func(next http.Handler) http.Handler {

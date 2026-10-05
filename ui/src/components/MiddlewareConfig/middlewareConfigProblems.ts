@@ -68,6 +68,22 @@ export function tarpitProblem(config: Record<string, string>): string | undefine
   return undefined;
 }
 
+export const ENTROPY_THRESHOLD_RANGE =
+  "Set an entropy threshold above 0 and at most 8 bits per byte, or leave it empty for 7.5: " +
+  "at 0 every request body is recorded as a threat, and no body measures above 8.";
+
+/**
+ * Why a body-entropy config cannot be saved, or undefined. Empty is the
+ * gateway's default of 7.5; the gateway refuses the same out-of-range values.
+ */
+export function entropyProblem(config: Record<string, string>): string | undefined {
+  const raw = (config.threshold || "").trim();
+  if (!raw) return undefined;
+  const t = Number(raw);
+  if (Number.isNaN(t)) return undefined; // not a number: the gateway names the parse error
+  return t > 0 && t <= 8 ? undefined : ENTROPY_THRESHOLD_RANGE;
+}
+
 /** The first reason a middleware of this type cannot be saved, or undefined. */
 export function middlewareConfigProblem(type: string, config: Record<string, string>): string | undefined {
   switch (type) {
@@ -82,6 +98,8 @@ export function middlewareConfigProblem(type: string, config: Record<string, str
       return tlsBindingProblem(config);
     case "tarpit":
       return tarpitProblem(config);
+    case "entropy":
+      return entropyProblem(config);
     default:
       return undefined;
   }

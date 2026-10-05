@@ -8,7 +8,7 @@
 
 import { Stack, TextInput, NumberInput, Switch, Text, TagsInput } from "@mantine/core";
 import { StoredSecretInput } from "../settings/StoredSecretInput";
-import { tarpitProblem } from "./middlewareConfigProblems";
+import { entropyProblem, tarpitProblem } from "./middlewareConfigProblems";
 
 interface EditorProps {
   config: Record<string, string>;
@@ -90,13 +90,14 @@ export function EntropyConfigEditor({ config, updateConfig }: EditorProps) {
   return (
     <NumberInput
       label="Entropy Threshold (bits per byte)"
-      description="A request body above this Shannon entropy is recorded as a threat; the request is still forwarded. Random or encrypted data is close to 8; text is 4 to 5."
+      description="A request body above this Shannon entropy is recorded as a threat; the request is still forwarded. Random or encrypted data is close to 8; text is 4 to 5. Above 0, at most 8. Empty: 7.5."
       placeholder="7.5"
       value={numberOrEmpty(config.threshold)}
       onChange={(v) => updateConfig("threshold", toConfig(v))}
       min={0}
       max={8}
       decimalScale={2}
+      error={entropyProblem(config)}
     />
   );
 }
