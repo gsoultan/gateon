@@ -75,6 +75,14 @@ ClamAV finding, an executable disguised as an image and a body the multipart
 parser cannot read (a parser differential is how a part is smuggled past the
 scan) stay `malware`.
 
+**A refusal that is not evidence is recorded observed too.** TLS binding
+refuses a request carrying the session cookie or its binding more than once
+(TRUTH-NEW-5: a backend may read a different copy from the one checked), and
+keeps refusing it; but a browser holds a cookie under two paths once a backend
+changes its Path, so the duplicate is not evidence of theft and was a
+score-80 penalty. It is recorded observed. A missing binding, a binding for
+another certificate and a session without a client certificate stay held.
+
 **A refused credential attempt is one the authentication path refused.** A
 401 or 403 counts towards brute force when the request reached its service --
 the backend's answer, which the gateway cannot read into -- or when the
