@@ -54,11 +54,13 @@ more -- each is stated where it applies -- but plan around them:
 - **Run one replica.** The Helm chart refuses `replicaCount > 1`: replicas share
   one identity from a Secret, but not their global settings or audit chain yet
   (ADR 0056).
-- **The setup wizard's database step can switch a configured database to
-  SQLite.** On a gateway whose configuration already names a database (the
-  chart's `externalDatabase`), keep the wizard on that database; choosing the
-  default SQLite creates the administrator in the existing database and the next
-  start refuses to run.
+- **A block applies to an IPv6 client's whole /64**, as the kernel shun already
+  did with eBPF. A provider that puts several customers in one /64 has them
+  blocked together (ADR 0058).
+- **Check an address's traces before "Apply fix" on a brute-force finding.** The
+  Security Hub's analysis engine still counts a POST the WAF or the geofence
+  refused towards that finding. The finding blocks nothing by itself; the fix
+  blocks the address for 24 hours.
 - **Sign-in is budgeted per client, loopback included** (10 a minute by default,
   `GATEON_AUTH_ATTEMPTS_PER_MINUTE`): scripts that sign in in a loop from the
   host share one budget.
@@ -286,6 +288,11 @@ groups:
   - alert: GateonTracesDropped
     expr: increase(gateon_trace_dropped_total[15m]) > 0
     for: 15m
+  - alert: GateonBlockListIncomplete   # more blocks in force than the list holds
+    expr: gateon_mitigation_block_list_complete == 0
+    for: 10m
+  - alert: GateonIPFeedOverLimit       # feed entries past the profile's bound
+    expr: increase(gateon_ip_feed_entries_refused_total{reason="over_limit"}[1h]) > 0
 ```
 
 Also watch, without paging: `gateon_middleware_waf_uninspected_responses_total`
@@ -296,9 +303,11 @@ on one entrypoint.
 Ship the service's journal and the audit log somewhere off the host. The audit
 log is hash-chained and signed; an administrator checks it under **Audit Log >
 Verify integrity** (or `GET /v1/audit/verify`, which walks at most 5000 entries
-a call and returns a cursor). Verification detects altered or removed entries in
-the middle of the chain, but not entries removed from its newest end, so the
-off-host copy is still the record to trust after an incident.
+a call and returns a cursor). Verification detects altered, inserted or removed
+entries anywhere in the chain, and entries removed from its newest end while the
+gateway has been running; it cannot detect entries removed from the end while the
+gateway was stopped, so the off-host copy is still the record to trust after an
+incident.
 
 ## 6. The soak
 
