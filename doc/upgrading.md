@@ -401,14 +401,15 @@ kernel already dropped the whole /64.
   already did with eBPF. A release from any address of the /64 lifts it. An address
   on `GATEON_MITIGATION_ALLOWLIST` inside a blocked /64 is still served, and its open
   L4 sessions are not closed; the other open sessions of the /64 are closed when the
-  block is written.
+  block is written. The answer to a manual block names the /64 it covers.
 - IPv6 blocks are listed under the /64's network address (`2001:db8:1:2::` for
   everything in `2001:db8:1:2::/64`); releasing that row works as before.
 - **Migration 68** moves every IPv6 row of `ip_mitigations` to its /64's key, and a
-  v4-mapped one (`::ffff:198.51.100.7`) to its IPv4 address. Where several addresses
-  of one /64 had rows, one is kept: a block in force over one that is not
-  (open-ended over bounded, the later end first), then a release, then the latest.
-  IPv4 rows are untouched.
+  v4-mapped one (`::ffff:198.51.100.7`) to its IPv4 address. Where several rows
+  collapse to one key -- addresses of one /64, or a v4-mapped row and the plain IPv4
+  row already stored for the same address -- one is kept: a block in force over one
+  that is not (open-ended over bounded, the later end first), then a release, then
+  the latest. Other IPv4 rows are untouched.
 - The threat list shows a threat from a shunned /64 as shunned. The "mitigated"
   filter still matches an IPv6 threat only by its own address.
 
@@ -888,7 +889,9 @@ with its reason, the dashboard's route list marks it ("REFUSES REQUESTS" /
 permission) returns the list.
 
 **Who is affected:** operators upgrading with such routes see them named;
-nothing changes in what the routes answer.
+nothing changes in what the routes answer. A route that refused at start because a
+secret or its identity provider was unavailable leaves the report when the
+router's retry brings it back.
 
 ### The configuration gate keys its proof by middleware type (ADR 0063)
 
@@ -900,6 +903,224 @@ security thresholds (`scripts/checkconfig/globals-baseline.txt`), and fails
 when the type picker does not offer a type the factory builds.
 
 **Who is affected:** contributors adding a dashboard key or a middleware type.
+
+### The WAF-hardening "Apply fix" now takes effect on every route at once
+
+The `security_vulnerability` "Apply fix" saved the gateway-wide WAF with
+audit-only off (or switched it on) and reported that it now refuses what it
+matches, but routes that had already served a request kept the chain they were
+built with -- the audit-only WAF, or none -- and forwarded every attack until
+some unrelated edit rebuilt them. The fix now rebuilds every route's chain when
+it changes the WAF, as saving the WAF settings does.
+
+**Who is affected:** anyone who applied this fix and made no other configuration
+change afterwards. Their saved WAF settings are right but may not have been
+running; saving any setting, or restarting, applies them. After this release
+the fix applies at once.
+
+### "Apply fix" on a blocking finding no longer blocks the source's browser class, and refuses an exempt source without writing anything
+
+The fix for `security_scan`, `brute_force_attempt`, `high_traffic`, `scanner`,
+`slow_client_anomaly` and `security_block_recommendation` used to block the
+finding's fingerprint on the source's /24 (IPv6 /64) as well as the address:
+every client of the same browser build on that network, refused for the
+fingerprint-block TTL (`GATEON_JA4_MITIGATION_TTL`, one hour by default), while
+the answer mentioned only the address. It now writes only the 24-hour
+block-list entry for the address.
+
+It also wrote the address block before checking whether the address is ever
+refused. An address on `GATEON_MITIGATION_ALLOWLIST`, or loopback, is now
+refused before anything is written, with the reason ("... was not blocked, and
+nothing was written: ..."). Before, the fix answered "recorded on the block list
+but is not enforced", left an inert row in Mitigations, and -- for an
+allowlisted IPv6 address -- refused the rest of its /64 for 24 hours.
+
+**Who is affected:** operators who use "Apply fix" on these findings. A fix
+applied to an allowlisted IPv6 address before this release may have left its
+/64 blocked; look for it under Mitigations and remove it. A fingerprint block
+the fix wrote lapses on its own within the fingerprint-block TTL. To block a
+browser build on a network deliberately, use Add Mitigation with
+`<fingerprint>|<address>`.
+
+### An empty Body Entropy threshold means 7.5, and a threshold outside (0, 8] cannot be saved
+
+An `entropy` (Body Entropy) middleware with no threshold used the value 0,
+which every request body exceeds, so every request with a body was recorded as
+a high-severity `high_entropy_payload` threat -- listed, alerted on and sent to
+the SIEM -- while the editor showed 7.5 as the value. An empty threshold now
+means 7.5. Saving a threshold of 0 or less, or above 8, is refused on every
+transport (dashboard, REST, gRPC, config import) with the allowed range; the
+editor says the range and the default.
+
+**Who is affected:** anyone with a Body Entropy middleware saved without a
+threshold: it now records only bodies above 7.5 bits per byte, so the flood of
+`high_entropy_payload` findings stops. A middleware already stored with a
+threshold of 0 or less keeps building and recording every body, as before, but
+cannot be saved again until the threshold is changed to a value in range or
+cleared.
+
+### The WAF's reputation rules no longer count their own refusals against the client
+
+A route WAF with **Behavioural Reputation** (`ip_reputation`) on refuses a
+client whose reputation is below 20 (rule 1910002) and an address a feed lists
+(rule 1910001). Each of those refusals was recorded as `waf_blocked` and held
+against the client: every refused retry took another 50 off its score, counted
+as attack evidence, and added to the per-address WAF-block tally the
+exploit-scan detector shuns on. On the third retry the client's browser build
+was blocked on its whole /24, so everyone on that network running the same
+browser build was refused on every route.
+
+These refusals are now recorded as `waf_reputation_block`. The request is still
+refused and the threat is still listed, broadcast, alerted on and shipped to a
+SIEM, and it still counts as a WAF block in `gateon_middleware_waf_blocked_total`
+and the security funnel. It no longer lowers reputation, counts towards a
+fingerprint block or an address shun, feeds the exploit-scan detector or the
+WAF's adaptive eBPF rate limit, or is a correlation signal, and a playbook's
+`block` action does not act on it. A POST refused this way is no longer read as
+a credential attempt. A client refused by mistake now recovers at the normal
+rate instead of staying refused while it retries.
+
+**Who is affected:** installs with `ip_reputation` on in a route WAF. Alert
+rules or SIEM queries that match these refusals by the type `waf_blocked` need
+`waf_reputation_block` as well. Threats stored before the upgrade keep their old
+type and age out of the analysis engine's 30-minute window.
+
+### A CORS violation is alerted once, with its query string redacted
+
+The CORS middleware sent each `cors_violation` to the alert dispatchers itself,
+on the request path, before the threat had been through redaction, and the
+threat pipeline then alerted on it again. A cross-origin request carrying
+`?access_token=...` or any other credential in its query string reached a
+webhook, Slack, Discord or Telegram channel unredacted, every violation was
+alerted twice, and its playbooks ran on the request path. It is now alerted
+once, from the threat pipeline, with credentials in its URI masked as
+`[REDACTED]`, like every other threat.
+
+**Who is affected:** installs with alerting on and a playbook that matches
+`cors_violation` (an "All threats" playbook with threshold 0, or one naming the
+type). Expect half as many CORS alerts.
+
+### A CORS violation is no longer held against the visitor
+
+The CORS middleware serves a request from an origin the route does not allow
+(the browser enforces the policy) and records a `cors_violation`. That record
+was held against the visitor, although the `Origin` header is usually one a
+page on another site made the visitor's browser send: it was a correlation
+signal for the visitor's browser class on its network, and a playbook with a
+`block` action at threshold 0 shunned the visitor. It is now recorded as
+observed, like the other detections that let the request through: listed,
+counted, alerted on and shipped, and held against nobody. Migration 69 marks
+stored `cors_violation` rows observed as well.
+
+**Who is affected:** installs with a CORS middleware and an alert playbook whose
+action is `block` that matches `cors_violation`; those visitors are no longer
+shunned.
+
+### Refused POSTs count as credential guessing only when the refusal could be one
+
+The analysis engine judges an address harmful when many of its POSTs are
+refused with 401 or 403, which gates the Neural Sentinel and Graph findings and
+from them the kernel throttle. It counted every refused POST, including a
+Connect or gRPC-Web poller re-presenting an expired session or token and a
+shunned address's own refused POSTs, so twelve such requests read as twelve
+guesses. It now counts a refused POST only when the gateway's refusal mark
+leaves it a possible guess (no mark, or a refusal by the gateway's own
+authentication), the same rule the engine's credential-failure count already
+applied.
+
+**Who is affected:** installs that use the Neural Sentinel or Graph findings,
+or the throttle they drive. Dashboard pollers whose session expired, and
+shunned addresses, no longer produce credential-guessing findings. POSTs
+refused by the WAF or the geofence still carry no mark and are still counted
+(a known gap; ADR 0059).
+
+### Header values are masked by shape, not only by name
+
+Traces, threats and the generic webhook's `requestHeaders` masked a header's
+value only when the header's name said it was a credential (Authorization,
+Cookie, anything named like a key, token, secret or session). A credential
+under any other name was stored as sent: AWS ALB's `X-Amzn-Oidc-Data` (a signed
+user JWT), an identity proxy's assertion header, a `gateon_tok_` token under a
+custom header, `Bearer ...` in a neutral header, a JWT in `Forwarded`'s `by=`.
+Such values are now masked by their shape, the same shapes a query-string value
+is masked for (a JSON Web Token, a gateway API or PASETO token, an encoded
+`Bearer`/`Basic` value) plus `Bearer` and `Basic` credentials. Only the
+credential is replaced with `[REDACTED]`; the rest of a structured value stays
+readable (`Forwarded: for=198.51.100.7;proto=https;by=[REDACTED]`), a token's
+prefix is kept (`gateon_tok_[REDACTED]`), and `WWW-Authenticate` /
+`Proxy-Authenticate` challenges are left as they are.
+
+**Who is affected:** everyone who reads traces or threats in the dashboard,
+the trace archive or a webhook. Records written before the upgrade are not
+rewritten and age out with trace and threat retention.
+
+### The WAF decides a response larger than its inspection limit before any of it is sent
+
+With response inspection on, a response larger than `response_body_limit`
+(1 MiB by default) used to be sent undecided: the first part was flushed at the
+limit, the rest streamed, and a data-leak finding in it (a card number in the
+first bytes of a large export) was decided only after every byte had gone. The
+client got the whole response under a 200, while the Security Hub,
+`gateon_request_failures_total` and the log recorded a block. A response whose
+content type no data-leak rule reads (images, archives) had the same gap for
+response-phase rules on its headers.
+
+Now the first `response_body_limit` bytes are inspected **before** any of them
+is sent. A finding there is refused with a complete 403, as for a smaller
+response. The bytes past the limit are not inspected: the response is sent and
+counted once in
+`gateon_middleware_waf_uninspected_responses_total{reason="ceiling_reached"}`,
+and nothing is recorded as blocked. A response the engine declined to read at
+its own body limit (`request_body_limit`) under `fail_open` or audit-only is
+counted there too.
+
+Should a refusal ever be reached after a response's headers have been sent,
+the response is cut (a connection reset or stream reset, never a clean end) and
+recorded with the new action `aborted`, which does not count as mitigated, and
+the log says "WAF cut a response it could no longer refuse".
+
+**Who is affected:** routes with response inspection and DLP whose responses
+exceed `response_body_limit`. A leak in the first `response_body_limit` bytes
+is now refused instead of delivered; one further in is delivered and counted
+as uninspected rather than falsely reported as blocked. If
+`ceiling_reached` climbs on a route that serves sensitive data, raise that
+route's `response_body_limit`. Dashboards or alerts that filter threats by
+action should expect `aborted` as a possible value.
+
+### All IP reputation feeds together may cover at most one /4 of IPv4 and one /32 of IPv6
+
+Each feed line was already limited to an IPv4 /8 or an IPv6 /32, but nothing
+limited the lines together: 256 lines `N.0.0.0/8` refused every IPv4 client.
+The address space all feeds cover together is now bounded per family, by
+default one /4's worth of IPv4 (268,435,456 addresses, sixteen /8s) and one /32's worth of
+IPv6 (counted in /64s; a narrower entry counts as one /64), in every profile.
+Feeds draw on it in configured order; overlapping entries count more than
+once. An entry past it is not in force, is counted in
+`gateon_ip_feed_entries_refused_total{reason="coverage"}`, and is logged at
+ERROR once per feed per refresh with the first refused prefix. A failed feed's
+last good copy must fit it too.
+
+`GATEON_IP_FEED_COVERAGE_V4` (a prefix length, 1-32; default 4) and
+`GATEON_IP_FEED_COVERAGE_V6` (1-64; default 32) override the bound: `3` allows
+thirty-two /8s' worth of IPv4. The IPv4 default fits the bogon and private
+ranges of FireHOL level 1 with room to spare.
+
+**Who is affected:** installs whose feeds together list more than a /4 of IPv4
+or a /32 of IPv6, which no common blocklist does. Entries past the bound stop
+being refused; check for `reason="coverage"` after upgrading, and either trim
+the feed or raise the bound.
+
+### The gateway-wide Payload Entropy setting no longer records every request when its threshold is empty
+
+With Payload Entropy on and its threshold left empty (stored as 0), every request
+with a body measured above the threshold and was recorded as a high-severity
+`high_entropy_payload` threat. A threshold of 0 or less now means 7.5 bits per
+byte, wherever it is set -- the global setting or a route's Body Entropy
+middleware saved before 0 was refused. The settings card now says the check
+records and does not block, and gives the range (above 0, at most 8).
+
+**Who is affected:** installs with Payload Entropy on and no threshold: far fewer
+`high_entropy_payload` threats. Alert rules on that type fire less.
 
 ### "Enable Revocation" now checks revoked tokens for JWT, PASETO and OIDC, and needs Redis
 

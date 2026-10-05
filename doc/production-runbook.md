@@ -291,8 +291,8 @@ groups:
   - alert: GateonBlockListIncomplete   # more blocks in force than the list holds
     expr: gateon_mitigation_block_list_complete == 0
     for: 10m
-  - alert: GateonIPFeedOverLimit       # feed entries past the profile's bound
-    expr: increase(gateon_ip_feed_entries_refused_total{reason="over_limit"}[1h]) > 0
+  - alert: GateonIPFeedOverLimit       # feed entries past the entry or coverage bound
+    expr: increase(gateon_ip_feed_entries_refused_total{reason=~"over_limit|coverage"}[1h]) > 0
 ```
 
 Also watch, without paging: `gateon_middleware_waf_uninspected_responses_total`
