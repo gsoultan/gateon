@@ -77,6 +77,10 @@ const (
 	// and the rest of it was sent. It is not a mitigating action: nothing was
 	// refused, and the record is about the response, not a client.
 	ActionRedacted = "redacted"
+	// ActionAborted is recorded when a response was found to need refusing
+	// after its headers had been sent: it was cut (a reset, not a clean end),
+	// and what had already left was not recalled. It is not a mitigating action.
+	ActionAborted = "aborted"
 
 	statusUnmitigated = "unmitigated"
 )

@@ -190,10 +190,20 @@ func (o wafObservation) countDecision(blocked bool) {
 	}
 
 	if blocked {
-		o.logDecision(wafBlockLines, "WAF blocked a request")
+		o.logDecision(wafBlockLines, o.blockMessage())
 		telemetry.RequestFailuresTotal.
 			WithLabelValues(o.routeID, "waf:"+o.decision.RuleID().String()).Inc()
 	}
+}
+
+// blockMessage is the log line for a refusing decision. A response cut after
+// its headers left was not blocked -- part of it reached the client -- and the
+// line says so rather than claim a refusal (ADR 0062).
+func (o wafObservation) blockMessage() string {
+	if o.outcome == kind.ActionAborted {
+		return "WAF cut a response it could no longer refuse"
+	}
+	return "WAF blocked a request"
 }
 
 // logDecision writes msg about the decision when lines allows one now, and

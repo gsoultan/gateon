@@ -134,6 +134,42 @@ another on the wire, or decided once and never looked again.
 - Request-path cost: see the benchstat in the change's report (StreamWriter,
   router, data-plane request, proxy, WAF).
 
+## Amendment (2026-10-05): a response larger than the inspection limit
+
+Review 3 (F1) found decision 1 did not hold past `response_body_limit`. At the
+limit the held prefix was flushed with no decision (for plaintext the engine
+analyses the body only in its body phase, which ran after the handler
+returned), the rest streamed, and the late refusal sent nothing further: a
+card in the first bytes of a 5 MB export reached the client whole under a
+clean 200, and the Security Hub, `gateon_request_failures_total` and the log
+recorded a block.
+
+- **At the limit the held prefix is decided before any of it leaves.** The
+  response-body phase runs on what is held (for plaintext, also the write that
+  crossed the limit, which the engine was already given); a refusal is a
+  complete 403 as in decision 1, and a redaction that can no longer be spliced
+  is still refused. A body the engine never reads (a type no data-leak rule
+  matches) has its body phase run at its headers, before they are committed.
+- **Bytes past the limit are uninspected, and counted as such**, once per
+  response, in `gateon_middleware_waf_uninspected_responses_total{reason=
+  "ceiling_reached"}`; the engine is no longer fed them. Inspecting them as
+  they stream was rejected: gwaf analyses a body only in `ProcessResponseBody`
+  over the whole accumulated body, so re-running it per chunk re-scores every
+  earlier byte (inflating anomaly scores) and costs O(n^2), and a finding there
+  could not stop bytes already sent. A response the engine refused to read
+  because it passed the engine's own body limit (`request_body_limit`), let
+  through by a fail-open or audit-only WAF, is counted the same way. A
+  fail-closed WAF still refuses a plaintext response whose crossing write takes
+  the engine past that limit, as before.
+- **A refusal after the headers is an abort, recorded as one.** No body
+  decision is made that late any more; should one be, later writes fail, the
+  handler ends with `http.ErrAbortHandler` (a reset, as decision 4), and the
+  event is recorded with action `aborted` (not mitigating) and logged as a cut
+  response, never as a block.
+
+Responses within the limit take the same path as before: the change adds no
+allocation, lock or I/O there (benchstat in the change's report).
+
 ## Related
 
 ADR 0041 (management credentials), 0042 (deadlines and streams), 0045 (bot
