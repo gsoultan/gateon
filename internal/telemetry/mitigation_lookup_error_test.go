@@ -130,6 +130,10 @@ func ageNegativeAnswers(t *testing.T, key string) {
 // in the background, so the next request meets a block written meanwhile
 // (ADR 0054). Both halves are what the stale window promises.
 func TestAStaleNotShunnedAnswerIsServedAndReadAgainInTheBackground(t *testing.T) {
+	// The background read must not depend on the runner's speed: under the
+	// tier's deadline (100 ms) a loaded CI runner timed it out, a lookup that
+	// times out is never cached, and the stale answer stood (PR #11, CI).
+	t.Setenv(envBlockLookupTimeout, "1m")
 	freshStore(t)
 	const ip = "198.51.100.83"
 	if IsIPMitigated(ip) {
@@ -144,10 +148,17 @@ func TestAStaleNotShunnedAnswerIsServedAndReadAgainInTheBackground(t *testing.T)
 	if IsIPMitigated(ip) {
 		t.Fatal("a stale answer was not served: the request waited for the database")
 	}
-	WaitBlockLookupsForTest()
-	if !IsIPMitigated(ip) {
-		t.Fatal("the stale answer was not read again: a block written elsewhere was not enforced after it")
+	// A read's answer is dropped when a block or release is written while it
+	// is in flight (ADR 0054), and a write from an earlier test's goroutines
+	// can land there; each stale answer starts another read, so a few tries
+	// tell "dropped once" from "never read again", which fails every one.
+	for range 3 {
+		WaitBlockLookupsForTest()
+		if IsIPMitigated(ip) {
+			return
+		}
 	}
+	t.Fatal("the stale answer was not read again: a block written elsewhere was not enforced after it")
 }
 
 // The fingerprint block has the same shape: a failed lookup answered "not
