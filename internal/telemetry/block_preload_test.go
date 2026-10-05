@@ -61,7 +61,15 @@ func restartStore(t *testing.T, url string) {
 	if err := InitPathStatsStore(url, 1); err != nil {
 		t.Fatalf("init store: %v", err)
 	}
-	t.Cleanup(func() { _ = ClosePathStatsStore(context.Background()) })
+	// Empty the block tables before closing, in this cleanup: cleanups run
+	// last-in first-out, so a restart mid-test registers its close after
+	// openPreloadStore's emptying cleanup and runs it first -- that cleanup
+	// then found no store and left this test's blocks in a shared Postgres,
+	// where the next test read them (TestAnUnscopedFingerprintBlock...).
+	t.Cleanup(func() {
+		emptyBlockTables(t)
+		_ = ClosePathStatsStore(context.Background())
+	})
 }
 
 func emptyBlockTables(t *testing.T) {
