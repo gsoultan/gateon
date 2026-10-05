@@ -27,19 +27,30 @@ import (
 const (
 	feedMaxEntriesEnv = "GATEON_IP_FEED_MAX_ENTRIES"
 	feedMaxMBEnv      = "GATEON_IP_FEED_MAX_MB"
+	feedCoverageV4Env = "GATEON_IP_FEED_COVERAGE_V4"
+	feedCoverageV6Env = "GATEON_IP_FEED_COVERAGE_V6"
 )
 
-// feedLimits bound the entries in force across every feed.
+// feedLimits bound the entries in force across every feed: how many, how many
+// bytes of index, and how much address space of each family they may cover
+// (cover4 in IPv4 addresses, cover6 in IPv6 /64s).
 type feedLimits struct {
 	entries int
 	bytes   int64
+	cover4  uint64
+	cover6  uint64
 }
 
 // currentFeedLimits is the tier's bounds, each overridden by its environment
-// variable when that is a positive integer.
+// variable when that is a positive integer (for a coverage, a prefix length
+// the family allows).
 func currentFeedLimits() feedLimits {
 	d := config.CurrentTierDefaults()
-	l := feedLimits{entries: d.IPFeedMaxEntries, bytes: d.IPFeedMaxBytes}
+	l := feedLimits{
+		entries: d.IPFeedMaxEntries, bytes: d.IPFeedMaxBytes,
+		cover4: coverageOf(envPrefix(feedCoverageV4Env, d.IPFeedCoverageV4Prefix, 32), 32),
+		cover6: coverageOf(envPrefix(feedCoverageV6Env, d.IPFeedCoverageV6Prefix, feedV6UnitBits), feedV6UnitBits),
+	}
 	if n, err := strconv.Atoi(strings.TrimSpace(os.Getenv(feedMaxEntriesEnv))); err == nil && n > 0 {
 		l.entries = n
 	}
@@ -47,6 +58,39 @@ func currentFeedLimits() feedLimits {
 		l.bytes = n << 20
 	}
 	return l
+}
+
+// envPrefix is the prefix length env names, when it is one from 1 to most,
+// and def otherwise.
+func envPrefix(env string, def, most int) int {
+	if n, err := strconv.Atoi(strings.TrimSpace(os.Getenv(env))); err == nil && n >= 1 && n <= most {
+		return n
+	}
+	return def
+}
+
+// feedV6UnitBits is the unit IPv6 coverage is counted in: a /64, the block one
+// network is given and the unit address shuns are kept in (ADR 0058). A
+// narrower entry counts as a whole /64, which overstates it and so errs
+// towards refusing; the entry bounds keep that from mattering.
+const feedV6UnitBits = 64
+
+// coverageOf is how many units of a /unitBits a /bits covers: 2^(unitBits-bits),
+// and one for a prefix as narrow as the unit or narrower. bits is never below 1,
+// so the result fits.
+func coverageOf(bits, unitBits int) uint64 {
+	if bits >= unitBits {
+		return 1
+	}
+	return 1 << uint(unitBits-bits)
+}
+
+// prefixCoverage is what p covers of each family: IPv4 addresses, IPv6 /64s.
+func prefixCoverage(p netip.Prefix) (v4, v6 uint64) {
+	if p.Addr().Is4() {
+		return coverageOf(p.Bits(), 32), 0
+	}
+	return 0, coverageOf(p.Bits(), feedV6UnitBits)
 }
 
 // The widest prefix a feed entry may be: an IPv4 /8 (16.7 million
@@ -64,14 +108,15 @@ const (
 const (
 	refusedTooWide   = "too_wide"
 	refusedOverLimit = "over_limit"
+	refusedCoverage  = "coverage"
 )
 
-// Feed metrics. The refusal reasons are the two constants above; the gauges
+// Feed metrics. The refusal reasons are the three constants above; the gauges
 // have no labels.
 var (
 	feedEntriesRefused = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "gateon_ip_feed_entries_refused_total",
-		Help: "IP reputation feed entries not put in force, by reason (too_wide, over_limit).",
+		Help: "IP reputation feed entries not put in force, by reason (too_wide, over_limit, coverage).",
 	}, []string{"reason"})
 	feedEntriesInForce = promauto.NewGauge(prometheus.GaugeOpts{
 		Name: "gateon_ip_feed_entries",
@@ -88,16 +133,35 @@ var (
 type feedBudget struct {
 	entries int
 	bytes   int64
+	cover4  uint64
+	cover6  uint64
 }
 
-// take reserves room for one entry costing size bytes, if there is room.
-func (b *feedBudget) take(size int64) bool {
-	if b.entries < 1 || b.bytes < size {
-		return false
+// newFeedBudget is the whole of limits, less reserve bytes.
+func newFeedBudget(limits feedLimits, reserve int64) feedBudget {
+	return feedBudget{entries: limits.entries, bytes: max(limits.bytes-reserve, 0),
+		cover4: limits.cover4, cover6: limits.cover6}
+}
+
+// take reserves room for an entry -- or a feed's last good copy -- of n
+// entries costing size bytes and covering c4 and c6, and reports "" when there
+// was room, or the reason there was not.
+//
+// Coverage is summed per entry, so prefixes that overlap count more than once:
+// conservative, it refuses earlier than a deduplicated count would, and it
+// costs nothing to keep.
+func (b *feedBudget) take(n int, size int64, c4, c6 uint64) string {
+	switch {
+	case b.entries < n || b.bytes < size:
+		return refusedOverLimit
+	case b.cover4 < c4 || b.cover6 < c6:
+		return refusedCoverage
 	}
-	b.entries--
+	b.entries -= n
 	b.bytes -= size
-	return true
+	b.cover4 -= c4
+	b.cover6 -= c6
+	return ""
 }
 
 // feedLoad is one feed as read: its ranges, what they cost, and what was
@@ -105,14 +169,18 @@ func (b *feedBudget) take(size int64) bool {
 type feedLoad struct {
 	// build collects the entries as they are read; ranges is what they
 	// became once the feed was read in full.
-	build     rangeBuilder
-	ranges    feedRanges
-	entries   int
-	bytes     int64
-	tooWide   int
-	overLimit int
-	// widest is the first too-wide entry, for the log.
-	widest string
+	build   rangeBuilder
+	ranges  feedRanges
+	entries int
+	bytes   int64
+	// cover4 and cover6 are the address space the entries in force cover.
+	cover4, cover6 uint64
+	tooWide        int
+	overLimit      int
+	overCoverage   int
+	// widest is the first too-wide entry, and uncovered the first entry past
+	// the coverage bound, for the log.
+	widest, uncovered string
 }
 
 // accept counts p against budget and adds it, or records why not.
@@ -125,13 +193,23 @@ func (l *feedLoad) accept(p netip.Prefix, budget *feedBudget) {
 		return
 	}
 	size := entryBytes(p)
-	if !budget.take(size) {
+	c4, c6 := prefixCoverage(p)
+	switch budget.take(1, size, c4, c6) {
+	case refusedOverLimit:
 		l.overLimit++
+		return
+	case refusedCoverage:
+		l.overCoverage++
+		if l.uncovered == "" {
+			l.uncovered = p.String()
+		}
 		return
 	}
 	l.build.add(p)
 	l.entries++
 	l.bytes += size
+	l.cover4 += c4
+	l.cover6 += c6
 }
 
 // tooWide reports whether p covers more than a feed entry may.

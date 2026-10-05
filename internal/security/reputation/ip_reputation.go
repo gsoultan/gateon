@@ -477,7 +477,7 @@ func heldBytes(idx *feedIndex, feeds map[string]*feedLoad) int64 {
 func (s *IPReputationStore) loadFeeds(ctx context.Context, urls []string, limits feedLimits) (map[string]*feedLoad, bool) {
 	// The index's top lookup tables are held beside the ranges; the byte bound
 	// covers them, so the ranges get what is left.
-	budget := feedBudget{entries: limits.entries, bytes: max(limits.bytes-topIndexBytes, 0)}
+	budget := newFeedBudget(limits, topIndexBytes)
 	current := make(map[string]*feedLoad, len(urls))
 	for _, url := range urls {
 		if _, dup := current[url]; dup {
@@ -507,20 +507,22 @@ func (s *IPReputationStore) keepLastGood(url string, err error, budget *feedBudg
 			"error", err, "url", url)
 		return nil
 	}
-	if prev.entries > budget.entries || prev.bytes > budget.bytes {
-		feedEntriesRefused.WithLabelValues(refusedOverLimit).Add(float64(prev.entries))
+	if reason := budget.take(prev.entries, prev.bytes, prev.cover4, prev.cover6); reason != "" {
+		feedEntriesRefused.WithLabelValues(reason).Add(float64(prev.entries))
 		logger.L.LogError("failed to fetch IP reputation feed, and its last good copy no longer fits the "+
 			"feed limits; none of it is in force", "error", err, "url", url, "entries", prev.entries,
-			"env", feedMaxEntriesEnv+", "+feedMaxMBEnv)
+			"reason", reason, "env", feedLimitEnvs)
 		return nil
 	}
-	budget.entries -= prev.entries
-	budget.bytes -= prev.bytes
 	logger.L.LogError("failed to fetch IP reputation feed; its last good copy stays in force",
 		"error", err, "url", url, "entries_kept", prev.entries)
 	// Counted once, when it was read; the copy carries no refusals of its own.
-	return &feedLoad{ranges: prev.ranges, entries: prev.entries, bytes: prev.bytes}
+	return &feedLoad{ranges: prev.ranges, entries: prev.entries, bytes: prev.bytes,
+		cover4: prev.cover4, cover6: prev.cover6}
 }
+
+// feedLimitEnvs names the environment variables that override the feed limits.
+const feedLimitEnvs = feedMaxEntriesEnv + ", " + feedMaxMBEnv + ", " + feedCoverageV4Env + ", " + feedCoverageV6Env
 
 // reportRefused counts and logs, at ERROR, the entries of one feed that are
 // not in force: listed addresses the gateway will not refuse.
@@ -536,6 +538,13 @@ func reportRefused(url string, load *feedLoad, limits feedLimits) {
 		logger.L.LogError("IP reputation feeds list more than the feed limits hold; the entries past them are not in force",
 			"url", url, "entries_refused", load.overLimit, "max_entries", limits.entries,
 			"max_bytes", limits.bytes, "env", feedMaxEntriesEnv+", "+feedMaxMBEnv)
+	}
+	if load.overCoverage > 0 {
+		feedEntriesRefused.WithLabelValues(refusedCoverage).Add(float64(load.overCoverage))
+		logger.L.LogError("IP reputation feeds together cover more address space than they may; the entries "+
+			"past the bound are not in force", "url", url, "entries_refused", load.overCoverage,
+			"first", load.uncovered, "max_ipv4_addresses", limits.cover4, "max_ipv6_slash64s", limits.cover6,
+			"env", feedCoverageV4Env+", "+feedCoverageV6Env)
 	}
 }
 

@@ -182,6 +182,16 @@ type TierDefaults struct {
 	// GATEON_IP_FEED_MAX_ENTRIES and GATEON_IP_FEED_MAX_MB override them.
 	IPFeedMaxEntries int
 	IPFeedMaxBytes   int64
+
+	// IPFeedCoverageV4Prefix and IPFeedCoverageV6Prefix bound the address
+	// space every feed may cover together, as a prefix length: at most one
+	// /N's worth of each family (ADR 0061). Each entry is already bounded to a
+	// /8 or a /32, but 256 lines "N.0.0.0/8" refused every IPv4 client. The
+	// same in every tier: it is a bound on what a feed may refuse, not on what
+	// it costs. GATEON_IP_FEED_COVERAGE_V4 (1-32) and GATEON_IP_FEED_COVERAGE_V6
+	// (1-64) override them.
+	IPFeedCoverageV4Prefix int
+	IPFeedCoverageV6Prefix int
 }
 
 // NormalizeTier coerces an arbitrary string to a known tier, defaulting to
@@ -250,6 +260,8 @@ func DefaultsFor(tier Tier) TierDefaults {
 			BlockLookupTimeout:        200 * time.Millisecond,
 			IPFeedMaxEntries:          250_000,
 			IPFeedMaxBytes:            8 << 20, // 8 MiB
+			IPFeedCoverageV4Prefix:    8,
+			IPFeedCoverageV6Prefix:    32,
 		}
 	case TierEnterprise:
 		return TierDefaults{
@@ -286,6 +298,8 @@ func DefaultsFor(tier Tier) TierDefaults {
 			BlockLookupTimeout:        50 * time.Millisecond,
 			IPFeedMaxEntries:          4_000_000,
 			IPFeedMaxBytes:            128 << 20, // 128 MiB
+			IPFeedCoverageV4Prefix:    8,
+			IPFeedCoverageV6Prefix:    32,
 		}
 	default: // TierStandard
 		return TierDefaults{
@@ -322,6 +336,8 @@ func DefaultsFor(tier Tier) TierDefaults {
 			BlockLookupTimeout:        100 * time.Millisecond,
 			IPFeedMaxEntries:          1_000_000,
 			IPFeedMaxBytes:            32 << 20, // 32 MiB
+			IPFeedCoverageV4Prefix:    8,
+			IPFeedCoverageV6Prefix:    32,
 		}
 	}
 }

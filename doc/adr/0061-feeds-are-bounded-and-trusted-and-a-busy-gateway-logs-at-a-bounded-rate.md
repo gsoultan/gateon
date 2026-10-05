@@ -142,12 +142,46 @@ which encloses the routes'.
   million entries and 25.9 -> 16.4 ns at 4096; a hit 6.4 -> 17.1 ns, paid
   only by a client about to be refused. No allocation either way.
 
+## Amendment (2026-10-05)
+
+**What all feeds cover together is bounded** (review 3, F5). The per-entry
+bound held per entry only: 256 lines `N.0.0.0/8`, far inside every tier's
+entry bound, refused every IPv4 client, which this ADR's title says a feed
+cannot do. The address space every feed covers together is now bounded per
+family, by default one /8's worth of IPv4 (16,777,216 addresses) and one
+/32's worth of IPv6 (2^32 /64s; an entry narrower than a /64 counts as one),
+in every tier -- it bounds what a feed may refuse, not what it costs. Entries
+draw on it in configured order like the entry bound; coverage is summed per
+entry, so overlapping prefixes count more than once, which refuses earlier
+than a deduplicated count and costs nothing. An entry past it is refused,
+counted in `gateon_ip_feed_entries_refused_total{reason="coverage"}` and
+logged at ERROR once per feed per refresh; a last good copy draws on it too.
+`GATEON_IP_FEED_COVERAGE_V4` (a prefix length, 1-32) and
+`GATEON_IP_FEED_COVERAGE_V6` (1-64) override it, for a feed that legitimately
+lists more (a full bogon list is the usual case). A feed listing more than a
+/8 of IPv4 in total keeps its first /8's worth.
+
+**Suppressed lines are counted without a lock** (review 3, F4).
+`LineLimiter.Skip` took a mutex for every line it left out, and `Allow` took
+it on every call while anything was pending: under attack every core queued
+on it. Lines are now counted in a fixed table of 32 slots per limiter (a key
+claims a slot by compare-and-swap; counts are atomics); a report swaps in an
+empty table and reads the old one once the writers inside it have left. The
+key bound is unchanged (32 per report, overflow under `(other)`); the keys are
+rule, route and backend target ids from configuration, never request data.
+
 ## Alternatives considered
 
 - **Keep the trie, cap entries.** Still ~500 bytes an IPv4 entry and ~3.4 KiB
   an IPv6 one; the bound would have had to be tiny. Rejected.
 - **Allow `http://` to private networks behind an opt-in.** A new tunable for
   a weaker transport on a trust boundary. Rejected.
+- **Narrow the title instead of bounding total coverage.** The claim is the
+  point: a feed that refuses every client is an outage whoever wrote it.
+  Rejected.
+- **Deduplicate overlapping prefixes before counting coverage.** Exact, but it
+  needs the merged ranges per feed before the bound is applied, and a
+  conservative sum only refuses earlier. Rejected.
 - **A timer per limiter for the report.** A goroutine per burst that outlives
   tests and races their log capture; the server's existing periodic task does
   the same job. Rejected.

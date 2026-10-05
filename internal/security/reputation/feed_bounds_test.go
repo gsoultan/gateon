@@ -128,6 +128,9 @@ func TestTheLimitIsSharedAcrossFeeds(t *testing.T) {
 // wider than an IPv4 /8 or an IPv6 /32 is refused and counted; the rest of
 // the feed is in force.
 func TestAFeedCannotListEveryone(t *testing.T) {
+	// The bound on what all entries cover together (feed_coverage_test.go) is
+	// widened, so this one sees only the bound on each entry.
+	t.Setenv(feedCoverageV4Env, "6")
 	before := refusedCount(t, refusedTooWide)
 	s := loadedStore(t, serveFeed(t, "0.0.0.0/0\n::/0\n2.0.0.0/7\n2001::/31\n::ffff:0:0/96\n"+
 		"198.51.100.0/24\n11.0.0.0/8\n2001:db8::/32\n"))
