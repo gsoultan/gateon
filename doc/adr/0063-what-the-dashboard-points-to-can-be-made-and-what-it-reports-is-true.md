@@ -80,8 +80,8 @@ were not so:
 8. **Say it at start, mark it in the list.** `router.RouteProblems` builds
    every enabled HTTP route's middlewares as the router does and parses its
    rule; the gateway logs one WARN at start naming each route that refuses or
-   matches nothing, `GET /v1/routes/problems` returns them (reused while no
-   route is invalidated, at most 30 s), and the route list marks them.
+   matches nothing, `GET /v1/routes/problems` returns them (rebuilt only when a
+   route is invalidated), and the route list marks them.
 
 ## Consequences
 
