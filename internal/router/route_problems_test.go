@@ -8,7 +8,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/gsoultan/gateon/internal/telemetry"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
@@ -48,6 +50,38 @@ func TestRouteProblemsNamesTheRoutesThatCannotServe(t *testing.T) {
 	}
 	if !strings.Contains(got["fails-closed"].Reason, `auth middleware "broken-auth" cannot be built`) {
 		t.Errorf("build failure reason = %q", got["fails-closed"].Reason)
+	}
+}
+
+// TestRouteProblemsNamesATarpitBuiltOff: a tarpit stored before the save check
+// with no threshold above 0 is built switched off, so its route keeps serving,
+// undelayed -- and is reported, so the tarpit it lists is not taken to be
+// running.
+func TestRouteProblemsNamesATarpitBuiltOff(t *testing.T) {
+	store := &stubMiddlewareStore{mws: map[string]*gateonv1.Middleware{
+		"slow": {Id: "slow", Type: "tarpit", Config: map[string]string{"base_delay": "5s", "max_delay": "5s"}},
+		"ok":   {Id: "ok", Type: "tarpit", Config: map[string]string{"threshold": "90", "base_delay": "5s", "max_delay": "5s"}},
+	}}
+	rt := &gateonv1.Route{Id: "tarpitted", Rule: "PathPrefix(`/t`)", Middlewares: []string{"slow"}}
+	routes := []*gateonv1.Route{rt, {Id: "fine", Rule: "PathPrefix(`/f`)", Middlewares: []string{"ok"}}}
+	got := RouteProblems(t.Context(), routes, ChainDeps{Middlewares: store})
+	if len(got) != 1 || got[0].RouteID != "tarpitted" || got[0].Kind != ProblemMiddlewareOff ||
+		!strings.Contains(got[0].Reason, `tarpit middleware "slow" is off`) ||
+		!strings.Contains(got[0].Reason, "threshold above 0") {
+		t.Fatalf("problems = %+v, want only tarpitted, %s, naming the tarpit and why", got, ProblemMiddlewareOff)
+	}
+
+	backend := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusTeapot) })
+	req := httptest.NewRequest(http.MethodGet, "http://x/t", nil)
+	req.RemoteAddr = "100.64.95.1:4444"
+	id := telemetry.GetReputationID(req)
+	telemetry.DecreaseReputation(id, 50, "test: tarpit built off")
+	t.Cleanup(func() { telemetry.ResetReputation(id) })
+	rec := httptest.NewRecorder()
+	start := time.Now()
+	ApplyRouteMiddlewares(backend, rt, nil, store, nil, nil, nil).ServeHTTP(rec, req)
+	if took := time.Since(start); rec.Code != http.StatusTeapot || took >= 5*time.Second {
+		t.Errorf("status %d after %v; want the backend's answer, undelayed", rec.Code, took)
 	}
 }
 

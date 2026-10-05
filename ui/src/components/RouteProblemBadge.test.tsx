@@ -28,6 +28,19 @@ describe("the route list's problem marker", () => {
     expect(html).not.toContain("<b>x");
   });
 
+  // A middleware stored with a config the gateway now refuses (a tarpit with
+  // no threshold above 0) is built switched off: the route serves, without it.
+  // It must not be marked as refusing requests, which it does not.
+  test("marks a route serving without a middleware that is off", () => {
+    const html = render(
+      <RouteProblemBadge
+        problem={{ routeId: "r", route: "api", kind: "middleware_off", reason: 'tarpit middleware "slow" is off until fixed' }}
+      />,
+    );
+    expect(html).toContain("MIDDLEWARE OFF");
+    expect(html).not.toContain("REFUSES REQUESTS");
+  });
+
   test("shows nothing for a route that serves", () => {
     expect(render(<RouteProblemBadge problem={undefined} />)).not.toContain("REQUESTS");
   });
