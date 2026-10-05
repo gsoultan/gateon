@@ -1653,7 +1653,7 @@ func init() {
 	// engine reads stored threats: it counted both against the address, its
 	// own findings of earlier passes among them. Rows written before this get
 	// what their type says of them (markLegacyThreats).
-	Register(68, "security_threats_held_against_source", func(db *sql.DB, dialect Dialect) error {
+	Register(69, "security_threats_held_against_source", func(db *sql.DB, dialect Dialect) error {
 		observed := `ALTER TABLE security_threats ADD COLUMN observed BOOLEAN NOT NULL DEFAULT FALSE`
 		unattributed := `ALTER TABLE security_threats ADD COLUMN unattributed BOOLEAN NOT NULL DEFAULT FALSE`
 		if dialect.Driver == DriverPostgres {
@@ -1668,7 +1668,7 @@ func init() {
 }
 
 // legacyObservedThreatTypes are the types only a control that let the request
-// through recorded before migration 68: an audit-only or below-threshold WAF
+// through recorded before migration 69: an audit-only or below-threshold WAF
 // match (ADR 0055), the recognisers, body entropy, behavioural profiling and a
 // device posture change (ADR 0059). Frozen: it describes what was written.
 var legacyObservedThreatTypes = []string{
@@ -1677,7 +1677,7 @@ var legacyObservedThreatTypes = []string{
 	"api_fuzzing", "probe_detected", "dga_detected", "device_posture_change",
 }
 
-// markLegacyThreats gives the rows written before migration 68 the flags the
+// markLegacyThreats gives the rows written before migration 69 the flags the
 // gateway would have written: observed for a detection-only type whose row
 // records no refusal, unattributed for a leak found in a response (ADR 0055's
 // data_exposure). A type is the only thing an old row says about it; an

@@ -6,7 +6,7 @@ Date: 2026-10-04
 
 Accepted. `sec` drives with `ux` co-signing: it changes what can get a client
 refused on every route, and what an operator's detection-only controls do.
-`data` co-signs migration 68; `qa` the tests.
+`data` co-signs migration 69; `qa` the tests.
 
 ## Context
 
@@ -89,7 +89,7 @@ is what marks "reached its service"; the trace records the authentication
 mark as `refusal: "authentication"`, which the analysis engine counts as an
 attempt.
 
-**Migration 68 persists `observed` and `unattributed`** on `security_threats`,
+**Migration 69 persists `observed` and `unattributed`** on `security_threats`,
 so a stored threat answers `HeldAgainstSource` as the live one did; rows
 written before it get what their type says (every `waf_detected` and the
 detection-only types without a refusal are observed, every `data_exposure`

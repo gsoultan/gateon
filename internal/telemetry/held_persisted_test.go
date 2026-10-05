@@ -12,7 +12,7 @@ import (
 // Unattributed were not persisted, so every threat read back from the store
 // was held against its source -- and the analysis engine, which reads stored
 // threats, counted detections the gateway let through and leaks found in
-// responses against the address (ADR 0059, migration 68).
+// responses against the address (ADR 0059, migration 69).
 func TestAStoredThreatSaysWhetherItIsHeldAgainstItsSource(t *testing.T) {
 	freshStore(t)
 	threats := []SecurityThreat{

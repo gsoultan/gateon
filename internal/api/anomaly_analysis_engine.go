@@ -479,7 +479,7 @@ func countCredentialFailure(stats *IPStats, path string) {
 // warning otherwise -- so a refusal of an earlier shun, a rate limit or a
 // geofence block was a WAF hit worth eight warnings, a detection the gateway
 // let through was a warning, and so was this engine's own finding from the
-// last pass. The stored row says which are held (migration 68).
+// last pass. The stored row says which are held (migration 69).
 func aggregateThreat(data *DiagnosticData, th *telemetry.SecurityThreat, evidenceSince time.Time) {
 	if th == nil || th.SourceIP == "" {
 		return

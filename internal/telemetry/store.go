@@ -498,7 +498,7 @@ type SecurityThreat struct {
 	// shipped like any other threat, and held against nobody -- no reputation
 	// penalty, no escalation to a fingerprint or address block, no correlation
 	// signal -- because the only identity it carries is the visitor's, and each
-	// of those would be a ban on the visitor. Persisted since migration 68, so
+	// of those would be a ban on the visitor. Persisted since migration 69, so
 	// the analysis engine can tell it from a stored threat.
 	Unattributed bool `json:"unattributed,omitzero"`
 	// Observed marks a match a control recorded and did not act on: a WAF in
@@ -509,7 +509,7 @@ type SecurityThreat struct {
 	// recorded, counted, broadcast and shipped, and held against nobody -- the
 	// operator has said not to act on it, or the control let the request
 	// through, so it is not evidence (ADR 0025, 0055, 0059). Persisted since
-	// migration 68.
+	// migration 69.
 	Observed bool `json:"observed,omitzero"`
 	// Internal fields for lazy formatting in background worker
 	rawReqHeader  map[string][]string
