@@ -62,29 +62,24 @@ type ProxyCache struct {
 	// handler so a management session token is never forwarded (ADR 0041).
 	sessions proxy.SessionVerifier
 	// problems is the last route-problem report, reused while no route was
-	// invalidated (epoch unchanged) and for at most routeProblemsTTL.
+	// invalidated (epoch unchanged). Building every route's middlewares is not
+	// free -- a WASM middleware compiles a module -- and the dashboard polls,
+	// so it is rebuilt only when configuration changed.
 	problems struct {
 		sync.Mutex
 		epoch  uint64
-		at     time.Time
 		report []router.RouteProblem
 	}
 }
 
-// routeProblemsTTL bounds how long a route-problem report is reused when no
-// configuration changed: building every route's middlewares is not free, and
-// the dashboard polls.
-const routeProblemsTTL = 30 * time.Second
-
 // RouteProblems reports the enabled routes that cannot serve as configured:
 // those that refuse every request and those whose rule matches nothing
-// (OPS-N4). The report is rebuilt when a route is invalidated or it is older
-// than routeProblemsTTL.
+// (OPS-N4). The report is rebuilt when a route is invalidated.
 func (c *ProxyCache) RouteProblems(ctx context.Context) []router.RouteProblem {
 	c.problems.Lock()
 	defer c.problems.Unlock()
 	epoch := c.epoch.Load()
-	if c.problems.report != nil && c.problems.epoch == epoch && time.Since(c.problems.at) < routeProblemsTTL {
+	if c.problems.report != nil && c.problems.epoch == epoch {
 		return slices.Clone(c.problems.report)
 	}
 	report := router.RouteProblems(ctx, c.routeStore.List(ctx), router.ChainDeps{
@@ -93,7 +88,7 @@ func (c *ProxyCache) RouteProblems(ctx context.Context) []router.RouteProblem {
 	if report == nil {
 		report = []router.RouteProblem{}
 	}
-	c.problems.epoch, c.problems.at, c.problems.report = epoch, time.Now(), report
+	c.problems.epoch, c.problems.report = epoch, report
 	return slices.Clone(report)
 }
 
