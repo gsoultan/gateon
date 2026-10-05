@@ -17,9 +17,10 @@ gateon becomes the only thing between the internet and something that matters.
 A production-readiness review on 2026-10-02 found defects that no setting
 avoids. They fall in two groups.
 
-**Fixed after v1.0.0.** Run a release that includes these fixes before putting
-gateon in front of internet traffic. On v1.0.0 itself, and only on internal or
-already-filtered traffic:
+**Fixed in v1.1.0.** Run v1.1.0 or later before putting gateon in front of
+internet traffic; it also carries the fixes of the reviews of 2026-10-04 and
+2026-10-05 ([upgrading.md](upgrading.md), v1.1.0). On v1.0.0, and only on
+internal or already-filtered traffic:
 
 - **Front it.** An anonymous client can switch off per-request timeouts with an
   `Upgrade` or `Accept: text/event-stream` header, and can exhaust a 2 GB host
@@ -142,7 +143,7 @@ control, from rate limits to blocks, keys on the address this decides.
 ## 2. Install and verify the artifact
 
 ```sh
-VER=1.0.0; ARCH=amd64     # or arm64
+VER=1.1.0; ARCH=amd64     # or arm64
 gh release download v$VER -R gsoultan/gateon -p "gateon_${VER}_linux_${ARCH}.deb" -p checksums.txt
 sha256sum --ignore-missing -c checksums.txt     # must print OK
 sudo apt install ./gateon_${VER}_linux_${ARCH}.deb   # or: sudo dnf install ./...rpm

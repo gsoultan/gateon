@@ -11,6 +11,16 @@ here after the fact.
 
 ## Unreleased
 
+Nothing yet.
+
+## v1.1.0
+
+Upgrading from v1.0.0: read this section. The database migrates on first start
+(migrations 66 to 69, SQLite and Postgres); take the backup in
+[backup-restore.md](backup-restore.md) first, so a rollback that v1.0.0 refuses
+to run on the migrated database can restore it (production-runbook.md, section
+9).
+
 ### The dashboard's credentials no longer reach any route middleware, and apps behind JWT, PASETO or introspection accept a signed-in administrator's browser
 
 The dashboard session (`gateon_session` / `__Host-gateon_session`), a session sent
@@ -2757,6 +2767,8 @@ wrote that map or opened a socket, so the only effect was a hash lookup on
 every TCP and UDP packet. Both maps are gone. A stored config that still sets
 the key loads as before; the key is ignored. The Diagnostics Phantom Core card
 is unaffected: it reports the kernel splice path, which never used XDP.
+
+## v1.0.0
 
 ### Stored secrets are no longer returned by the API — **API clients that read secrets stop getting them**
 
