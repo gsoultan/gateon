@@ -62,6 +62,15 @@ record through it. Nothing not held against its source is attack evidence
 (`AttackEvidenceWeight` is 0), and it no longer adds to the per-address score
 the alerting manager's autonomous shun reads.
 
+*Amended 2026-10-05 (review 3).* A CORS violation is one too: the CORS
+middleware serves the request (the browser enforces the policy), and the
+`Origin` is the one another site's page made the browser send. It was held,
+so it was a correlation signal and a block playbook at threshold 0 shunned the
+visitor; it is now recorded observed, and migration 69 back-fills stored
+`cors_violation` rows (the migration was not yet released). It also no longer
+calls the alerting manager itself, which alerted on an unredacted copy, twice,
+on the request path.
+
 **A WASM guest cannot refuse**, so everything it records is observed. If the
 host ever gives a guest a way to refuse, a threat recorded for a request it
 refused is the one that may count. Its score is clamped to 0..100 (NaN to 0),

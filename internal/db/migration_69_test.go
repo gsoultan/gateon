@@ -56,6 +56,7 @@ func checkMigration69(t *testing.T, conn *sql.DB, dialect Dialect) {
 		{"m69-sqli", "sqli_detected", "detected", true, false},
 		{"m69-probe", "probe_detected", "flagged", true, false},
 		{"m69-posture", "device_posture_change", "", true, false},
+		{"m69-cors", "cors_violation", "detected", true, false},
 		{"m69-leak", "data_exposure", "redacted", false, true},
 		{"m69-waf-block", "waf_blocked", "blocked", false, false},
 		{"m69-trap", "honeypot_triggered", "blocked", false, false},

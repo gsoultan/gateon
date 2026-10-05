@@ -307,6 +307,10 @@ func reportCORSViolation(r *http.Request, origin string, cfg CORSConfig) {
 		UserAgent:      r.UserAgent(),
 		Method:         r.Method,
 		Recommendation: "Verify if this origin should be allowed in the CORS configuration for this route.",
+		// The request is served, and a browser sends the Origin another
+		// site's page made it send: a control that lets the request through
+		// records Observed, held against nobody (ADR 0059, review 3 F3).
+		Observed: true,
 	}
 
 	// Recorded, and nothing else: the store's loop redacts it and hands it to

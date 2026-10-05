@@ -1670,11 +1670,13 @@ func init() {
 // legacyObservedThreatTypes are the types only a control that let the request
 // through recorded before migration 69: an audit-only or below-threshold WAF
 // match (ADR 0055), the recognisers, body entropy, behavioural profiling and a
-// device posture change (ADR 0059). Frozen: it describes what was written.
+// device posture change (ADR 0059), and a CORS violation, which the CORS
+// middleware records and serves (added before migration 69 was released,
+// review 3 F3). Frozen: it describes what was written.
 var legacyObservedThreatTypes = []string{
 	"waf_detected", "xss_detected", "sqli_detected", "generic_attack", "gambling_detected",
 	"php_vulnerability", "file_upload_attempt", "high_entropy_payload", "behavioral_anomaly",
-	"api_fuzzing", "probe_detected", "dga_detected", "device_posture_change",
+	"api_fuzzing", "probe_detected", "dga_detected", "device_posture_change", "cors_violation",
 }
 
 // markLegacyThreats gives the rows written before migration 69 the flags the
