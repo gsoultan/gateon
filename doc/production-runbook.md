@@ -49,9 +49,6 @@ more -- each is stated where it applies -- but plan around them:
 - **Existing installs keep their audit setting.** Setup turns audit on for new
   installs; an existing one with audit off logs a warning at start. Turn it on
   and keep the off-host copy section 5 describes.
-- **The global WAF's category switches are read-only.** Narrow a category on a
-  route WAF; the gateway-wide equivalent needs a configuration change still to
-  come.
 - **Run one replica.** The Helm chart refuses `replicaCount > 1`: replicas share
   one identity from a Secret, but not their global settings or audit chain yet
   (ADR 0056).

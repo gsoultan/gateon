@@ -11,7 +11,255 @@ here after the fact.
 
 ## Unreleased
 
-Nothing yet.
+The database migrates on first start (migration 70, SQLite and Postgres); take the
+backup in [backup-restore.md](backup-restore.md) first.
+
+### Custom WAF rules on cookies, query or body arguments, the joined arguments, or the response status now fire
+
+A custom WAF rule (Security Hub -> WAF rules, stored in `waf_rules`) whose
+targets name `cookies`, `cookie_names`, `args_get`, `args_post`, `args_joined`
+or `resp_status` has never matched anything. The rule saved, showed as enabled
+and was listed as loaded. It did not refuse, score or log a single request,
+because the WAF engine (gwaf v0.6.2) never filled those collections:
+
+- `cookies` / `cookie_names`: the `Cookie` header was never split into cookies.
+- `args_get` / `args_post`: query and body arguments were only filed under `args`.
+- `args_joined`: the joined view of all argument values was never built.
+- `resp_status`: the status was recorded where response-phase rules never looked.
+
+This release ships the gwaf version that fills them, so these rules start doing
+what they say. **A rule on one of these targets with action `block` will now
+refuse requests that it has always let through, from the moment you upgrade.**
+A `score` rule now adds to the anomaly score, which can push requests over the
+block threshold together with other rules. A `log` rule starts writing entries.
+
+How the collections are read, so you can check a rule before it goes live:
+
+- `cookies:<name>` selects one cookie, matching the name case-insensitively;
+  `cookies` with no name inspects every cookie value. Values are not
+  URL-decoded; add the `urldecode` transform if your rule needs it. A cookie
+  pair with no `=` is inspected as both a name and a value.
+- `args_get` is the query string's arguments and `args_post` the body's (form,
+  JSON, multipart and XML fields); `args` is still both. A rule on `args_get`
+  that runs in the request-headers phase sees the query exactly as `args` did.
+- `args_joined` is every argument value concatenated with nothing in between,
+  available from the request-body phase on.
+- A request carrying more cookies than the argument limit (1000 by default) is
+  now refused as over the limit **when a rule reads `cookies` or
+  `cookie_names`**, rather than having the cookies past the limit go uninspected.
+
+The built-in rules read none of these targets, so nothing changes for an
+install without custom rules on them. The false-positive corpus is unchanged
+(PL1 0.49%, PL2 1.23%, chain 0 of 408 refused, before and after).
+
+**Who is affected:** anyone with an enabled custom WAF rule whose targets
+include `cookies`, `cookie_names`, `args_get`, `args_post`, `args_joined` or
+`resp_status`. Before upgrading, list them (the rule definitions are JSON in
+`waf_rules.definition`; search for those target names), and either switch the
+route's WAF to audit-only for a few days and review what they would have
+refused, or set such rules to `log` first. Exceptions you scoped to these
+targets also start to apply, since there are now matches for them to suppress.
+
+### The global WAF's attack families can be switched off, and the old switches are gone (ADR 0064)
+
+The Global WAF card now has a switch per attack family -- SQL injection, XSS,
+file inclusion & traversal, code execution, PHP, Java, Node.js, scanner
+detection, protocol enforcement, ransomware -- beside a Running / Not running
+badge showing what the saved configuration actually runs. Switching a family
+off removes the rules filed under that family from the gateway-wide WAF, on
+every route without a WAF of its own, and nothing else (web-shell malware
+detection always runs; code execution off also lets PHP, Java and Node.js code
+injection through, as on a route WAF). A route WAF's own switch wins; a route
+WAF that leaves a switch unset follows the global one, off included.
+
+In the config these are `waf.categories` (`sqli`, `xss`, `lfi`, `rce`, `php`,
+`java`, `nodejs`, `scanner`, `protocol`, `ransomware_detection`), each absent
+(run as the WAF tier decides), `true` (run even where the `minimal` tier would
+not) or `false` (off). The old top-level `waf.sqli`, `waf.xss`, `waf.lfi`,
+`waf.rce`, `waf.php`, `waf.scanner`, `waf.protocol`, `waf.java`, `waf.nodejs`,
+`waf.ransomware_detection` and `waf.use_crs` are removed. They never did
+anything -- the global WAF ran every family whatever they said -- and a stored
+`false` could not be told from a switch nobody touched, so they are **not**
+carried over: a `global.json` or `global.yaml` that still names them loads
+fine, they are ignored, and every family keeps running. Remove them at your
+convenience.
+
+The security posture counts a global WAF with every attack family off as not
+blocking (no WAF credit, under "every attack category off"), and names any
+family switched off gateway-wide in the WAF control's detail.
+
+**Who is affected:** nobody until a family is switched off. Operators who had
+set the old booleans (by hand, or because a tool wrote back what `GET
+/v1/global` returned) see no change: those values were never honoured and
+still are not. To narrow the gateway-wide WAF, use the new switches.
+
+### A POST the WAF or the geofence refused no longer counts towards a brute-force finding
+
+The Security Hub's analysis engine counted every POST answered 401 or 403 with
+no refusal mark as a possible password guess, including those the WAF, the
+geofence, bot management or a honeypot trap refused before any backend saw
+them. A user whose login form the WAF refused could be reported as a password
+guesser, and that finding's "Apply fix" blocks the address for 24 hours. Such
+a refusal now counts only when a backend answered it (the trace records time
+spent in one) or the gateway's authentication refused it. Traces already
+stored are read by the same rule.
+
+**Who is affected:** operators who saw "Potential brute force" findings for
+addresses the WAF or the geofence was refusing; those stop. A backend's own
+login form refusing passwords is still counted.
+
+### A tarpit without a threshold above 0 or a maximum delay is refused on every transport, and a stored one is switched off
+
+The dashboard refused to save a tarpit middleware without a threat-score
+threshold above 0 and a maximum delay (ADR 0063). The gateway did not: one saved
+through REST, gRPC or a config import was stored, and the factory read the unset
+threshold as 0. Every client's threat score reaches 0, and the delay -- the base
+delay scaled by score/threshold -- divided by it. What that did depended on the
+CPU: on arm64 (Graviton, Apple silicon) every client with any threat score was
+held for the maximum delay; on amd64 nobody was delayed at all.
+
+- Saving such a tarpit is now refused on every transport, with the dashboard's
+  words: `middleware config "threshold": "" is not valid: set a threat score
+  threshold above 0: ...`, and the same for an empty `max_delay`. The dashboard
+  and the gateway read one fixture in their tests, so the two rules cannot drift.
+- A tarpit already stored that way keeps its route serving but is **built
+  switched off**: it delays nobody, on every platform. It is not refused,
+  because a delay is not worth an outage on upgrade, and not left as it was,
+  because on arm64 that slows every client the reputation system has ever
+  marked. Each build logs a WARN (`middleware is switched off; the route serves
+  without it until it is fixed`), the start-up route-problem WARN names the
+  route, and the route list marks it **MIDDLEWARE OFF** with the reason
+  (`GET /v1/routes/problems` reports kind `middleware_off`). A stored tarpit
+  whose `max_delay` is set to zero is reported the same way: it never delayed
+  anyone.
+- A very small threshold (for example `1e-12`) scaled the delay past the range of
+  a Duration, which on amd64 came out negative: the worst clients were not
+  delayed at all. The delay is now capped before it is converted.
+
+The dashboard's messages changed to say what an unset maximum delay actually did
+(nothing: every delay is capped at it), instead of "so no request is held
+indefinitely".
+
+**Who is affected:** anyone with a tarpit middleware saved through the API or an
+import without a `threshold` above 0 or a `max_delay`. After upgrading, check the
+route list for **MIDDLEWARE OFF**, set a threshold (the dashboard suggests 50)
+and a maximum delay, and save. The global Active Tarpitting setting (Settings >
+Security) has the same zero-threshold problem and is not changed by this entry:
+with a Score Threshold of 0 it is now off on every platform, as it already was on
+amd64, without a warning.
+
+### A route can be told it always or never streams (ADR 0064)
+
+Routes have a new setting, `stream_mode` (dashboard: route editor, **Streaming
+responses**). `auto`, the default, is what every route did before: a 200
+`text/event-stream` response with no `Content-Length` outlives the
+entrypoint's read and write timeouts and is ended instead by the stream idle
+timeout and maximum lifetime (`GATEON_STREAM_IDLE_TIMEOUT`,
+`GATEON_STREAM_MAX_LIFETIME`). `always` lifts every response on the route
+once the backend has answered -- for NDJSON, long-poll or chunked backends that
+were cut at the write timeout -- and still bounds it by the stream idle timeout
+and lifetime; with both of those set to `0` it keeps the entrypoint's timeouts
+instead, and the gateway logs a warning. `never` keeps the entrypoint's
+timeouts on every response, an event stream included.
+
+Migration 70 adds the `routes.stream_mode` column (SQLite and Postgres); every
+existing route is `auto`. A value other than 0, 1 or 2 is refused when a route
+is saved (`400` / `InvalidArgument`). Over the API the field is `streamMode`,
+sent and accepted as a number.
+
+**Who is affected:** nobody until a route is set to `always` or `never`.
+Operators whose streaming backends do not answer `text/event-stream` can now
+set those routes to `always` instead of raising the entrypoint's write
+timeout for every route on it.
+
+### `POST /v1/waf/update` and the `TriggerWafUpdate` RPC are gone (ADR 0064)
+
+The endpoint could only fail: rule downloads were retired when gwaf replaced
+the previous engine, and the rules are compiled into the binary. The dashboard
+button was removed in the previous release. The REST route now answers `404`,
+and the Connect/gRPC procedure is unknown (`404` / `Unimplemented`). To get
+newer rules, upgrade gateon; custom rules still load from
+`<data_dir>/waf/rules` with **Load custom rules from disk**.
+
+**Who is affected:** scripts or clients that called the endpoint. They were
+already receiving a failure.
+
+### A container image is published for every release: `ghcr.io/gsoultan/gateon`
+
+Every release tag now publishes `ghcr.io/gsoultan/gateon` for `linux/amd64`
+and `linux/arm64` (ADR 0065). It is not built from source: the binary is
+copied out of the release's own `gateon_<version>_linux_<arch>.tar.gz`, after
+checking it against the release's `checksums.txt`, onto
+`distroless/static-debian12:nonroot`. So the image runs byte-for-byte the
+tarball's binary -- CGO-free, PGO-built, `-trimpath`, uid 65532. Each image
+carries an SBOM and a provenance attestation
+(`gh attestation verify oci://ghcr.io/gsoultan/gateon:<version> --owner gsoultan`).
+
+Tags: `X.Y.Z` always; `X.Y` for the newest patch of that line; `latest` for
+the release GitHub marks Latest. A prerelease gets only its exact version.
+Publishing an older release's image never moves `X.Y` or `latest` backwards.
+
+v1.1.0 shipped before this. Its image is published from its own tarballs by
+dispatching the release workflow with `publish_tag=v1.1.0`; until that has
+run, `docker pull ghcr.io/gsoultan/gateon:1.1.0` answers `manifest unknown`.
+
+Whether the package is public is the repository owner's choice, made in the
+GHCR package settings. While it is private, pulling needs credentials: on
+Kubernetes, an `imagePullSecrets` entry for an account with `read:packages`
+(the chart README shows the commands).
+
+**Who is affected:** anyone deploying with Docker or the Helm chart. The
+chart's default `image.repository` was already `ghcr.io/gsoultan/gateon`, so a
+default install now pulls the published image rather than failing to; an
+install that sets `image.repository` to its own build is unchanged. Building
+your own from the repository's `Dockerfile` remains supported.
+
+### The image's data directory is 0700, as it was always meant to be
+
+`/var/lib/gateon` in the image is now mode 0700 owned by 65532. The Dockerfile
+chmod-ed the directory 0700 in its builder stage, but COPY of a directory
+creates the destination 0755 and copies only the contents, so every image
+built until now had it 0755. The directory holds `global.json`, with the
+session key. A named Docker volume takes the directory's mode when it is first
+created, so an existing volume keeps 0755 until you change it
+(`docker run --rm -v gateon-data:/d --user 0 busybox chmod 0700 /d`); the
+gateway does not need the change to run.
+
+**Who is affected:** Docker installs using a named volume at
+`/var/lib/gateon` created from an earlier image. Kubernetes volumes and bind
+mounts never took their mode from the image and are unaffected.
+
+### Chart 0.3.1
+
+README and `values.yaml` comments only: the published image, how to pin a
+digest, and the pull secret a private package needs. No template or default
+changed.
+
+**Who is affected:** no one's rendered manifests change.
+
+### A WASM middleware's module is compiled once per route and closed when nothing uses it
+
+Building a WASM middleware compiled its module into a new runtime that nothing
+closed. Every rebuild of the route -- each route invalidation, each
+configuration change, and the route-problem report, which builds every route
+again after a change (ADR 0063) -- compiled it again: for a 1.9 MB module about
+370 ms of CPU and 25 MB of allocation per build, with the compiled code mapped
+outside the Go heap until a collection and a finalizer unmapped it.
+
+- Builds of the same module for the same route now share one compiled module.
+  It is held while any chain built on it is reachable -- including a replaced
+  chain still finishing a request -- and then kept idle for the next rebuild.
+  At most 4 idle modules are kept; beyond that the least recently idled is
+  closed. A module in use is never closed. A module that fails to compile has
+  its runtime closed at once.
+- At shutdown, after the listeners have drained, every module is closed.
+
+There is no setting. The bound on modules held is one per configured WASM
+middleware per route that uses it, plus 4 idle.
+
+**Who is affected:** anyone with a WASM middleware. Configuration changes, and
+the route list's problem report, no longer recompile every WASM module; nothing
+to do.
 
 ## v1.1.0
 
