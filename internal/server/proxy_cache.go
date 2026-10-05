@@ -61,6 +61,59 @@ type ProxyCache struct {
 	// sessions is the management plane's token check, handed to every proxy
 	// handler so a management session token is never forwarded (ADR 0041).
 	sessions proxy.SessionVerifier
+	// problems is the last route-problem report, reused while no route was
+	// invalidated (epoch unchanged) and for at most routeProblemsTTL.
+	problems struct {
+		sync.Mutex
+		epoch  uint64
+		at     time.Time
+		report []router.RouteProblem
+	}
+}
+
+// routeProblemsTTL bounds how long a route-problem report is reused when no
+// configuration changed: building every route's middlewares is not free, and
+// the dashboard polls.
+const routeProblemsTTL = 30 * time.Second
+
+// RouteProblems reports the enabled routes that cannot serve as configured:
+// those that refuse every request and those whose rule matches nothing
+// (OPS-N4). The report is rebuilt when a route is invalidated or it is older
+// than routeProblemsTTL.
+func (c *ProxyCache) RouteProblems(ctx context.Context) []router.RouteProblem {
+	c.problems.Lock()
+	defer c.problems.Unlock()
+	epoch := c.epoch.Load()
+	if c.problems.report != nil && c.problems.epoch == epoch && time.Since(c.problems.at) < routeProblemsTTL {
+		return slices.Clone(c.problems.report)
+	}
+	report := router.RouteProblems(ctx, c.routeStore.List(ctx), router.ChainDeps{
+		Redis: c.redisClient, Middlewares: c.mwStore, Global: c.globalStore, Ebpf: c.ebpfManager, Reputation: c.reputation,
+	})
+	if report == nil {
+		report = []router.RouteProblem{}
+	}
+	c.problems.epoch, c.problems.at, c.problems.report = epoch, time.Now(), report
+	return slices.Clone(report)
+}
+
+// maxProblemsLogged bounds the start-up warning's list; the dashboard has all.
+const maxProblemsLogged = 20
+
+// WarnRouteProblems logs, once, every route that cannot serve as configured,
+// so a route an upgrade left failing closed or matching nothing is visible at
+// start rather than when a request first reaches it (OPS-N4).
+func (c *ProxyCache) WarnRouteProblems(ctx context.Context) {
+	problems := c.RouteProblems(ctx)
+	if len(problems) == 0 {
+		return
+	}
+	lines := make([]string, 0, min(len(problems), maxProblemsLogged))
+	for _, p := range problems[:min(len(problems), maxProblemsLogged)] {
+		lines = append(lines, p.Route+" ("+p.Kind+"): "+p.Reason)
+	}
+	logger.L.LogWarn("routes that cannot serve as configured: each answers 503 or matches no request until "+
+		"fixed; the dashboard's route list marks them", "count", len(problems), "routes", lines)
 }
 
 // defaultRefusalRetry bounds how long a route stays refused after the

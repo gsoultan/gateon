@@ -4,6 +4,7 @@
 package handlers
 
 import (
+	"context"
 	"time"
 
 	"github.com/gsoultan/gateon/internal/auth"
@@ -13,12 +14,16 @@ import (
 	"github.com/gsoultan/gateon/internal/domain/route"
 	"github.com/gsoultan/gateon/internal/domain/service"
 	"github.com/gsoultan/gateon/internal/domain/tls"
+	"github.com/gsoultan/gateon/internal/router"
 	"github.com/gsoultan/gateon/internal/server/mgmtorigin"
 	"github.com/gsoultan/gateon/pkg/proxy"
 )
 
 // RouteStatsProvider returns target stats for a route. Nil if route not found.
 type RouteStatsProvider func(routeID string) []proxy.TargetStats
+
+// RouteProblemsProvider lists the routes that cannot serve as configured.
+type RouteProblemsProvider func(ctx context.Context) []router.RouteProblem
 
 // Deps holds dependencies for REST API handlers (avoids importing server package).
 type Deps struct {
@@ -35,6 +40,8 @@ type Deps struct {
 	Version            string
 	StartTime          time.Time
 	RouteStatsProvider RouteStatsProvider
+	// RouteProblems, when set, supplies GET /v1/routes/problems (OPS-N4).
+	RouteProblems RouteProblemsProvider
 	// SecurityPosture, when set, supplies the report for GET /v1/security/posture.
 	SecurityPosture SecurityPostureProvider
 	// InvalidateAllProxies, when set, drops every cached route proxy so the
