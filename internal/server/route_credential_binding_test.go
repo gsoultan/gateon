@@ -35,8 +35,8 @@ import (
 // RBAC interceptor -- to a caller of one role, over real route/service/
 // middleware stores wired with the ADR 0038 binding guard.
 type routeAPI struct {
-	url    string
-	http   *http.Client
+	url      string
+	http     *http.Client
 	grpc     gateonv1.ApiServiceClient
 	routes   *config.RouteRegistry
 	services *config.ServiceRegistry
