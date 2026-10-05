@@ -158,16 +158,75 @@ func TestLineLimiterBoundsItsKeys(t *testing.T) {
 	for i := range lineLimiterMaxKeys + 10 {
 		l.Skip(now, "key", strings.Repeat("x", i+1))
 	}
-	if len(l.pending) != lineLimiterMaxKeys || l.overflow != 10 {
-		t.Fatalf("pending keys %d, overflow %d; want %d and 10", len(l.pending), l.overflow, lineLimiterMaxKeys)
+	if keys, overflow := tableKeys(l.counts.Load()), l.counts.Load().overflow.Load(); keys != lineLimiterMaxKeys || overflow != 10 {
+		t.Fatalf("pending keys %d, overflow %d; want %d and 10", keys, overflow, lineLimiterMaxKeys)
 	}
 	l.Flush()
 	if !strings.Contains(buf.String(), `k=(other) v=(other) not_written=10`) {
 		t.Errorf("the overflow was not reported:\n%s", buf.String())
 	}
-	if l.pendingN.Load() != 0 || l.pending != nil {
+	if l.pending() || tableKeys(l.counts.Load()) != 0 {
 		t.Error("Flush left lines pending")
 	}
+}
+
+// tableKeys is how many keys t counts under.
+func tableKeys(t *skipTable) int {
+	n := 0
+	for i := range t.slots {
+		if t.slots[i].key.Load() != nil {
+			n++
+		}
+	}
+	return n
+}
+
+// TestLineLimiterLosesNoLineToAReport: Skip takes no lock, so a report swaps
+// the table out from under writers still counting in it. It must wait for
+// them: every line is in exactly one report.
+func TestLineLimiterLosesNoLineToAReport(t *testing.T) {
+	l := NewLineLimiter(LineLimit{Level: slog.LevelInfo, Summary: "left out", PerSecond: 1, Every: time.Hour,
+		Labels: [2]string{"rule", "route"}})
+	const workers, perWorker = 16, 20000
+	var reported atomic.Int64
+	var writers, reporter sync.WaitGroup
+	done := make(chan struct{})
+	reporter.Go(func() {
+		// Reports as fast as it can, so writers are caught at every point.
+		for {
+			select {
+			case <-done:
+				return
+			default:
+				reported.Add(drainedCount(l.counts.Swap(new(skipTable)).drained()))
+			}
+		}
+	})
+	now := time.Now()
+	for w := range workers {
+		writers.Go(func() {
+			for i := range perWorker {
+				l.Skip(now, "942100", []string{"shop", "api", "admin"}[(w+i)%3])
+			}
+		})
+	}
+	writers.Wait()
+	close(done)
+	reporter.Wait()
+	reported.Add(drainedCount(l.counts.Load()))
+
+	if got := reported.Load(); got != workers*perWorker {
+		t.Errorf("counted %d lines, want %d", got, workers*perWorker)
+	}
+}
+
+// drainedCount is every line t counts.
+func drainedCount(t *skipTable) int64 {
+	n := t.overflow.Load()
+	for i := range t.slots {
+		n += t.slots[i].n.Load()
+	}
+	return n
 }
 
 // TestARegisteredLimiterReportsWithoutAnotherLine: a burst's last interval is

@@ -4,7 +4,10 @@
 package logger
 
 import (
+	"hash/maphash"
 	"log/slog"
+	"math/bits"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -103,6 +106,12 @@ func (p *PerSecond) Allow(now time.Time) bool {
 // calls: without it a burst's last interval would be reported only when the
 // next event of the same kind happened. The line says since when it counted.
 // The limiter starts no goroutine of its own.
+//
+// Nothing here takes a lock. Skip runs once per refused request past the
+// per-second budget -- every WAF block and every failed proxied request under
+// attack -- and a mutex there serialised every core on the one limiter exactly
+// when the gateway was busiest (review 3, F4). Lines are counted in a
+// skipTable with atomics; a report swaps in an empty table and reads the old.
 type LineLimiter struct {
 	budget  PerSecond
 	every   time.Duration
@@ -110,21 +119,89 @@ type LineLimiter struct {
 	summary string
 	labels  [2]string
 
-	// pendingN is the number of lines counted and not yet reported, read
-	// without the lock so an Allow with nothing pending takes none.
-	pendingN atomic.Int64
-
-	mu       sync.Mutex
-	pending  map[[2]string]int64
-	overflow int64
-	since    time.Time
+	// counts is the table lines are counted in until the next report.
+	counts atomic.Pointer[skipTable]
 }
 
 // lineLimiterMaxKeys bounds the keys a LineLimiter counts under between two
 // reports; past it lines are counted under one overflow key. The keys are
-// configuration (a route, a rule, a target), not request data, but a bound
-// costs nothing and makes the report's size a constant.
+// configuration, not request data -- a WAF rule id and route id, a route id
+// and a backend target URL -- so no client can choose one, but a bound costs
+// nothing and makes the table, and the report, a constant size: at most two
+// tables (the one counting and one being reported) of 32 slots each.
 const lineLimiterMaxKeys = 32
+
+// skipTable counts the lines one LineLimiter left out between two reports.
+//
+// Each of up to lineLimiterMaxKeys keys claims a slot by compare-and-swap,
+// probing from the key's hash, and keeps it for the table's life; lines past
+// that count under overflow. writers is the number of Skips inside the table:
+// a report that has swapped it out reads it only once they have left, so no
+// count is lost to the swap.
+type skipTable struct {
+	slots    [lineLimiterMaxKeys]skipSlot
+	overflow atomic.Int64
+	writers  atomic.Int64
+	// since is when the first line was counted, as sinceStamp encodes it; zero
+	// means nothing is counted.
+	since atomic.Int64
+}
+
+// skipSlot is one key's count. key is nil until the slot is claimed.
+type skipSlot struct {
+	key atomic.Pointer[[2]string]
+	n   atomic.Int64
+}
+
+// skipSeed seeds the hash a key's first probe slot is taken from.
+var skipSeed = maphash.MakeSeed()
+
+// count counts one line under (a, b). It allocates only when it claims a slot
+// for a key the table does not hold yet: at most lineLimiterMaxKeys times a
+// table.
+func (t *skipTable) count(a, b string) {
+	h := maphash.String(skipSeed, a) ^ bits.RotateLeft64(maphash.String(skipSeed, b), 1)
+	start := int(h % lineLimiterMaxKeys)
+	var mine *[2]string
+	for i := range lineLimiterMaxKeys {
+		s := &t.slots[(start+i)%lineLimiterMaxKeys]
+		k := s.key.Load()
+		if k == nil {
+			if mine == nil {
+				mine = &[2]string{a, b}
+			}
+			if s.key.CompareAndSwap(nil, mine) {
+				k = mine
+			} else {
+				k = s.key.Load()
+			}
+		}
+		if k[0] == a && k[1] == b {
+			s.n.Add(1)
+			return
+		}
+	}
+	t.overflow.Add(1)
+}
+
+// sinceStamp encodes now as a skipTable's since: the time after epoch (on the
+// monotonic clock when now carries it), plus one so that zero stays "none".
+func sinceStamp(now time.Time) int64 {
+	return int64(max(now.Sub(epoch), 0)) + 1
+}
+
+// sinceTime decodes a skipTable's since.
+func sinceTime(stamp int64) time.Time { return epoch.Add(time.Duration(stamp - 1)) }
+
+// drained returns t once no Skip is counting in it any more. t has been
+// swapped out, so a Skip arriving now counts in its successor; the wait is
+// for the few already inside, which hold no lock and finish in nanoseconds.
+func (t *skipTable) drained() *skipTable {
+	for t.writers.Load() != 0 {
+		runtime.Gosched()
+	}
+	return t
+}
 
 // LineLimit describes a LineLimiter.
 type LineLimit struct {
@@ -147,8 +224,13 @@ type LineLimit struct {
 func NewLineLimiter(c LineLimit) *LineLimiter {
 	l := &LineLimiter{every: c.Every, level: c.Level, summary: c.Summary, labels: c.Labels}
 	l.budget.SetMax(c.PerSecond)
+	l.counts.Store(new(skipTable))
 	return l
 }
+
+// pending reports whether any line is counted and not yet reported. Two
+// atomic loads: an Allow with nothing pending pays only these.
+func (l *LineLimiter) pending() bool { return l.counts.Load().since.Load() != 0 }
 
 // registered are the limiters ReportDue and FlushReports cover: the
 // package-level ones, a handful, registered once at start-up.
@@ -177,7 +259,7 @@ func registeredLimiters() []*LineLimiter {
 // passed by now.
 func ReportDue(now time.Time) {
 	for _, l := range registeredLimiters() {
-		if l.pendingN.Load() > 0 {
+		if l.pending() {
 			l.reportDue(now)
 		}
 	}
@@ -187,7 +269,7 @@ func ReportDue(now time.Time) {
 // interval: at shutdown, so what was counted is not lost with the process.
 func FlushReports() {
 	for _, l := range registeredLimiters() {
-		if l.pendingN.Load() > 0 {
+		if l.pending() {
 			l.Flush()
 		}
 	}
@@ -196,65 +278,74 @@ func FlushReports() {
 // Allow reports whether a line may be written at now. A caller told no must
 // call Skip, which counts the line for the next report.
 func (l *LineLimiter) Allow(now time.Time) bool {
-	if l.pendingN.Load() > 0 {
+	if l.pending() {
 		l.reportDue(now)
 	}
 	return l.budget.Allow(now)
 }
 
-// Skip counts a line that was not written under the key (a, b).
+// Skip counts a line that was not written under the key (a, b). It takes no
+// lock, and allocates only to add a key to the table.
 func (l *LineLimiter) Skip(now time.Time, a, b string) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	if l.pending == nil {
-		l.pending = make(map[[2]string]int64, 4)
+	t := l.enter()
+	if t.since.Load() == 0 {
+		t.since.CompareAndSwap(0, sinceStamp(now))
 	}
-	if l.since.IsZero() {
-		l.since = now
+	t.count(a, b)
+	t.writers.Add(-1)
+}
+
+// enter returns the table lines are counted in now, with the caller counted
+// among its writers. Checking the table is still current after joining it is
+// what lets a report wait for exactly the writers that can still touch it: one
+// that joined a table already swapped out leaves it and joins its successor.
+func (l *LineLimiter) enter() *skipTable {
+	for {
+		t := l.counts.Load()
+		t.writers.Add(1)
+		if l.counts.Load() == t {
+			return t
+		}
+		t.writers.Add(-1)
 	}
-	key := [2]string{a, b}
-	if _, ok := l.pending[key]; ok || len(l.pending) < lineLimiterMaxKeys {
-		l.pending[key]++
-	} else {
-		l.overflow++
-	}
-	l.pendingN.Add(1)
 }
 
 // reportDue writes the report when the interval since the first line it
-// counts has passed.
+// counts has passed. Of callers racing to it, the one whose swap succeeds
+// reports; the rest return.
 func (l *LineLimiter) reportDue(now time.Time) {
-	l.mu.Lock()
-	if l.since.IsZero() || now.Sub(l.since) < l.every {
-		l.mu.Unlock()
+	t := l.counts.Load()
+	stamp := t.since.Load()
+	if stamp == 0 || now.Sub(sinceTime(stamp)) < l.every {
 		return
 	}
-	pending, overflow, since := l.pending, l.overflow, l.since
-	l.pending, l.overflow, l.since = nil, 0, time.Time{}
-	l.pendingN.Store(0)
-	l.mu.Unlock()
-	l.write(pending, overflow, since)
+	if l.counts.CompareAndSwap(t, new(skipTable)) {
+		l.write(t.drained())
+	}
 }
 
 // Flush writes the report now, whatever the interval. For shutdown and tests.
 func (l *LineLimiter) Flush() {
-	l.mu.Lock()
-	pending, overflow, since := l.pending, l.overflow, l.since
-	l.pending, l.overflow, l.since = nil, 0, time.Time{}
-	l.pendingN.Store(0)
-	l.mu.Unlock()
-	l.write(pending, overflow, since)
+	l.write(l.counts.Swap(new(skipTable)).drained())
 }
 
-// write logs one line per key counted, and one for the overflow.
-func (l *LineLimiter) write(pending map[[2]string]int64, overflow int64, since time.Time) {
-	for key, n := range pending {
-		l.log(l.labels[0], key[0], l.labels[1], key[1],
-			"not_written", n, "since", since, "max_per_second", l.budget.Max())
+// write logs one line per key counted in t, and one for the overflow.
+func (l *LineLimiter) write(t *skipTable) {
+	stamp := t.since.Load()
+	if stamp == 0 {
+		return
 	}
-	if overflow > 0 {
+	since := sinceTime(stamp)
+	for i := range t.slots {
+		s := &t.slots[i]
+		if k := s.key.Load(); k != nil && s.n.Load() > 0 {
+			l.log(l.labels[0], k[0], l.labels[1], k[1],
+				"not_written", s.n.Load(), "since", since, "max_per_second", l.budget.Max())
+		}
+	}
+	if n := t.overflow.Load(); n > 0 {
 		l.log(l.labels[0], "(other)", l.labels[1], "(other)",
-			"not_written", overflow, "since", since, "max_per_second", l.budget.Max())
+			"not_written", n, "since", since, "max_per_second", l.budget.Max())
 	}
 }
 
