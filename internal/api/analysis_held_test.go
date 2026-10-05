@@ -5,10 +5,14 @@ package api
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/gsoultan/gateon/internal/middleware"
+	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	"github.com/gsoultan/gateon/internal/telemetry/repid"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
@@ -107,6 +111,35 @@ func TestTheAnalysisEngineJudgesAnAddressOnlyByWhatIsHeldAgainstIt(t *testing.T)
 	if sc := data.IPStats[scanner]; sc == nil || sc.WAFHits != 0 || sc.WAFWarnings != 2 {
 		t.Errorf("two flagged detections from an address shunned since were counted as %+v, "+
 			"want two warnings: nothing refused them when they were recorded", sc)
+	}
+}
+
+// TestTheAnalysisEngineCountsAPasswordTheGatewayRefused: since ADR 0059 the
+// gateway's authentication marks its refusals, and the trace carries the
+// mark. A refusal mark used to mean "not a credential attempt" to the trace
+// side, so a password guessed against Basic auth would have stopped counting.
+func TestTheAnalysisEngineCountsAPasswordTheGatewayRefused(t *testing.T) {
+	t.Setenv("GATEON_TRACE_DIR", filepath.Join(t.TempDir(), "traces"))
+	analysisStore(t)
+	const guesser = "100.64.74.10"
+	h := middleware.Metrics("basic-route")(middleware.BasicAuth("admin", "right-password")(
+		http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })))
+	for range 3 {
+		req := httptest.NewRequest(http.MethodGet, "/reports", nil)
+		req.RemoteAddr = guesser + ":51000"
+		req.SetBasicAuth("admin", "a-guess")
+		req = req.WithContext(request.WithState(req.Context(), &request.RequestState{RequestID: request.GenerateID()}))
+		rr := httptest.NewRecorder()
+		h.ServeHTTP(rr, req)
+		if rr.Code != http.StatusUnauthorized {
+			t.Fatalf("a wrong password got %d", rr.Code)
+		}
+	}
+	telemetry.FlushTraces()
+	data := &DiagnosticData{Traces: telemetry.GetTracesFiltered(t.Context(), 100, true)}
+	analysisEngine().Analyze(t.Context(), data)
+	if st := data.IPStats[guesser]; st == nil || st.CredentialFailures != 3 {
+		t.Fatalf("three passwords Basic auth refused were counted as %+v credential failures", st)
 	}
 }
 

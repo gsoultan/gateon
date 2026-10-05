@@ -577,18 +577,9 @@ func ApplyRouteMiddlewares(h http.Handler, rt *gateonv1.Route, redisClient redis
 		chain = append(chain, gwaf)
 	}
 
-	// Final Service Timing Wrapper (placed last in chain, closest to proxy)
-	chain = append(chain, func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if rs := request.GetRequestState(r); rs != nil {
-				rs.TServiceStart = time.Now().UnixNano()
-			}
-			next.ServeHTTP(w, r)
-			if rs := request.GetRequestState(r); rs != nil {
-				rs.TServiceEnd = time.Now().UnixNano()
-			}
-		})
-	})
+	// Last in the chain, nearest the proxy: whether a request reached its
+	// service is what tells a backend's 401 from the gateway's own refusals.
+	chain = append(chain, request.ServiceBoundary)
 
 	if len(chain) > 0 {
 		h = middleware.Chain(chain...)(h)

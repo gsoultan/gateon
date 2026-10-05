@@ -836,6 +836,7 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 				WriteHTTPError(w, http.StatusForbidden, err.Error())
 			case errors.Is(err, auth.ErrInvalidCredentials):
 				logger.SecurityEvent("auth_2fa_enroll_failure", r, "invalid_credentials")
+				request.MarkRefused(r, request.RefusalAuthentication) // a refused password (ADR 0059)
 				WriteHTTPError(w, http.StatusUnauthorized, err.Error())
 			default:
 				WriteHTTPError(w, http.StatusInternalServerError, err.Error())

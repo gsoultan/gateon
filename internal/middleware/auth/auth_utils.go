@@ -170,6 +170,14 @@ func (c AuthBaseConfig) HandleFailure(w http.ResponseWriter, r *http.Request, ne
 		return
 	}
 
+	// Authentication refused it: of the refusals the gateway writes before a
+	// request reaches its service, the kind brute-force detection counts
+	// (request.RefusalAuthentication, ADR 0059). A token refusal is marked as
+	// one first (refuseToken) and keeps that mark.
+	if rs := request.GetRequestState(r); rs != nil && rs.Refused == request.RefusalNone {
+		rs.Refused = request.RefusalAuthentication
+	}
+
 	msg := err.Error()
 	if c.ErrorTemplate != "" {
 		msg = c.ErrorTemplate

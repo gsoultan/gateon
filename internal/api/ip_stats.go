@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/telemetry"
 )
 
@@ -76,10 +77,16 @@ type IPStats struct {
 // Connect, gRPC-Web or GraphQL poller re-presenting an expired session over
 // POST -- the dashboard's own calls among them -- is a session that ended, not
 // a guess (ADR 0031). A POST a backend refused is still counted: the gateway
-// did not check its credential and cannot say what it was.
+// did not check its credential and cannot say what it was. So is one the
+// gateway's authentication refused, which it marks as such (ADR 0059).
 func credentialAttempt(tr *telemetry.TraceRecord) bool {
-	return tr.Refusal == "" && (tr.Method == http.MethodPost || tr.PasswordAuth)
+	return (tr.Refusal == "" || tr.Refusal == authenticationRefusal) &&
+		(tr.Method == http.MethodPost || tr.PasswordAuth)
 }
+
+// authenticationRefusal is how a trace records a refusal by the gateway's
+// authentication (request.RefusalAuthentication).
+var authenticationRefusal = request.RefusalAuthentication.String()
 
 // Failures is how many of the address's traced requests failed (4xx or 5xx).
 func (s *IPStats) Failures() int {

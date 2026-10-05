@@ -44,6 +44,10 @@ var answer401 = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 	w.WriteHeader(http.StatusUnauthorized)
 })
 
+// backend401 is answer401 as a route serves it, behind the router's service
+// boundary: a backend's answer, which the gateway cannot read into.
+var backend401 = request.ServiceBoundary(answer401)
+
 func expiredJWT(t *testing.T, secret []byte) string {
 	t.Helper()
 	tok, err := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
@@ -94,18 +98,18 @@ func TestTheGatewaysOwnTokenRefusalIsNotACredentialAttempt(t *testing.T) {
 		{"a POST with a revoked API key", "198.51.100.202", http.MethodPost, "/api/orders",
 			apiKey.Handler(answer200), map[string]string{"X-API-Key": "revoked-key"}, 0},
 		{"stuffing /v1/login with a bogus bearer header", "198.51.100.203", http.MethodPost, "/v1/login",
-			answer401, map[string]string{"Authorization": "Bearer x", "Content-Type": "application/json"}, 1},
+			backend401, map[string]string{"Authorization": "Bearer x", "Content-Type": "application/json"}, 1},
 		{"Basic auth guessed over GET", "198.51.100.204", http.MethodGet, "/reports",
 			BasicAuth("admin", "right-password")(answer200), map[string]string{"Authorization": "Basic YWRtaW46Z3Vlc3M="}, 1},
 		{"a backend's own 401 to a POST (the gateway cannot know)", "198.51.100.205", http.MethodPost, "/api/orders",
-			answer401, map[string]string{"Authorization": "Bearer expired"}, 1},
+			backend401, map[string]string{"Authorization": "Bearer expired"}, 1},
 		// Only a token the gateway checked is a token refusal: a POST that
 		// presented none was refused for that, not for a stale session.
 		{"a POST presenting no token to the session check", "198.51.100.206", http.MethodPost,
 			"/gateon.v1.ApiService/ListRoutes", session, map[string]string{"Content-Type": "application/json"}, 1},
 		// In dry run the check refuses nothing; the backend's refusal is its own.
 		{"a dry-run session check in front of a backend that refuses", "198.51.100.207", http.MethodPost, "/v1/login",
-			PasetoAuth(expiredSessions{}, AuthBaseConfig{DryRun: true})(answer401),
+			PasetoAuth(expiredSessions{}, AuthBaseConfig{DryRun: true})(backend401),
 			map[string]string{"Authorization": "Bearer stale"}, 1},
 	} {
 		code, got := countedRefusal(tc.h, tc.ip, tc.method, tc.path, tc.header)
@@ -131,7 +135,7 @@ func TestATokenRefusalIsTracedAsOne(t *testing.T) {
 	const poller, stuffer = "198.51.100.210", "198.51.100.211"
 	countedRefusal(session, poller, http.MethodPost, "/gateon.v1.ApiService/ListRoutes",
 		map[string]string{"Cookie": "gateon_session=expired"})
-	countedRefusal(answer401, stuffer, http.MethodPost, "/v1/login", map[string]string{"Authorization": "Bearer x"})
+	countedRefusal(backend401, stuffer, http.MethodPost, "/v1/login", map[string]string{"Authorization": "Bearer x"})
 	telemetry.FlushTraces()
 
 	refusals := map[string]string{}

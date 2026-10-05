@@ -7,6 +7,7 @@ import (
 	"context"
 	"net/http"
 	"sync"
+	"time"
 )
 
 // RequestStateContextKey is the type used for values stored in a request's context.
@@ -110,6 +111,13 @@ const (
 	// address's own refused POSTs renewed its shun from the shun's refusals
 	// the moment it lapsed (ADR 0031).
 	RefusalMitigation
+	// RefusalAuthentication: the gateway's authentication refused the request
+	// other than for a token it verified -- HTTP Basic refusing a password or
+	// a request that presented none, the forward-auth service it asked
+	// refusing, the management sign-in refusing a password or a second-factor
+	// code. The one refusal the gateway writes that can be a guess
+	// (CredentialChecked, ADR 0059).
+	RefusalAuthentication
 )
 
 // String names the refusal as a trace records it: "" for none.
@@ -119,6 +127,8 @@ func (r Refusal) String() string {
 		return "token"
 	case RefusalMitigation:
 		return "mitigation"
+	case RefusalAuthentication:
+		return "authentication"
 	default:
 		return ""
 	}
@@ -126,14 +136,59 @@ func (r Refusal) String() string {
 
 // MarkRefused records on r's state why the gateway refused it. The refusing
 // code calls it as it writes the refusal, and nothing else may: the mark tells
-// the detectors a 401 or 403 was not a credential attempt, so inferring it
+// the detectors whether a 401 or 403 was a credential attempt, so inferring it
 // from what a request carries -- a header's presence -- would let a password
 // guess exempt itself by adding one. Without request state nothing is marked,
 // and the refusal counts as it did before.
 func MarkRefused(r *http.Request, why Refusal) {
-	if rs := GetRequestState(r); rs != nil {
+	MarkRefusedContext(r.Context(), why)
+}
+
+// MarkRefusedContext is MarkRefused for code that holds the request's context
+// rather than the request: a handler the management API serves over REST,
+// Connect and gRPC alike.
+func MarkRefusedContext(ctx context.Context, why Refusal) {
+	if rs := GetRequestStateFromContext(ctx); rs != nil {
 		rs.Refused = why
 	}
+}
+
+// CredentialChecked reports whether a 401 or 403 this request was answered
+// with can have refused a credential: the request reached its service, whose
+// answer the gateway cannot read into (a backend's login form), or the
+// gateway's own authentication marked it refused (RefusalAuthentication).
+//
+// Every other refusal the gateway writes checked no credential. A geofence, a
+// WAF, a trap, bot management, deception and TLS binding all answer 403 before
+// the service, and a POST each of them refused counted towards a brute-force
+// shun as a refused login (ADR 0059); so did the gateway's own token and
+// mitigation refusals until they were marked (ADR 0031).
+func (rs *RequestState) CredentialChecked() bool {
+	switch rs.Refused {
+	case RefusalAuthentication:
+		return true
+	case RefusalNone:
+		return rs.TServiceStart > 0
+	default:
+		return false
+	}
+}
+
+// ServiceBoundary is the last middleware of a route's chain, nearest its
+// service. It stamps when every route middleware has passed the request on
+// (TServiceStart) and when the service returned (TServiceEnd), so a request
+// without TServiceStart was answered by the gateway itself (ADR 0048, 0059).
+func ServiceBoundary(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rs := GetRequestState(r)
+		if rs != nil {
+			rs.TServiceStart = time.Now().UnixNano()
+		}
+		next.ServeHTTP(w, r)
+		if rs != nil {
+			rs.TServiceEnd = time.Now().UnixNano()
+		}
+	})
 }
 
 // DebugInfo captures request/response details for diagnostic tracing.

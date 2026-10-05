@@ -12,8 +12,9 @@ import (
 )
 
 // An introspected OAuth2 token the provider calls inactive is refused by the
-// gateway's own verification, and the request is marked so; one that
-// presented no token is refused for that and stays unmarked. ADR 0031.
+// gateway's own verification, and the request is marked so (ADR 0031); one
+// that presented no token is refused by authentication for that, and marked
+// as such (ADR 0059).
 func TestIntrospectionMarksOnlyAPresentedTokenItRefused(t *testing.T) {
 	idp := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -33,7 +34,7 @@ func TestIntrospectionMarksOnlyAPresentedTokenItRefused(t *testing.T) {
 		want                request.Refusal
 	}{
 		{"an inactive token", "Bearer opaque-token", request.RefusalToken},
-		{"no token", "", request.RefusalNone},
+		{"no token", "", request.RefusalAuthentication},
 	} {
 		rs := &request.RequestState{}
 		req := httptest.NewRequest(http.MethodPost, "/graphql", nil)

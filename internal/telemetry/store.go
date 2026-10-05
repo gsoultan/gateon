@@ -445,10 +445,12 @@ type TraceRecord struct {
 
 	// Refusal is why the gateway itself refused the request, where it knows
 	// (request.Refusal): "token" when its own verification refused a token the
-	// request presented. The analysis reads summary traces, and this is how it
-	// tells a poller re-presenting an expired session or bearer token over
-	// POST from a password guess, which is the same POST answered 401. Set
-	// only from the mark the refusing code wrote, never from the headers.
+	// request presented, "mitigation" for a shun or block, "authentication"
+	// when its authentication refused it otherwise (ADR 0059). The analysis
+	// reads summary traces, and this is how it tells a poller re-presenting an
+	// expired session or bearer token over POST from a password guess, which
+	// is the same POST answered 401. Set only from the mark the refusing code
+	// wrote, never from the headers.
 	// omitempty: absent is "", which is how every other trace reads.
 	Refusal string `json:"refusal,omitempty"`
 

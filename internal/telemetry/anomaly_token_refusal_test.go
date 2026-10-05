@@ -49,12 +49,13 @@ func TestAnExpiredSessionConnectPollerIsNotBruteForce(t *testing.T) {
 
 // The mark is written by the check that refused, not read off the request:
 // a password-stuffing POST to the login form that adds a bearer header is
-// refused by the password check, which marks nothing, and still counts.
+// refused by the password check, which marks it an authentication refusal
+// (ADR 0059), and still counts.
 func TestLoginStuffingWithABogusBearerIsStillBruteForce(t *testing.T) {
 	initAnomalyTestStore(t)
 	agg := newIsolatedAggregator()
 	const ip = "198.51.100.91"
-	guess := refusedPost("/v1/login", request.RefusalNone, map[string]string{
+	guess := refusedPost("/v1/login", request.RefusalAuthentication, map[string]string{
 		"Authorization": "Bearer x", "Content-Type": "application/json",
 	})
 	answered(agg, ip, 24, http.StatusUnauthorized, guess)
@@ -72,6 +73,10 @@ func TestABackendsOwnRefusalOfAPostStillCounts(t *testing.T) {
 	agg := newIsolatedAggregator()
 	const ip = "198.51.100.92"
 	api := refusedPost("/api/orders", request.RefusalNone, map[string]string{"Authorization": "Bearer expired"})
+	// Answered by the backend: the request crossed the route's service boundary.
+	request.ServiceBoundary(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	})).ServeHTTP(httptest.NewRecorder(), api)
 	answered(agg, ip, 3, http.StatusUnauthorized, api)
 	counted := -1.0
 	for _, s := range agg.GetIPStats(0) {
@@ -81,5 +86,23 @@ func TestABackendsOwnRefusalOfAPostStillCounts(t *testing.T) {
 	}
 	if counted != 3 {
 		t.Errorf("%v of 3 POSTs a backend refused 401 counted as refused attempts, want 3", counted)
+	}
+}
+
+// A POST a gateway layer refused before the request reached its service -- the
+// WAF, a trap, the geofence, bot management, deception, TLS binding -- checked
+// no credential. Each counted as a refused login, so a user whose form posts
+// the WAF kept refusing was reported and shunned as a password guesser.
+// ADR 0059.
+func TestAPostAGatewayLayerRefusedIsNotBruteForce(t *testing.T) {
+	initAnomalyTestStore(t)
+	agg := newIsolatedAggregator()
+	const ip = "198.51.100.93"
+	refused := refusedPost("/checkout", request.RefusalNone, map[string]string{"Content-Type": "application/json"})
+	answered(agg, ip, 24, http.StatusForbidden, refused)
+
+	if recorded, shunned := bruteForceOutcome(t, agg, ip); recorded || shunned {
+		t.Errorf("24 POSTs a gateway layer refused 403 before any credential check were reported as "+
+			"brute force (%v) or shunned (%v)", recorded, shunned)
 	}
 }
