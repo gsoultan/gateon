@@ -4,13 +4,10 @@
 package reputation
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"math"
-	"net/http"
 	"net/netip"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -36,8 +33,9 @@ type IPReputationStore struct {
 	feedMu sync.Mutex
 	// lastGood is what each configured feed said the last time it could be
 	// read, keyed by URL, so a feed that fails at refresh time keeps its
-	// entries in force. Only configured feeds are kept.
-	lastGood map[string][]netip.Prefix
+	// entries in force. Only configured feeds are kept, and their ranges are
+	// shared with the index, never copied.
+	lastGood map[string]*feedLoad
 
 	// cancelMu guards refreshCancel, which stops the refresh in flight.
 	// Reconfigure calls it: that refresh is fetching for a configuration that
@@ -63,105 +61,16 @@ type reputationProvider struct {
 	client ReputationClient
 }
 
-// feedIndex is one immutable generation of the feed entries: host entries by
-// their text, and every entry in the trie.
+// feedIndex is one immutable generation of the entries in force: every feed's
+// as merged ranges, and the scores SetIPScore set by address text.
 type feedIndex struct {
 	ips     map[string]float64
-	trie    *ipTrie
+	ranges  feedRanges
 	entries int
 }
 
 func newFeedIndex() *feedIndex {
-	return &feedIndex{ips: map[string]float64{}, trie: newIPTrie()}
-}
-
-type trieNode struct {
-	children [2]*trieNode
-	score    float64
-	hasValue bool
-}
-
-type ipTrie struct {
-	v4 *trieNode
-	v6 *trieNode
-}
-
-func newIPTrie() *ipTrie {
-	return &ipTrie{
-		v4: &trieNode{},
-		v6: &trieNode{},
-	}
-}
-
-func (t *ipTrie) insert(prefix netip.Prefix, score float64) {
-	addr := prefix.Addr()
-	ones := prefix.Bits()
-	var curr *trieNode
-	var bits []byte
-
-	if addr.Is4() {
-		curr = t.v4
-		b := addr.As4()
-		bits = b[:]
-	} else {
-		curr = t.v6
-		b := addr.As16()
-		bits = b[:]
-	}
-
-	for i := 0; i < ones; i++ {
-		bit := (bits[i/8] >> (7 - (uint(i) % 8))) & 1
-		if curr.children[bit] == nil {
-			curr.children[bit] = &trieNode{}
-		}
-		curr = curr.children[bit]
-	}
-	// Longest prefix match wins for score if we just overwrite,
-	// but we could also take the max.
-	if score > curr.score || !curr.hasValue {
-		curr.score = score
-	}
-	curr.hasValue = true
-}
-
-func (t *ipTrie) search(addr netip.Addr) (bool, float64) {
-	var curr *trieNode
-	var bits []byte
-	var maxBits int
-
-	if addr.Is4() {
-		curr = t.v4
-		b := addr.As4()
-		bits = b[:]
-		maxBits = 32
-	} else {
-		curr = t.v6
-		b := addr.As16()
-		bits = b[:]
-		maxBits = 128
-	}
-
-	var lastScore float64
-	var found bool
-
-	if curr.hasValue {
-		lastScore = curr.score
-		found = true
-	}
-
-	for i := 0; i < maxBits; i++ {
-		bit := (bits[i/8] >> (7 - (uint(i) % 8))) & 1
-		if curr.children[bit] == nil {
-			break
-		}
-		curr = curr.children[bit]
-		if curr.hasValue {
-			lastScore = curr.score
-			found = true
-		}
-	}
-
-	return found, lastScore
+	return &feedIndex{ips: map[string]float64{}}
 }
 
 // NewIPReputationStore builds a store for cfg. It loads nothing: Start does the
@@ -260,6 +169,8 @@ func (s *IPReputationStore) clearFeeds() {
 	defer s.feedMu.Unlock()
 	s.lastGood = nil
 	s.index.Store(newFeedIndex())
+	feedEntriesInForce.Set(0)
+	feedIndexBytes.Set(0)
 }
 
 // IsBad reports whether a feed lists ipStr, and the score the listing carries.
@@ -270,12 +181,11 @@ func (s *IPReputationStore) IsBad(ipStr string) (bool, float64) {
 		return false, 0
 	}
 
-	// Check manual map first (O(1))
+	// A score set by SetIPScore, by the address as written.
 	if score, ok := idx.ips[ipStr]; ok {
 		return true, score
 	}
 
-	// Fast lookup in Radix Tree (O(bits))
 	addr, err := netip.ParseAddr(ipStr)
 	if err != nil {
 		return false, 0
@@ -283,10 +193,12 @@ func (s *IPReputationStore) IsBad(ipStr string) (bool, float64) {
 
 	// A v4-mapped address is the IPv4 host it maps: the spelling a proxy on a
 	// dual-stack socket writes for an IPv4 client. Searched as written it went
-	// to the IPv6 trie, where no IPv4 entry lives, and every listed IPv4
-	// address walked past the feed. The trie holds every entry, host routes
-	// included, so the unmapped search finds what the map lookup above missed.
-	return idx.trie.search(addr.Unmap())
+	// to the IPv6 entries, where no IPv4 entry lives, and every listed IPv4
+	// address walked past the feed; contains unmaps it.
+	if idx.ranges.contains(addr) {
+		return true, feedListedScore
+	}
+	return false, 0
 }
 
 // Listed reports whether ipStr is listed at or above the block threshold:
@@ -302,7 +214,7 @@ func (s *IPReputationStore) SetIPScore(ip string, score float64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	old := s.index.Load()
-	next := &feedIndex{ips: make(map[string]float64, len(old.ips)+1), trie: old.trie, entries: old.entries}
+	next := &feedIndex{ips: make(map[string]float64, len(old.ips)+1), ranges: old.ranges, entries: old.entries}
 	for k, v := range old.ips {
 		next.ips[k] = v
 	}
@@ -524,44 +436,122 @@ func (s *IPReputationStore) update(ctx context.Context) {
 		return
 	}
 
-	current := make(map[string][]netip.Prefix, len(cfg.FeedUrls))
-	for _, url := range cfg.FeedUrls {
-		prefixes, err := fetchFeed(ctx, url)
-		if ctx.Err() != nil {
-			// Superseded or shut down: what this refresh read is for a
-			// configuration that is gone, so it installs none of it.
-			return
-		}
-		if err != nil {
-			prefixes = s.lastGood[url]
-			logger.L.LogError("failed to fetch IP reputation feed; its last good copy stays in force",
-				"error", err, "url", url, "entries_kept", len(prefixes))
-		}
-		current[url] = prefixes
+	current, ok := s.loadFeeds(ctx, cfg.FeedUrls, currentFeedLimits())
+	if !ok {
+		// Superseded or shut down: what this refresh read is for a
+		// configuration that is gone, so it installs none of it.
+		return
 	}
 	// Replacing the map also drops the copies of feeds no longer configured,
-	// which is what bounds it.
+	// which is what bounds it. The old index and copies are garbage once the
+	// new index is stored: a refresh holds at most two generations, each
+	// within the limits.
 	s.lastGood = current
-
-	idx := indexFeeds(current)
+	idx := indexFeeds(cfg.FeedUrls, current)
 	s.index.Store(idx)
+	held := heldBytes(idx, current)
+	feedEntriesInForce.Set(float64(idx.entries))
+	feedIndexBytes.Set(float64(held))
 
 	logger.L.LogInfo("IP reputation store updated; listed addresses are refused on every entrypoint",
-		"ips", len(idx.ips), "entries", idx.entries)
+		"entries", idx.entries, "bytes", held)
 }
 
-// indexFeeds builds the lookup structures from every feed's entries.
-func indexFeeds(feeds map[string][]netip.Prefix) *feedIndex {
-	idx := newFeedIndex()
-	for _, prefixes := range feeds {
-		for _, p := range prefixes {
-			idx.trie.insert(p, feedListedScore)
-			idx.entries++
-			if p.IsSingleIP() {
-				idx.ips[p.Addr().String()] = feedListedScore
-			}
+// heldBytes is what the feeds hold in memory: the index, and -- when there is
+// more than one feed, so the index is a merged copy -- each feed's last good
+// copy beside it. One feed's copy is the index's own ranges.
+func heldBytes(idx *feedIndex, feeds map[string]*feedLoad) int64 {
+	n := idx.ranges.bytes()
+	if len(feeds) < 2 {
+		return n
+	}
+	for _, f := range feeds {
+		n += f.ranges.bytes()
+	}
+	return n
+}
+
+// loadFeeds reads every feed in turn, within limits, and reports false when
+// ctx ended first. A feed that cannot be read keeps its last good copy, which
+// draws on the limits like a fresh one.
+func (s *IPReputationStore) loadFeeds(ctx context.Context, urls []string, limits feedLimits) (map[string]*feedLoad, bool) {
+	// The index's top lookup tables are held beside the ranges; the byte bound
+	// covers them, so the ranges get what is left.
+	budget := feedBudget{entries: limits.entries, bytes: max(limits.bytes-topIndexBytes, 0)}
+	current := make(map[string]*feedLoad, len(urls))
+	for _, url := range urls {
+		if _, dup := current[url]; dup {
+			continue
+		}
+		load, err := fetchFeed(ctx, url, &budget)
+		if ctx.Err() != nil {
+			return nil, false
+		}
+		if err != nil {
+			load = s.keepLastGood(url, err, &budget)
+		}
+		if load != nil {
+			reportRefused(url, load, limits)
+			current[url] = load
 		}
 	}
+	return current, true
+}
+
+// keepLastGood is url's last good copy, when the budget still has room for
+// it, for a feed that could not be read.
+func (s *IPReputationStore) keepLastGood(url string, err error, budget *feedBudget) *feedLoad {
+	prev := s.lastGood[url]
+	if prev == nil {
+		logger.L.LogError("failed to fetch IP reputation feed; it has no earlier copy, so none of it is in force",
+			"error", err, "url", url)
+		return nil
+	}
+	if prev.entries > budget.entries || prev.bytes > budget.bytes {
+		feedEntriesRefused.WithLabelValues(refusedOverLimit).Add(float64(prev.entries))
+		logger.L.LogError("failed to fetch IP reputation feed, and its last good copy no longer fits the "+
+			"feed limits; none of it is in force", "error", err, "url", url, "entries", prev.entries,
+			"env", feedMaxEntriesEnv+", "+feedMaxMBEnv)
+		return nil
+	}
+	budget.entries -= prev.entries
+	budget.bytes -= prev.bytes
+	logger.L.LogError("failed to fetch IP reputation feed; its last good copy stays in force",
+		"error", err, "url", url, "entries_kept", prev.entries)
+	// Counted once, when it was read; the copy carries no refusals of its own.
+	return &feedLoad{ranges: prev.ranges, entries: prev.entries, bytes: prev.bytes}
+}
+
+// reportRefused counts and logs, at ERROR, the entries of one feed that are
+// not in force: listed addresses the gateway will not refuse.
+func reportRefused(url string, load *feedLoad, limits feedLimits) {
+	if load.tooWide > 0 {
+		feedEntriesRefused.WithLabelValues(refusedTooWide).Add(float64(load.tooWide))
+		logger.L.LogError("IP reputation feed lists prefixes wider than a feed entry may be; they are not in force",
+			"url", url, "entries", load.tooWide, "first", load.widest,
+			"widest_allowed", fmt.Sprintf("IPv4 /%d, IPv6 /%d", minFeedBitsV4, minFeedBitsV6))
+	}
+	if load.overLimit > 0 {
+		feedEntriesRefused.WithLabelValues(refusedOverLimit).Add(float64(load.overLimit))
+		logger.L.LogError("IP reputation feeds list more than the feed limits hold; the entries past them are not in force",
+			"url", url, "entries_refused", load.overLimit, "max_entries", limits.entries,
+			"max_bytes", limits.bytes, "env", feedMaxEntriesEnv+", "+feedMaxMBEnv)
+	}
+}
+
+// indexFeeds builds the index from every feed's entries, in configured order.
+func indexFeeds(urls []string, feeds map[string]*feedLoad) *feedIndex {
+	sets := make([]feedRanges, 0, len(feeds))
+	seen := make(map[string]bool, len(feeds))
+	idx := newFeedIndex()
+	for _, url := range urls {
+		if load, ok := feeds[url]; ok && !seen[url] {
+			seen[url] = true
+			sets = append(sets, load.ranges)
+			idx.entries += load.entries
+		}
+	}
+	idx.ranges = unionRanges(sets)
 	return idx
 }
 
@@ -574,73 +564,3 @@ func indexFeeds(feeds map[string][]netip.Prefix) *feedIndex {
 // loaded thousands of addresses blocked none of them. An operator who wants a
 // feed recorded but not enforced sets the threshold above 100.
 const feedListedScore = 100.0
-
-// fetchFeed reads one plain-text feed: an address or CIDR per line, with "#"
-// comments.
-//
-// Anything but a 2xx answer is an error. An error page is not an empty feed:
-// its body parses as zero addresses, and taking that as the feed's answer would
-// take every entry out of force.
-func fetchFeed(ctx context.Context, url string) ([]netip.Prefix, error) {
-	// The deadline covers the body as well as the headers: the scan below
-	// reads through the same request context.
-	ctx, cancel := context.WithTimeout(ctx, feedFetchTimeout)
-	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		return nil, fmt.Errorf("feed answered with status %d", resp.StatusCode)
-	}
-
-	var out []netip.Prefix
-	scanner := bufio.NewScanner(resp.Body)
-	for scanner.Scan() {
-		if p, ok := parseFeedLine(scanner.Text()); ok {
-			out = append(out, p)
-		}
-	}
-	if err := scanner.Err(); err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-// parseFeedLine turns one feed line into a prefix; a bare address becomes a
-// host prefix. Blank lines, comments and anything unparseable are skipped.
-func parseFeedLine(line string) (netip.Prefix, bool) {
-	if idx := strings.Index(line, "#"); idx >= 0 {
-		line = line[:idx]
-	}
-	line = strings.TrimSpace(line)
-	if line == "" {
-		return netip.Prefix{}, false
-	}
-	if strings.Contains(line, "/") {
-		prefix, err := netip.ParsePrefix(line)
-		return unmapPrefix(prefix), err == nil
-	}
-	addr, err := netip.ParseAddr(line)
-	if err != nil {
-		return netip.Prefix{}, false
-	}
-	return unmapPrefix(netip.PrefixFrom(addr, addr.BitLen())), true
-}
-
-// unmapPrefix files a v4-mapped entry under the IPv4 network it maps, where an
-// IPv4 client's lookup goes. A prefix shorter than the mapped space (/96)
-// covers more than IPv4 and is kept as written.
-func unmapPrefix(p netip.Prefix) netip.Prefix {
-	const mappedBits = 96
-	if !p.IsValid() || !p.Addr().Is4In6() || p.Bits() < mappedBits {
-		return p
-	}
-	return netip.PrefixFrom(p.Addr().Unmap(), p.Bits()-mappedBits)
-}

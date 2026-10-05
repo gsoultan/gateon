@@ -41,47 +41,49 @@ func TestIPReputationStore_CIDRMatch(t *testing.T) {
 
 	// Test IPv4 CIDR
 	prefix, _ := netip.ParsePrefix("192.168.1.0/24")
-	insertPrefix(store, prefix, 1.0)
+	insertPrefix(store, prefix)
 
 	bad, score := store.IsBad("192.168.1.50")
 	assert.True(t, bad)
-	assert.Equal(t, 1.0, score)
+	assert.Equal(t, feedListedScore, score)
 
 	bad, _ = store.IsBad("192.168.2.1")
 	assert.False(t, bad)
 
 	// Test IPv6 CIDR
 	prefix6, _ := netip.ParsePrefix("2001:db8::/32")
-	insertPrefix(store, prefix6, 0.8)
+	insertPrefix(store, prefix6)
 
 	bad, score = store.IsBad("2001:db8::1")
 	assert.True(t, bad)
-	assert.Equal(t, 0.8, score)
+	assert.Equal(t, feedListedScore, score)
 
 	bad, _ = store.IsBad("2001:db9::1")
 	assert.False(t, bad)
 }
 
-// insertPrefix adds a prefix to the store's index in place. Test-only: the
-// index is immutable once published, and these tests read it from the test's
+// insertPrefix adds a prefix to the store's index. Test-only: it rebuilds the
+// published index's ranges in place, and these tests read it from the test's
 // own goroutine.
-func insertPrefix(s *IPReputationStore, p netip.Prefix, score float64) {
+func insertPrefix(s *IPReputationStore, p netip.Prefix) {
 	idx := s.index.Load()
-	idx.trie.insert(p, score)
+	var b rangeBuilder
+	b.add(p)
+	idx.ranges = unionRanges([]feedRanges{idx.ranges, b.ranges()})
 	idx.entries++
 }
 
-func BenchmarkIPTrie_Lookup(b *testing.B) {
-	trie := newIPTrie()
-	// Insert 1000 prefixes
-	for i := 0; i < 255; i++ {
+func BenchmarkFeedIndex_Lookup(b *testing.B) {
+	var rb rangeBuilder
+	for i := range 255 {
 		p, _ := netip.ParsePrefix(fmt.Sprintf("10.%d.0.0/16", i))
-		trie.insert(p, float64(i))
+		rb.add(p)
 	}
+	r := rb.ranges()
 	addr, _ := netip.ParseAddr("10.123.45.67")
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		trie.search(addr)
+	for range b.N {
+		r.contains(addr)
 	}
 }
 

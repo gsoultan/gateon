@@ -170,6 +170,36 @@ func TestLineLimiterBoundsItsKeys(t *testing.T) {
 	}
 }
 
+// TestARegisteredLimiterReportsWithoutAnotherLine: a burst's last interval is
+// reported by the periodic ReportDue once the interval has passed, without
+// waiting for the next line of the same kind, and FlushReports writes what is
+// left at shutdown.
+func TestARegisteredLimiterReportsWithoutAnotherLine(t *testing.T) {
+	buf := captureL(t)
+	l := Register(NewLineLimiter(LineLimit{Level: slog.LevelWarn, Summary: "burst tail", PerSecond: 1,
+		Every: 30 * time.Second, Labels: [2]string{"rule", "route"}}))
+	base := time.Now()
+	for range 5 {
+		if !l.Allow(base) {
+			l.Skip(base, "942100", "shop")
+		}
+	}
+	ReportDue(base.Add(10 * time.Second))
+	if strings.Contains(buf.String(), "burst tail") {
+		t.Fatalf("reported before the interval passed:\n%s", buf.String())
+	}
+	ReportDue(base.Add(31 * time.Second))
+	if !strings.Contains(buf.String(), "rule=942100 route=shop not_written=4") {
+		t.Fatalf("ReportDue did not report the burst's tail:\n%s", buf.String())
+	}
+	buf.Reset()
+	l.Skip(base, "942100", "shop")
+	FlushReports()
+	if !strings.Contains(buf.String(), "not_written=1") {
+		t.Errorf("FlushReports did not write what was left:\n%s", buf.String())
+	}
+}
+
 // BenchmarkPerSecondAllow is the cost on a line that is written: one load and
 // one compare-and-swap, no allocation.
 func BenchmarkPerSecondAllow(b *testing.B) {

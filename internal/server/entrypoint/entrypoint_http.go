@@ -123,7 +123,7 @@ func entrypointChain(ctx context.Context, ep *gateonv1.EntryPoint, deps *Deps) [
 	epLabel := cmp.Or(ep.Name, ep.Id)
 	chain := []middleware.Middleware{
 		middleware.EntryPoint(ep.Id, epLabel, IsManagementAddress(ep.Address, deps)),
-		middleware.Metrics("gateon-" + epLabel),
+		middleware.EntrypointMetrics(epLabel),
 		identity.IPMitigation(),
 		identity.UserMitigation(),
 		middleware.Recovery(),

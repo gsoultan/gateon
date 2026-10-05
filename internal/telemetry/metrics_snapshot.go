@@ -585,30 +585,10 @@ func collectMetricsSnapshot(ctx context.Context, limit, offset int, heavy bool) 
 }
 
 func buildGoldenSignals(ctx context.Context, idx map[string]*dto.MetricFamily) GoldenSignals {
-	// Golden signals represent total traffic through the gateway. The preferred
-	// source is the entrypoint layer ("gateon-" prefixed route label), which
-	// counts every request hitting the gateway exactly once (including requests
-	// that don't match a user route). If no entrypoint-level series exist — e.g.
-	// only a management entrypoint is configured, or a custom label scheme is in
-	// use — we fall back to summing the per-route series so the headline signals
-	// still reflect real proxied traffic instead of silently showing zero (RC#1).
-
-	// Cache label lookups during filtering
-	epFilter := func(m *dto.Metric) bool {
-		r := labelValue(m, "route")
-		return strings.HasPrefix(r, "gateon-")
-	}
-	routeFilter := func(m *dto.Metric) bool {
-		r := labelValue(m, "route")
-		return r != "" && !strings.HasPrefix(r, "gateon-")
-	}
-
-	gs := computeGoldenSignals(idx, epFilter)
-	if gs.RequestsTotal == 0 {
-		if fallback := computeGoldenSignals(idx, routeFilter); fallback.RequestsTotal > 0 {
-			gs = fallback
-		}
-	}
+	// Golden signals represent total traffic through the gateway: every series
+	// of the per-route families, each request being in exactly one -- its
+	// route's, or "gateon-<entrypoint>" when no route took it (ADR 0061).
+	gs := onceScopedSignals(idx)
 
 	// Active connections are tracked per-target, not per-route, so they are
 	// summed independently of the request-series filter above.
@@ -773,18 +753,24 @@ func outcomeCount(idx map[string]*dto.MetricFamily, outcome string) float64 {
 	})
 }
 
-// onceScopedSignals are the request signals over one scope only: the
-// entrypoint series, which see every request once, or the route series when
-// there are none (as buildGoldenSignals chooses).
+// onceScopedSignals are the request signals with each request counted once.
+//
+// The per-route families hold every request exactly once: under its route, or
+// under "gateon-<entrypoint>" when no route took it. They used to hold every
+// proxied request twice -- the entrypoint's metrics recorded it under
+// "gateon-<entrypoint>" as well -- so this read the "gateon-" series alone,
+// and anyone summing the families in Prometheus counted double (OPS-N8, ADR
+// 0061).
+//
+// In-flight is the exception: a request a route is serving is also one its
+// entrypoint is serving, so the total is the entrypoint gauge's, and the
+// route gauge's only where no entrypoint reports.
 func onceScopedSignals(idx map[string]*dto.MetricFamily) GoldenSignals {
 	gs := computeGoldenSignals(idx, func(m *dto.Metric) bool {
-		return strings.HasPrefix(labelValue(m, "route"), internalRoutePrefix)
+		return labelValue(m, "route") != ""
 	})
-	if gs.RequestsTotal == 0 {
-		gs = computeGoldenSignals(idx, func(m *dto.Metric) bool {
-			r := labelValue(m, "route")
-			return r != "" && !strings.HasPrefix(r, internalRoutePrefix)
-		})
+	if _, ok := idx["gateon_entrypoint_requests_in_flight"]; ok {
+		gs.InFlightTotal = sumGauge(idx, "gateon_entrypoint_requests_in_flight", nil)
 	}
 	return gs
 }

@@ -4,7 +4,6 @@
 package logger
 
 import (
-	"context"
 	"log/slog"
 	"sync"
 	"sync/atomic"
@@ -29,12 +28,18 @@ const (
 
 // epoch is what PerSecond measures its windows from. A time.Time taken from
 // time.Now carries the monotonic clock, so windows measured from it never move
-// backwards when the wall clock is stepped.
-var epoch = time.Now()
+// backwards when the wall clock is stepped. epochOffset starts the windows on
+// the wall clock's second at start-up, so a window is the second a log line's
+// timestamp shows: windows offset from it let one timestamped second hold the
+// tail of one window and the head of the next, twice the cap, as measured.
+var (
+	epoch       = time.Now()
+	epochOffset = time.Duration(epoch.Nanosecond())
+)
 
 // windowOf is the one-second window now falls in, counted from epoch.
 func windowOf(now time.Time) uint64 {
-	d := now.Sub(epoch)
+	d := now.Sub(epoch) + epochOffset
 	if d < 0 {
 		return 0
 	}
@@ -93,10 +98,11 @@ func (p *PerSecond) Allow(now time.Time) bool {
 // counts the rest by key, saying how many it left out at most once per
 // summary interval, one line per key.
 //
-// The report is written by the first call after the interval has passed, not
-// by a timer: there is no goroutine to stop. A burst's last interval is
-// therefore reported when the next event of the same kind happens; the line
-// says since when it counted, so a late report is still accurate.
+// The report is written by the first call after the interval has passed, and,
+// for a registered limiter, by ReportDue, which the server's periodic task
+// calls: without it a burst's last interval would be reported only when the
+// next event of the same kind happened. The line says since when it counted.
+// The limiter starts no goroutine of its own.
 type LineLimiter struct {
 	budget  PerSecond
 	every   time.Duration
@@ -142,6 +148,49 @@ func NewLineLimiter(c LineLimit) *LineLimiter {
 	l := &LineLimiter{every: c.Every, level: c.Level, summary: c.Summary, labels: c.Labels}
 	l.budget.SetMax(c.PerSecond)
 	return l
+}
+
+// registered are the limiters ReportDue and FlushReports cover: the
+// package-level ones, a handful, registered once at start-up.
+var registered struct {
+	mu       sync.Mutex
+	limiters []*LineLimiter
+}
+
+// Register adds l to the limiters ReportDue and FlushReports cover, and
+// returns it.
+func Register(l *LineLimiter) *LineLimiter {
+	registered.mu.Lock()
+	defer registered.mu.Unlock()
+	registered.limiters = append(registered.limiters, l)
+	return l
+}
+
+// registeredLimiters is a copy of the registered limiters.
+func registeredLimiters() []*LineLimiter {
+	registered.mu.Lock()
+	defer registered.mu.Unlock()
+	return append([]*LineLimiter(nil), registered.limiters...)
+}
+
+// ReportDue writes the report of every registered limiter whose interval has
+// passed by now.
+func ReportDue(now time.Time) {
+	for _, l := range registeredLimiters() {
+		if l.pendingN.Load() > 0 {
+			l.reportDue(now)
+		}
+	}
+}
+
+// FlushReports writes every registered limiter's report now, whatever its
+// interval: at shutdown, so what was counted is not lost with the process.
+func FlushReports() {
+	for _, l := range registeredLimiters() {
+		if l.pendingN.Load() > 0 {
+			l.Flush()
+		}
+	}
 }
 
 // Allow reports whether a line may be written at now. A caller told no must
@@ -199,14 +248,26 @@ func (l *LineLimiter) Flush() {
 
 // write logs one line per key counted, and one for the overflow.
 func (l *LineLimiter) write(pending map[[2]string]int64, overflow int64, since time.Time) {
-	lg := L.get()
-	ctx := context.Background()
 	for key, n := range pending {
-		lg.Log(ctx, l.level, l.summary, l.labels[0], key[0], l.labels[1], key[1],
+		l.log(l.labels[0], key[0], l.labels[1], key[1],
 			"not_written", n, "since", since, "max_per_second", l.budget.Max())
 	}
 	if overflow > 0 {
-		lg.Log(ctx, l.level, l.summary, l.labels[0], "(other)", l.labels[1], "(other)",
+		l.log(l.labels[0], "(other)", l.labels[1], "(other)",
 			"not_written", overflow, "since", since, "max_per_second", l.budget.Max())
+	}
+}
+
+// log writes the report line at the limiter's level.
+func (l *LineLimiter) log(args ...any) {
+	switch {
+	case l.level >= slog.LevelError:
+		L.LogError(l.summary, args...)
+	case l.level >= slog.LevelWarn:
+		L.LogWarn(l.summary, args...)
+	case l.level >= slog.LevelInfo:
+		L.LogInfo(l.summary, args...)
+	default:
+		L.LogDebug(l.summary, args...)
 	}
 }

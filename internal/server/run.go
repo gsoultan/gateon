@@ -330,12 +330,17 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 				s.SyncProxies()
 				// Heartbeat log for live observability
 				logger.L.LogDebug("gateway heartbeat", "active_proxies", s.proxyCache().Count())
+				// What the rate-limited log lines left out, once their
+				// interval has passed, even if that kind of line has not
+				// happened since (ADR 0061).
+				logger.ReportDue(time.Now())
 			}
 		}
 	})
 
 	<-ctx.Done()
 	logger.L.LogInfo("shutting down gracefully")
+	logger.FlushReports()
 	// Background, not ctx: ctx is the thing that just fired. Deriving the
 	// shutdown deadline from it would hand ShutdownAll an already-cancelled
 	// context and collapse the graceful drain into an immediate close.

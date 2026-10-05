@@ -45,7 +45,7 @@ func TestAChunkedUploadIsCountedAtItsSize(t *testing.T) {
 		_, _ = io.Copy(io.Discard, r.Body)
 		_, _ = w.Write([]byte("ok"))
 	})
-	h := Chain(EntryPoint("web", "web", false), Metrics("gateon-chunked"))(
+	h := Chain(EntryPoint("web", "web", false), EntrypointMetrics("chunked"))(
 		Chain(MetricsWithService("chunked-route", "svc"))(backend))
 	srv := httptest.NewServer(h)
 	defer srv.Close()
@@ -74,8 +74,9 @@ func TestAChunkedUploadIsCountedAtItsSize(t *testing.T) {
 	if got := counterValue(t, route) - r0; got != want {
 		t.Errorf("route bytes in: +%v, want +%v", got, want)
 	}
-	if got := counterValue(t, entry) - e0; got != want {
-		t.Errorf("entrypoint bytes in: +%v, want +%v", got, want)
+	// Counted once, under the route that took it (ADR 0061).
+	if got := counterValue(t, entry) - e0; got != 0 {
+		t.Errorf("entrypoint bytes in: +%v, want +0; a routed request is counted under its route only", got)
 	}
 	if got := ipBytesIn(t, "127.0.0.1") - ip0; got != want {
 		t.Errorf("bandwidth-by-IP bytes in: +%v, want +%v (counted once)", got, want)

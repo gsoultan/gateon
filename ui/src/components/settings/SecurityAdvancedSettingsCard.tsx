@@ -323,7 +323,7 @@ export const SecurityAdvancedSettingsCard: React.FC<SecurityAdvancedSettingsCard
                 <Stack gap="sm">
                   <TagsInput
                     label="Feed URLs"
-                    description="URLs of IP reputation feeds (text/plain). Recommended: AbuseIPDB, Emerging Threats."
+                    description="URLs of IP reputation feeds (text/plain, one address or CIDR per line). Each must be https:// (http:// only for a feed on this host's loopback). An entry wider than an IPv4 /8 or an IPv6 /32 is skipped, and entries past the profile's limit (GATEON_IP_FEED_MAX_ENTRIES, GATEON_IP_FEED_MAX_MB) are not loaded; both are logged and counted. Recommended: AbuseIPDB, Emerging Threats."
                     placeholder="https://example.com/bad-ips.txt"
                     value={security.ipReputation?.feedUrls || []}
                     onChange={(val) => updateSection("ipReputation", { feedUrls: val })}

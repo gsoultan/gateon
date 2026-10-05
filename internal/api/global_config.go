@@ -22,6 +22,7 @@ import (
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware/security"
 	wafmw "github.com/gsoultan/gateon/internal/middleware/security/waf"
+	"github.com/gsoultan/gateon/internal/security/reputation"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
@@ -294,6 +295,14 @@ func (s *ApiService) prepareGlobalUpdate(ctx context.Context, update, stored *ga
 // clients against blocked nobody and saved with success (ADR 0044).
 func validateGlobalSave(stored, proposed *gateonv1.GlobalConfig) error {
 	if err := security.ValidateGeoIPSave(stored.GetGeoip(), proposed.GetGeoip()); err != nil {
+		return status.Error(codes.InvalidArgument, err.Error())
+	}
+	// A feed decides whom every entrypoint refuses; one read over plain
+	// http:// lets anyone on the path decide that (ADR 0061).
+	if err := reputation.ValidateFeedURLs(
+		stored.GetSecurityAdvanced().GetIpReputation().GetFeedUrls(),
+		proposed.GetSecurityAdvanced().GetIpReputation().GetFeedUrls(),
+	); err != nil {
 		return status.Error(codes.InvalidArgument, err.Error())
 	}
 	return nil

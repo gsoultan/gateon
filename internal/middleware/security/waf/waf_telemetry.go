@@ -144,8 +144,10 @@ const (
 
 // wafBlockLines and wafWouldBlockLines rate-limit the two decision lines.
 var (
-	wafBlockLines      = newWAFLines("WAF blocked requests whose lines were not written (over the per-second limit; each is in gateon_request_failures_total and the Security Hub)")
-	wafWouldBlockLines = newWAFLines("WAF would have blocked requests whose lines were not written (over the per-second limit; each is in gateon_middleware_waf_would_block_total)")
+	wafBlockLines = logger.Register(newWAFLines("WAF blocked requests whose lines were not written " +
+		"(over the per-second limit; each is in gateon_request_failures_total and the Security Hub)"))
+	wafWouldBlockLines = logger.Register(newWAFLines("WAF would have blocked requests whose lines were not " +
+		"written (over the per-second limit; each is in gateon_middleware_waf_would_block_total)"))
 )
 
 // newWAFLines is the limiter for one kind of WAF decision line.

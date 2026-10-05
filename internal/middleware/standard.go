@@ -18,6 +18,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/httputil"
 	"github.com/gsoultan/gateon/internal/logger"
@@ -356,10 +358,62 @@ func Metrics(routeID string) Middleware {
 	return MetricsWithService(routeID, "")
 }
 
+// entrypointRoutePrefix starts the route label of the metrics an HTTP
+// entrypoint puts in front of routing, and of a request no route took.
+const entrypointRoutePrefix = "gateon-"
+
+// EntrypointMetrics is the metrics middleware an HTTP entrypoint puts in front
+// of routing. A request a route takes is counted by the route's own metrics,
+// under the route; this one counts it under "gateon-<entrypoint>" in the
+// per-route families only when no route did, so a sum over those families
+// counts every request once. It used to count every request there as well,
+// and every proxied request was in gateon_requests_total, the duration
+// histogram, the byte counters, TTFB and the in-flight gauge twice (OPS-N8,
+// ADR 0061). What the entrypoint saw in all is its own family:
+// gateon_entrypoint_requests_total, gateon_entrypoint_request_duration_seconds
+// and gateon_entrypoint_requests_in_flight.
+func EntrypointMetrics(epLabel string) Middleware {
+	return MetricsWithService(entrypointRoutePrefix+epLabel, "")
+}
+
+// inFlightGauge is the gauge a request is in while this instance serves it:
+// the entrypoint's own family for the entrypoint's instance, so a request a
+// route is serving is not in gateon_requests_in_flight twice.
+func inFlightGauge(route, entrypoint string, isEntrypoint bool) prometheus.Gauge {
+	if isEntrypoint {
+		return telemetry.EntrypointRequestsInFlight.WithLabelValues(entrypoint)
+	}
+	return telemetry.RequestsInFlight.WithLabelValues(route)
+}
+
+// routeSample is what recordRouteSeries needs from one finished request.
+type routeSample struct {
+	route, service, method, status string
+	// bytesIn and bytesOut include a baseline of 256 and 200 bytes for the
+	// request line and headers, and the response headers.
+	bytesIn, bytesOut int64
+	duration, ttfb    time.Duration
+}
+
+// recordRouteSeries records a request in the per-route families: requests,
+// duration, bytes in and out, and time to first byte.
+func recordRouteSeries(s routeSample) {
+	telemetry.RequestsTotal.WithLabelValues(s.route, s.service, s.method, s.status).Inc()
+	telemetry.RequestDurationSeconds.WithLabelValues(s.route, s.service, s.method).Observe(s.duration.Seconds())
+	telemetry.RequestBytesTotal.WithLabelValues(s.route, "in").Add(float64(s.bytesIn))
+	telemetry.RequestBytesTotal.WithLabelValues(s.route, "out").Add(float64(s.bytesOut))
+	if s.ttfb > 0 {
+		telemetry.TTFBSeconds.WithLabelValues(s.route).Observe(s.ttfb.Seconds())
+	}
+}
+
 // MetricsWithService returns a metrics middleware that also records the service label.
 func MetricsWithService(routeID, serviceID string) Middleware {
 	traceRate := traceSampleRate()
 	var traceCounter uint64
+	// The entrypoint's instance (EntrypointMetrics) records a request in the
+	// per-route families only when no route did (ADR 0061).
+	entrypoint, isEntrypoint := strings.CutPrefix(routeID, entrypointRoutePrefix)
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if ShouldSkipMetrics(r) {
@@ -376,8 +430,9 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 			start := time.Now()
 
 			// Track in-flight requests
-			telemetry.RequestsInFlight.WithLabelValues(activeRouteID).Inc()
-			defer telemetry.RequestsInFlight.WithLabelValues(activeRouteID).Dec()
+			inFlight := inFlightGauge(activeRouteID, entrypoint, isEntrypoint)
+			inFlight.Inc()
+			defer inFlight.Dec()
 
 			// Capture original host and path before proxying mutates r.Host/r.URL.
 			origHost := cmp.Or(r.Host, r.URL.Host)
@@ -414,8 +469,6 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 			if counted != nil {
 				reqInSize = counted.n.Load()
 			}
-			// A baseline of 256 bytes accounts for headers and request line.
-			telemetry.RequestBytesTotal.WithLabelValues(activeRouteID, "in").Add(float64(reqInSize + 256))
 
 			respOutSize := sw.BytesWritten
 			if respOutSize < 0 {
@@ -589,9 +642,18 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 			}
 
 		skipTrace:
-			// Rich Prometheus metrics
-			telemetry.RequestsTotal.WithLabelValues(activeRouteID, serviceID, methodLabel, statusStr).Inc()
-			telemetry.RequestDurationSeconds.WithLabelValues(activeRouteID, serviceID, methodLabel).Observe(duration.Seconds())
+			if isEntrypoint {
+				telemetry.EntrypointRequestsTotal.WithLabelValues(entrypoint, statusStr).Inc()
+				telemetry.EntrypointRequestDurationSeconds.WithLabelValues(entrypoint).Observe(duration.Seconds())
+			}
+			// The per-route families: a route's metrics always record; the
+			// entrypoint's only a request no route recorded.
+			if !isEntrypoint || once {
+				recordRouteSeries(routeSample{
+					route: activeRouteID, service: serviceID, method: methodLabel, status: statusStr,
+					bytesIn: reqInSize + 256, bytesOut: respOutSize + 200, duration: duration, ttfb: sw.TTFB(),
+				})
+			}
 
 			if once {
 				recordPerRequest(r, perRequestSample{
@@ -603,15 +665,6 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 				// route middleware has passed the request on, so its absence
 				// means the gateway answered without a backend (ADR 0048).
 				telemetry.RecordRequestOutcome(rs != nil && rs.TServiceStart > 0, actualStatus)
-			}
-
-			// Track response body size
-			// Add a baseline of 200 bytes to account for response headers.
-			telemetry.RequestBytesTotal.WithLabelValues(activeRouteID, "out").Add(float64(respOutSize + 200))
-
-			// Track TTFB
-			if ttfb := sw.TTFB(); ttfb > 0 {
-				telemetry.TTFBSeconds.WithLabelValues(activeRouteID).Observe(ttfb.Seconds())
 			}
 		})
 	}

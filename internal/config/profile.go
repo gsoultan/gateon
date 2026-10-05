@@ -170,6 +170,18 @@ type TierDefaults struct {
 	// for scheduling, the enterprise tier's request rates less.
 	// GATEON_BLOCK_LOOKUP_TIMEOUT overrides it.
 	BlockLookupTimeout time.Duration
+
+	// IPFeedMaxEntries and IPFeedMaxBytes bound the IP reputation feeds in
+	// force, across every feed: how many entries (an address or a prefix,
+	// one per line) and how many bytes of index they may hold (ADR 0061).
+	// An entry past either bound is refused, counted and logged. Nothing
+	// bounded the index before: a million IPv4 addresses held ~500 MiB and
+	// took ~1 GiB per refresh, and a million IPv6 ones ran the 2 GB host out
+	// of memory. The index is now compact -- 8 bytes an IPv4 entry, 32 an IPv6
+	// one -- so the byte bound is what decides for an IPv6 feed.
+	// GATEON_IP_FEED_MAX_ENTRIES and GATEON_IP_FEED_MAX_MB override them.
+	IPFeedMaxEntries int
+	IPFeedMaxBytes   int64
 }
 
 // NormalizeTier coerces an arbitrary string to a known tier, defaulting to
@@ -236,6 +248,8 @@ func DefaultsFor(tier Tier) TierDefaults {
 			StreamIdleTimeout:         2 * time.Minute,
 			StreamMaxLifetime:         time.Hour,
 			BlockLookupTimeout:        200 * time.Millisecond,
+			IPFeedMaxEntries:          250_000,
+			IPFeedMaxBytes:            8 << 20, // 8 MiB
 		}
 	case TierEnterprise:
 		return TierDefaults{
@@ -270,6 +284,8 @@ func DefaultsFor(tier Tier) TierDefaults {
 			StreamIdleTimeout:         10 * time.Minute,
 			StreamMaxLifetime:         12 * time.Hour,
 			BlockLookupTimeout:        50 * time.Millisecond,
+			IPFeedMaxEntries:          4_000_000,
+			IPFeedMaxBytes:            128 << 20, // 128 MiB
 		}
 	default: // TierStandard
 		return TierDefaults{
@@ -304,6 +320,8 @@ func DefaultsFor(tier Tier) TierDefaults {
 			StreamIdleTimeout:         5 * time.Minute,
 			StreamMaxLifetime:         4 * time.Hour,
 			BlockLookupTimeout:        100 * time.Millisecond,
+			IPFeedMaxEntries:          1_000_000,
+			IPFeedMaxBytes:            32 << 20, // 32 MiB
 		}
 	}
 }

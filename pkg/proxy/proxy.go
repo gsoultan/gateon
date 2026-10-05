@@ -322,13 +322,13 @@ const (
 )
 
 // proxyErrorLines rate-limits the "Proxy error" line across every route.
-var proxyErrorLines = logger.NewLineLimiter(logger.LineLimit{
+var proxyErrorLines = logger.Register(logger.NewLineLimiter(logger.LineLimit{
 	Level:     slog.LevelError,
 	Summary:   "Proxy errors whose lines were not written (over the per-second limit; each is in gateon_request_failures_total)",
 	PerSecond: proxyErrorLinesPerSecond,
 	Every:     proxyErrorReportEvery,
 	Labels:    [2]string{"route", "target"},
-})
+}))
 
 // logProxyError writes the "Proxy error" line for a failed request when the
 // limiter allows one now, and counts it under its route and target when not.
