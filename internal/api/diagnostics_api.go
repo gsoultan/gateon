@@ -26,6 +26,7 @@ import (
 	"github.com/gsoultan/gateon/internal/middleware"
 	"github.com/gsoultan/gateon/internal/middleware/security"
 	"github.com/gsoultan/gateon/internal/middleware/security/identity"
+	wafmw "github.com/gsoultan/gateon/internal/middleware/security/waf"
 	"github.com/gsoultan/gateon/internal/security/waf"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	"github.com/gsoultan/gateon/internal/telemetry/repid"
@@ -652,8 +653,14 @@ func fixWAFFinding(s *ApiService, ctx context.Context, req *gateonv1.ApplyRecomm
 	return s.applyBlockIPRecommendation(ctx, req.GetSource())
 }
 
+// fixByBlockingSource blocks the source a finding names, and only that: one
+// bounded entry on the block list (applyBlockIPRecommendation). It used to
+// block the threat's fingerprint first, keyed to the source's /24 (/64), with
+// no expiry and no exemption check -- every client of that browser build on
+// that network, refused for good, while the answer spoke only of a 24-hour
+// address block and, for an allowlisted source, reported failure (review-3 F2).
+// A browser class on a network is not the source the finding names.
 func fixByBlockingSource(s *ApiService, ctx context.Context, req *gateonv1.ApplyRecommendationRequest) (*gateonv1.ApplyRecommendationResponse, error) {
-	s.mitigateFingerprintFromThreat(ctx, req.GetThreatId())
 	return s.applyBlockIPRecommendation(ctx, req.GetSource())
 }
 
@@ -676,6 +683,12 @@ func (s *ApiService) ApplyRecommendation(ctx context.Context, req *gateonv1.Appl
 	return resp, nil
 }
 
+// recommendationBlockDuration is how long an "Apply fix" block holds: one of
+// the manual-block durations the mitigation dashboard offers (ADR 0037). A
+// recommendation is applied from a finding, not a decision about the address,
+// so it lapses on its own; the operator extends it from Mitigations.
+const recommendationBlockDuration = 24 * time.Hour
+
 func (s *ApiService) applyBlockIPRecommendation(ctx context.Context, sourceIP string) (*gateonv1.ApplyRecommendationResponse, error) {
 	if sourceIP == "" {
 		return &gateonv1.ApplyRecommendationResponse{Success: false, Message: "Source IP is required to block"}, nil
@@ -690,59 +703,53 @@ func (s *ApiService) applyBlockIPRecommendation(ctx context.Context, sourceIP st
 		return applyFingerprintBlock(sourceIP), nil
 	}
 
-	mwID := "block-ip-" + strings.ReplaceAll(sourceIP, ".", "-")
-	mwID = strings.ReplaceAll(mwID, ":", "-")
-
-	mw := &gateonv1.Middleware{
-		Id:   mwID,
-		Name: "Auto-Block: " + sourceIP,
-		Type: "ipfilter",
-		Config: map[string]string{
-			"deny_list": sourceIP,
-		},
+	// An address the request path never refuses is refused here before
+	// anything is written. The block is keyed by repid.AddressKey -- the /64
+	// for IPv6 (ADR 0058) -- and the exemption spares only the exact address,
+	// so writing first blocked an allowlisted monitor's whole /64 while the fix
+	// answered that the block was not enforced (review-3 F3). The predicate is
+	// the one every listener asks.
+	if identity.ExemptFromEnforcement(sourceIP) {
+		return refuseFix(fmt.Sprintf("%s was not blocked, and nothing was written: %s.", sourceIP, exemptionReason(sourceIP))), nil
 	}
 
-	if err := s.Middlewares.Update(ctx, mw); err != nil {
-		return &gateonv1.ApplyRecommendationResponse{Success: false, Message: "Failed to create block middleware: " + err.Error()}, nil
+	// One bounded entry on the block list every entrypoint and route enforces
+	// (identity.AddressBlocked), which Remove Mitigation lifts and the
+	// dashboard counts down. This used to add a block-ip-* ipfilter to every
+	// route, one more per fix, with no expiry and outside that list, and to
+	// announce an XDP shun that, with eBPF off, never happened (truth NEW-7).
+	// The kernel entry, when eBPF is attached, is leased by the same write.
+	if err := telemetry.MarkIPMitigatedFor(sourceIP, "Recommendation applied via API", recommendationBlockDuration); err != nil {
+		return refuseFix(fmt.Sprintf("IP %s was not blocked: the mitigation could not be recorded (%v)", sourceIP, err)), nil
 	}
-
-	routes := s.Routes.List(ctx)
-	updatedCount := 0
-	for _, rt := range routes {
-		if !slices.Contains(rt.Middlewares, mwID) {
-			rt.Middlewares = append(rt.Middlewares, mwID)
-			if err := s.Routes.Update(ctx, rt); err == nil {
-				updatedCount++
-			}
-		}
+	if !telemetry.IsIPMitigatedContext(ctx, sourceIP) {
+		return refuseFix(fmt.Sprintf("IP %s was not blocked: the block is not in force.", sourceIP)), nil
 	}
-
-	if s.Invalidator != nil {
-		s.Invalidator.InvalidateRoutes(func(*gateonv1.Route) bool { return true })
+	//nolint:contextcheck // the same request-path predicate MitigateThreat asks; it takes no context.
+	if res := exemptAddressAnswer(sourceIP); res != nil {
+		return refuseFix(res.GetMessage()), nil
 	}
-
-	if s.EbpfManager != nil {
-		if err := s.EbpfManager.ShunIP(sourceIP); err != nil {
-			logger.L.LogError("Failed to shun IP at XDP level", "error", err, "ip", sourceIP)
-		} else {
-			logger.L.LogInfo("IP shunned at XDP level for DDoS mitigation", "ip", sourceIP)
-		}
-	}
-
-	// Record mitigation in telemetry. Reported rather than logged: announcing
-	// "blocked via middleware and shunned at XDP level" for a write that failed
-	// leaves the operator believing a security control is on.
-	if err := telemetry.MarkIPMitigated(sourceIP, "Manual recommendation applied via API"); err != nil {
-		return &gateonv1.ApplyRecommendationResponse{
-			Success: false,
-			Message: fmt.Sprintf("IP %s was not blocked: the mitigation could not be recorded (%v)", sourceIP, err),
-		}, nil
-	}
-
 	return &gateonv1.ApplyRecommendationResponse{
 		Success: true,
-		Message: fmt.Sprintf("IP %s blocked via middleware and shunned at XDP level.", sourceIP),
+		Message: fmt.Sprintf("IP %s is blocked on every entrypoint for %s%s. Extend or lift it under Mitigations.",
+			sourceIP, recommendationBlockWords, s.kernelBlockWords()),
 	}, nil
+}
+
+// recommendationBlockWords is recommendationBlockDuration as the message says it.
+const recommendationBlockWords = "24 hours"
+
+// kernelBlockWords says the kernel drops the address too, only when the XDP
+// program is attached: the Holder answers a shun with nil when eBPF is off,
+// which is how "shunned at XDP level" was reported with nothing in the kernel.
+func (s *ApiService) kernelBlockWords() string {
+	if s.EbpfManager == nil {
+		return ""
+	}
+	if st, err := s.EbpfManager.GetMapStats(); err == nil && st.Attached {
+		return ", and dropped in the kernel (eBPF) for the same time"
+	}
+	return ""
 }
 
 // applyFingerprintBlock blocks a fingerprint a finding names, on the network
@@ -981,8 +988,15 @@ func (s *ApiService) MitigateThreat(ctx context.Context, req *gateonv1.MitigateT
 
 	return &gateonv1.MitigateThreatResponse{
 		Success: true,
-		Message: fmt.Sprintf("Source %s successfully mitigated.", source),
+		Message: fmt.Sprintf("Source %s successfully mitigated.%s", source, ipReach(isIP, source)),
 	}, nil
+}
+
+func ipReach(isIP bool, source string) string {
+	if !isIP {
+		return ""
+	}
+	return blockReach(source)
 }
 
 // exemptAddressAnswer is the answer for an address the block list now names
@@ -995,16 +1009,33 @@ func exemptAddressAnswer(ip string) *gateonv1.MitigateThreatResponse {
 	if identity.AddressBlocked(ip) {
 		return nil
 	}
-	why := "it is in GATEON_MITIGATION_ALLOWLIST, whose addresses are never refused"
-	if httputil.IsLoopback(ip) {
-		why = "it is a loopback address, which is never refused (the gateway's own traffic, " +
-			"and every client behind a local proxy that sets no forwarding header)"
-	}
 	return &gateonv1.MitigateThreatResponse{
 		Success: false,
 		Message: fmt.Sprintf("%s was recorded on the block list but is not enforced: %s. "+
-			"Requests from it are still served.", ip, why),
+			"Requests from it are still served.%s", ip, exemptionReason(ip), blockReach(ip)),
 	}
+}
+
+// blockReach names what an address block covers beyond the address, for an
+// answer to say: an IPv6 block is its /64 (ADR 0058), so blocking one
+// allowlisted address of a /64 refuses every other address in it, and an
+// answer that named only the address hid that. Empty for IPv4.
+func blockReach(ip string) string {
+	key := repid.AddressKey(ip)
+	if !strings.Contains(key, ":") {
+		return ""
+	}
+	return fmt.Sprintf(" The block covers %s/64: every other address in it is refused.", key)
+}
+
+// exemptionReason says why the request path never refuses ip, an address
+// identity.ExemptFromEnforcement exempts.
+func exemptionReason(ip string) string {
+	if httputil.IsLoopback(ip) {
+		return "it is a loopback address, which is never refused (the gateway's own traffic, " +
+			"and every client behind a local proxy that sets no forwarding header)"
+	}
+	return "it is in GATEON_MITIGATION_ALLOWLIST, whose addresses are never refused"
 }
 
 func (s *ApiService) RemoveMitigatedThreat(ctx context.Context, req *gateonv1.RemoveMitigatedThreatRequest) (*gateonv1.RemoveMitigatedThreatResponse, error) {
@@ -1246,25 +1277,6 @@ func (s *ApiService) resetReputationForIP(ctx context.Context, ip string) {
 		// And the fingerprint block, which is the class on this address's
 		// network (ADR 0026): the one this address's clients were refused by.
 		telemetry.MarkUserUnmitigated(repid.For(fp, ip))
-	}
-}
-
-// mitigateFingerprintFromThreat blocks the class a threat came from on the
-// network it came from, never the class everywhere (ADR 0026).
-func (s *ApiService) mitigateFingerprintFromThreat(ctx context.Context, threatID string) {
-	if threatID == "" {
-		return
-	}
-	th, err := telemetry.GetSecurityThreatByID(ctx, threatID)
-	if err != nil || th.SourceIP == "" {
-		return
-	}
-	fp := th.Fingerprint
-	if fp == "" && th.JA4 != "" {
-		fp = th.JA4 + "_" + th.JA4H
-	}
-	if fp != "" {
-		telemetry.MarkUserMitigated(repid.For(fp, th.SourceIP), "JA4+", "Mitigated via recommendation for "+th.Type, th.Category)
 	}
 }
 
@@ -1697,27 +1709,56 @@ func (s *ApiService) applyWafHardeningRecommendation(ctx context.Context, reason
 		return &gateonv1.ApplyRecommendationResponse{Success: false, Message: "Global config service not available"}, nil
 	}
 
+	// What the fix can change is whether the gateway-wide WAF runs and whether
+	// it blocks. It used to set the global category booleans, which the global
+	// WAF ignores -- it runs every category (ADR 0044) -- and to report "core
+	// protections and OWASP CRS" enabled while an audit-only WAF stayed
+	// audit-only and blocked nothing (truth NEW-7).
+	var changed []string
 	err := s.editGlobal(ctx, func(globalCfg *gateonv1.GlobalConfig) {
+		changed = changed[:0]
 		if globalCfg.Waf == nil {
-			globalCfg.Waf = &gateonv1.WafConfig{}
+			globalCfg.Waf = &gateonv1.WafConfig{UseCrs: true}
 		}
-		globalCfg.Waf.Enabled = true
-		globalCfg.Waf.UseCrs = true
-		// Enable core protections if they are off
-		globalCfg.Waf.Sqli = true
-		globalCfg.Waf.Xss = true
-		globalCfg.Waf.Lfi = true
-		globalCfg.Waf.Rce = true
-		globalCfg.Waf.Scanner = true
+		if !globalCfg.Waf.Enabled {
+			globalCfg.Waf.Enabled = true
+			changed = append(changed, "turned the gateway-wide WAF on")
+		}
+		if globalCfg.Waf.AuditOnly {
+			globalCfg.Waf.AuditOnly = false
+			changed = append(changed, "turned audit-only off, so it now refuses what it matches")
+		}
 	})
 	if err != nil {
-		return &gateonv1.ApplyRecommendationResponse{Success: false, Message: "Failed to update config: " + errorMessage(err)}, nil
+		return refuseFix("Failed to update config: " + errorMessage(err)), nil
 	}
+	if len(changed) > 0 {
+		s.rebuildForGlobalWAF()
+	}
+	return &gateonv1.ApplyRecommendationResponse{Success: true, Message: hardeningMessage(changed)}, nil
+}
 
-	return &gateonv1.ApplyRecommendationResponse{
-		Success: true,
-		Message: "WAF has been enabled with core security protections (SQLi, XSS, etc.) and OWASP CRS.",
-	}, nil
+// rebuildForGlobalWAF makes a changed global WAF reach the requests it
+// describes. The router builds the global WAF into each route's chain when the
+// chain is built, and caches the chain, so a saved change does nothing until
+// the chain is rebuilt: the hardening fix used to report "audit-only off, so it
+// now refuses what it matches" while every cached route kept the audit-only
+// WAF and forwarded every attack. It drops what UpdateGlobalConfig drops after
+// a WAF change -- the built WAFs, then every route's chain.
+func (s *ApiService) rebuildForGlobalWAF() {
+	wafmw.InvalidateWAFCache()
+	s.invalidator().InvalidateRoutes(func(*gateonv1.Route) bool { return true })
+}
+
+// hardeningMessage says what the WAF hardening fix changed, and what it does
+// not touch.
+func hardeningMessage(changed []string) string {
+	const scope = " The gateway-wide WAF runs every attack category on routes without a WAF of their own; " +
+		"a route's WAF middleware keeps its own settings, including its own audit-only."
+	if len(changed) == 0 {
+		return "The gateway-wide WAF was already on and blocking; nothing changed." + scope
+	}
+	return "Applied: " + strings.Join(changed, "; ") + "." + scope
 }
 
 func (s *ApiService) TriggerWafUpdate(ctx context.Context, _ *gateonv1.TriggerWafUpdateRequest) (*gateonv1.TriggerWafUpdateResponse, error) {

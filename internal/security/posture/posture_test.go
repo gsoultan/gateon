@@ -129,6 +129,63 @@ func TestBotCoverageCountsTheRoutesThatCarryIt(t *testing.T) {
 	}
 }
 
+// allCategoriesOff is a route WAF config with every attack-category switch off.
+func allCategoriesOff() map[string]string {
+	cfg := map[string]string{}
+	for _, k := range AttackCategoryKeys {
+		cfg[k] = "false"
+	}
+	return cfg
+}
+
+// TestWAFWithEveryCategoryOffEarnsNoBlockingCredit is truth NEW-13: a route
+// WAF with every attack category switched off was counted as blocking and
+// earned full WAF credit, while SQLi, XSS, LFI and RCE probes reached the
+// backend. It blocks none of the attacks the control is about, so it is
+// counted apart and earns nothing.
+func TestWAFWithEveryCategoryOffEarnsNoBlockingCredit(t *testing.T) {
+	oneOn := allCategoriesOff()
+	oneOn["xss"] = "true"
+	mws := index(mw("none", "waf", allCategoriesOff()), mw("xss-only", "waf", oneOn))
+	global := &gateonv1.GlobalConfig{Waf: &gateonv1.WafConfig{Enabled: true}}
+	cases := []struct {
+		name       string
+		route      *gateonv1.Route
+		enforcing  int
+		catsOff    int
+		wantCredit float64
+	}{
+		{"every category off", httpRoute("r", "none"), 0, 1, 0},
+		{"one category left on", httpRoute("r", "xss-only"), 1, 0, 1},
+		{"a second WAF that runs categories", httpRoute("r", "none", "xss-only"), 1, 0, 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := Config{Global: global, Routes: []*gateonv1.Route{tc.route}, Middlewares: mws}
+			cov := Coverage(c)
+			if cov.Enforcing != tc.enforcing || cov.CategoriesOff != tc.catsOff {
+				t.Fatalf("coverage = %+v, want enforcing %d, categoriesOff %d", cov, tc.enforcing, tc.catsOff)
+			}
+			if got := controlByID(t, Compute(c), "waf").Credit; got != tc.wantCredit {
+				t.Errorf("WAF credit = %v, want %v", got, tc.wantCredit)
+			}
+		})
+	}
+}
+
+// TestRateLimitCoverageCountsTheRoutesThatCarryIt: what replaces the
+// advisory's removed DoS-switch check (NEW-6) is counted on the routes that
+// carry a ratelimit or inflightreq middleware, once per route.
+func TestRateLimitCoverageCountsTheRoutesThatCarryIt(t *testing.T) {
+	mws := index(mw("rl", "ratelimit", nil), mw("inflight", "inflightreq", nil), mw("waf", "waf", nil))
+	cov := Coverage(Config{Global: &gateonv1.GlobalConfig{}, Middlewares: mws, Routes: []*gateonv1.Route{
+		httpRoute("a", "rl"), httpRoute("b", "inflight"), httpRoute("c", "rl", "inflight"), httpRoute("d", "waf"),
+	}})
+	if cov.RateLimited != 3 {
+		t.Fatalf("RateLimited = %d, want 3 (routes a, b and c; d carries only a WAF)", cov.RateLimited)
+	}
+}
+
 func controlByID(t *testing.T, s Score, id string) Control {
 	t.Helper()
 	for _, c := range s.Controls {

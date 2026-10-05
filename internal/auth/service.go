@@ -64,7 +64,10 @@ type Service interface {
 	// the password step -- from Authenticate's SecondStepError or Setup2FA --
 	// and issues a session. See ADR 0039.
 	Verify2FA(challenge, id, code string) (bool, string, *gateonv1.User, error)
-	Disable2FA(id string) error
+	// ResetTwoFactor removes account id's second factor, requires a new
+	// enrolment at its next sign-in and ends its sessions: an administrator's
+	// reset of another account (ADR 0057). See Manager.ResetTwoFactor.
+	ResetTwoFactor(id string) error
 
 	Close() error
 }

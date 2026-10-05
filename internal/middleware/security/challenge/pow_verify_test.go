@@ -22,7 +22,7 @@ const powTestThreshold = -1.0
 // testPowChallenge is a challenge issuer with a fixed key, for tests that
 // exercise the challenge page directly.
 func testPowChallenge() powChallenge {
-	return powChallenge{key: []byte("test-key"), difficulty: 3}
+	return newPowChallenge(3, "test-key", "")
 }
 
 // solvePoW does the work the challenge page's script does: find a nonce whose

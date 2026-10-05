@@ -114,6 +114,7 @@ func analyzeConfig(ctx context.Context, cfg *gateonv1.GlobalConfig, routes wafCo
 	insights = append(insights, tlsInsights(cfg.GetTls())...)
 	insights = append(insights, wafInsights(cfg.GetWaf(), routes)...)
 	insights = append(insights, botInsights(routes)...)
+	insights = append(insights, rateLimitInsights(routes)...)
 	insights = append(insights, managementExposureInsights(cfg.GetManagement())...)
 	insights = append(insights, auditInsights(cfg.GetAudit())...)
 	insights = append(insights, detectionInsights(cfg)...)
@@ -195,6 +196,9 @@ func wafInsights(waf *gateonv1.WafConfig, cov wafCoverage) []aiInsight {
 	if cov.Off > 0 {
 		out = append(out, wafPartialInsight(cov))
 	}
+	if cov.CategoriesOff > 0 {
+		out = append(out, wafNoCategoriesInsight(cov))
+	}
 	if waf.GetEnabled() {
 		out = append(out, globalWAFInsights(waf)...)
 	}
@@ -243,6 +247,19 @@ func wafPartialInsight(cov wafCoverage) aiInsight {
 	}
 }
 
+// wafNoCategoriesInsight: a route WAF with every attack category switched off
+// runs, and refuses none of SQLi, XSS, LFI or RCE (truth NEW-13).
+func wafNoCategoriesInsight(cov wafCoverage) aiInsight {
+	return aiInsight{
+		Title: fmt.Sprintf("A WAF with every attack category off runs on %d of %d routes", cov.CategoriesOff, cov.Total),
+		Description: fmt.Sprintf("On %d of %d routes the route's WAF middleware has every attack category switched off: "+
+			"SQL injection, XSS, path traversal and code execution reach the backend.", cov.CategoriesOff, cov.Total),
+		Severity:       insightWarning,
+		Category:       categorySecurity,
+		Recommendation: "Switch the categories the application needs back on in the route's WAF middleware, or remove it so the gateway-wide WAF inspects the route.",
+	}
+}
+
 // wafEnableSuggestion is the config that turns the gateway-wide WAF on.
 const wafEnableSuggestion = "waf:\n  enabled: true\n  use_crs: true\n  paranoia_level: 1"
 
@@ -259,16 +276,30 @@ func globalWAFInsights(waf *gateonv1.WafConfig) []aiInsight {
 			SuggestedConfig: "waf:\n  paranoia_level: 2",
 		})
 	}
-	if !waf.GetDosProtection() {
-		out = append(out, aiInsight{
-			Title:          "DoS protection is off",
-			Description:    "WAF DoS protection is disabled; bursty abusive clients can exhaust backend capacity.",
-			Severity:       insightWarning,
-			Category:       categoryAvailability,
-			Recommendation: "Enable WAF DoS protection (and consider eBPF/XDP rate limiting) on public entrypoints.",
-		})
-	}
 	return out
+}
+
+// rateLimitInsights reports which routes bound what one client may cost them.
+// It replaces a "DoS protection is off" warning that recommended the WAF's
+// dos_protection flag, which selects no rule and which ADR 0044 removed from
+// the dashboard: setting it cleared the warning and protected nothing (truth
+// NEW-6). A ratelimit or inflightreq middleware is what does.
+func rateLimitInsights(cov wafCoverage) []aiInsight {
+	if cov.Total == 0 || cov.RateLimited == cov.Total {
+		return nil
+	}
+	title := "Rate limiting covers no route"
+	if cov.RateLimited > 0 {
+		title = fmt.Sprintf("Rate limiting covers %d of %d routes", cov.RateLimited, cov.Total)
+	}
+	return []aiInsight{{
+		Title: title,
+		Description: fmt.Sprintf("%d of %d routes carry no ratelimit or inflightreq middleware, so one bursty "+
+			"client can use as much of their backends' capacity as it can send.", cov.Total-cov.RateLimited, cov.Total),
+		Severity:       insightInfo,
+		Category:       categoryAvailability,
+		Recommendation: "Attach a ratelimit middleware (requests per client) or an inflightreq middleware (concurrent requests) to public routes.",
+	}}
 }
 
 // botInsights reports which routes carry a bot_management middleware. It used
@@ -416,39 +447,139 @@ func managementExposureInsights(mgmt *gateonv1.ManagementConfig) []aiInsight {
 	return out
 }
 
+// logTally counts what a batch of log lines says. levels come from the line's
+// own level; the request counts come from the status and path an access-log
+// line carries, which is INFO whatever the status -- so a level count alone
+// called 401s and a /.env probe healthy (truth T41).
+type logTally struct {
+	errors, warns, infos       int
+	refused, serverErrs, probe int
+	msgs                       map[string]int
+}
+
 // analyzeLogs produces a deterministic, human-readable summary of recent log
-// lines (level breakdown + most frequent messages), without any external model.
+// lines (levels, refused and failed requests, probes, most frequent
+// messages), without any external model.
 func analyzeLogs(logs []string) string {
 	if len(logs) == 0 {
 		return "No logs were provided to analyze."
 	}
-
-	var errors, warns, infos int
-	msgCounts := make(map[string]int)
+	t := logTally{msgs: make(map[string]int)}
 	for _, line := range logs {
-		// Avoid strings.ToLower for performance; use case-insensitive checks where possible
-		// or just check for common casing in logs (slog uses level=ERROR/WARN/INFO or "level":"error")
-		hasError := strings.Contains(line, "level=error") || strings.Contains(line, "level=ERROR") ||
-			strings.Contains(line, "\"level\":\"error\"") || strings.Contains(line, "\"level\":\"ERROR\"") ||
-			strings.Contains(line, " error ") || strings.Contains(line, " ERROR ")
+		t.add(line)
+	}
+	var b strings.Builder
+	b.Grow(256)
+	fmt.Fprintf(&b, "Analyzed %d log lines: %d error, %d warning, %d info/other. ", len(logs), t.errors, t.warns, t.infos)
+	b.WriteString(t.requestSentence())
+	b.WriteString(t.verdict())
+	writeTopMessages(&b, t.msgs)
+	b.WriteString("(Local Mode: deterministic analysis, no data left this server.)")
+	return b.String()
+}
 
-		hasWarn := !hasError && (strings.Contains(line, "level=warn") || strings.Contains(line, "level=WARN") ||
-			strings.Contains(line, "\"level\":\"warn\"") || strings.Contains(line, "\"level\":\"WARN\"") ||
-			strings.Contains(line, " warn ") || strings.Contains(line, " WARN "))
-
-		if hasError {
-			errors++
-		} else if hasWarn {
-			warns++
-		} else {
-			infos++
-		}
-
-		if key := extractLogMessage(line); key != "" {
-			msgCounts[key]++
+func (t *logTally) add(line string) {
+	switch {
+	case lineHasLevel(line, "error", "ERROR"):
+		t.errors++
+	case lineHasLevel(line, "warn", "WARN"):
+		t.warns++
+	default:
+		t.infos++
+	}
+	if status, ok := logField(line, "status"); ok {
+		switch {
+		case status == "401" || status == "403" || status == "429":
+			t.refused++
+		case len(status) == 3 && status[0] == '5':
+			t.serverErrs++
 		}
 	}
+	if path, ok := logField(line, "path"); ok && sensitiveProbePath(path) {
+		t.probe++
+	}
+	if key := extractLogMessage(line); key != "" {
+		t.msgs[key]++
+	}
+}
 
+// lineHasLevel reports whether line carries the level, spelled lower or
+// upper, in slog's text or JSON form, or as a bare word.
+func lineHasLevel(line, lower, upper string) bool {
+	for _, l := range []string{lower, upper} {
+		if strings.Contains(line, "level="+l) || strings.Contains(line, `"level":"`+l+`"`) ||
+			strings.Contains(line, " "+l+" ") {
+			return true
+		}
+	}
+	return false
+}
+
+// logField reads key's value from a slog text (key=value) or JSON
+// ("key":value or "key":"value") line.
+func logField(line, key string) (string, bool) {
+	for _, marker := range []string{" " + key + "=", `"` + key + `":`} {
+		i := strings.Index(line, marker)
+		if i < 0 {
+			continue
+		}
+		v := strings.TrimPrefix(line[i+len(marker):], `"`)
+		if end := strings.IndexAny(v, ` ",}`); end >= 0 {
+			v = v[:end]
+		}
+		return v, v != ""
+	}
+	return "", false
+}
+
+// sensitiveProbePaths are paths only a scanner asks for: credentials,
+// repository metadata and admin consoles that are not this gateway's.
+var sensitiveProbePaths = []string{
+	"/.env", "/.git", "/.aws", "/.ssh", "/.htpasswd", "/etc/passwd", "/wp-login.php", "/phpmyadmin", "/server-status",
+}
+
+func sensitiveProbePath(path string) bool {
+	p := strings.ToLower(path)
+	for _, s := range sensitiveProbePaths {
+		if strings.HasPrefix(p, s) {
+			return true
+		}
+	}
+	return false
+}
+
+func (t *logTally) requestSentence() string {
+	if t.refused == 0 && t.serverErrs == 0 && t.probe == 0 {
+		return ""
+	}
+	return fmt.Sprintf("Requests: %d refused (401/403/429), %s, %s. ",
+		t.refused, countOf(t.serverErrs, "server error (5xx)", "server errors (5xx)"),
+		countOf(t.probe, "probe for a sensitive path", "probes for sensitive paths"))
+}
+
+// countOf is n with the noun it counts.
+func countOf(n int, one, many string) string {
+	if n == 1 {
+		return "1 " + one
+	}
+	return fmt.Sprintf("%d %s", n, many)
+}
+
+func (t *logTally) verdict() string {
+	switch {
+	case t.errors > 0 || t.serverErrs > 0:
+		return "Errors are present and should be investigated first. "
+	case t.refused > 0 || t.probe > 0:
+		return "Requests were refused or probed for sensitive paths; check whether one client accounts for them. "
+	case t.warns > 0:
+		return "Warnings are present; review them for early signs of trouble. "
+	default:
+		return "No errors, warnings, refusals or probes detected — the gateway appears healthy. "
+	}
+}
+
+// writeTopMessages appends the three most frequent messages.
+func writeTopMessages(b *strings.Builder, msgCounts map[string]int) {
 	type kv struct {
 		msg   string
 		count int
@@ -457,45 +588,46 @@ func analyzeLogs(logs []string) string {
 	for m, c := range msgCounts {
 		top = append(top, kv{m, c})
 	}
+	if len(top) == 0 {
+		return
+	}
 	slices.SortFunc(top, func(a, b kv) int {
 		if a.count != b.count {
 			return cmp.Compare(b.count, a.count)
 		}
 		return strings.Compare(a.msg, b.msg)
 	})
-
-	var b strings.Builder
-	b.Grow(256)
-	fmt.Fprintf(&b, "Analyzed %d log lines: %d error, %d warning, %d info/other. ", len(logs), errors, warns, infos)
-	switch {
-	case errors == 0 && warns == 0:
-		b.WriteString("No errors or warnings detected — the gateway appears healthy. ")
-	case errors > 0:
-		b.WriteString("Errors are present and should be investigated first. ")
-	default:
-		b.WriteString("Warnings are present; review them for early signs of trouble. ")
-	}
-	if len(top) > 0 {
-		b.WriteString("Most frequent messages: ")
-		limit := 3
-		if len(top) < limit {
-			limit = len(top)
+	b.WriteString("Most frequent messages: ")
+	for i := range min(3, len(top)) {
+		if i > 0 {
+			b.WriteString(", ")
 		}
-		for i := 0; i < limit; i++ {
-			if i > 0 {
-				b.WriteString(", ")
-			}
-			fmt.Fprintf(&b, "%q (×%d)", top[i].msg, top[i].count)
-		}
-		b.WriteString(". ")
+		fmt.Fprintf(b, "%q (×%d)", top[i].msg, top[i].count)
 	}
-	b.WriteString("(Local Mode: deterministic analysis, no data left this server.)")
-	return b.String()
+	b.WriteString(". ")
 }
 
-// extractLogMessage pulls the msg="..." field from a slog text line, falling back
-// to a trimmed prefix so similar lines group together.
+// logJSONString reads a JSON log line's string field key.
+func logJSONString(line, key string) (string, bool) {
+	marker := `"` + key + `":"`
+	i := strings.Index(line, marker)
+	if i < 0 {
+		return "", false
+	}
+	rest := line[i+len(marker):]
+	end := strings.IndexByte(rest, '"')
+	if end < 0 {
+		return "", false
+	}
+	return rest[:end], true
+}
+
+// extractLogMessage pulls the msg field from a slog JSON or text line, falling
+// back to a trimmed prefix so similar lines group together.
 func extractLogMessage(line string) string {
+	if v, ok := logJSONString(line, "msg"); ok {
+		return v
+	}
 	const marker = "msg="
 	if i := strings.Index(line, marker); i >= 0 {
 		rest := line[i+len(marker):]

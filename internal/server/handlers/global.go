@@ -836,6 +836,7 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 				WriteHTTPError(w, http.StatusForbidden, err.Error())
 			case errors.Is(err, auth.ErrInvalidCredentials):
 				logger.SecurityEvent("auth_2fa_enroll_failure", r, "invalid_credentials")
+				request.MarkRefused(r, request.RefusalAuthentication) // a refused password (ADR 0059)
 				WriteHTTPError(w, http.StatusUnauthorized, err.Error())
 			default:
 				WriteHTTPError(w, http.StatusInternalServerError, err.Error())
@@ -959,6 +960,22 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 		}
 
 		resp, err := svc.ChangePassword(r.Context(), &req)
+		if err != nil {
+			writeServiceRefusal(w, err)
+			return
+		}
+		data, _ := ProtojsonOptions().Marshal(resp)
+		_, _ = w.Write(data)
+	})
+	// Another account's second factor (ADR 0057). The rules -- administrators
+	// only, never the caller's own account, sessions ended, audited -- are the
+	// service's, so REST, Connect and gRPC give the same answer.
+	mux.HandleFunc("POST /v1/users/{id}/2fa/reset", func(w http.ResponseWriter, r *http.Request) {
+		if !RequirePermission(w, r, auth.ActionWrite, auth.ResourceUsers) {
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		resp, err := svc.ResetUserTwoFactor(r.Context(), &gateonv1.ResetUserTwoFactorRequest{Id: r.PathValue("id")})
 		if err != nil {
 			writeServiceRefusal(w, err)
 			return

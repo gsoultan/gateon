@@ -27,7 +27,6 @@ import (
 	"github.com/gsoultan/gateon/internal/middleware/security"
 	"github.com/gsoultan/gateon/internal/middleware/security/identity"
 	"github.com/gsoultan/gateon/internal/middleware/traffic"
-	"github.com/gsoultan/gateon/internal/server/readiness"
 	"github.com/gsoultan/gateon/internal/syncutil"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	gtls "github.com/gsoultan/gateon/internal/tls"
@@ -319,15 +318,11 @@ func newManagementHTTPServer(addr string, handler http.Handler, t deadline.Reque
 func startTCPServer(addr string, ep *gateonv1.EntryPoint, deps *Deps, wg *syncutil.WaitGroup, shutdownReg *ShutdownRegistry) {
 	logger.L.Info().Str("addr", addr).Str("ep", ep.Id).Msg("starting TCP entrypoint")
 	s := newTCPServer(ep, deps, wg)
-	l, err := s.listen(addr)
-	if err != nil {
-		logger.L.LogError("TCP listen failed; the entrypoint is not serving and /readyz reports it",
-			"error", err, "addr", addr, "ep", ep.Id)
-		readiness.ListenerFailed(ep.Id, addr, err)
-		return
-	}
-	readiness.ListenerBound(ep.Id, addr)
-	s.start(l, shutdownReg)
+	bindListener(deps, wg, listenerSpec[net.Listener]{
+		ep: ep.Id, addr: addr,
+		listen: func() (net.Listener, error) { return s.listen(addr) },
+		serve:  func(l net.Listener) { s.start(l, shutdownReg) },
+	})
 }
 
 // newTCPServer is ep's accept loop and connection accounting, not yet
@@ -461,18 +456,17 @@ func (s *tcpServer) refusePerAddr(c net.Conn) {
 
 func startUDPServer(addr string, ep *gateonv1.EntryPoint, deps *Deps, wg *syncutil.WaitGroup, shutdownReg *ShutdownRegistry) {
 	logger.L.LogInfo("starting UDP entrypoint", "addr", addr)
-	laddr, err := net.ResolveUDPAddr("udp", addr)
-	if err == nil {
-		var conn *net.UDPConn
-		if conn, err = net.ListenUDP("udp", laddr); err == nil {
-			readiness.ListenerBound(ep.Id, "udp "+addr)
-			serveUDP(conn, ep, deps, wg, shutdownReg)
-			return
-		}
-	}
-	logger.L.LogError("UDP listen failed; the entrypoint is not serving and /readyz reports it",
-		"error", err, "addr", addr, "ep", ep.Id)
-	readiness.ListenerFailed(ep.Id, "udp "+addr, err)
+	bindListener(deps, wg, listenerSpec[*net.UDPConn]{
+		ep: ep.Id, addr: "udp " + addr,
+		listen: func() (*net.UDPConn, error) {
+			laddr, err := net.ResolveUDPAddr("udp", addr)
+			if err != nil {
+				return nil, err
+			}
+			return net.ListenUDP("udp", laddr)
+		},
+		serve: func(conn *net.UDPConn) { serveUDP(conn, ep, deps, wg, shutdownReg) },
+	})
 }
 
 // serveUDP proxies or answers datagrams on conn until shutdown closes it.

@@ -481,6 +481,31 @@ var RequestsInFlight = promauto.NewGaugeVec(prometheus.GaugeOpts{
 	Help: "Number of currently in-flight requests.",
 }, []string{"route"})
 
+// The entrypoint view: every request an HTTP entrypoint received, routed or
+// not, by entrypoint. gateon_requests_total and its siblings count a request
+// once, under its route or -- when no route took it -- under
+// "gateon-<entrypoint>"; the entrypoint view used to live in those same
+// families under that label, which counted every proxied request twice in any
+// sum over them (OPS-N8, ADR 0061). It is its own family now, so a sum over
+// either family counts each request once.
+var (
+	EntrypointRequestsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "gateon_entrypoint_requests_total",
+		Help: "Requests each HTTP entrypoint received, routed or not, by status code.",
+	}, []string{"entrypoint", "status_code"})
+
+	EntrypointRequestDurationSeconds = promauto.NewHistogramVec(prometheus.HistogramOpts{
+		Name:    "gateon_entrypoint_request_duration_seconds",
+		Help:    "Histogram of request duration at each HTTP entrypoint, routed or not, in seconds.",
+		Buckets: []float64{0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10},
+	}, []string{"entrypoint"})
+
+	EntrypointRequestsInFlight = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "gateon_entrypoint_requests_in_flight",
+		Help: "Requests each HTTP entrypoint is serving now, routed or not.",
+	}, []string{"entrypoint"})
+)
+
 // ActiveConnections tracks active connections per target.
 var ActiveConnections = promauto.NewGaugeVec(prometheus.GaugeOpts{
 	Name: "gateon_active_connections",

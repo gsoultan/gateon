@@ -24,7 +24,6 @@ import {
   IconShieldCheck, 
   IconShieldOff, 
   IconEye,
-  IconActivity, 
   IconFingerprint, 
   IconRefresh, 
   IconClock,
@@ -352,23 +351,10 @@ export function OverviewTab({
           </Group>
         </Alert>
       )}
-      <SimpleGrid cols={{ base: 1, sm: 2, lg: 3, xl: 5 }}>
+      {/* No "Global Threat Score" card: it was the day's unscaled sum of
+          threat scores, shown as a risk level it had no scale for (T41). */}
+      <SimpleGrid cols={{ base: 1, sm: 2, lg: 4 }}>
         <SecurityPostureCard posture={posture} isLoading={postureLoading} error={postureError} />
-
-        <Card withBorder radius="md" p="md" className="hover:shadow-lg transition-all duration-300">
-          <Group justify="space-between">
-            <Stack gap={0}>
-              <Text size="xs" c="dimmed" fw={700} tt="uppercase">Global Threat Score</Text>
-              <AnimatedTitle value={metrics?.security?.globalThreatScore || 0} />
-            </Stack>
-            <ThemeIcon size="xl" color="orange" variant="light" radius="md">
-              <IconActivity size={24} />
-            </ThemeIcon>
-          </Group>
-          <Text size="xs" c="dimmed" mt="sm">
-            Real-time estimate of system-wide risk level. Lower is safer.
-          </Text>
-        </Card>
 
         <Card withBorder radius="md" p="md" className="hover:shadow-lg transition-all duration-300">
           <Group justify="space-between">

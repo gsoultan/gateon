@@ -1646,6 +1646,59 @@ func init() {
 		}
 		return addColumns(db, dialect, column)
 	})
+
+	// ADR 0059. A stored threat says whether it is held against its source.
+	// Observed (a detection a control let through) and unattributed (a threat
+	// its source did not choose to send) were not persisted, and the analysis
+	// engine reads stored threats: it counted both against the address, its
+	// own findings of earlier passes among them. Rows written before this get
+	// what their type says of them (markLegacyThreats).
+	Register(69, "security_threats_held_against_source", func(db *sql.DB, dialect Dialect) error {
+		observed := `ALTER TABLE security_threats ADD COLUMN observed BOOLEAN NOT NULL DEFAULT FALSE`
+		unattributed := `ALTER TABLE security_threats ADD COLUMN unattributed BOOLEAN NOT NULL DEFAULT FALSE`
+		if dialect.Driver == DriverPostgres {
+			observed = `ALTER TABLE security_threats ADD COLUMN IF NOT EXISTS observed BOOLEAN NOT NULL DEFAULT FALSE`
+			unattributed = `ALTER TABLE security_threats ADD COLUMN IF NOT EXISTS unattributed BOOLEAN NOT NULL DEFAULT FALSE`
+		}
+		if err := addColumns(db, dialect, observed, unattributed); err != nil {
+			return err
+		}
+		return markLegacyThreats(db, dialect)
+	})
+}
+
+// legacyObservedThreatTypes are the types only a control that let the request
+// through recorded before migration 69: an audit-only or below-threshold WAF
+// match (ADR 0055), the recognisers, body entropy, behavioural profiling and a
+// device posture change (ADR 0059), and a CORS violation, which the CORS
+// middleware records and serves (added before migration 69 was released,
+// review 3 F3). Frozen: it describes what was written.
+var legacyObservedThreatTypes = []string{
+	"waf_detected", "xss_detected", "sqli_detected", "generic_attack", "gambling_detected",
+	"php_vulnerability", "file_upload_attempt", "high_entropy_payload", "behavioral_anomaly",
+	"api_fuzzing", "probe_detected", "dga_detected", "device_posture_change", "cors_violation",
+}
+
+// markLegacyThreats gives the rows written before migration 69 the flags the
+// gateway would have written: observed for a detection-only type whose row
+// records no refusal, unattributed for a leak found in a response (ADR 0055's
+// data_exposure). A type is the only thing an old row says about it; an
+// analysis-engine finding or a WASM guest's threat cannot be told from one, and
+// is left held -- the engine reads the most recent thousand threats, and these
+// age out of it.
+func markLegacyThreats(db *sql.DB, dialect Dialect) error {
+	observed := dialect.Rebind(`UPDATE security_threats SET observed = TRUE
+		WHERE type = ? AND COALESCE(action_taken, '') NOT IN ('blocked', 'challenged', 'shunned')`)
+	for _, typ := range legacyObservedThreatTypes {
+		if _, err := db.Exec(observed, typ); err != nil {
+			return fmt.Errorf("mark stored %s threats observed: %w", typ, err)
+		}
+	}
+	unattributed := dialect.Rebind(`UPDATE security_threats SET unattributed = TRUE WHERE type = ?`)
+	if _, err := db.Exec(unattributed, "data_exposure"); err != nil {
+		return fmt.Errorf("mark stored data exposures unattributed: %w", err)
+	}
+	return nil
 }
 
 // legacyShunFirstRung is how long the first automatic shun lasted when

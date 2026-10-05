@@ -77,12 +77,7 @@ func IsSecret(key string) bool {
 
 // credentialHeaders are the header names that carry a credential whatever
 // they are set to.
-var credentialHeaders = map[string]bool{
-	"authorization":       true,
-	"proxy-authorization": true,
-	"cookie":              true,
-	"set-cookie":          true,
-}
+var credentialHeaders = []string{"authorization", "proxy-authorization", "cookie", "set-cookie"}
 
 // credentialFragments are the parts of a header or query-parameter name that
 // say its value is a credential: X-Api-Key, X-Auth-Token, X-Session-Id,
@@ -100,17 +95,49 @@ var credentialFragments = []string{
 // where a value would have done. What it cannot catch is a credential in a
 // header whose name gives nothing away (X-Upstream: <token>); ADR 0033 records
 // that residue.
+//
+// It allocates nothing: the telemetry store asks it about every header of
+// every trace it keeps (ADR 0060), and canonical header names are mixed case,
+// which strings.ToLower would copy.
 func IsCredentialName(name string) bool {
-	n := strings.ToLower(strings.TrimSpace(name))
-	if credentialHeaders[n] {
-		return true
+	n := strings.TrimSpace(name)
+	for _, h := range credentialHeaders {
+		if strings.EqualFold(n, h) {
+			return true
+		}
 	}
 	for _, frag := range credentialFragments {
-		if strings.Contains(n, frag) {
+		if containsFold(n, frag) {
 			return true
 		}
 	}
 	return false
+}
+
+// containsFold reports whether s contains the lower-case ASCII string sub,
+// without regard to ASCII case.
+func containsFold(s, sub string) bool {
+	for i := 0; i+len(sub) <= len(s); i++ {
+		if hasLowerPrefixFold(s[i:], sub) {
+			return true
+		}
+	}
+	return false
+}
+
+// hasLowerPrefixFold reports whether s starts with the lower-case ASCII string
+// prefix, without regard to ASCII case.
+func hasLowerPrefixFold(s, prefix string) bool {
+	for j := 0; j < len(prefix); j++ {
+		c := s[j]
+		if 'A' <= c && c <= 'Z' {
+			c += 'a' - 'A'
+		}
+		if c != prefix[j] {
+			return false
+		}
+	}
+	return true
 }
 
 // Held names every entry of a middleware config whose key or value contains

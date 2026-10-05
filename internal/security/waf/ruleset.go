@@ -313,6 +313,19 @@ func LookupRule(id uint32) (RuleInfo, bool) {
 	return RuleInfo{}, false
 }
 
+// RepeatsEarlierDecision reports whether a built-in rule refuses on a decision
+// the gateway already made rather than on anything the request carries: the
+// reputation family, 1910001 (a feed lists the address) and 1910002 (the
+// client's own reputation fell below 20). Such a refusal is recorded and held
+// against nobody, as the reputation blocker's and the feed's own are (ADR
+// 0055): held, every refused retry was a new penalty, and the third blocked the
+// client's browser build on its whole network. This is the one place that says
+// which rules those are; a rule joins by its category.
+func RepeatsEarlierDecision(id uint32) bool {
+	info, ok := LookupRule(id)
+	return ok && info.Category == CategoryReputation
+}
+
 // defaultSpecs is the corpus. Ordering is by category for readability; gwaf
 // sorts by (phase, ID) at compile time, so source order does not affect
 // evaluation.

@@ -81,12 +81,11 @@ copy on the volume is what the gateway reads, so changing `globalConfig`,
 those settings in the dashboard. The seed starts the audit log on, signed, as
 setup does; `globalConfig.audit` overrides it.
 
-**With the setup wizard and `externalDatabase`, choose the same database in the
-wizard's Database step.** Its default is SQLite, and the gateway already has
-the configured database open: the administrator is created there, `global.json`
-is switched to SQLite, and the next start refuses ("the user database has no
-administrator"). This is an open defect (ADR 0056, Consequences); setting up
-through `POST /v1/setup` without a database avoids it.
+**With `externalDatabase`, setup keeps that database.** The wizard shows the
+database the configuration names and offers no other; `POST /v1/setup` naming a
+different one is refused (ADR 0057). To use another database, change
+`externalDatabase` before the first start, or `global.json` on the volume and
+restart, before running setup.
 
 ## Persistence off
 

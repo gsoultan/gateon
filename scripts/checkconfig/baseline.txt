@@ -63,11 +63,20 @@ TlsBindingConfig.cookie_name
 # that never set them (ADR 0044). The dashboard no longer offers them; it shows
 # what runs from GET /v1/waf/effective. They were "read" only by the copy into a
 # route WAF that T7 removed. Needs a field recording an explicit "off".
+# lfi, rce, scanner, sqli, xss joined them when the WAF-hardening "Apply fix"
+# stopped setting them (truth NEW-7): it was their last writer that anything
+# read, and setting them changed nothing. use_crs selects nothing since ADR 0044.
 WafConfig.java
+WafConfig.lfi
 WafConfig.nodejs
 WafConfig.php
 WafConfig.protocol
 WafConfig.ransomware_detection
+WafConfig.rce
+WafConfig.scanner
+WafConfig.sqli
+WafConfig.use_crs
+WafConfig.xss
 # rules_url: the updater cannot be pointed at a mirror or private
 # ruleset. update_interval_hours: the WafConfig one is dead; the identically
 # named IPReputationConfig field is what is actually read.

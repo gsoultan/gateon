@@ -122,3 +122,21 @@ func TestPostureCountsARouteWAFByTheModeItInherits(t *testing.T) {
 		t.Fatalf("coverage = %+v, want the route counted as detecting, as the engine runs it", cov)
 	}
 }
+
+// TestPostureGivesNoBlockingCreditToAWAFThatRunsNoCategory is truth NEW-13 on
+// the resolver the server uses (waf.EffectiveRoute): a route WAF with every
+// attack category off was counted as blocking, with full WAF credit, while
+// SQLi, XSS, LFI and RCE probes reached the backend.
+func TestPostureGivesNoBlockingCreditToAWAFThatRunsNoCategory(t *testing.T) {
+	store := &mockGlobalReg{config: &gateonv1.GlobalConfig{Waf: &gateonv1.WafConfig{Enabled: true}}}
+	pc := postureConfig(context.Background(), postureDeps{globalStore: store})
+	off := map[string]string{}
+	for _, k := range posture.AttackCategoryKeys {
+		off[k] = "false"
+	}
+	pc.Routes = []*gateonv1.Route{{Id: "r", Rule: "PathPrefix(`/`)", Middlewares: []string{"w"}}}
+	pc.Middlewares = map[string]*gateonv1.Middleware{"w": {Id: "w", Type: "waf", Config: off}}
+	if cov := posture.Coverage(pc); cov.Enforcing != 0 || cov.CategoriesOff != 1 {
+		t.Fatalf("coverage = %+v, want the route counted under categoriesOff, not as blocking", cov)
+	}
+}

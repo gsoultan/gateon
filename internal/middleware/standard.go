@@ -18,11 +18,14 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/httputil"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware/security/identity"
 	"github.com/gsoultan/gateon/internal/request"
+	"github.com/gsoultan/gateon/internal/security/redact"
 	"github.com/gsoultan/gateon/internal/telemetry"
 )
 
@@ -171,7 +174,7 @@ func AccessLogSampled(routeID string, sampleRate uint32) Middleware {
 	if sampleRate == 0 {
 		return func(next http.Handler) http.Handler { return next }
 	}
-	accessLogs.max.Store(accessLogMaxPerSecond())
+	accessLogs.setMax(accessLogMaxPerSecond())
 	var counter uint64
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -197,13 +200,16 @@ func AccessLogSampled(routeID string, sampleRate uint32) Middleware {
 				}
 				rs.AccessLogged = true
 			}
-			sampled := sampleRate == 1 || (atomic.AddUint64(&counter, 1)%uint64(sampleRate) == 0)
-			if sampled && accessLogs.allow(start) {
+			if sampleRate != 1 && atomic.AddUint64(&counter, 1)%uint64(sampleRate) != 0 {
+				return
+			}
+			// Counted when the line is written, not when the request began.
+			if now := time.Now(); accessLogs.allow(now) {
 				statusCode := sw.Status
 				if statusCode == 0 {
 					statusCode = http.StatusOK
 				}
-				duration := time.Since(start)
+				duration := now.Sub(start)
 				logger.L.LogInfo("access log",
 					"host", origHost,
 					"method", origMethod,
@@ -245,45 +251,56 @@ func accessLogMaxPerSecond() int64 {
 // request; the access log is a convenience, and is what gives.
 var accessLogs accessLogCap
 
-// accessLogCap counts the access-log lines of the current second. It is
-// approximate at the second's edge -- two requests can both reset it -- and
-// that is the price of no lock on the request path.
+// accessLogCap counts the access-log lines of the current second, exactly:
+// the window and its count move together in one atomic word, and the window
+// only moves forwards (logger.PerSecond). It used to be keyed on the time a
+// request started and reset whenever that time differed from the window it
+// held, so a slow request finishing beside fast ones moved the window back and
+// the next fast one moved it forward, each move starting the count over -- 737
+// lines a second through a cap of 100 (OPS-N2, ADR 0061).
 type accessLogCap struct {
-	max        atomic.Int64
-	second     atomic.Int64
-	written    atomic.Int64
+	window     logger.PerSecond
 	suppressed atomic.Int64
-	minute     atomic.Int64
+	// reported is when the cap last said what it left out, in nanoseconds of
+	// the monotonic clock since accessLogEpoch.
+	reported atomic.Int64
 }
 
-// allow reports whether an access-log line may be written at now.
+// accessLogEpoch is what accessLogCap measures its report interval from; a
+// time from time.Now carries the monotonic clock.
+var accessLogEpoch = time.Now()
+
+// accessLogReportEvery is how often, at most, the cap says how many lines it
+// left out.
+const accessLogReportEvery = time.Minute
+
+// setMax sets the cap; zero lifts it.
+func (c *accessLogCap) setMax(n int64) { c.window.SetMax(n) }
+
+// allow reports whether an access-log line may be written at now, the moment
+// the line would be written.
 func (c *accessLogCap) allow(now time.Time) bool {
-	limit := c.max.Load()
-	if limit <= 0 {
-		return true
+	ok := c.window.Allow(now)
+	if !ok {
+		c.suppressed.Add(1)
 	}
-	sec := now.Unix()
-	if cur := c.second.Load(); cur != sec && c.second.CompareAndSwap(cur, sec) {
-		c.written.Store(0)
-		c.reportSuppressed(sec, limit)
+	if c.suppressed.Load() > 0 {
+		c.reportSuppressed(now)
 	}
-	if c.written.Add(1) <= limit {
-		return true
-	}
-	c.suppressed.Add(1)
-	return false
+	return ok
 }
 
 // reportSuppressed logs, at most once a minute, how many lines the cap left
 // out since it last said so.
-func (c *accessLogCap) reportSuppressed(sec, limit int64) {
-	minute := sec / 60
-	if cur := c.minute.Load(); cur == minute || !c.minute.CompareAndSwap(cur, minute) {
+func (c *accessLogCap) reportSuppressed(now time.Time) {
+	at := int64(now.Sub(accessLogEpoch))
+	last := c.reported.Load()
+	if at-last < int64(accessLogReportEvery) || !c.reported.CompareAndSwap(last, at) {
 		return
 	}
 	if n := c.suppressed.Swap(0); n > 0 {
 		logger.L.LogWarn("access log: lines over the per-second cap were not written; every request is still "+
-			"in the trace store", "not_written", n, "max_per_second", limit, "env", accessLogMaxPerSecondEnv)
+			"in the trace store", "not_written", n, "max_per_second", c.window.Max(), "env", accessLogMaxPerSecondEnv)
 	}
 }
 
@@ -341,10 +358,62 @@ func Metrics(routeID string) Middleware {
 	return MetricsWithService(routeID, "")
 }
 
+// entrypointRoutePrefix starts the route label of the metrics an HTTP
+// entrypoint puts in front of routing, and of a request no route took.
+const entrypointRoutePrefix = "gateon-"
+
+// EntrypointMetrics is the metrics middleware an HTTP entrypoint puts in front
+// of routing. A request a route takes is counted by the route's own metrics,
+// under the route; this one counts it under "gateon-<entrypoint>" in the
+// per-route families only when no route did, so a sum over those families
+// counts every request once. It used to count every request there as well,
+// and every proxied request was in gateon_requests_total, the duration
+// histogram, the byte counters, TTFB and the in-flight gauge twice (OPS-N8,
+// ADR 0061). What the entrypoint saw in all is its own family:
+// gateon_entrypoint_requests_total, gateon_entrypoint_request_duration_seconds
+// and gateon_entrypoint_requests_in_flight.
+func EntrypointMetrics(epLabel string) Middleware {
+	return MetricsWithService(entrypointRoutePrefix+epLabel, "")
+}
+
+// inFlightGauge is the gauge a request is in while this instance serves it:
+// the entrypoint's own family for the entrypoint's instance, so a request a
+// route is serving is not in gateon_requests_in_flight twice.
+func inFlightGauge(route, entrypoint string, isEntrypoint bool) prometheus.Gauge {
+	if isEntrypoint {
+		return telemetry.EntrypointRequestsInFlight.WithLabelValues(entrypoint)
+	}
+	return telemetry.RequestsInFlight.WithLabelValues(route)
+}
+
+// routeSample is what recordRouteSeries needs from one finished request.
+type routeSample struct {
+	route, service, method, status string
+	// bytesIn and bytesOut include a baseline of 256 and 200 bytes for the
+	// request line and headers, and the response headers.
+	bytesIn, bytesOut int64
+	duration, ttfb    time.Duration
+}
+
+// recordRouteSeries records a request in the per-route families: requests,
+// duration, bytes in and out, and time to first byte.
+func recordRouteSeries(s routeSample) {
+	telemetry.RequestsTotal.WithLabelValues(s.route, s.service, s.method, s.status).Inc()
+	telemetry.RequestDurationSeconds.WithLabelValues(s.route, s.service, s.method).Observe(s.duration.Seconds())
+	telemetry.RequestBytesTotal.WithLabelValues(s.route, "in").Add(float64(s.bytesIn))
+	telemetry.RequestBytesTotal.WithLabelValues(s.route, "out").Add(float64(s.bytesOut))
+	if s.ttfb > 0 {
+		telemetry.TTFBSeconds.WithLabelValues(s.route).Observe(s.ttfb.Seconds())
+	}
+}
+
 // MetricsWithService returns a metrics middleware that also records the service label.
 func MetricsWithService(routeID, serviceID string) Middleware {
 	traceRate := traceSampleRate()
 	var traceCounter uint64
+	// The entrypoint's instance (EntrypointMetrics) records a request in the
+	// per-route families only when no route did (ADR 0061).
+	entrypoint, isEntrypoint := strings.CutPrefix(routeID, entrypointRoutePrefix)
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if ShouldSkipMetrics(r) {
@@ -361,8 +430,9 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 			start := time.Now()
 
 			// Track in-flight requests
-			telemetry.RequestsInFlight.WithLabelValues(activeRouteID).Inc()
-			defer telemetry.RequestsInFlight.WithLabelValues(activeRouteID).Dec()
+			inFlight := inFlightGauge(activeRouteID, entrypoint, isEntrypoint)
+			inFlight.Inc()
+			defer inFlight.Dec()
 
 			// Capture original host and path before proxying mutates r.Host/r.URL.
 			origHost := cmp.Or(r.Host, r.URL.Host)
@@ -399,8 +469,6 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 			if counted != nil {
 				reqInSize = counted.n.Load()
 			}
-			// A baseline of 256 bytes accounts for headers and request line.
-			telemetry.RequestBytesTotal.WithLabelValues(activeRouteID, "in").Add(float64(reqInSize + 256))
 
 			respOutSize := sw.BytesWritten
 			if respOutSize < 0 {
@@ -446,8 +514,8 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 			// Trace recording: an active debugger always records (explicit opt-in);
 			// otherwise sample per the tier to bound hot-path cost, except for
 			// requests that failed, which are always kept.
-			debug, hasDebug := r.Context().Value(DebugInfoContextKey).(*DebugInfo)
-			recordDetailed := hasDebug && debug != nil
+			debug := debugInfoOf(r, rs)
+			recordDetailed := debug != nil
 			recordSampled := false
 			if !recordDetailed {
 				recordSampled = shouldRecordTrace(traceRate, &traceCounter, actualStatus)
@@ -574,9 +642,18 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 			}
 
 		skipTrace:
-			// Rich Prometheus metrics
-			telemetry.RequestsTotal.WithLabelValues(activeRouteID, serviceID, methodLabel, statusStr).Inc()
-			telemetry.RequestDurationSeconds.WithLabelValues(activeRouteID, serviceID, methodLabel).Observe(duration.Seconds())
+			if isEntrypoint {
+				telemetry.EntrypointRequestsTotal.WithLabelValues(entrypoint, statusStr).Inc()
+				telemetry.EntrypointRequestDurationSeconds.WithLabelValues(entrypoint).Observe(duration.Seconds())
+			}
+			// The per-route families: a route's metrics always record; the
+			// entrypoint's only a request no route recorded.
+			if !isEntrypoint || once {
+				recordRouteSeries(routeSample{
+					route: activeRouteID, service: serviceID, method: methodLabel, status: statusStr,
+					bytesIn: reqInSize + 256, bytesOut: respOutSize + 200, duration: duration, ttfb: sw.TTFB(),
+				})
+			}
 
 			if once {
 				recordPerRequest(r, perRequestSample{
@@ -588,15 +665,6 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 				// route middleware has passed the request on, so its absence
 				// means the gateway answered without a backend (ADR 0048).
 				telemetry.RecordRequestOutcome(rs != nil && rs.TServiceStart > 0, actualStatus)
-			}
-
-			// Track response body size
-			// Add a baseline of 200 bytes to account for response headers.
-			telemetry.RequestBytesTotal.WithLabelValues(activeRouteID, "out").Add(float64(respOutSize + 200))
-
-			// Track TTFB
-			if ttfb := sw.TTFB(); ttfb > 0 {
-				telemetry.TTFBSeconds.WithLabelValues(activeRouteID).Observe(ttfb.Seconds())
 			}
 		})
 	}
@@ -831,9 +899,12 @@ func Debugger(globalStore config.GlobalConfigStore) Middleware {
 				return
 			}
 
-			maxBodySize := int(conf.Debugger.MaxBodySize)
+			// Bounded by what a trace keeps (ADR 0060): an operator's larger
+			// max_body_size held that much per body per in-flight request, to
+			// store 64 KiB of it.
+			maxBodySize := min(int(conf.Debugger.MaxBodySize), redact.MaxBodyBytes)
 			if maxBodySize <= 0 {
-				maxBodySize = 64 * 1024
+				maxBodySize = redact.MaxBodyBytes
 			}
 
 			// Capture Request Body without consuming it (using TeeReader)
@@ -887,6 +958,18 @@ func Debugger(globalStore config.GlobalConfigStore) Middleware {
 			}
 		})
 	}
+}
+
+// debugInfoOf is what the debugger captured for r: on the request state when
+// there is one -- every request through an entrypoint -- else in the context.
+// Read from the context alone, as the metrics middleware once did, a debugger
+// capture never reached a trace (ADR 0060).
+func debugInfoOf(r *http.Request, rs *RequestState) *DebugInfo {
+	if rs != nil && rs.DebugInfo != nil {
+		return rs.DebugInfo
+	}
+	debug, _ := r.Context().Value(DebugInfoContextKey).(*DebugInfo)
+	return debug
 }
 
 type requestBodyCapture struct {

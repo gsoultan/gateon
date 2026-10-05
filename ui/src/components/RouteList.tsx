@@ -46,6 +46,8 @@ import {
 import type { Route } from "../types/gateon";
 import { useTableDensity } from "../hooks/useTableDensity";
 import { ConfirmDeleteModal } from "./ConfirmDelete";
+import { RouteProblemBadge } from "./RouteProblemBadge";
+import { useRouteProblems } from "../hooks/useRouteProblems";
 
 export default function RouteList({
   limit,
@@ -70,6 +72,8 @@ export default function RouteList({
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "paused">("all");
   const pageSize = 10;
   const density = useTableDensity();
+  // Routes that answer 503 or match nothing (OPS-N4), marked in the list.
+  const { data: problems } = useRouteProblems();
   const isMobile = useIsMobile();
 
   // Debounce the free-text inputs so we don't fire a request on every
@@ -269,6 +273,7 @@ export default function RouteList({
                         </Stack>
                         <Group gap={4}>
                           {route.disabled && <Badge color="gray" size="xs">PAUSED</Badge>}
+                          <RouteProblemBadge problem={problems?.get(route.id)} />
                           {!readOnly && (
                             <Menu position="bottom-end">
                               <Menu.Target>
@@ -453,6 +458,7 @@ export default function RouteList({
                             P: {route.priority}
                           </Badge>
                         )}
+                        <RouteProblemBadge problem={problems?.get(route.id)} />
                       </Group>
                     </Stack>
                   </Table.Td>

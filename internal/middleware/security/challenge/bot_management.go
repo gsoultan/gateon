@@ -77,7 +77,7 @@ func serveBotManagement(cfg BotManagementConfig, next http.Handler, w http.Respo
 	// 4. Everyone else gets the challenge.
 	if cfg.EnableJSChallenge {
 		telemetry.MiddlewareBotManagementTotal.WithLabelValues(cfg.RouteID, "challenge_served").Inc()
-		telemetry.ActiveUnverifiedClientsTotal.Inc()
+		unverifiedClients.served()
 		serveJSChallenge(w, r, challengeFor(cfg.SecretKey, r.UserAgent(), clientIP, time.Now()))
 		return
 	}

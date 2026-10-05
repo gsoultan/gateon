@@ -5,11 +5,13 @@ package challenge
 
 import (
 	"net/http"
+	"sync/atomic"
 	"time"
 
 	"github.com/gsoultan/gateon/internal/middleware/kind"
 	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/telemetry"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 // The challenge page talks to the gateway on the URL it was served for, never
@@ -55,7 +57,6 @@ func serveChallengeRequest(cfg BotManagementConfig, clientIP string, w http.Resp
 // short of the work.
 func handleAnswer(cfg BotManagementConfig, clientIP string, w http.ResponseWriter, r *http.Request) {
 	now := time.Now()
-	telemetry.ActiveUnverifiedClientsTotal.Dec()
 	w.Header().Set("Cache-Control", "no-store")
 	a := answer{
 		id: r.Header.Get(HeaderChallengeID), nonce: r.Header.Get(HeaderChallengeNonce),
@@ -73,6 +74,7 @@ func handleAnswer(cfg BotManagementConfig, clientIP string, w http.ResponseWrite
 	}
 
 	telemetry.MiddlewareBotManagementTotal.WithLabelValues(cfg.RouteID, "challenge_solved").Inc()
+	unverifiedClients.verified()
 	// The pass is a bypass credential for this middleware, so it gets the
 	// same attributes as a session cookie. Secure comes from
 	// request.IsSecure rather than r.TLS: behind a TLS-terminating proxy
@@ -104,6 +106,39 @@ func handleCheck(cfg BotManagementConfig, clientIP string, w http.ResponseWriter
 		return
 	}
 	w.WriteHeader(http.StatusForbidden)
+}
+
+// unverifiedCount backs the clients-held-at-the-challenge gauge (DP-N6). It
+// moves down only for an answer that verified, and never below zero: a
+// verified answer to a challenge served by another instance, or before a
+// restart, has nothing here to take away. The gauge is moved by the same
+// amount as the count, never Set from it, so concurrent changes cannot leave
+// it showing a stale value.
+type unverifiedCount struct {
+	n     atomic.Int64
+	gauge prometheus.Gauge
+}
+
+var unverifiedClients = &unverifiedCount{gauge: telemetry.ActiveUnverifiedClientsTotal}
+
+// served counts a challenge handed out.
+func (c *unverifiedCount) served() {
+	c.n.Add(1)
+	c.gauge.Inc()
+}
+
+// verified counts a challenge answered with the work done.
+func (c *unverifiedCount) verified() {
+	for {
+		n := c.n.Load()
+		if n <= 0 {
+			return
+		}
+		if c.n.CompareAndSwap(n, n-1) {
+			c.gauge.Dec()
+			return
+		}
+	}
 }
 
 // challengeMethod is the method the page's requests use: the challenged

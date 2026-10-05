@@ -1,0 +1,12 @@
+# Global security settings (scripts/checkconfig/globals.go) with no row yet in
+# internal/router/global_setting_effects_test.go. Same note rules as
+# effects-baseline.txt: "unproven: <why>", "INERT <finding>", or "proven by
+# TestX" naming a test that builds the route chain through the factory or the
+# router.
+#
+# Format: field  # note
+
+security_advanced.tarpit.delay_base_ms  # unproven: its effect is a delay; the registry records answers, not time
+security_advanced.tarpit.delay_max_ms  # unproven: its effect is a delay; the registry records answers, not time
+security_advanced.tarpit.score_threshold  # unproven: its effect is a delay; the registry records answers, not time
+security_advanced.entropy.threshold  # unproven: detection only -- it records a threat and forwards the request, so the answer does not change

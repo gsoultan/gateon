@@ -32,7 +32,9 @@ import (
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/security/mitigation"
+	"github.com/gsoultan/gateon/internal/security/redact"
 	"github.com/gsoultan/gateon/internal/syncutil"
+	"github.com/gsoultan/gateon/internal/telemetry/blocklist"
 	"github.com/gsoultan/gateon/internal/telemetry/lookupgate"
 	"github.com/gsoultan/gateon/internal/telemetry/repid"
 	"github.com/gsoultan/gateon/internal/telemetry/tracebudget"
@@ -75,6 +77,10 @@ const (
 	// and the rest of it was sent. It is not a mitigating action: nothing was
 	// refused, and the record is about the response, not a client.
 	ActionRedacted = "redacted"
+	// ActionAborted is recorded when a response was found to need refusing
+	// after its headers had been sent: it was cut (a reset, not a clean end),
+	// and what had already left was not recalled. It is not a mitigating action.
+	ActionAborted = "aborted"
 
 	statusUnmitigated = "unmitigated"
 )
@@ -95,44 +101,21 @@ func isMitigatingAction(action string) bool {
 	}
 }
 
-// credentialHeaders name the headers whose values are credentials -- by
-// standard, or by a convention common enough to assume -- lower-cased. A trace
-// keeps that one was sent, which is what a debugging session needs, and not
-// what it said: the trace store is read from the dashboard, kept for days, and
-// with the trace archive on, for months.
-var credentialHeaders = [...]string{
-	"authorization",
-	"proxy-authorization",
-	"cookie",
-	"set-cookie",
-	"x-api-key",
-	"x-auth-token",
-	"x-access-token",
-	"x-refresh-token",
-	"x-amz-security-token",      // AWS STS session token
-	"x-goog-api-key",            // Google APIs
-	"api-key",                   // Azure OpenAI and Cognitive Services
-	"ocp-apim-subscription-key", // Azure API Management
-	"x-functions-key",           // Azure Functions
-	"x-vault-token",             // HashiCorp Vault
-	"private-token",             // GitLab
-	"x-csrf-token",
-	"x-xsrf-token",
-}
-
-func isCredentialHeader(name string) bool {
-	for _, h := range credentialHeaders {
-		if len(name) == len(h) && strings.EqualFold(name, h) {
-			return true
-		}
-	}
-	return false
-}
-
 // RedactHeaders replaces the value of each credential header in a header
 // block -- one "Name: value" per line, as FormatHeaders writes it -- with
-// [REDACTED]. It runs on the store's goroutine, and builds into a pooled
-// strings.Builder rather than splitting the block.
+// [REDACTED], and masks the credentials in the query string of each header
+// whose value is a URI (Referer, Location, X-Forwarded-Uri; redact.URI). It
+// runs on the store's goroutine, and builds into a pooled strings.Builder
+// rather than splitting the block.
+//
+// A trace keeps that a credential was sent, which is what a debugging session
+// needs, and not what it said: the trace store is read from the dashboard,
+// kept for days, and with the trace archive on, for months. Which headers carry
+// one is redact.IsCredentialHeader -- Authorization, Cookie, and anything named
+// like a key, token, secret, session or signature -- the vocabulary every other
+// redaction uses (ADR 0060). An explicit list of seventeen names preceded it,
+// and X-Session-Token, X-Amz-Signature and every vendor header nobody had
+// thought of were stored as sent.
 func RedactHeaders(headers string) string {
 	if headers == "" {
 		return ""
@@ -141,6 +124,10 @@ func RedactHeaders(headers string) string {
 	sb := builderPool.Get().(*strings.Builder)
 	sb.Reset()
 	defer builderPool.Put(sb)
+	// One buffer of the block's size: the result is rarely longer, and
+	// growing by doubling from empty allocated five times for a browser's
+	// headers.
+	sb.Grow(len(headers))
 
 	start := 0
 	for {
@@ -149,12 +136,7 @@ func RedactHeaders(headers string) string {
 		if end != -1 {
 			line = headers[start : start+end]
 		}
-		if colon := strings.IndexByte(line, ':'); colon > 0 && isCredentialHeader(line[:colon]) {
-			sb.WriteString(line[:colon])
-			sb.WriteString(": [REDACTED]")
-		} else {
-			sb.WriteString(line)
-		}
+		writeRedactedHeaderLine(sb, line)
 		if end == -1 {
 			break
 		}
@@ -162,6 +144,26 @@ func RedactHeaders(headers string) string {
 		start += end + 1
 	}
 	return sb.String()
+}
+
+// writeRedactedHeaderLine writes one "Name: value" line of a header block with
+// its credential, if any, masked.
+func writeRedactedHeaderLine(sb *strings.Builder, line string) {
+	colon := strings.IndexByte(line, ':')
+	switch {
+	case colon <= 0:
+		sb.WriteString(line)
+	case redact.IsCredentialHeader(line[:colon]):
+		sb.WriteString(line[:colon])
+		sb.WriteString(": " + redact.Mask)
+	case redact.IsURIHeader(line[:colon]):
+		sb.WriteString(line[:colon+1])
+		sb.WriteString(redact.URI(line[colon+1:]))
+	default:
+		// By shape: a token under a name that does not say so (ADR 0060).
+		sb.WriteString(line[:colon+1])
+		sb.WriteString(redact.HeaderValue(line[:colon], line[colon+1:]))
+	}
 }
 
 // ParseHeaders parses a plain text header block (formatted by FormatHeaders) back into a map.
@@ -453,10 +455,12 @@ type TraceRecord struct {
 
 	// Refusal is why the gateway itself refused the request, where it knows
 	// (request.Refusal): "token" when its own verification refused a token the
-	// request presented. The analysis reads summary traces, and this is how it
-	// tells a poller re-presenting an expired session or bearer token over
-	// POST from a password guess, which is the same POST answered 401. Set
-	// only from the mark the refusing code wrote, never from the headers.
+	// request presented, "mitigation" for a shun or block, "authentication"
+	// when its authentication refused it otherwise (ADR 0059). The analysis
+	// reads summary traces, and this is how it tells a poller re-presenting an
+	// expired session or bearer token over POST from a password guess, which
+	// is the same POST answered 401. Set only from the mark the refusing code
+	// wrote, never from the headers.
 	// omitempty: absent is "", which is how every other trace reads.
 	Refusal string `json:"refusal,omitempty"`
 
@@ -504,15 +508,18 @@ type SecurityThreat struct {
 	// shipped like any other threat, and held against nobody -- no reputation
 	// penalty, no escalation to a fingerprint or address block, no correlation
 	// signal -- because the only identity it carries is the visitor's, and each
-	// of those would be a ban on the visitor. Not persisted; the threat's
-	// Details say it instead.
+	// of those would be a ban on the visitor. Persisted since migration 69, so
+	// the analysis engine can tell it from a stored threat.
 	Unattributed bool `json:"unattributed,omitzero"`
 	// Observed marks a match a control recorded and did not act on: a WAF in
-	// audit-only mode, or a WAF match the engine scored below the route's
-	// blocking threshold. It is recorded, counted, broadcast and shipped, and
-	// held against nobody -- the operator has said not to act on it, or the
-	// control itself judged it short of a refusal, so it is not evidence
-	// (ADR 0025, 0055). Not persisted; the type (waf_detected) says it.
+	// audit-only mode, a WAF match the engine scored below the route's
+	// blocking threshold, and every detection-only control -- the XSS, SQLi
+	// and threat recognisers, body entropy, behavioural profiling, a device
+	// posture change, a WASM guest, the analysis engine's own findings. It is
+	// recorded, counted, broadcast and shipped, and held against nobody -- the
+	// operator has said not to act on it, or the control let the request
+	// through, so it is not evidence (ADR 0025, 0055, 0059). Persisted since
+	// migration 69.
 	Observed bool `json:"observed,omitzero"`
 	// Internal fields for lazy formatting in background worker
 	rawReqHeader  map[string][]string
@@ -528,6 +535,12 @@ const (
 	threatReputationBlock = "reputation_block"
 )
 
+// ThreatWAFReputationBlock is a WAF refusal by one of its reputation rules
+// (secwaf.RepeatsEarlierDecision): a feed listing or the client's own low
+// score, refused again by the WAF. It is a WAF block in every count, and like
+// the reputation blocker's refusal it is held against nobody.
+const ThreatWAFReputationBlock = "waf_reputation_block"
+
 // HeldAgainstSource reports whether a threat may count against the client that
 // sent it: lower its reputation, count towards a fingerprint block or an
 // address shun, be a correlation signal, or trigger a playbook's block.
@@ -539,7 +552,8 @@ const (
 //     load, loopback, or a data leak in a response it was served).
 //   - Observed: a control recorded a match and did not act on it.
 //   - A refusal that follows an earlier decision (a shun or feed listing, a
-//     fingerprint block, a reputation refusal). It is the gateway's own
+//     fingerprint block, a reputation refusal, the WAF's reputation rules
+//     refusing the same listing or score). It is the gateway's own
 //     decision coming back: counting it made a refused client's every retry a
 //     new penalty, and a feed listing a correlation signal (ADR 0044).
 func (st *SecurityThreat) HeldAgainstSource() bool {
@@ -547,10 +561,19 @@ func (st *SecurityThreat) HeldAgainstSource() bool {
 		return false
 	}
 	switch st.Type {
-	case typeIPMitigation, typeUserMitigation, threatIPShunning, threatReputationBlock:
+	case typeIPMitigation, typeUserMitigation, threatIPShunning, threatReputationBlock,
+		ThreatWAFReputationBlock:
 		return false
 	}
 	return true
+}
+
+// RefusedWhenRecorded reports whether the request path refused, challenged or
+// shunned when it recorded the threat. Mitigated says more of a stored threat
+// read back -- that its address or fingerprint is blocked now, whatever the
+// threat was -- which is the dashboard's question, not the analysis engine's.
+func (st *SecurityThreat) RefusedWhenRecorded() bool {
+	return isMitigatingAction(st.ActionTaken)
 }
 
 type UserMitigation struct {
@@ -626,7 +649,12 @@ type pathStatsStore struct {
 	userMitigationCache         *lru.ARCCache
 	// lookups reads the block list on the request path under a deadline,
 	// one query per key and a bounded number in flight (ADR 0054).
-	lookups           *blockLookups
+	lookups *blockLookups
+	// blocks is every block in force, read at start-up and every minute, so
+	// one is enforced without a lookup (ADR 0058); blockListLoaded is closed
+	// once the first read has ended.
+	blocks            *blocklist.List
+	blockListLoaded   chan struct{}
 	traceStoreEnabled atomic.Bool
 	// traceGuard stops trace writes while the disk holding the store is
 	// nearly full and backs Pebble off a full one (ADR 0049).
@@ -668,13 +696,23 @@ func PathStatsStoreReady() bool {
 // databaseURL: sqlite:path, postgres://..., mysql://..., mariadb://...
 // Plain path (e.g. "gateon.db") is treated as SQLite.
 // It is safe to call multiple times; only the first call takes effect.
+//
+// It returns once the block list has been read (ADR 0058), or
+// blockListStartWait has passed, waiting outside the store lock so nothing
+// that asks for the store waits with it.
 func InitPathStatsStore(databaseURL string, retentionDays int) error {
 	storeMu.Lock()
-	defer storeMu.Unlock()
 	if store != nil {
+		storeMu.Unlock()
 		return nil
 	}
-	return initStore(databaseURL, retentionDays)
+	err := initStore(databaseURL, retentionDays)
+	st := store
+	storeMu.Unlock()
+	if err == nil && st != nil {
+		st.awaitBlockList()
+	}
+	return err
 }
 
 // resolveTraceDir picks the directory for the Pebble trace store.
@@ -782,12 +820,21 @@ func initStore(databaseURL string, retentionDays int) error {
 		st.userMitigationCache = cache
 	}
 	st.lookups = newBlockLookups(st)
+	st.blocks = blocklist.New(blockListBounds)
+	st.blockListLoaded = make(chan struct{})
 
 	if err := db.Migrate(database, dialect); err != nil {
 		_ = pdb.Close()
 		_ = database.Close()
 		return fmt.Errorf("failed to migrate database: %w", err)
 	}
+
+	// Seed today's counters before the store is published, so no threat can
+	// be counted ahead of the seed. Seeded from dailyResetLoop's goroutine, the
+	// seed's Store overwrote whatever the loop had already counted: the first
+	// threats after a start were lost from "mitigated today", and
+	// TestGetMitigatedRolling24h failed whenever the seed ran late.
+	st.syncDailyBaselines(false)
 
 	// Set global store AFTER migrations are complete to ensure any
 	// background activity (triggered by loops) uses a fully migrated DB.
@@ -805,6 +852,7 @@ func initStore(databaseURL string, retentionDays int) error {
 
 	st.wg.Go(st.loop)
 	st.wg.Go(st.dailyResetLoop)
+	st.wg.Go(func() { st.blockListLoop(st.blockListLoaded) })
 
 	return nil
 }
@@ -994,11 +1042,8 @@ func (s *pathStatsStore) dailyResetLoop() {
 	ticker := time.NewTicker(mitigationEpochLength)
 	defer ticker.Stop()
 
-	// Initial seed - load current daily totals from the database into the
-	// in-memory atomic counters. This ensures "Mitigated Today" and traffic
-	// headline figures survive process restarts.
-	s.syncDailyBaselines(false)
-
+	// The initial seed of today's counters runs in InitPathStatsStore, before
+	// anything can count.
 	for {
 		select {
 		case <-s.stopCh:
@@ -1094,7 +1139,7 @@ func (s *pathStatsStore) domainUpsertStmt(tx *sql.Tx) (*sql.Stmt, error) {
 }
 
 func (s *pathStatsStore) threatInsertStmt(tx *sql.Tx) (*sql.Stmt, error) {
-	q := s.dialect.Rebind("INSERT INTO security_threats (id, type, source_ip, fingerprint, score, details, timestamp, ja4, ja4h, route_id, request_uri, category, severity, asn, action_taken, country_code, latitude, longitude, request_headers, request_body, response_headers, response_body, user_agent, method, confidence, entropy, cluster_size, recommendation, triggered_rules, reputation, source_ips) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+	q := s.dialect.Rebind("INSERT INTO security_threats (id, type, source_ip, fingerprint, score, details, timestamp, ja4, ja4h, route_id, request_uri, category, severity, asn, action_taken, country_code, latitude, longitude, request_headers, request_body, response_headers, response_body, user_agent, method, confidence, entropy, cluster_size, recommendation, triggered_rules, reputation, source_ips, observed, unattributed) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
 	return tx.Prepare(q)
 }
 
@@ -1145,7 +1190,7 @@ func threatInsertArgs(th *SecurityThreat, sourceIPs string) []any {
 		th.JA4, th.JA4H, th.RouteID, th.RequestURI, th.Category, th.Severity, th.ASN, th.ActionTaken,
 		th.CountryCode, th.Latitude, th.Longitude, th.RequestHeaders, th.RequestBody,
 		th.ResponseHeaders, th.ResponseBody, th.UserAgent, th.Method, th.Confidence, th.Entropy,
-		th.ClusterSize, th.Recommendation, th.TriggeredRules, th.Reputation, sourceIPs}
+		th.ClusterSize, th.Recommendation, th.TriggeredRules, th.Reputation, sourceIPs, th.Observed, th.Unattributed}
 	for i, arg := range args {
 		if text, ok := arg.(string); ok {
 			args[i] = db.SafeText(text)
@@ -1888,9 +1933,15 @@ func (s *pathStatsStore) processTrace(tr *TraceRecord) {
 		tr.rawRespHeader = nil // Release map for GC
 	}
 
-	// Redact sensitive headers in the background
+	// Every trace passes here before it is stored, and so before the
+	// dashboard, the trace archive or a threat built from it can read it: the
+	// one place its credentials are taken out (ADR 0060). Off the request path.
 	tr.RequestHeaders = RedactHeaders(tr.RequestHeaders)
 	tr.ResponseHeaders = RedactHeaders(tr.ResponseHeaders)
+	tr.RequestURI = redact.URI(tr.RequestURI)
+	tr.Referer = redact.URI(tr.Referer)
+	tr.RequestBody = redact.Body(tr.RequestBody)
+	tr.ResponseBody = redact.Body(tr.ResponseBody)
 }
 
 // RecordSecurityThreatWithJA4 is a helper that populates JA4 and JA4H from the request before recording.
@@ -1981,8 +2032,10 @@ const (
 	typeBruteForce = "brute_force_attempt"
 )
 
-// normalizeThreatHeaders formats the captured headers and redacts them before
-// anything persists or broadcasts the threat. The raw maps are dropped so the
+// normalizeThreatHeaders formats the captured headers and takes every
+// credential out of the threat before anything persists, broadcasts, alerts,
+// ships or correlates it (ADR 0060): header values, the query string of its
+// request URI, its bodies, and its details. The raw maps are dropped so the
 // pooled record does not hold request memory alive.
 func normalizeThreatHeaders(st *SecurityThreat) {
 	if st.rawReqHeader != nil {
@@ -1995,8 +2048,12 @@ func normalizeThreatHeaders(st *SecurityThreat) {
 	}
 	st.RequestHeaders = RedactHeaders(st.RequestHeaders)
 	st.ResponseHeaders = RedactHeaders(st.ResponseHeaders)
-	// Details is redacted too: it frequently quotes the offending header back.
-	st.Details = RedactHeaders(st.Details)
+	// Details is redacted too: it frequently quotes the offending header back,
+	// and sometimes the parameter.
+	st.Details = redact.Text(RedactHeaders(st.Details))
+	st.RequestURI = redact.URI(st.RequestURI)
+	st.RequestBody = redact.Body(st.RequestBody)
+	st.ResponseBody = redact.Body(st.ResponseBody)
 }
 
 // escalateMitigation blocks the actor behind a threat, not just the request.
@@ -2074,7 +2131,8 @@ type funnelRule struct {
 var mitigationFunnelRules = []funnelRule{
 	{
 		matches: func(cat, typ string) bool {
-			return cat == "waf" || typ == "waf_block" || typ == "waf_blocked" || typ == "waf_violation"
+			return cat == "waf" || typ == "waf_block" || typ == "waf_blocked" || typ == "waf_violation" ||
+				typ == ThreatWAFReputationBlock
 		},
 		record: func(routeID, typ string, st *SecurityThreat) {
 			// firstRuleID, not TriggeredRules. The label is declared rule_id
@@ -2194,7 +2252,10 @@ func (s *pathStatsStore) processThreat(st *SecurityThreat) {
 	if isMitigated {
 		recordMitigationFunnel(st)
 	}
-	if s.scoreCache != nil {
+	// The per-address score the alerting manager's autonomous shun reads
+	// (GetIPThreatScore). A threat not held against its source -- one a
+	// control let through, among others -- is no evidence towards it either.
+	if s.scoreCache != nil && st.HeldAgainstSource() {
 		current, ok := s.scoreCache.Get(st.SourceIP)
 		score := st.Score
 		if ok {
@@ -2261,13 +2322,13 @@ func IsIPUnmitigated(ip string) bool {
 	// holds "not shunned" for every address IPMitigation looked up and found
 	// no row for, which says nothing about a release.
 	if s.unmitigatedCache != nil {
-		if val, ok := s.unmitigatedCache.Get(ip); ok {
+		if val, ok := s.unmitigatedCache.Get(addressCacheKey(ip)); ok {
 			if until, isUntil := val.(shunUntil); isUntil && until.active() {
 				return false
 			}
 		}
 	}
-	row, err := s.readIPShun(ip)
+	row, err := s.readIPShun(repid.AddressKey(ip))
 	return err == nil && row.held(time.Now())
 }
 
@@ -2308,7 +2369,7 @@ func IsIPMitigatedContext(ctx context.Context, ip string) bool {
 	if blocked, ok := s.cachedIPMitigation(ip); ok {
 		return blocked
 	}
-	until, err := s.lookups.ip.Do(ctx, ip)
+	until, err := s.lookups.ip.Do(ctx, repid.AddressKey(ip))
 	if err != nil {
 		mitigationLookupFailed(mitigationLookupIP, err)
 		return false
@@ -2331,22 +2392,44 @@ func IPMitigationFromCache(ip string) (blocked, ok bool) {
 }
 
 func (s *pathStatsStore) cachedIPMitigation(ip string) (blocked, ok bool) {
-	if s.unmitigatedCache == nil {
-		return false, false
+	age := answerNone
+	if s.unmitigatedCache != nil {
+		if val, hit := s.unmitigatedCache.Get(addressCacheKey(ip)); hit {
+			blocked, age = cachedIPAnswer(val)
+		}
 	}
-	val, hit := s.unmitigatedCache.Get(ip)
-	if !hit {
-		return false, false
-	}
-	blocked, age := cachedIPAnswer(val)
-	switch age {
-	case answerFresh:
+	switch {
+	case age == answerFresh:
 		return blocked, true
-	case answerStale:
-		s.lookups.ip.Refresh(ip)
+	case !blocked && s.listedIPBlock(ip):
+		// The block list holds a shun the cache does not know of: one read
+		// before a restart, or written on another node since this answer
+		// (ADR 0058). Enforced without a lookup, whether or not one could run.
+		return true, true
+	case age == answerStale:
+		s.lookups.ip.Refresh(repid.AddressKey(ip))
 		return blocked, true
 	}
 	return false, false
+}
+
+// addressCacheKey is what the enforcement cache keeps ip's answer under:
+// repid.Address's key, in a form the request path builds without formatting
+// text -- plain IPv4 text as it is, and an IPv6 address as the netip.Addr of
+// its /64, which costs a parse and the one allocation the cache's interface
+// key cost already (ADR 0058). A v4-mapped address is its IPv4 text.
+func addressCacheKey(ip string) any {
+	if strings.IndexByte(ip, ':') < 0 {
+		return ip
+	}
+	a, ok := repid.Address(ip)
+	switch {
+	case !ok:
+		return ip
+	case a.Is4():
+		return a.String()
+	}
+	return a
 }
 
 // cachedIPAnswer reads what the cache holds for an address: whether it is
@@ -2381,7 +2464,7 @@ func (s *pathStatsStore) lookupIPShun(ctx context.Context, ip string) (shunUntil
 	since := s.lookups.writes.Load()
 	until, err := s.readIPShunUntil(ctx, ip)
 	if err == nil {
-		s.lookups.keep(s.unmitigatedCache, ip, ipAnswerToCache(until), since)
+		s.lookups.keep(s.unmitigatedCache, addressCacheKey(ip), ipAnswerToCache(until), since)
 	}
 	return until, err
 }
@@ -2669,7 +2752,7 @@ func ShunAutomatically(ip, reason string) (ShunResult, error) {
 		return ShunResult{Outcome: ShunExempt}, nil
 	}
 	now := time.Now().UTC().Truncate(time.Second)
-	prev, err := s.readIPShun(ip)
+	prev, err := s.readIPShun(repid.AddressKey(ip))
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return ShunResult{}, err
 	}
@@ -2685,7 +2768,7 @@ func ShunAutomatically(ip, reason string) (ShunResult, error) {
 // applyAutoShun writes ip's automatic shun until then and makes it take
 // effect: the cache the request path reads, and a leased kernel entry.
 func (s *pathStatsStore) applyAutoShun(ip, reason string, now, until time.Time) (ShunResult, error) {
-	written, err := s.writeAutoShun(ip, reason, now, until)
+	written, err := s.writeAutoShun(repid.AddressKey(ip), reason, now, until)
 	if err != nil {
 		logger.Default().LogError("failed to record an automatic shun", "ip", ip, "error", err)
 		return ShunResult{}, err
@@ -2700,8 +2783,9 @@ func (s *pathStatsStore) applyAutoShun(ip, reason string, now, until time.Time) 
 	}
 	s.lookups.noteWrite()
 	if s.unmitigatedCache != nil {
-		s.unmitigatedCache.Add(ip, shunUntil(until.UnixNano()))
+		s.unmitigatedCache.Add(addressCacheKey(ip), shunUntil(until.UnixNano()))
 	}
+	s.noteIPBlock(ip, until.UnixNano())
 	// An automatic shun -- an SSH brute-forcer, a scanner -- reaches open L4
 	// sessions too, not only connections accepted after it (ADR 0036).
 	// ShunAutomatically already refused loopback and the allowlist, so the
@@ -2843,13 +2927,14 @@ func markIPMitigated(ip string, reason string, duration time.Duration) error {
 	// name the same instant.
 	now := time.Now().UTC().Truncate(time.Second)
 	cacheEnd := shunForever
+	key := repid.AddressKey(ip)
 	var err error
 	if duration > 0 {
 		until := now.Add(duration)
 		cacheEnd = shunUntil(until.UnixNano())
-		_, err = s.db.Exec(s.dialect.Rebind(QueryMarkIPMitigatedFor), ip, reason, sqlUTC(now), sqlUTC(until))
+		_, err = s.db.Exec(s.dialect.Rebind(QueryMarkIPMitigatedFor), key, reason, sqlUTC(now), sqlUTC(until))
 	} else {
-		_, err = s.db.Exec(s.dialect.Rebind(QueryMarkIPMitigated), ip, reason, sqlUTC(now))
+		_, err = s.db.Exec(s.dialect.Rebind(QueryMarkIPMitigated), key, reason, sqlUTC(now))
 	}
 	if err != nil {
 		logger.Default().LogError("failed to mark IP as mitigated", "ip", ip, "error", err)
@@ -2868,7 +2953,10 @@ func markIPMitigated(ip string, reason string, duration time.Duration) error {
 		s.lookups.noteWrite()
 	}
 	if err == nil && s.unmitigatedCache != nil {
-		s.unmitigatedCache.Add(ip, cacheEnd)
+		s.unmitigatedCache.Add(addressCacheKey(ip), cacheEnd)
+	}
+	if err == nil {
+		s.noteIPBlock(ip, int64(cacheEnd))
 	}
 
 	// A block reaches the entrypoints' open sessions, not only connections
@@ -2917,7 +3005,8 @@ func MarkIPUnmitigated(ip string) error {
 	// The release time is bound in UTC rather than taken from the database's
 	// CURRENT_TIMESTAMP, which Postgres writes in the server's zone into a
 	// column without one: the hold is measured from it.
-	_, err := s.db.Exec(s.dialect.Rebind(QueryReleaseIPMitigation), sqlUTC(time.Now()), ip)
+	key := repid.AddressKey(ip)
+	_, err := s.db.Exec(s.dialect.Rebind(QueryReleaseIPMitigation), sqlUTC(time.Now()), key)
 	if err != nil {
 		logger.Default().LogError("failed to mark IP as unmitigated", "ip", ip, "error", err)
 	}
@@ -2930,12 +3019,15 @@ func MarkIPUnmitigated(ip string) error {
 		s.lookups.noteWrite()
 	}
 	if err == nil && s.unmitigatedCache != nil {
-		s.unmitigatedCache.Add(ip, notBlocked())
+		s.unmitigatedCache.Add(addressCacheKey(ip), notBlocked())
+	}
+	if err == nil {
+		s.noteIPBlock(ip, blocklist.Released)
 	}
 	// A release is a ruling on the evidence that earned the shun, so none of
 	// it may count towards another (ADR 0029).
 	if err == nil {
-		forgetAddressEvidence(ip)
+		forgetAddressEvidence(key)
 	}
 
 	// Real-time eBPF synchronization to restore access immediately
@@ -3081,10 +3173,14 @@ func (s *pathStatsStore) cachedUserMitigation(ja4plus string) (blocked, ok bool)
 	// request, which put a database round trip on every request a blocked
 	// client made (dataplane F7).
 	blocked, age := s.cachedUserAnswer(ja4plus)
-	switch age {
-	case answerFresh:
+	switch {
+	case age == answerFresh:
 		return blocked, true
-	case answerStale:
+	case !blocked && s.blocks.HasKeys() && s.blocks.KeyBlocked(ja4plus):
+		// 3. The block list holds a block the cache does not know of (ADR
+		// 0058), enforced without a lookup.
+		return true, true
+	case age == answerStale:
 		s.lookups.user.Refresh(ja4plus)
 		return blocked, true
 	}
@@ -3210,7 +3306,7 @@ func (l *blockLookups) noteWrite() { l.writes.Add(1) }
 // this node since the lookup began, which may have read the database before
 // it. Then the entry is dropped rather than kept over the write's own, and the
 // next request reads the database again. Rare: blocks are.
-func (l *blockLookups) keep(c *lru.ARCCache, key string, answer any, since uint64) {
+func (l *blockLookups) keep(c *lru.ARCCache, key, answer any, since uint64) {
 	if c == nil {
 		return
 	}
@@ -3278,6 +3374,202 @@ func WaitBlockLookupsForTest() {
 	if s := getStore(); s != nil {
 		s.lookups.ip.Wait()
 		s.lookups.user.Wait()
+	}
+}
+
+// The block list (ADR 0058): every block in force, read at start-up and every
+// blockListRefreshEvery, so a block is enforced without a lookup -- after a
+// restart, and while the lookups are saturated or the database does not
+// answer -- which the cache, learning blocks one lookup at a time, could not.
+const (
+	// blockListRefreshEvery is how often the list is read again: the epoch a
+	// cached answer is trusted for, so a block or release written on another
+	// node reaches the list as soon as it reaches the cache.
+	blockListRefreshEvery = mitigationEpochLength
+	// blockListReadTimeout bounds one read where the driver honours it.
+	blockListReadTimeout = 30 * time.Second
+	// blockListStartWait is how long opening the store waits for the first
+	// read. The database answered the migrations a moment before; one that
+	// stops answering now does not hold start-up longer than this, and the
+	// list is read on the next refresh.
+	blockListStartWait = 5 * time.Second
+)
+
+// blockListBounds is what the list holds: 20,000 address shuns (an IPv4
+// address or IPv6 /64 and an end; 1.3 MB at the bound, measured) and 20,000
+// fingerprint blocks (a key of at most 128 bytes -- repid.For writes under 100
+// -- and an end; 2.8 MB at the bound with keys of that length, about 3.7 MB
+// with every key at 128): at most 5 MB for one read, and a refresh holds two
+// reads for a moment. A list larger than that is read
+// newest first and the rest is left to the lookups, as before the list
+// existed (reported in gateon_mitigation_block_list_complete). Not a
+// tunable: it is a bound on an attack's worth of blocks, not a size an
+// operator chooses. A var so a test can make it small.
+var blockListBounds = blocklist.Bounds{Entries: 20_000, KeyBytes: 128, Edits: 4_096}
+
+var (
+	// BlockListEntries is how many blocks the last read of the block list
+	// holds, by kind ("ip" or "user").
+	BlockListEntries = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "gateon_mitigation_block_list_entries",
+		Help: "Blocks in force this node enforces without a database lookup, by kind (ip, user), as of the last read.",
+	}, []string{"kind"})
+	// BlockListComplete is 1 while the block list holds every block in force
+	// of a kind, and 0 when there were more than blockListBounds.Entries: the
+	// oldest are then enforced only by a lookup.
+	BlockListComplete = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "gateon_mitigation_block_list_complete",
+		Help: "1 if the block list holds every block in force of a kind (ip, user); 0 if some are enforced only by a database lookup.",
+	}, []string{"kind"})
+)
+
+// blockListLoop reads the block list at once, closes loaded, and reads it
+// again every blockListRefreshEvery until the store stops.
+func (s *pathStatsStore) blockListLoop(loaded chan<- struct{}) {
+	complete := s.readBlockList(true)
+	close(loaded)
+	ticker := time.NewTicker(blockListRefreshEvery)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-s.stopCh:
+			return
+		case <-ticker.C:
+			complete = s.readBlockList(complete)
+		}
+	}
+}
+
+// readBlockList reads every block in force into the list. A read that fails
+// leaves the last one in force -- its automatic shuns still lapse when they
+// end -- and is logged. It returns whether the list holds every block,
+// logging when that changes from wasComplete.
+func (s *pathStatsStore) readBlockList(wasComplete bool) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), blockListReadTimeout)
+	defer cancel()
+	t := s.blocks.Begin()
+	b := s.blocks.NewBase()
+	err := s.readIPShunsInto(ctx, b)
+	if err == nil {
+		err = s.readUserBlocksInto(ctx, b)
+	}
+	if err != nil {
+		logger.Default().LogError("block list: read failed; enforcing the last list read", "error", err)
+		return wasComplete
+	}
+	s.blocks.Replace(t, b)
+	ips, keys, ipsComplete, keysComplete := s.blocks.Size()
+	BlockListEntries.WithLabelValues(mitigationLookupIP).Set(float64(ips))
+	BlockListEntries.WithLabelValues(mitigationLookupUser).Set(float64(keys))
+	BlockListComplete.WithLabelValues(mitigationLookupIP).Set(boolGauge(ipsComplete))
+	BlockListComplete.WithLabelValues(mitigationLookupUser).Set(boolGauge(keysComplete))
+	complete := ipsComplete && keysComplete
+	if wasComplete && !complete {
+		logger.Default().LogWarn("block list: more blocks in force than it holds; the oldest are enforced only by a lookup",
+			"bound", blockListBounds.Entries)
+	}
+	return complete
+}
+
+func boolGauge(b bool) float64 {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+// readIPShunsInto adds every address shun in force to b, newest first. A row
+// whose key is not an address, or whose end does not scan, is left to the
+// lookup, which reads it as it always has.
+func (s *pathStatsStore) readIPShunsInto(ctx context.Context, b *blocklist.Base) error {
+	rows, err := s.db.QueryContext(ctx, s.dialect.Rebind(QueryBlockListIPShuns), sqlUTC(time.Now()), blockListBounds.Entries+1)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var ip string
+		var end sql.NullTime
+		if rows.Scan(&ip, &end) != nil {
+			b.AddressesCut()
+			continue
+		}
+		a, ok := repid.Address(ip)
+		if !ok {
+			continue
+		}
+		until := blocklist.Forever
+		if end.Valid {
+			until = end.Time.UnixNano()
+		}
+		if !b.AddAddress(a, until) {
+			break
+		}
+	}
+	return rows.Err()
+}
+
+// readUserBlocksInto adds every fingerprint block in force to b: each scoped
+// key whose latest row inside the TTL is a block, until that row's TTL ends.
+func (s *pathStatsStore) readUserBlocksInto(ctx context.Context, b *blocklist.Base) error {
+	limit := blockListBounds.Entries + 1
+	rows, err := s.db.QueryContext(ctx, s.dialect.Rebind(QueryBlockListUserMitigations), mitigationCutoff(), limit)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	seen := make(map[string]struct{})
+	n := 0
+	for rows.Next() {
+		n++
+		var key, status string
+		var at time.Time
+		if rows.Scan(&key, &status, &at) != nil {
+			b.KeysCut()
+			continue
+		}
+		if _, decided := seen[key]; decided {
+			continue
+		}
+		seen[key] = struct{}{}
+		if status == statusMitigated && !b.AddKey(key, at.Add(mitigationTTL).UnixNano()) {
+			break
+		}
+	}
+	if n >= limit {
+		b.KeysCut()
+	}
+	return rows.Err()
+}
+
+// awaitBlockList waits for the store's first read of the block list, at most
+// blockListStartWait.
+func (s *pathStatsStore) awaitBlockList() {
+	timer := time.NewTimer(blockListStartWait)
+	defer timer.Stop()
+	select {
+	case <-s.blockListLoaded:
+	case <-timer.C:
+		logger.Default().LogWarn("block list: not read within the start-up wait; blocks are enforced by lookup until it is",
+			"wait", blockListStartWait)
+	}
+}
+
+// listedIPBlock reports whether the block list holds a shun in force for ip.
+// An empty list -- most installs, most of the time -- costs a load.
+func (s *pathStatsStore) listedIPBlock(ip string) bool {
+	if !s.blocks.HasAddresses() {
+		return false
+	}
+	a, ok := repid.Address(ip)
+	return ok && s.blocks.AddressBlocked(a)
+}
+
+// noteIPBlock records this node's write of ip's block (until its end) or
+// release (blocklist.Released) in the block list.
+func (s *pathStatsStore) noteIPBlock(ip string, until int64) {
+	if a, ok := repid.Address(ip); ok {
+		s.blocks.NoteAddress(a, until)
 	}
 }
 
@@ -3439,6 +3731,8 @@ func MarkUserMitigated(ja4plus string, fpType string, reason string, category st
 	_, err := s.db.Exec(query, ja4plus, fpType, reason, category, now, reason, category, now)
 	if err != nil {
 		logger.Default().LogError("failed to mark user as mitigated", "ja4plus", ja4plus, "error", err)
+	} else {
+		s.blocks.NoteKey(ja4plus, now.Add(mitigationTTL).UnixNano())
 	}
 	s.lookups.noteWrite()
 	if s.userMitigationCache != nil {
@@ -3491,6 +3785,9 @@ func MarkUserUnmitigated(ja4plus string) bool {
 	if err != nil {
 		logger.Default().LogError("failed to mark user as unmitigated", "ja4plus", ja4plus, "error", err)
 	}
+	// Whether or not the marker was written, the block is gone from the
+	// table: the list must not keep it either.
+	s.blocks.NoteKey(ja4plus, blocklist.Released)
 	return released
 }
 
@@ -4252,13 +4549,13 @@ func GetSecurityThreatByID(ctx context.Context, id string) (*SecurityThreat, err
 		return nil, errors.New("threat ID is required")
 	}
 
-	query := s.dialect.Rebind("SELECT id, type, source_ip, fingerprint, score, details, timestamp, ja4, ja4h, route_id, request_uri, category, severity, asn, action_taken, country_code, COALESCE(request_headers, ''), COALESCE(request_body, ''), COALESCE(response_headers, ''), COALESCE(response_body, ''), COALESCE(t.user_agent, ''), COALESCE(t.method, ''), confidence, entropy, cluster_size, COALESCE(recommendation, ''), COALESCE(triggered_rules, ''), reputation, source_ips FROM security_threats t WHERE id = ?")
+	query := s.dialect.Rebind("SELECT id, type, source_ip, fingerprint, score, details, timestamp, ja4, ja4h, route_id, request_uri, category, severity, asn, action_taken, country_code, COALESCE(request_headers, ''), COALESCE(request_body, ''), COALESCE(response_headers, ''), COALESCE(response_body, ''), COALESCE(t.user_agent, ''), COALESCE(t.method, ''), confidence, entropy, cluster_size, COALESCE(recommendation, ''), COALESCE(triggered_rules, ''), reputation, source_ips, observed, unattributed FROM security_threats t WHERE id = ?")
 	ex, cleanup := s.getExecutor(ctx)
 	defer cleanup()
 
 	th := &SecurityThreat{}
 	var sourceIPs string
-	err := ex.QueryRowContext(ctx, query, id).Scan(&th.ID, &th.Type, &th.SourceIP, &th.Fingerprint, &th.Score, &th.Details, &th.Time, &th.JA4, &th.JA4H, &th.RouteID, &th.RequestURI, &th.Category, &th.Severity, &th.ASN, &th.ActionTaken, &th.CountryCode, &th.RequestHeaders, &th.RequestBody, &th.ResponseHeaders, &th.ResponseBody, &th.UserAgent, &th.Method, &th.Confidence, &th.Entropy, &th.ClusterSize, &th.Recommendation, &th.TriggeredRules, &th.Reputation, &sourceIPs)
+	err := ex.QueryRowContext(ctx, query, id).Scan(&th.ID, &th.Type, &th.SourceIP, &th.Fingerprint, &th.Score, &th.Details, &th.Time, &th.JA4, &th.JA4H, &th.RouteID, &th.RequestURI, &th.Category, &th.Severity, &th.ASN, &th.ActionTaken, &th.CountryCode, &th.RequestHeaders, &th.RequestBody, &th.ResponseHeaders, &th.ResponseBody, &th.UserAgent, &th.Method, &th.Confidence, &th.Entropy, &th.ClusterSize, &th.Recommendation, &th.TriggeredRules, &th.Reputation, &sourceIPs, &th.Observed, &th.Unattributed)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, fmt.Errorf("threat with ID %s not found", id)
@@ -4408,7 +4705,7 @@ func GetSecurityThreatsLite(ctx context.Context, limit, offset int, filter *Thre
 	limit, offset = clampThreatBounds(limit, offset)
 
 	where, args := buildThreatFilterQuery(s.dialect, filter, true)
-	query := s.dialect.Rebind("SELECT t.id, t.type, t.source_ip, t.fingerprint, t.score, t.details, t.timestamp, t.ja4, t.ja4h, t.route_id, t.request_uri, t.category, t.severity, t.asn, t.action_taken, t.country_code, t.latitude, t.longitude, COALESCE(t.user_agent, ''), COALESCE(t.method, ''), COALESCE(t.recommendation, ''), COALESCE(t.triggered_rules, ''), t.reputation, COALESCE(m.status, ''), COALESCE(fm4.status, ''), t.source_ips FROM security_threats t LEFT JOIN ip_mitigations m ON t.source_ip = m.ip LEFT JOIN user_mitigations fm4 ON t.ja4 = fm4.fingerprint AND (fm4.ja4h = '' OR fm4.ja4h = t.ja4h) " + where + " ORDER BY t.timestamp DESC LIMIT ? OFFSET ?")
+	query := s.dialect.Rebind("SELECT t.id, t.type, t.source_ip, t.fingerprint, t.score, t.details, t.timestamp, t.ja4, t.ja4h, t.route_id, t.request_uri, t.category, t.severity, t.asn, t.action_taken, t.country_code, t.latitude, t.longitude, COALESCE(t.user_agent, ''), COALESCE(t.method, ''), COALESCE(t.recommendation, ''), COALESCE(t.triggered_rules, ''), t.reputation, COALESCE(m.status, ''), COALESCE(fm4.status, ''), t.source_ips, t.observed, t.unattributed FROM security_threats t LEFT JOIN ip_mitigations m ON t.source_ip = m.ip LEFT JOIN user_mitigations fm4 ON t.ja4 = fm4.fingerprint AND (fm4.ja4h = '' OR fm4.ja4h = t.ja4h) " + where + " ORDER BY t.timestamp DESC LIMIT ? OFFSET ?")
 	args = append(args, limit, offset)
 
 	ex, cleanup := s.getExecutor(ctx)
@@ -4434,19 +4731,34 @@ func GetSecurityThreatsLite(ctx context.Context, limit, offset int, filter *Thre
 		th := &SecurityThreat{}
 		var mitigationStatus, fm4Status string
 		var sourceIPs string
-		if err := rows.Scan(&th.ID, &th.Type, &th.SourceIP, &th.Fingerprint, &th.Score, &th.Details, &th.Time, &th.JA4, &th.JA4H, &th.RouteID, &th.RequestURI, &th.Category, &th.Severity, &th.ASN, &th.ActionTaken, &th.CountryCode, &th.Latitude, &th.Longitude, &th.UserAgent, &th.Method, &th.Recommendation, &th.TriggeredRules, &th.Reputation, &mitigationStatus, &fm4Status, &sourceIPs); err != nil {
+		if err := rows.Scan(&th.ID, &th.Type, &th.SourceIP, &th.Fingerprint, &th.Score, &th.Details, &th.Time, &th.JA4, &th.JA4H, &th.RouteID, &th.RequestURI, &th.Category, &th.Severity, &th.ASN, &th.ActionTaken, &th.CountryCode, &th.Latitude, &th.Longitude, &th.UserAgent, &th.Method, &th.Recommendation, &th.TriggeredRules, &th.Reputation, &mitigationStatus, &fm4Status, &sourceIPs, &th.Observed, &th.Unattributed); err != nil {
 			logQueryErr(ctx, "threats lite: scan failed", err)
 			continue
 		}
 		if sourceIPs != "" {
 			th.SourceIPs = strings.Split(sourceIPs, ",")
 		}
+		mitigationStatus = s.ipv6ShunStatus(th.SourceIP, mitigationStatus)
 		th.Mitigated = mitigationStatus == statusMitigated || fm4Status == statusMitigated ||
 			((isMitigatingAction(th.ActionTaken)) &&
 				mitigationStatus != "unmitigated" && fm4Status != "unmitigated")
 		res = append(res, th)
 	}
 	return res
+}
+
+// ipv6ShunStatus is the shun status a threat from ip is listed with. The
+// join reads the row keyed by the threat's own address, and an IPv6 address
+// is shunned under its /64's key (ADR 0058), which SQL cannot compute: so an
+// IPv6 threat the join found nothing for is shown as shunned when the block
+// list holds its /64. A release there is not shown -- the threat reads as
+// one never shunned -- and the dashboard's "mitigated" filter, which runs in
+// SQL, still matches IPv6 threats by their own address.
+func (s *pathStatsStore) ipv6ShunStatus(ip, joined string) string {
+	if joined != "" || strings.IndexByte(ip, ':') < 0 || !s.listedIPBlock(ip) {
+		return joined
+	}
+	return statusMitigated
 }
 
 // CountSecurityThreats returns the total number of security threats in the store.

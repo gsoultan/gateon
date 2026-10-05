@@ -18,6 +18,8 @@ func TestRedactHeaders_RemovesCredentialValues(t *testing.T) {
 		"X-Access-Token", "X-Refresh-Token", "X-Amz-Security-Token", "X-Goog-Api-Key", "Api-Key",
 		"Ocp-Apim-Subscription-Key", "X-Functions-Key", "X-Vault-Token", "Private-Token",
 		"X-Csrf-Token", "X-Xsrf-Token", "x-amz-security-token", "AUTHORIZATION",
+		// Not on the list that preceded redact.IsCredentialHeader (ADR 0060).
+		"X-Session-Token", "X-Amz-Signature", "X-Upstream-Secret", "Session-Id",
 	} {
 		got := RedactHeaders(name + ": s3cr3t:with:colons")
 		if got != name+": [REDACTED]" {
@@ -30,7 +32,8 @@ func TestRedactHeaders_LeavesEverythingElse(t *testing.T) {
 	block := strings.Join([]string{
 		"Accept: */*",
 		"Cookie-Policy: strict", // a name that starts like a credential header is not one
-		"X-Api-Key-Id: key-7",
+		"X-Request-Id: key-7",
+		"WWW-Authenticate: Bearer realm=\"api\"", // a challenge, not a credential
 		"Authorization: Bearer abc",
 		"Content-Type: application/json",
 		"not a header line",
@@ -38,7 +41,8 @@ func TestRedactHeaders_LeavesEverythingElse(t *testing.T) {
 	want := strings.Join([]string{
 		"Accept: */*",
 		"Cookie-Policy: strict",
-		"X-Api-Key-Id: key-7",
+		"X-Request-Id: key-7",
+		"WWW-Authenticate: Bearer realm=\"api\"",
 		"Authorization: [REDACTED]",
 		"Content-Type: application/json",
 		"not a header line",

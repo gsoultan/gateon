@@ -175,6 +175,7 @@ const (
 	ActionFlagged    = telemetry.ActionFlagged
 	ActionThrottled  = telemetry.ActionThrottled
 	ActionRedacted   = telemetry.ActionRedacted
+	ActionAborted    = telemetry.ActionAborted
 )
 
 func ParseListStrict(val string) []string {

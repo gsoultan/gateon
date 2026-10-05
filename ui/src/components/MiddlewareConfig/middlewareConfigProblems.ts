@@ -53,6 +53,37 @@ export function tlsBindingProblem(config: Record<string, string>): string | unde
   return secret.length >= 32 ? undefined : TLS_BINDING_SECRET_REQUIRED;
 }
 
+/**
+ * Why a tarpit config cannot be saved, or undefined. The factory reads an
+ * unset threshold as 0, and the delay is the base delay scaled by the score
+ * over the threshold: at 0 every client, a clean one included, meets it and
+ * the delay is a division by zero.
+ */
+export function tarpitProblem(config: Record<string, string>): string | undefined {
+  const t = Number(config.threshold);
+  if (!config.threshold || !Number.isFinite(t) || t <= 0) {
+    return "Set a threat score threshold above 0: at 0 every client is delayed.";
+  }
+  if (!config.max_delay) return "Set a maximum delay, so no request is held indefinitely.";
+  return undefined;
+}
+
+export const ENTROPY_THRESHOLD_RANGE =
+  "Set an entropy threshold above 0 and at most 8 bits per byte, or leave it empty for 7.5: " +
+  "at 0 every request body is recorded as a threat, and no body measures above 8.";
+
+/**
+ * Why a body-entropy config cannot be saved, or undefined. Empty is the
+ * gateway's default of 7.5; the gateway refuses the same out-of-range values.
+ */
+export function entropyProblem(config: Record<string, string>): string | undefined {
+  const raw = (config.threshold || "").trim();
+  if (!raw) return undefined;
+  const t = Number(raw);
+  if (Number.isNaN(t)) return undefined; // not a number: the gateway names the parse error
+  return t > 0 && t <= 8 ? undefined : ENTROPY_THRESHOLD_RANGE;
+}
+
 /** The first reason a middleware of this type cannot be saved, or undefined. */
 export function middlewareConfigProblem(type: string, config: Record<string, string>): string | undefined {
   switch (type) {
@@ -65,6 +96,10 @@ export function middlewareConfigProblem(type: string, config: Record<string, str
       return xfccProblem(config);
     case "tls_binding":
       return tlsBindingProblem(config);
+    case "tarpit":
+      return tarpitProblem(config);
+    case "entropy":
+      return entropyProblem(config);
     default:
       return undefined;
   }

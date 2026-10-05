@@ -311,7 +311,8 @@ func TestFileSecurityFilesItsBlocksAgainstItsRoute(t *testing.T) {
 	for {
 		select {
 		case th := <-feed:
-			if th.Type != "file_security_block" {
+			// Over the size cap: a policy refusal, not malware (ADR 0059).
+			if th.Type != "file_upload_refused" {
 				continue
 			}
 			if th.RouteID != "upload-route" {
@@ -319,7 +320,7 @@ func TestFileSecurityFilesItsBlocksAgainstItsRoute(t *testing.T) {
 			}
 			return
 		case <-deadline:
-			t.Fatal("no file_security_block threat reached the live feed")
+			t.Fatal("no file_upload_refused threat reached the live feed")
 		}
 	}
 }

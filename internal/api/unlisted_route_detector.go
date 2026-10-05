@@ -191,7 +191,7 @@ func unlistedRouteAnomaly(tr *telemetry.TraceRecord, honeypot bool) *gateonv1.An
 		anomaly.Type = "honeypot_triggered"
 		anomaly.Severity = "critical"
 		anomaly.Description = fmt.Sprintf("Honeypot triggered! Access to trap route: %s", tr.Path)
-		anomaly.Recommendation = "This IP is likely a scanner. Block it immediately at the XDP level."
+		anomaly.Recommendation = "This address is likely a scanner. Block it under Mitigations; with eBPF attached the block is also enforced in the kernel."
 		anomaly.Score = 0.9
 	}
 	return anomaly

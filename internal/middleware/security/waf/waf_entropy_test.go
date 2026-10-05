@@ -4,9 +4,13 @@
 package waf
 
 import (
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"testing/iotest"
 )
 
 func TestWAFEntropyFalsePositive(t *testing.T) {
@@ -50,3 +54,61 @@ func TestWAFEntropyFalsePositive(t *testing.T) {
 		t.Errorf("Unknown high-entropy header was NOT blocked, but should be")
 	}
 }
+
+// TestBodyEntropyForwardsTheBodyOnce is DP-F4. peekBody put the peeked bytes
+// back twice -- once before its error check and again after -- so the request
+// that left the WAF carried the head of its body twice under the original
+// Content-Length. Every POST to a route with enable_body_entropy reached the
+// proxy longer than it declared (502), and the engine inspected a body the
+// client never sent.
+func TestBodyEntropyForwardsTheBodyOnce(t *testing.T) {
+	mw, err := WAF(WAFConfig{RouteID: "entropy-body", EnableBodyEntropy: true, RequestBodyLimit: 1 << 20})
+	if err != nil {
+		t.Fatalf("create WAF: %v", err)
+	}
+	var got []byte
+	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got, _ = io.ReadAll(r.Body)
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	sent := strings.Repeat("an ordinary order note, nothing to see here. ", 4)
+	req := httptest.NewRequest(http.MethodPost, "/orders", strings.NewReader(sent))
+	req.Header.Set("Content-Type", "text/plain")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d, want 200", rec.Code)
+	}
+	if string(got) != sent {
+		t.Fatalf("upstream received %d bytes, the client sent %d (Content-Length %d):\n%q",
+			len(got), len(sent), req.ContentLength, got)
+	}
+}
+
+// TestPeekBodyRestoresTheStreamExactly pins the helper itself, including the
+// error path: bytes read before a failure are already off the client's stream
+// and have to be put back, once.
+func TestPeekBodyRestoresTheStreamExactly(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body io.Reader
+		want string
+	}{
+		{"shorter than the peek", strings.NewReader("hello"), "hello"},
+		{"longer than the peek", strings.NewReader(strings.Repeat("a", 10) + "tail"), strings.Repeat("a", 10) + "tail"},
+		{"read error after some bytes", io.MultiReader(strings.NewReader("abc"), iotest.ErrReader(errPeek)), "abc"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := httptest.NewRequest(http.MethodPost, "/", io.NopCloser(tc.body))
+			_, _ = peekBody(r, 10)
+			rest, _ := io.ReadAll(r.Body)
+			if string(rest) != tc.want {
+				t.Errorf("body after peek = %q, want %q", rest, tc.want)
+			}
+		})
+	}
+}
+
+var errPeek = errors.New("connection reset mid-body")

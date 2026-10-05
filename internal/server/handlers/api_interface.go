@@ -28,6 +28,7 @@ type GlobalAndAuthAPI interface {
 	ListUsers(ctx context.Context, req *gateonv1.ListUsersRequest) (*gateonv1.ListUsersResponse, error)
 	UpdateUser(ctx context.Context, req *gateonv1.UpdateUserRequest) (*gateonv1.UpdateUserResponse, error)
 	DeleteUser(ctx context.Context, req *gateonv1.DeleteUserRequest) (*gateonv1.DeleteUserResponse, error)
+	ResetUserTwoFactor(ctx context.Context, req *gateonv1.ResetUserTwoFactorRequest) (*gateonv1.ResetUserTwoFactorResponse, error)
 	ChangePassword(ctx context.Context, req *gateonv1.ChangePasswordRequest) (*gateonv1.ChangePasswordResponse, error)
 	GetStatus(ctx context.Context, req *gateonv1.GetStatusRequest) (*gateonv1.GetStatusResponse, error)
 	GetDiagnostics(ctx context.Context, req *gateonv1.GetDiagnosticsRequest) (*gateonv1.GetDiagnosticsResponse, error)

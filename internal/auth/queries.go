@@ -52,6 +52,15 @@ const (
 	QueryUpdatePassword = "UPDATE users SET password = ? WHERE id = ?"
 	QueryUpdate2FA      = "UPDATE users SET two_factor_enabled = ?, two_factor_secret = ?, recovery_codes = ? WHERE id = ?"
 
+	// QueryResetTwoFactor is an administrator's reset of another account's
+	// second factor (ADR 0057), in one statement so no half of it can land
+	// alone: the secret and recovery codes go, enrolment is required again at
+	// the next sign-in, and every session ends.
+	// #nosec G101 -- a parameterised statement, not a credential. Every value
+	// is bound or a constant.
+	QueryResetTwoFactor = "UPDATE users SET two_factor_enabled = ?, two_factor_secret = '', recovery_codes = '', " +
+		"two_factor_pending = ?, session_epoch = session_epoch + 1 WHERE id = ?"
+
 	// QueryTwoFactorSecrets and QueryUpdateTwoFactorSecret re-encrypt every
 	// stored second factor when the session key is rotated.
 	// #nosec G101 -- a query naming a column, not a credential.

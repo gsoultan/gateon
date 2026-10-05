@@ -118,6 +118,9 @@ const (
 	ApiServiceUpdateUserProcedure = "/gateon.v1.ApiService/UpdateUser"
 	// ApiServiceDeleteUserProcedure is the fully-qualified name of the ApiService's DeleteUser RPC.
 	ApiServiceDeleteUserProcedure = "/gateon.v1.ApiService/DeleteUser"
+	// ApiServiceResetUserTwoFactorProcedure is the fully-qualified name of the ApiService's
+	// ResetUserTwoFactor RPC.
+	ApiServiceResetUserTwoFactorProcedure = "/gateon.v1.ApiService/ResetUserTwoFactor"
 	// ApiServiceGetDiagnosticsProcedure is the fully-qualified name of the ApiService's GetDiagnostics
 	// RPC.
 	ApiServiceGetDiagnosticsProcedure = "/gateon.v1.ApiService/GetDiagnostics"
@@ -225,6 +228,9 @@ type ApiServiceClient interface {
 	ListUsers(context.Context, *connect.Request[v1.ListUsersRequest]) (*connect.Response[v1.ListUsersResponse], error)
 	UpdateUser(context.Context, *connect.Request[v1.UpdateUserRequest]) (*connect.Response[v1.UpdateUserResponse], error)
 	DeleteUser(context.Context, *connect.Request[v1.DeleteUserRequest]) (*connect.Response[v1.DeleteUserResponse], error)
+	// ResetUserTwoFactor removes another account's second factor and ends its
+	// sessions (ADR 0057). Administrators only; never the caller's own account.
+	ResetUserTwoFactor(context.Context, *connect.Request[v1.ResetUserTwoFactorRequest]) (*connect.Response[v1.ResetUserTwoFactorResponse], error)
 	GetDiagnostics(context.Context, *connect.Request[v1.GetDiagnosticsRequest]) (*connect.Response[v1.GetDiagnosticsResponse], error)
 	ListSecurityThreats(context.Context, *connect.Request[v1.ListSecurityThreatsRequest]) (*connect.Response[v1.ListSecurityThreatsResponse], error)
 	GetSecurityThreat(context.Context, *connect.Request[v1.GetSecurityThreatRequest]) (*connect.Response[v1.GetSecurityThreatResponse], error)
@@ -460,6 +466,12 @@ func NewApiServiceClient(httpClient connect.HTTPClient, baseURL string, opts ...
 			connect.WithSchema(apiServiceMethods.ByName("DeleteUser")),
 			connect.WithClientOptions(opts...),
 		),
+		resetUserTwoFactor: connect.NewClient[v1.ResetUserTwoFactorRequest, v1.ResetUserTwoFactorResponse](
+			httpClient,
+			baseURL+ApiServiceResetUserTwoFactorProcedure,
+			connect.WithSchema(apiServiceMethods.ByName("ResetUserTwoFactor")),
+			connect.WithClientOptions(opts...),
+		),
 		getDiagnostics: connect.NewClient[v1.GetDiagnosticsRequest, v1.GetDiagnosticsResponse](
 			httpClient,
 			baseURL+ApiServiceGetDiagnosticsProcedure,
@@ -647,6 +659,7 @@ type apiServiceClient struct {
 	listUsers             *connect.Client[v1.ListUsersRequest, v1.ListUsersResponse]
 	updateUser            *connect.Client[v1.UpdateUserRequest, v1.UpdateUserResponse]
 	deleteUser            *connect.Client[v1.DeleteUserRequest, v1.DeleteUserResponse]
+	resetUserTwoFactor    *connect.Client[v1.ResetUserTwoFactorRequest, v1.ResetUserTwoFactorResponse]
 	getDiagnostics        *connect.Client[v1.GetDiagnosticsRequest, v1.GetDiagnosticsResponse]
 	listSecurityThreats   *connect.Client[v1.ListSecurityThreatsRequest, v1.ListSecurityThreatsResponse]
 	getSecurityThreat     *connect.Client[v1.GetSecurityThreatRequest, v1.GetSecurityThreatResponse]
@@ -834,6 +847,11 @@ func (c *apiServiceClient) DeleteUser(ctx context.Context, req *connect.Request[
 	return c.deleteUser.CallUnary(ctx, req)
 }
 
+// ResetUserTwoFactor calls gateon.v1.ApiService.ResetUserTwoFactor.
+func (c *apiServiceClient) ResetUserTwoFactor(ctx context.Context, req *connect.Request[v1.ResetUserTwoFactorRequest]) (*connect.Response[v1.ResetUserTwoFactorResponse], error) {
+	return c.resetUserTwoFactor.CallUnary(ctx, req)
+}
+
 // GetDiagnostics calls gateon.v1.ApiService.GetDiagnostics.
 func (c *apiServiceClient) GetDiagnostics(ctx context.Context, req *connect.Request[v1.GetDiagnosticsRequest]) (*connect.Response[v1.GetDiagnosticsResponse], error) {
 	return c.getDiagnostics.CallUnary(ctx, req)
@@ -993,6 +1011,9 @@ type ApiServiceHandler interface {
 	ListUsers(context.Context, *connect.Request[v1.ListUsersRequest]) (*connect.Response[v1.ListUsersResponse], error)
 	UpdateUser(context.Context, *connect.Request[v1.UpdateUserRequest]) (*connect.Response[v1.UpdateUserResponse], error)
 	DeleteUser(context.Context, *connect.Request[v1.DeleteUserRequest]) (*connect.Response[v1.DeleteUserResponse], error)
+	// ResetUserTwoFactor removes another account's second factor and ends its
+	// sessions (ADR 0057). Administrators only; never the caller's own account.
+	ResetUserTwoFactor(context.Context, *connect.Request[v1.ResetUserTwoFactorRequest]) (*connect.Response[v1.ResetUserTwoFactorResponse], error)
 	GetDiagnostics(context.Context, *connect.Request[v1.GetDiagnosticsRequest]) (*connect.Response[v1.GetDiagnosticsResponse], error)
 	ListSecurityThreats(context.Context, *connect.Request[v1.ListSecurityThreatsRequest]) (*connect.Response[v1.ListSecurityThreatsResponse], error)
 	GetSecurityThreat(context.Context, *connect.Request[v1.GetSecurityThreatRequest]) (*connect.Response[v1.GetSecurityThreatResponse], error)
@@ -1224,6 +1245,12 @@ func NewApiServiceHandler(svc ApiServiceHandler, opts ...connect.HandlerOption) 
 		connect.WithSchema(apiServiceMethods.ByName("DeleteUser")),
 		connect.WithHandlerOptions(opts...),
 	)
+	apiServiceResetUserTwoFactorHandler := connect.NewUnaryHandler(
+		ApiServiceResetUserTwoFactorProcedure,
+		svc.ResetUserTwoFactor,
+		connect.WithSchema(apiServiceMethods.ByName("ResetUserTwoFactor")),
+		connect.WithHandlerOptions(opts...),
+	)
 	apiServiceGetDiagnosticsHandler := connect.NewUnaryHandler(
 		ApiServiceGetDiagnosticsProcedure,
 		svc.GetDiagnostics,
@@ -1440,6 +1467,8 @@ func NewApiServiceHandler(svc ApiServiceHandler, opts ...connect.HandlerOption) 
 			apiServiceUpdateUserHandler.ServeHTTP(w, r)
 		case ApiServiceDeleteUserProcedure:
 			apiServiceDeleteUserHandler.ServeHTTP(w, r)
+		case ApiServiceResetUserTwoFactorProcedure:
+			apiServiceResetUserTwoFactorHandler.ServeHTTP(w, r)
 		case ApiServiceGetDiagnosticsProcedure:
 			apiServiceGetDiagnosticsHandler.ServeHTTP(w, r)
 		case ApiServiceListSecurityThreatsProcedure:
@@ -1625,6 +1654,10 @@ func (UnimplementedApiServiceHandler) UpdateUser(context.Context, *connect.Reque
 
 func (UnimplementedApiServiceHandler) DeleteUser(context.Context, *connect.Request[v1.DeleteUserRequest]) (*connect.Response[v1.DeleteUserResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gateon.v1.ApiService.DeleteUser is not implemented"))
+}
+
+func (UnimplementedApiServiceHandler) ResetUserTwoFactor(context.Context, *connect.Request[v1.ResetUserTwoFactorRequest]) (*connect.Response[v1.ResetUserTwoFactorResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gateon.v1.ApiService.ResetUserTwoFactor is not implemented"))
 }
 
 func (UnimplementedApiServiceHandler) GetDiagnostics(context.Context, *connect.Request[v1.GetDiagnosticsRequest]) (*connect.Response[v1.GetDiagnosticsResponse], error) {

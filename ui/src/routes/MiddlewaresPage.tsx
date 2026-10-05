@@ -47,6 +47,7 @@ import { useMiddlewares, useMiddlewareRoutes, apiFetch, getApiErrorMessage } fro
 import { usePermissions } from "../hooks/usePermissions";
 import { useTableDensity } from "../hooks/useTableDensity";
 import { MiddlewareConfigEditor } from "../components/MiddlewareConfig";
+import { middlewareTypeSelectData } from "../components/MiddlewareConfig/middlewareTypes";
 import {
   middlewareConfigProblem,
   withoutRetiredKeys,
@@ -400,37 +401,8 @@ export default function MiddlewaresPage() {
 
           <Select
             label="Type"
-            data={[
-              { label: "Rate Limiting", value: "ratelimit" },
-              { label: "In-Flight Requests (conn limit)", value: "inflightreq" },
-              { label: "Buffering (max body)", value: "buffering" },
-              { label: "Authentication", value: "auth" },
-              { label: "Header Manipulation", value: "headers" },
-              { label: "Forwarded Headers (X-Forwarded-Proto)", value: "forwardedheaders" },
-              { label: "Path Rewrite", value: "rewrite" },
-              { label: "Add Prefix", value: "addprefix" },
-              { label: "Strip Prefix", value: "stripprefix" },
-              { label: "Strip Prefix Regex", value: "stripprefixregex" },
-              { label: "Replace Path", value: "replacepath" },
-              { label: "Replace Path Regex", value: "replacepathregex" },
-              { label: "Gzip Compression", value: "compress" },
-              { label: "Forward Auth", value: "forwardauth" },
-              { label: "CORS", value: "cors" },
-              { label: "IP Filter", value: "ipfilter" },
-              { label: "WAF (Coraza)", value: "waf" },
-              { label: "Cloudflare Turnstile", value: "turnstile" },
-              { label: "GeoIP", value: "geoip" },
-              { label: "HMAC Signature", value: "hmac" },
-              { label: "WebAssembly (WASM)", value: "wasm" },
-              { label: "Response Cache", value: "cache" },
-              { label: "Body Transformation", value: "transform" },
-              { label: "gRPC-Web", value: "grpcweb" },
-              { label: "Custom Errors", value: "errors" },
-              { label: "Retry", value: "retry" },
-              { label: "Circuit Breaker", value: "circuit_breaker" },
-              { label: "Access Logging", value: "accesslog" },
-              { label: "Prometheus Metrics", value: "metrics" },
-            ]}
+            data={middlewareTypeSelectData()}
+            searchable
             value={editingMW?.type || "ratelimit"}
             onChange={(val) =>
               editingMW &&

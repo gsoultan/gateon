@@ -233,6 +233,7 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 		Version:            s.Version,
 		StartTime:          s.StartTime(),
 		RouteStatsProvider: s.GetRouteStats,
+		RouteProblems:      s.proxyCache().RouteProblems,
 		SecurityPosture: newPostureProvider(postureDeps{
 			version: s.Version, globalStore: s.GlobalStore, clamav: clamavManager, waf: wafUpdater,
 			fimScanner: fimScanner, ebpf: s.EbpfManager,
@@ -289,6 +290,10 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 	// The configuration database is watched for /readyz and gateon_config_db_up
 	// from before the listeners open, so the first probe already knows.
 	wg.Go(func() { readiness.WatchDatabase(ctx, configDatabasePinger(s.AuthManager)) })
+	// Routes an upgrade left refusing every request or matching none are said
+	// once at start, not when a request first reaches them (OPS-N4). Off the
+	// start path: it builds every route's middlewares.
+	wg.Go(func() { s.proxyCache().WarnRouteProblems(ctx) })
 	//nolint:contextcheck // listeners stop through shutdownReg, not a context; StartServers takes none.
 	if err := entrypoint.StartServers(s.EpStore, s.Port, baseHandler, internalAPI, tlsConfig, s.TLSManager, &wg, shutdownReg, entrypoint.WrapL4Resolver(l4Resolver), mgmtConfig, s.GlobalStore, pCore); err != nil {
 		// Exits non-zero, so a service manager restarts the gateway rather than
@@ -330,12 +335,17 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 				s.SyncProxies()
 				// Heartbeat log for live observability
 				logger.L.LogDebug("gateway heartbeat", "active_proxies", s.proxyCache().Count())
+				// What the rate-limited log lines left out, once their
+				// interval has passed, even if that kind of line has not
+				// happened since (ADR 0061).
+				logger.ReportDue(time.Now())
 			}
 		}
 	})
 
 	<-ctx.Done()
 	logger.L.LogInfo("shutting down gracefully")
+	logger.FlushReports()
 	// Background, not ctx: ctx is the thing that just fired. Deriving the
 	// shutdown deadline from it would hand ShutdownAll an already-cancelled
 	// context and collapse the graceful drain into an immediate close.

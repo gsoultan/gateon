@@ -131,6 +131,8 @@ func (f *Factory) checkSave(m *gateonv1.Middleware) error {
 		return f.checkClientTrust(cfg)
 	case "geoip":
 		return f.checkClientTrust(cfg)
+	case "entropy":
+		return security.CheckEntropySave(cfg)
 	}
 	return nil
 }
@@ -356,7 +358,7 @@ func (f *Factory) Create(m *gateonv1.Middleware, routeID string) (Middleware, er
 		}
 		return security.Tarpit(baseDelay, maxDelay, threshold), nil
 	case "entropy":
-		threshold, err := kind.ParseFloatStrict(cfg["threshold"], 0)
+		threshold, err := kind.ParseFloatStrict(cfg["threshold"], security.DefaultEntropyThreshold)
 		if err != nil {
 			return nil, kind.CfgError("threshold", cfg["threshold"], err)
 		}
@@ -402,7 +404,7 @@ func (f *Factory) Create(m *gateonv1.Middleware, routeID string) (Middleware, er
 	case "circuit_breaker":
 		return circuitBreakerFromConfig(cfg, routeID, cfg[kind.RouteStateKey])
 	case "wasm":
-		return transform.Wasm(context.Background(), m.WasmBlob)
+		return transform.Wasm(context.Background(), m.WasmBlob, routeID)
 	default:
 		return nil, fmt.Errorf("unknown middleware type: %s", m.Type)
 	}

@@ -5,10 +5,12 @@ package security
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -94,7 +96,44 @@ func Tarpit(baseDelay, maxDelay time.Duration, scoreThreshold float64) kind.Midd
 // "hold whatever arrives".
 const entropyPeekLimit = 1024 * 1024
 
+// DefaultEntropyThreshold is the body-entropy threshold, in bits per byte, an
+// unset one means: what the dashboard's editor shows. Random or encrypted data
+// measures close to 8 and text 4 to 5. An unset threshold used to mean 0, which
+// every body exceeds, so every request with a body was recorded as a
+// high-severity threat (review-3 F5).
+const DefaultEntropyThreshold = 7.5
+
+// maxEntropy is the Shannon entropy of a uniformly random byte stream; no body
+// measures above it.
+const maxEntropy = 8.0
+
+// CheckEntropySave refuses, at save, a body-entropy threshold that cannot do
+// what the setting says: at 0 or below every body is recorded, above 8 none
+// is. Empty is the default. A value that is not a number is left to the
+// factory, which refuses it by its parse error.
+func CheckEntropySave(cfg map[string]string) error {
+	v := strings.TrimSpace(cfg["threshold"])
+	if v == "" {
+		return nil
+	}
+	t, err := strconv.ParseFloat(v, 64)
+	if err != nil || (t > 0 && t <= maxEntropy) {
+		return nil
+	}
+	return kind.CfgError("threshold", v, errors.New("set an entropy threshold above 0 and at most 8 bits per "+
+		"byte, or leave it empty for 7.5: at 0 every request body is recorded as a threat, and no body "+
+		"measures above 8"))
+}
+
+// Entropy records a request whose body measures above threshold bits per
+// byte. A threshold at or below 0 is the default: every body exceeds it, so it
+// can only mean "unset" -- the gateway-wide Payload Entropy setting stores 0
+// when its field is left empty, and a route config saved before the save check
+// may hold it.
 func Entropy(threshold float64, routeID string) kind.Middleware {
+	if threshold <= 0 {
+		threshold = DefaultEntropyThreshold
+	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			checkEntropy(next, w, r, threshold, routeID)
@@ -147,6 +186,9 @@ func checkEntropy(next http.Handler, w http.ResponseWriter, r *http.Request, thr
 				Category:    "advanced",
 				Severity:    kind.SeverityHigh,
 				ActionTaken: kind.ActionDetected,
+				// Measured and let through: a compressed upload or an
+				// encrypted blob is high-entropy too (ADR 0059).
+				Observed: true,
 			})
 		}
 	}
@@ -303,6 +345,15 @@ func (rc recognition) serve(next http.Handler, w http.ResponseWriter, r *http.Re
 			Category:    rc.category,
 			Severity:    rc.severity,
 			ActionTaken: kind.ActionDetected,
+			// The request goes on to the next handler whatever matched: a
+			// substring hit ("update ", "--", "<img") is not a refusal, and a
+			// detection that is not one is no evidence against the client
+			// (ADR 0059). It used to take half its score off the client's
+			// reputation: these three run on the management plane too, so an
+			// operator's fourth dashboard save whose body held "--" left their
+			// browser on their network refused by every route's reputation
+			// blocker.
+			Observed: true,
 		})
 	}
 
@@ -398,6 +449,7 @@ func ThreatRecognition(routeID string) kind.Middleware {
 					Category:    "advanced",
 					Severity:    severity,
 					ActionTaken: kind.ActionDetected,
+					Observed:    true, // let through; see recognition.serve
 				})
 			}
 

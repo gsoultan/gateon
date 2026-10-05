@@ -1188,10 +1188,28 @@ func (m *Manager) completeEnrolment(user *gateonv1.User, recoveryCodes string) e
 	return nil
 }
 
-func (m *Manager) Disable2FA(id string) error {
-	qUpdate := m.dialect.Rebind(QueryUpdate2FA)
-	_, err := m.db.Exec(qUpdate, false, "", "", id)
-	return err
+// ErrNoSuchUser answers a change to an account id that names none.
+var ErrNoSuchUser = errors.New("no such user")
+
+// ResetTwoFactor is an administrator's reset of account id's second factor
+// (ADR 0057): its TOTP secret and recovery codes are removed, it must enrol a
+// new authenticator at its next sign-in (two_factor_pending), and every session
+// it has ends, here and on the peers.
+//
+// There was no way to do this: an account whose authenticator was lost or
+// compromised could only be deleted and recreated. Disable2FA, which cleared
+// the factor and left the sessions and the account password-only, existed and
+// nothing called it.
+func (m *Manager) ResetTwoFactor(id string) error {
+	res, err := m.db.Exec(m.dialect.Rebind(QueryResetTwoFactor), false, true, id)
+	if err != nil {
+		return fmt.Errorf("failed to reset two-factor authentication: %w", err)
+	}
+	if n, err := res.RowsAffected(); err == nil && n == 0 {
+		return ErrNoSuchUser
+	}
+	m.revokeSessions(id)
+	return nil
 }
 
 // SetUserDisabled enables or disables an account without deleting it. A disabled

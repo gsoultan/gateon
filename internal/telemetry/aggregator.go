@@ -269,13 +269,17 @@ func (a *LocalMetricsAggregator) RecordRequest(ip string, status int, r *http.Re
 // GraphQL poller whose session ended, not a password guess (ADR 0031). The
 // mark is written by the middleware that refused, never read off the request,
 // so a stuffing POST to a login form that adds a bearer header still counts.
-// Read only for a 401 or 403, from the method, the header's scheme and the
-// request state, allocating nothing.
+// Nor is any other refusal the gateway wrote before the request reached its
+// service -- a geofence, a WAF, a trap, bot management, deception, TLS
+// binding -- unless its authentication marked it: none of them checked a
+// credential (request.RequestState.CredentialChecked, ADR 0059). Read only
+// for a 401 or 403, from the method, the header's scheme and the request
+// state, allocating nothing.
 func credentialRefusal(status int, r *http.Request) bool {
 	if (status != http.StatusUnauthorized && status != http.StatusForbidden) || r == nil {
 		return false
 	}
-	if rs := request.GetRequestState(r); rs != nil && rs.Refused != request.RefusalNone {
+	if rs := request.GetRequestState(r); rs != nil && !rs.CredentialChecked() {
 		return false
 	}
 	return r.Method == http.MethodPost || presentsPassword(r.Header)

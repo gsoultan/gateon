@@ -10,13 +10,11 @@ import (
 	"net/http"
 	"os"
 	"slices"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/gsoultan/gateon/internal/config"
-	"github.com/gsoultan/gateon/internal/httputil"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/security/mitigation"
@@ -24,7 +22,19 @@ import (
 	lru "github.com/hashicorp/golang-lru"
 )
 
-// GetIPFingerprint returns a unique identifier for the client (preferring JA4+ fingerprint over IP).
+// GetIPFingerprint returns the request's JA4+ fingerprint: the class half of
+// its reputation identity (GetReputationID), and what telemetry and
+// correlation display. It is "" when the request has none, and then
+// repid.For keys the identity by the address alone -- the one ClientIPOf
+// resolves, which believes a forwarding header only from a trusted proxy.
+//
+// It used to fall back to the leftmost X-Forwarded-For, or X-Real-IP, read
+// raw: headers any client writes. Through the reputation identity that made
+// the class half of a score something the client named, so it could shed a
+// bad score per request or spend it on someone else's (dataplane F10). A
+// client's address is decided in one place, the resolver (invariant 8, ADR
+// 0058); the check that guards the rule refuses a raw read of either header
+// outside it.
 func GetIPFingerprint(r *http.Request) string {
 	if rs := request.GetRequestState(r); rs != nil {
 		if rs.JA4Plus != "" {
@@ -34,27 +44,10 @@ func GetIPFingerprint(r *http.Request) string {
 			return rs.JA4 + "_" + rs.JA4H
 		}
 	}
-
-	// Try to get from context if not in request state
 	if ja4plus := GetJA4Plus(r); ja4plus != "_" {
 		return ja4plus
 	}
-
-	// Fallback to IP extraction
-	ip := r.RemoteAddr
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		ip = strings.Split(xff, ",")[0]
-	} else if xri := r.Header.Get("X-Real-IP"); xri != "" {
-		ip = xri
-	}
-	// StripPort, not net.SplitHostPort. This runs on every request, and the
-	// value here usually comes from X-Forwarded-For or X-Real-IP, which carry a
-	// bare address with no port. SplitHostPort's "missing port" path allocates
-	// an *AddrError that is discarded immediately — a heap allocation per
-	// request for a value nobody reads. It was ~10% of allocation objects in
-	// the infra-chain benchmark profile. StripPort answers the same question
-	// without allocating.
-	return httputil.StripPort(ip)
+	return ""
 }
 
 type Reputation struct {

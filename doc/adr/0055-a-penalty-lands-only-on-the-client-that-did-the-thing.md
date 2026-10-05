@@ -71,6 +71,16 @@ kinds are not held against their source:
   listing), `user_mitigation` (a fingerprint block), `ip_shunning`,
   `reputation_block`. It is the gateway's own decision coming back.
 
+  *Amended 2026-10-05 (review 3).* The WAF's reputation rules refuse on the
+  same decisions -- 1910001 on a feed listing, 1910002 on the client's own
+  score below 20 -- and filed their refusal as `waf_blocked`, so each refused
+  retry cost another 50 and the third blocked the client's build on its whole
+  network. Their refusal is now `waf_reputation_block`, one of this kind: still
+  a WAF block in the counters, not in the per-address WAF-block tally the
+  exploit-scan detector shuns on, no adaptive rate limit, and marked
+  `RefusalMitigation` like the reputation blocker's. `secwaf.RepeatsEarlierDecision`
+  is the one place that names those rules (by their `Reputation` category).
+
 Serving a challenge already records no threat (ADR 0045); a *wrong answer* to
 one still does, and is still held against its sender.
 

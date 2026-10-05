@@ -136,34 +136,12 @@ func TrackBehaviorInternal(b *behaviorInc) {
 		// Analyze IAT for robotic regularity (low variance)
 		if len(state.IATs) >= 5 {
 			if isRoboticTiming(state.IATs, highTrafficFactor) {
-				RecordSecurityThreat(SecurityThreat{
-					Type:        "behavioral_anomaly",
-					Fingerprint: fingerprint,
-					SourceIP:    b.sourceIP,
-					UserAgent:   b.userAgent,
-					JA4:         b.ja4,
-					JA4H:        b.ja4h,
-					Score:       30 / highTrafficFactor,
-					Details:     "Robotic timing pattern detected (highly regular intervals)",
-					RequestURI:  path,
-					ActionTaken: ActionFlagged,
-					Severity:    "low",
-				})
+				b.observe("behavioral_anomaly", 30/highTrafficFactor, severityLow,
+					"Robotic timing pattern detected (highly regular intervals)")
 			}
 			if isHeartbeatPattern(state.IATs, highTrafficFactor) {
-				RecordSecurityThreat(SecurityThreat{
-					Type:        "behavioral_anomaly",
-					Fingerprint: fingerprint,
-					SourceIP:    b.sourceIP,
-					UserAgent:   b.userAgent,
-					JA4:         b.ja4,
-					JA4H:        b.ja4h,
-					Score:       40 / highTrafficFactor,
-					Details:     "Heartbeat pattern detected (regular long-interval polling)",
-					RequestURI:  path,
-					ActionTaken: ActionFlagged,
-					Severity:    "medium",
-				})
+				b.observe("behavioral_anomaly", 40/highTrafficFactor, severityMedium,
+					"Heartbeat pattern detected (regular long-interval polling)")
 			}
 		}
 	}
@@ -180,53 +158,20 @@ func TrackBehaviorInternal(b *behaviorInc) {
 
 	// Analyze for API Fuzzing / Scanning
 	if isFuzzing(state.StatusCodes, highTrafficFactor) {
-		RecordSecurityThreat(SecurityThreat{
-			Type:        "api_fuzzing",
-			Fingerprint: fingerprint,
-			SourceIP:    b.sourceIP,
-			UserAgent:   b.userAgent,
-			JA4:         b.ja4,
-			JA4H:        b.ja4h,
-			Score:       60 / highTrafficFactor,
-			Details:     "High rate of 404/403 responses detected (potential fuzzing/scanning)",
-			RequestURI:  path,
-			ActionTaken: ActionFlagged,
-			Severity:    "high",
-		})
+		b.observe("api_fuzzing", 60/highTrafficFactor, severityHigh,
+			"High rate of 404/403 responses detected (potential fuzzing/scanning)")
 	}
 
 	// Analyze Sequence for jump-to-critical-path
 	if isSuspiciousSequence(state.Sequence) {
-		RecordSecurityThreat(SecurityThreat{
-			Type:        "behavioral_anomaly",
-			Fingerprint: fingerprint,
-			SourceIP:    b.sourceIP,
-			UserAgent:   b.userAgent,
-			JA4:         b.ja4,
-			JA4H:        b.ja4h,
-			Score:       50,
-			Details:     "Suspicious path sequence detected (jump to sensitive area)",
-			RequestURI:  path,
-			ActionTaken: ActionFlagged,
-			Severity:    "medium",
-		})
+		b.observe("behavioral_anomaly", 50, severityMedium,
+			"Suspicious path sequence detected (jump to sensitive area)")
 	}
 
 	// Analyze for Directory Traversal / Probe
 	if isProbePattern(path) {
-		RecordSecurityThreat(SecurityThreat{
-			Type:        "probe_detected",
-			Fingerprint: fingerprint,
-			SourceIP:    b.sourceIP,
-			UserAgent:   b.userAgent,
-			JA4:         b.ja4,
-			JA4H:        b.ja4h,
-			Score:       70,
-			Details:     "Known exploit probe or directory traversal attempt: " + path,
-			RequestURI:  path,
-			ActionTaken: ActionFlagged,
-			Severity:    "high",
-		})
+		b.observe("probe_detected", 70, severityHigh,
+			"Known exploit probe or directory traversal attempt: "+path)
 	}
 
 	state.LastPath = path
@@ -239,19 +184,38 @@ func TrackBehaviorInternal(b *behaviorInc) {
 		hostname = hostname[:idx]
 	}
 	if isDGAPattern(hostname) {
-		RecordSecurityThreat(SecurityThreat{
-			Type:        "dga_detected",
-			Fingerprint: fingerprint,
-			SourceIP:    b.sourceIP,
-			UserAgent:   b.userAgent,
-			JA4:         b.ja4,
-			JA4H:        b.ja4h,
-			Score:       40,
-			Details:     "Potential DGA hostname detected: " + hostname,
-			RequestURI:  path,
-			ActionTaken: ActionFlagged,
-		})
+		b.observe("dga_detected", 40, "", "Potential DGA hostname detected: "+hostname)
 	}
+}
+
+// severityLow is the lowest severity a finding is filed with; severityMedium
+// and severityHigh are anomaly.go's.
+const severityLow = "low"
+
+// observe records one behavioural finding about the request b describes.
+//
+// Every one is Observed (ADR 0059). Profiling runs after the response was
+// sent: the request was answered, and by whatever the route decided, not by
+// this. A rhythm, a run of 404s or a jump to /admin describes how a client
+// behaves -- a dashboard polling every five seconds, a health checker, a user
+// with a bookmark -- and each finding took half its score off the client's
+// reputation, which every route's reputation blocker refuses on. Recorded,
+// counted and shown; held against nobody.
+func (b *behaviorInc) observe(threatType string, score float64, severity, details string) {
+	RecordSecurityThreat(SecurityThreat{
+		Type:        threatType,
+		Fingerprint: b.fingerprint,
+		SourceIP:    b.sourceIP,
+		UserAgent:   b.userAgent,
+		JA4:         b.ja4,
+		JA4H:        b.ja4h,
+		Score:       score,
+		Details:     details,
+		RequestURI:  b.path,
+		ActionTaken: ActionFlagged,
+		Severity:    severity,
+		Observed:    true,
+	})
 }
 
 func isRoboticTiming(iats []time.Duration, factor float64) bool {

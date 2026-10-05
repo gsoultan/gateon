@@ -57,6 +57,9 @@ service ApiService {
   rpc ListUsers(ListUsersRequest) returns (ListUsersResponse);
   rpc UpdateUser(UpdateUserRequest) returns (UpdateUserResponse);
   rpc DeleteUser(DeleteUserRequest) returns (DeleteUserResponse);
+  // ResetUserTwoFactor removes another account's second factor and ends its
+  // sessions (ADR 0057). Administrators only; never the caller's own account.
+  rpc ResetUserTwoFactor(ResetUserTwoFactorRequest) returns (ResetUserTwoFactorResponse);
 
   rpc GetDiagnostics(GetDiagnosticsRequest) returns (GetDiagnosticsResponse);
   rpc ListSecurityThreats(ListSecurityThreatsRequest) returns (ListSecurityThreatsResponse);

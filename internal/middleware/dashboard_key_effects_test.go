@@ -18,6 +18,7 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -40,14 +41,21 @@ import (
 // this table and fails when a key the dashboard writes has neither a row here
 // nor a line in scripts/checkconfig/effects-baseline.txt.
 type keyEffect struct {
-	mwType, key string
-	base        map[string]string // the rest of the config
-	a, b        string            // the two values compared
-	probe       func(t *testing.T) *http.Request
-	requests    int              // probe this many times (rate limits); 0 = once
-	backend     http.HandlerFunc // nil = echoBackend
-	inert       string           // the finding that says it does nothing
+	mwType, key  string
+	base         map[string]string // the rest of the config
+	a, b         string            // the two values compared
+	probe        func(t *testing.T) *http.Request
+	requests     int                     // probe this many times (rate limits); 0 = once
+	backend      http.HandlerFunc        // nil = echoBackend
+	freshBackend func() http.HandlerFunc // a new backend per build, for one that counts
+	header       string                  // a response header to record as well
+	inert        string                  // the finding that says it does nothing
 }
+
+// effectBuild numbers the registry's builds. Each build is its own route, so
+// middlewares that keep per-route state (the circuit breaker) start clean,
+// across -count and -shuffle too.
+var effectBuild atomic.Int64
 
 // dashboardKeyEffects is the registry.
 var dashboardKeyEffects = []keyEffect{
@@ -74,6 +82,22 @@ var dashboardKeyEffects = []keyEffect{
 	{mwType: "ratelimit", key: "burst", a: "5", b: "1", probe: getFrom("/", "198.51.100.20:4000"), requests: 3},
 	{mwType: "cors", key: "allowed_origins", a: "https://a.example", b: "https://b.example", probe: fromOrigin("https://b.example")},
 	{mwType: "buffering", key: "max_request_body_bytes", a: "1048576", b: "10", probe: postBody(100)},
+
+	// NEW-10: a key is proven for the type whose factory builds it. These
+	// were covered only by a row for another type, or by tests that built the
+	// config struct directly.
+	{mwType: "grpcweb", key: "allowed_origins", a: "https://a.example", b: "https://b.example", probe: grpcWebFrom("https://b.example")},
+	{mwType: "circuit_breaker", key: "min_requests", base: map[string]string{"error_threshold": "0.5"},
+		a: "1", b: "10", probe: get("/"), requests: 3, backend: failingBackend},
+	{mwType: "circuit_breaker", key: "error_threshold", base: map[string]string{"min_requests": "2"},
+		a: "0.4", b: "0.9", probe: get("/"), requests: 4, freshBackend: alternatingBackend},
+	{mwType: "security_headers", key: "preset", a: "recommended", b: "strict", probe: get("/"), header: "X-Frame-Options"},
+	{mwType: "honeypot", key: "paths", a: "/elsewhere", b: "/trap", probe: getFromFresh("/trap")},
+	{mwType: "deception", key: "honeypot_paths", a: "/elsewhere", b: "/trap", probe: getFromFresh("/trap")},
+	{mwType: "graphql_firewall", key: "max_depth", a: "10", b: "2",
+		probe: postJSON("/graphql", `{"query":"{ a { b { c { d } } } }"}`)},
+	{mwType: "graphql_firewall", key: "introspection", a: "true", b: "false",
+		probe: postJSON("/graphql", `{"query":"{ __schema { types { name } } }"}`)},
 }
 
 func TestDashboardKeysChangeWhatTheGatewayDoes(t *testing.T) {
@@ -101,12 +125,16 @@ func observe(t *testing.T, row keyEffect, value string) string {
 		cfg = map[string]string{}
 	}
 	cfg[row.key] = value
+	route := fmt.Sprintf("effect-route-%d", effectBuild.Add(1))
 	mw, err := NewFactory(nil, nil, nil, nil, t.TempDir()).Create(
-		&gateonv1.Middleware{Id: "effect", Type: row.mwType, Config: cfg}, "effect-route")
+		&gateonv1.Middleware{Id: "effect", Type: row.mwType, Config: cfg}, route)
 	if err != nil {
 		t.Fatalf("build %s with %s=%q: %v", row.mwType, row.key, value, err)
 	}
 	backend := row.backend
+	if row.freshBackend != nil {
+		backend = row.freshBackend()
+	}
 	if backend == nil {
 		backend = echoBackend
 	}
@@ -115,8 +143,9 @@ func observe(t *testing.T, row keyEffect, value string) string {
 	for range max(row.requests, 1) {
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, row.probe(t))
-		out = append(out, fmt.Sprintf("%d enc=%q acao=%q body=%q", rec.Code,
-			rec.Header().Get("Content-Encoding"), rec.Header().Get("Access-Control-Allow-Origin"), rec.Body.String()))
+		out = append(out, fmt.Sprintf("%d enc=%q acao=%q hdr=%q body=%q", rec.Code,
+			rec.Header().Get("Content-Encoding"), rec.Header().Get("Access-Control-Allow-Origin"),
+			headerOf(rec, row.header), rec.Body.String()))
 	}
 	return strings.Join(out, " | ")
 }
@@ -125,6 +154,65 @@ func observe(t *testing.T, row keyEffect, value string) string {
 func echoBackend(w http.ResponseWriter, r *http.Request) {
 	_, _ = io.Copy(io.Discard, r.Body)
 	_, _ = io.WriteString(w, "xfcc="+r.Header.Get("X-Forwarded-Client-Cert"))
+}
+
+func headerOf(rec *httptest.ResponseRecorder, name string) string {
+	if name == "" {
+		return ""
+	}
+	return rec.Header().Get(name)
+}
+
+// freshPeer numbers the clients getFromFresh sends from.
+var freshPeer atomic.Int64
+
+// getFromFresh is a GET from a client no earlier probe used: a trap blocks the
+// address that springs it, which would answer every later probe from it the
+// same way, across -count too.
+func getFromFresh(target string) func(*testing.T) *http.Request {
+	return func(t *testing.T) *http.Request {
+		n := freshPeer.Add(1)
+		return getFrom(target, fmt.Sprintf("198.18.%d.%d:4000", (n/250)%250, n%250+1))(t)
+	}
+}
+
+// failingBackend answers every request 500.
+func failingBackend(w http.ResponseWriter, _ *http.Request) {
+	w.WriteHeader(http.StatusInternalServerError)
+}
+
+// alternatingBackend fails every other request it is sent, starting with the
+// first. The registry probes an even number of times per build, so each build
+// sees the same pattern.
+func alternatingBackend() http.HandlerFunc {
+	var n atomic.Int64
+	return func(w http.ResponseWriter, _ *http.Request) {
+		if n.Add(1)%2 == 1 {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}
+}
+
+// grpcWebFrom is a browser's gRPC-Web call from origin.
+func grpcWebFrom(origin string) func(*testing.T) *http.Request {
+	return func(*testing.T) *http.Request {
+		r := httptest.NewRequest(http.MethodPost, "http://app.example/pkg.Svc/Call", strings.NewReader("\x00\x00\x00\x00\x00"))
+		r.Header.Set("Content-Type", "application/grpc-web+proto")
+		r.Header.Set("Origin", origin)
+		r.RemoteAddr = "198.51.100.10:4000"
+		return r
+	}
+}
+
+func postJSON(target, body string) func(*testing.T) *http.Request {
+	return func(*testing.T) *http.Request {
+		r := httptest.NewRequest(http.MethodPost, "http://app.example"+target, strings.NewReader(body))
+		r.Header.Set("Content-Type", "application/json")
+		r.RemoteAddr = "198.51.100.10:4000"
+		return r
+	}
 }
 
 func sizedBody(n int) http.HandlerFunc {

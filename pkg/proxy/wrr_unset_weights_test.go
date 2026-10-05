@@ -49,6 +49,69 @@ func TestWeightedServiceWithNoWeightsServes(t *testing.T) {
 	}
 }
 
+// TestAStandbyServesWhenEveryWeightedTargetIsDown is TRUTH-NEW-12. A target at
+// weight 0 beside weighted ones is "on standby" (ADR 0047), but it never took
+// a request even with every weighted target down: the route answered 503 with
+// a live standby in its pool. Standbys now share the traffic, evenly, while no
+// weighted target is alive, and go back to nothing when one returns.
+func TestAStandbyServesWhenEveryWeightedTargetIsDown(t *testing.T) {
+	const primary, s1, s2 = "http://primary.internal", "http://standby-1.internal", "http://standby-2.internal"
+	lb := NewWeightedRoundRobinLB([]*gateonv1.Target{
+		{Url: s1, Weight: 0}, {Url: primary, Weight: 3}, {Url: s2, Weight: 0},
+	})
+	lb.SetAlive(primary, false)
+	seen := map[string]int{}
+	for range 20 {
+		seen[lb.Next()]++
+	}
+	if seen[s1] != 10 || seen[s2] != 10 {
+		t.Fatalf("with the only weighted target down, 20 picks went %v; want the two live standbys 10 each", seen)
+	}
+
+	lb.SetAlive(s1, false)
+	for range 4 {
+		if got := lb.Next(); got != s2 {
+			t.Fatalf("with one standby left, a pick went to %q", got)
+		}
+	}
+
+	lb.SetAlive(primary, true)
+	for range 10 {
+		if got := lb.Next(); got != primary {
+			t.Fatalf("the weighted target is back but a pick went to %q", got)
+		}
+	}
+
+	lb.SetAlive(primary, false)
+	lb.SetAlive(s2, false)
+	if got := lb.Next(); got != "" {
+		t.Fatalf("every target down, standbys included, but a pick went to %q", got)
+	}
+}
+
+// TestARouteFailsOverToItsStandby: the same through the proxy, with the
+// primary ejected by its health check rather than by hand.
+func TestARouteFailsOverToItsStandby(t *testing.T) {
+	primary := newSwitchableBackend(t, "primary")
+	standby := namedBackends(t, "standby")["standby"]
+	ph := proxyFor(t, &gateonv1.Service{Id: "failover", WeightedTargets: []*gateonv1.Target{
+		{Url: primary.url(), Weight: 1}, {Url: standby, Weight: 0},
+	}})
+	if got := sequence(t, ph, 4); got[0] != "primary" || got[3] != "primary" {
+		t.Fatalf("with the primary up, requests went to %v", got)
+	}
+	primary.stop()
+	ph.checkAll(t.Context(), ph.healthHTTPClient())
+	ph.checkAll(t.Context(), ph.healthHTTPClient())
+
+	rec := httptest.NewRecorder()
+	ph.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "http://gw.test/", nil))
+	if rec.Code != http.StatusOK || rec.Header().Get("X-Backend") != "standby" {
+		t.Fatalf("primary down, standby up: status %d from %q, want 200 from the standby",
+			rec.Code, rec.Header().Get("X-Backend"))
+	}
+}
+
 // TestZeroWeightStaysStandbyBesideAWeightedTarget keeps the fix from turning a
 // canary held at 0% into a live one: weight zero next to a weighted target
 // still receives nothing.

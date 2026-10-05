@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -40,6 +42,7 @@ func countLines(buf *bytes.Buffer, msg string) int {
 // (twice it, should the loop straddle a second).
 func TestTheAccessLogIsCappedPerSecond(t *testing.T) {
 	t.Setenv(accessLogMaxPerSecondEnv, "5")
+	accessLogs = accessLogCap{}
 	t.Cleanup(func() { accessLogs = accessLogCap{} })
 	buf := captureLog(t)
 	h := AccessLogSampled("capped-route", 1)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {}))
@@ -52,13 +55,13 @@ func TestTheAccessLogIsCappedPerSecond(t *testing.T) {
 }
 
 // TestTheAccessLogCapResetsEachSecondAndReportsWhatItLeftOut: a new second
-// writes again, and a new minute says how many lines the cap held back.
+// writes again, and a minute on the cap says how many lines it held back.
 func TestTheAccessLogCapResetsEachSecondAndReportsWhatItLeftOut(t *testing.T) {
-	t.Cleanup(func() { accessLogs = accessLogCap{} })
 	buf := captureLog(t)
 	var c accessLogCap
-	c.max.Store(2)
-	t0 := time.Date(2026, 10, 3, 12, 0, 0, 0, time.UTC)
+	c.setMax(2)
+	t0 := time.Now().Add(time.Hour)
+	c.reported.Store(int64(t0.Sub(accessLogEpoch)))
 
 	allowed := 0
 	for range 5 {
@@ -81,6 +84,41 @@ func TestTheAccessLogCapResetsEachSecondAndReportsWhatItLeftOut(t *testing.T) {
 	}
 }
 
+// TestTheAccessLogCapHoldsWhenRequestsFinishOutOfOrder is OPS-N2: the cap was
+// keyed on the time each request started and reset its count whenever that
+// differed from the second it held, forwards or backwards. A slow request
+// finishing beside fast ones moved the second back, the next fast one moved it
+// forward, and every move started the count over: 737 lines a second through
+// a cap of 100. Two seconds' worth (twenty) is the most that may pass here.
+func TestTheAccessLogCapHoldsWhenRequestsFinishOutOfOrder(t *testing.T) {
+	captureLog(t)
+	var c accessLogCap
+	c.setMax(10)
+	base := time.Now()
+	earlier, later := base.Add(time.Second), base.Add(2*time.Second)
+	var allowed atomic.Int64
+	var wg sync.WaitGroup
+	for g := range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range 500 {
+				at := later
+				if (i+g)%2 == 1 {
+					at = earlier
+				}
+				if c.allow(at) {
+					allowed.Add(1)
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	if n := allowed.Load(); n > 20 {
+		t.Fatalf("%d of 4000 access-log lines written across two seconds under a cap of 10 a second", n)
+	}
+}
+
 // TestAZeroCapLiftsIt: GATEON_ACCESS_LOG_MAX_PER_SECOND=0 writes every line.
 func TestAZeroCapLiftsIt(t *testing.T) {
 	t.Setenv(accessLogMaxPerSecondEnv, "0")
@@ -88,8 +126,9 @@ func TestAZeroCapLiftsIt(t *testing.T) {
 		t.Fatalf("accessLogMaxPerSecond() = %d, want 0", got)
 	}
 	var c accessLogCap
+	c.setMax(accessLogMaxPerSecond())
 	for range 1000 {
-		if !c.allow(time.Unix(1, 0)) {
+		if !c.allow(time.Now()) {
 			t.Fatal("a zero cap refused a line")
 		}
 	}
@@ -99,7 +138,7 @@ func TestAZeroCapLiftsIt(t *testing.T) {
 // that would be written: an atomic load and add, no allocation.
 func BenchmarkAccessLogCapAllow(b *testing.B) {
 	var c accessLogCap
-	c.max.Store(1 << 62)
+	c.setMax(1 << 23)
 	now := time.Now()
 	b.ReportAllocs()
 	b.RunParallel(func(pb *testing.PB) {

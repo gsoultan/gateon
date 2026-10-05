@@ -14,6 +14,7 @@ import (
 
 	"github.com/gsoultan/gateon/internal/telemetry"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
+	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
@@ -22,6 +23,14 @@ import (
 
 // healthCheckInterval is how often every target is checked.
 const healthCheckInterval = 15 * time.Second
+
+// healthCheckWorkers bounds how many of one route's targets are checked at
+// once. Every check is bounded by its own 5 s timeout, so a tick lasts at most
+// ceil(targets/8) timeouts; eight blackholed targets leave rotation in two
+// ticks rather than eighty seconds (DP-N8). A constant, not a tunable: it caps
+// connections a gateway opens per route per tick, and nothing an operator
+// would tune.
+const healthCheckWorkers = 8
 
 func (h *ProxyHandler) runHealthCheck() {
 	ticker := time.NewTicker(healthCheckInterval)
@@ -50,28 +59,42 @@ func (h *ProxyHandler) healthHTTPClient() *http.Client {
 
 // checkAll checks every target once and tells the balancer what changed. It is
 // one tick of runHealthCheck.
+//
+// Targets are checked concurrently, at most healthCheckWorkers at a time, and
+// the tick returns when every check has. One after another, each blackholed
+// target cost a full timeout per tick (DP-N8).
 func (h *ProxyHandler) checkAll(ctx context.Context, client *http.Client) {
+	var g errgroup.Group
+	g.SetLimit(healthCheckWorkers)
 	for _, s := range h.lb.GetStats() {
-		u := s.URL
-		ok := h.checkTargetHealth(ctx, client, u)
-
-		// One check result is not a state change. See healthThresholds:
-		// every target is checked in this one loop on this one goroutine,
-		// so whatever makes a single check fail tends to fail all of them
-		// in the same tick, and acting on each result individually is how
-		// a busy gateway empties its own backend pool.
-		alive, changed := h.healthThresholds.Record(u, ok)
-		if changed {
-			h.lb.SetAlive(u, alive)
-		}
-
-		healthVal := 0.0
-		if alive {
-			healthVal = 1.0
-		}
-		telemetry.TargetHealth.WithLabelValues(h.routeName, u).Set(healthVal)
-		telemetry.ActiveConnections.WithLabelValues(u).Set(float64(s.ActiveConn))
+		g.Go(func() error {
+			h.checkOne(ctx, client, s)
+			return nil
+		})
 	}
+	_ = g.Wait()
+}
+
+// checkOne checks one target and records the result.
+func (h *ProxyHandler) checkOne(ctx context.Context, client *http.Client, s TargetStats) {
+	u := s.URL
+	ok := h.checkTargetHealth(ctx, client, u)
+
+	// One check result is not a state change. See healthThresholds: whatever
+	// makes a single check fail tends to fail all of a tick's checks at once,
+	// and acting on each result individually is how a busy gateway empties its
+	// own backend pool.
+	alive, changed := h.healthThresholds.Record(u, ok)
+	if changed {
+		h.lb.SetAlive(u, alive)
+	}
+
+	healthVal := 0.0
+	if alive {
+		healthVal = 1.0
+	}
+	telemetry.TargetHealth.WithLabelValues(h.routeName, u).Set(healthVal)
+	telemetry.ActiveConnections.WithLabelValues(u).Set(float64(s.ActiveConn))
 }
 
 func (h *ProxyHandler) checkTargetHealth(ctx context.Context, client *http.Client, targetURL string) bool {

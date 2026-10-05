@@ -61,6 +61,19 @@ func TestConnectServesTheRPCsTheDashboardCalls(t *testing.T) {
 			}
 			return res.Msg.GetMessage(), nil
 		}},
+		// ADR 0057: the wizard sends the setup token in IsSetupRequired's body,
+		// and the user-management page resets a second factor, over Connect.
+		{"IsSetupRequired", "required", func() (string, error) {
+			res, err := h.IsSetupRequired(ctx, connect.NewRequest(&gateonv1.IsSetupRequiredRequest{}))
+			if err != nil || !res.Msg.GetRequired() {
+				return "", err
+			}
+			return "required", nil
+		}},
+		{"ResetUserTwoFactor", "admin role required", func() (string, error) {
+			_, err := h.ResetUserTwoFactor(ctx, connect.NewRequest(&gateonv1.ResetUserTwoFactorRequest{Id: "u-2"}))
+			return "", err
+		}},
 	}
 
 	for _, c := range calls {

@@ -44,6 +44,7 @@ func (t RequestTimeouts) Handler(next http.Handler, limits StreamLimits) http.Ha
 		sw := NewStreamWriter(w, limits)
 		defer Release(sw)
 		next.ServeHTTP(sw, r)
+		sw.AbortIfCut()
 	})
 }
 

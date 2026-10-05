@@ -181,6 +181,12 @@ func ForwardAuth(cfg ForwardAuthConfig) (Middleware, error) {
 			defer resp.Body.Close()
 
 			if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+				// The authentication path refused: a 401 or 403 from it can
+				// be a refused credential, which brute-force detection counts
+				// (request.RefusalAuthentication, ADR 0059).
+				if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+					request.MarkRefused(r, request.RefusalAuthentication)
+				}
 				// Return auth service response to client
 				for k, vv := range resp.Header {
 					for _, v := range vv {

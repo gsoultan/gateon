@@ -9,9 +9,18 @@ import (
 	"fmt"
 
 	"github.com/gsoultan/gateon/internal/auth"
+	"github.com/gsoultan/gateon/internal/request"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 	"google.golang.org/grpc/metadata"
 )
+
+// signInRefused reports whether a sign-in error refused the credentials: a
+// wrong password, or an account the password was tried against while locked
+// or disabled. These are what /v1/login answers 401.
+func signInRefused(err error) bool {
+	return errors.Is(err, auth.ErrInvalidCredentials) || errors.Is(err, auth.ErrAccountLocked) ||
+		errors.Is(err, auth.ErrAccountDisabled)
+}
 
 func (s *ApiService) Login(ctx context.Context, req *gateonv1.LoginRequest) (*gateonv1.LoginResponse, error) {
 	if !auth.Available(s.Auth) {
@@ -44,6 +53,12 @@ func (s *ApiService) Login(ctx context.Context, req *gateonv1.LoginRequest) (*ga
 			return nil, err
 		}
 		s.logAudit(ctx, "login_failed", "auth", fmt.Sprintf("Failed login attempt for user: %s", req.Username))
+		if signInRefused(err) {
+			// The one refusal on the management plane brute-force detection
+			// counts (request.RefusalAuthentication, ADR 0059): every other 401
+			// or 403 the gateway writes before a service checked no password.
+			request.MarkRefusedContext(ctx, request.RefusalAuthentication)
+		}
 		return nil, err
 	}
 	s.logAudit(ctx, "login_success", "auth", fmt.Sprintf("User logged in: %s", req.Username))
@@ -114,6 +129,9 @@ func (s *ApiService) Verify2FA(ctx context.Context, req *gateonv1.Verify2FAReque
 			return nil, err
 		}
 		s.logAudit(ctx, "verify_2fa_failed", "user", fmt.Sprintf("Failed 2FA verification for user: %s", req.Id))
+		if errors.Is(err, auth.ErrInvalidTwoFactorCode) {
+			request.MarkRefusedContext(ctx, request.RefusalAuthentication) // a guessed code, as signInRefused
+		}
 		return nil, err
 	}
 	if success {

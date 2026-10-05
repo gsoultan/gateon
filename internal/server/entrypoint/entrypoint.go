@@ -6,16 +6,20 @@ package entrypoint
 import (
 	"context"
 	"crypto/tls"
+	"io"
 	"net"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/deadline"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware/security/identity"
+	"github.com/gsoultan/gateon/internal/server/readiness"
 	"github.com/gsoultan/gateon/internal/syncutil"
 	"github.com/gsoultan/gateon/internal/telemetry"
+	"github.com/gsoultan/gateon/internal/telemetry/repid"
 	gtls "github.com/gsoultan/gateon/internal/tls"
 	"github.com/gsoultan/gateon/pkg/l4"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
@@ -147,10 +151,15 @@ func (o *openConns) remove(c net.Conn) {
 // socket is what ends the session: the goroutine serving it unblocks, its
 // handler returns, and remove forgets it -- this does not wait for that, so it
 // cannot deadlock against remove taking the same lock.
+//
+// A block covers what repid.AddressKey keys it by -- an IPv6 address's whole
+// /64 (ADR 0058) -- so it closes every address of that /64, except one the
+// allowlist names, which the block does not refuse either.
 func (o *openConns) closeByAddr(ip string) int {
 	if ip == "" {
 		return 0
 	}
+	key := repid.AddressKey(ip)
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	n := 0
@@ -158,7 +167,7 @@ func (o *openConns) closeByAddr(ip string) int {
 		if addr == "" {
 			addr = peerIP(c)
 		}
-		if addr == ip {
+		if addr == ip || (addr != "" && repid.AddressKey(addr) == key && !identity.ExemptFromEnforcement(addr)) {
 			_ = c.Close()
 			n++
 		}
@@ -346,6 +355,108 @@ type Deps struct {
 	// ManagementTimeouts are the management listener's per-request bounds;
 	// nil is defaultManagementTimeouts, which is what production runs.
 	ManagementTimeouts *deadline.RequestTimeouts
+	// rebind is how a listener that failed to bind is retried; the zero value
+	// is the production schedule. Tests shorten it.
+	rebind rebindPolicy
+}
+
+// rebindPolicy is the backoff between attempts to bind a listener that could
+// not bind: first, doubling to max, until it binds or the gateway shuts down.
+type rebindPolicy struct {
+	first, max time.Duration
+	bound      func(addr string) // called once a retry has bound and is serving; nil in production
+}
+
+// Production retry schedule. A retry costs one bind attempt, so the bound is
+// on how stale /readyz may be after the port frees, not on cost: at most 30 s.
+const (
+	defaultRebindFirst = time.Second
+	defaultRebindMax   = 30 * time.Second
+)
+
+func (p rebindPolicy) withDefaults() rebindPolicy {
+	if p.first <= 0 {
+		p.first = defaultRebindFirst
+	}
+	if p.max < p.first {
+		p.max = max(defaultRebindMax, p.first)
+	}
+	return p
+}
+
+// listenerSpec is one listener of an entrypoint: how to bind it and what to do
+// with it once bound. addr is the address as readiness names it.
+type listenerSpec[L io.Closer] struct {
+	ep, addr string
+	listen   func() (L, error)
+	serve    func(L)
+}
+
+// bindListener binds spec now and serves it. When the address is taken it
+// reports the entrypoint not ready and keeps retrying in the background until
+// it binds -- readiness and gateon_entrypoint_up then recover -- or the gateway
+// shuts down (OPS-N5). Entrypoints used to be bound once, at startup: one whose
+// port was held for a moment (the previous process still draining, a deploy
+// overlapping) answered 503 on /readyz until someone restarted the gateway.
+// The first failure is logged at ERROR; the retries are not, and readiness
+// keeps the latest reason.
+func bindListener[L io.Closer](deps *Deps, wg *syncutil.WaitGroup, spec listenerSpec[L]) {
+	l, err := spec.listen()
+	if err == nil {
+		readiness.ListenerBound(spec.ep, spec.addr)
+		spec.serve(l)
+		return
+	}
+	logger.L.LogError("entrypoint listener could not bind; retrying until it does, and /readyz reports it meanwhile",
+		"error", err, "addr", spec.addr, "ep", spec.ep)
+	readiness.ListenerFailed(spec.ep, spec.addr, err)
+	retryListener(deps, wg, spec)
+}
+
+// retryListener is bindListener's background half.
+func retryListener[L io.Closer](deps *Deps, wg *syncutil.WaitGroup, spec listenerSpec[L]) {
+	ctx, cancel := context.WithCancel(context.Background())
+	stop := func(context.Context) error { cancel(); return nil }
+	if deps.ShutdownRegistry != nil {
+		deps.ShutdownRegistry.Register(stop)
+	}
+	policy := deps.rebind.withDefaults()
+	wg.Go(func() {
+		wait := policy.first
+		for attempt := 2; ; attempt++ {
+			if !waitFor(ctx, wait) {
+				return
+			}
+			l, err := spec.listen()
+			if err != nil {
+				readiness.ListenerFailed(spec.ep, spec.addr, err)
+				wait = min(2*wait, policy.max)
+				continue
+			}
+			// If shutdown began while this bound, whatever serve registers now
+			// is never called; closing on the shutdown signal covers that.
+			context.AfterFunc(ctx, func() { _ = l.Close() })
+			readiness.ListenerBound(spec.ep, spec.addr)
+			logger.L.LogInfo("entrypoint listener bound after retrying", "addr", spec.addr, "ep", spec.ep, "attempts", attempt)
+			spec.serve(l)
+			if policy.bound != nil {
+				policy.bound(spec.addr)
+			}
+			return
+		}
+	})
+}
+
+// waitFor waits d, or until ctx ends; it reports whether d passed.
+func waitFor(ctx context.Context, d time.Duration) bool {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-t.C:
+		return true
+	case <-ctx.Done():
+		return false
+	}
 }
 
 // RateLimiter provides per-key rate limiting middleware.

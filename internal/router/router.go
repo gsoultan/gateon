@@ -161,6 +161,14 @@ func SelectRoute(r *http.Request, store config.RouteStore) *gateonv1.Route {
 	// is also what keeps the route the gateway chose and the path the backend
 	// receives from disagreeing. r.RequestURI keeps the original, so the WAF and
 	// the access log still see what the client actually sent.
+	//
+	// A path some backends resolve differently from this router ("..;", a
+	// backslash) selects no route at all (DP-F8): there is no route that is
+	// right for it. The base handler refuses it with 400 before getting here;
+	// this is the backstop for any caller that does not.
+	if AmbiguousPath(r.URL.Path) {
+		return nil
+	}
 	if clean := NormalizePath(r.URL.Path); clean != r.URL.Path {
 		r.URL.Path = clean
 		r.URL.RawPath = ""
@@ -360,77 +368,10 @@ func ApplyRouteMiddlewares(h http.Handler, rt *gateonv1.Route, redisClient redis
 	// to ensure that even blocked requests include the necessary CORS headers
 	// and that preflight (OPTIONS) requests are handled correctly without
 	// triggering false security alerts.
-	var userMiddlewares []middleware.Middleware
-	var corsMiddleware middleware.Middleware
-	hasCORS := false
-	// hasWAF records whether this route attached its own "waf" middleware and it
-	// built successfully. It gates the gateway-wide WAF below: a route with its
-	// own WAF is an explicit override and must not also run the global one.
-	// Setting it only on a successful Create is deliberate — if the per-route WAF
-	// fails to build, hasWAF stays false and the global WAF still covers the
-	// route, so a misconfigured override fails safe rather than open.
-	hasWAF := false
-
-	// Security middlewares that could not be built. A route with any of these
-	// serves a refusal rather than a chain missing a control it was configured
-	// to have.
-	var missingSecurity []string
-
-	if mwStore != nil {
-		for _, mid := range rt.Middlewares {
-			mid = strings.TrimSpace(mid)
-			if mid == "" {
-				continue
-			}
-			mwConf, found := mwStore.Get(ctx, mid)
-			if !found || mwConf == nil {
-				// A route naming a middleware that is not in the store used to
-				// skip silently, so a renamed or deleted middleware removed
-				// whatever it enforced with nothing to notice. Treated as a
-				// build failure of unknown type, which fails closed.
-				logger.L.LogError("route names a middleware that does not exist; "+
-					"the route will refuse requests until it is fixed",
-					"route", routeLabel, "middleware", mid)
-				missingSecurity = append(missingSecurity, mid)
-				continue
-			}
-
-			mw, err := mwFactory.Create(mwConf, routeLabel)
-			if err != nil {
-				// Previously a bare `continue`: the middleware vanished from
-				// the chain, nothing was logged, and the chain is cached until
-				// invalidated -- so a transient failure was baked in. An oidc
-				// middleware whose IdP discovery failed left the route serving
-				// with no authentication while the dashboard still listed it.
-				if isSecurityMiddleware(mwConf.Type) {
-					logger.L.LogError("security middleware failed to build; the route "+
-						"will refuse requests rather than serve without it",
-						"route", routeLabel, "middleware", mid,
-						"type", mwConf.Type, "error", err)
-					missingSecurity = append(missingSecurity, mid)
-				} else {
-					logger.L.LogWarn("middleware failed to build; the route will "+
-						"serve without it",
-						"route", routeLabel, "middleware", mid,
-						"type", mwConf.Type, "error", err)
-				}
-				continue
-			}
-			{
-				if strings.EqualFold(mwConf.Type, "cors") || strings.EqualFold(mwConf.Type, "grpcweb") {
-					if !hasCORS {
-						corsMiddleware = mw
-						hasCORS = true
-					}
-				} else {
-					if strings.EqualFold(mwConf.Type, "waf") {
-						hasWAF = true
-					}
-					userMiddlewares = append(userMiddlewares, mw)
-				}
-			}
-		}
-	}
+	built := buildRouteMiddlewares(ctx, mwFactory, rt, mwStore)
+	built.log(routeLabel)
+	userMiddlewares, corsMiddleware, hasCORS, hasWAF := built.user, built.cors, built.hasCORS, built.hasWAF
+	missingSecurity := built.refusing()
 
 	// A route configured with a security middleware that could not be built
 	// serves a refusal, not a chain missing the control.
@@ -569,18 +510,9 @@ func ApplyRouteMiddlewares(h http.Handler, rt *gateonv1.Route, redisClient redis
 		chain = append(chain, gwaf)
 	}
 
-	// Final Service Timing Wrapper (placed last in chain, closest to proxy)
-	chain = append(chain, func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if rs := request.GetRequestState(r); rs != nil {
-				rs.TServiceStart = time.Now().UnixNano()
-			}
-			next.ServeHTTP(w, r)
-			if rs := request.GetRequestState(r); rs != nil {
-				rs.TServiceEnd = time.Now().UnixNano()
-			}
-		})
-	})
+	// Last in the chain, nearest the proxy: whether a request reached its
+	// service is what tells a backend's 401 from the gateway's own refusals.
+	chain = append(chain, request.ServiceBoundary)
 
 	if len(chain) > 0 {
 		h = middleware.Chain(chain...)(h)

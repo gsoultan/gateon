@@ -197,6 +197,82 @@ func BenchmarkNormalizePath(b *testing.B) {
 	}
 }
 
+// TestAmbiguousPath pins which spellings are refused (DP-F8) and, as much, which
+// are not: a false positive here is a 400 for an ordinary request.
+func TestAmbiguousPath(t *testing.T) {
+	for _, tc := range []struct {
+		in   string
+		want bool
+	}{
+		// Tomcat/Spring: parameters on a dot segment, stripped before the dots
+		// are resolved.
+		{"/public/..;/admin", true},
+		{"/public/..;jsessionid=x/admin", true},
+		{"/public/.;/admin", true},
+		{"/..;/admin", true},
+		{"/a/b/..;", true},
+		{"/ok;x=1/..;/admin", true},
+		// IIS/ASP.NET: a backslash is a separator.
+		{`/public\..\admin`, true},
+		{`/public\admin`, true},
+		{`\admin`, true},
+
+		{"/", false},
+		{"/api/v1/users", false},
+		{"/admin;x=1", false},
+		{"/cars;color=red/wheels", false},
+		{"/a..;/b", false},
+		{"/...;/b", false},
+		{"/a/.hidden;v=1", false},
+		{"/public/../admin", false}, // resolved by NormalizePath, not refused
+		{"", false},
+	} {
+		if got := AmbiguousPath(tc.in); got != tc.want {
+			t.Errorf("AmbiguousPath(%q) = %v, want %v", tc.in, got, tc.want)
+		}
+	}
+}
+
+// TestAmbiguousPathDoesNotAllocate keeps the per-request scan free.
+func TestAmbiguousPathDoesNotAllocate(t *testing.T) {
+	paths := []string{"/api/v1/users", "/admin;x=1", "/public/..;/admin", `/a\b`}
+	if got := testing.AllocsPerRun(100, func() {
+		for _, p := range paths {
+			_ = AmbiguousPath(p)
+		}
+	}); got != 0 {
+		t.Errorf("AmbiguousPath allocated %v times per run, want 0", got)
+	}
+}
+
+// TestSelectRouteRefusesAmbiguousPaths is DP-F8 at the routing layer. With a
+// catch-all route and an authenticated /admin route, /public/..;/admin was
+// routed to the catch-all -- its chain, not /admin's -- and a Tomcat backend
+// served /admin. Selecting no route is the backstop for any caller that does
+// not refuse the request first (the base handler answers 400).
+func TestSelectRouteRefusesAmbiguousPaths(t *testing.T) {
+	trie := config.NewPathTrie()
+	trie.Insert("/", true, &gateonv1.Route{Id: "public", Rule: "PathPrefix(`/`)"})
+	trie.Insert("/admin", true, &gateonv1.Route{Id: "admin", Rule: "PathPrefix(`/admin`)"})
+	trie.Flatten()
+	store := &trieStore{trie: trie}
+
+	for _, p := range []string{"/public/..;/admin", "/public/.;/admin", "/public/%2e%2e;/admin",
+		`/public\..\admin`, "/public%5c..%5cadmin"} {
+		req := httptest.NewRequest("GET", p, nil)
+		req.Host = "app.example.com"
+		if got := SelectRoute(req, store); got != nil {
+			t.Errorf("%q selected route %q; a path the backend resolves differently "+
+				"must select no route", p, got.Id)
+		}
+	}
+	req := httptest.NewRequest("GET", "/admin;x=1", nil)
+	req.Host = "app.example.com"
+	if got := SelectRoute(req, store); got == nil {
+		t.Error("/admin;x=1 selected no route; an ordinary path parameter is not ambiguous")
+	}
+}
+
 // TestSelectRouteLeavesPathParametersAlone records a deliberate non-change.
 //
 // A path segment may legally contain a semicolon, and some servers -- Tomcat and
@@ -213,6 +289,10 @@ func BenchmarkNormalizePath(b *testing.B) {
 //
 // Recorded rather than silently accepted, so it is a decision with a reason
 // attached and not a gap someone finds later.
+//
+// The dot-segment form, /public/..;/admin, is different: no backend means it
+// literally, so NormalizePath still leaves it alone but AmbiguousPath refuses
+// it before routing (DP-F8, ADR 0062; TestSelectRouteRefusesAmbiguousPaths).
 func TestSelectRouteLeavesPathParametersAlone(t *testing.T) {
 	if got := NormalizePath("/admin;x=1"); got != "/admin;x=1" {
 		t.Errorf("NormalizePath(\"/admin;x=1\") = %q; path parameters are being "+

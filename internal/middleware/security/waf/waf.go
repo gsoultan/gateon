@@ -9,6 +9,7 @@ import (
 	"cmp"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -708,11 +709,11 @@ func (t *wafRuntime) inspectAndForward(next http.Handler, w http.ResponseWriter,
 // which is an unbounded allocation keyed on upstream behaviour and breaks
 // server-sent events and any long-lived stream.
 //
-// The cost of streaming is that headers are committed before the body is seen,
-// so a response-body match can no longer change the status code. It truncates
-// the response instead, which is the honest trade: the leaked bytes stop
-// either way, and a client that received a 200 with a truncated body is
-// strictly better off than one that waited for the whole thing to be buffered.
+// Every response-body decision is made before the first body byte is
+// committed -- at the end of a held response, at the ceiling over the held
+// prefix, or at the headers of a body the engine never reads -- so a refusal
+// is a complete 403. Should one ever come after the headers, the response is
+// aborted (abortIfCut), never ended cleanly, and recorded as cut.
 func (t *wafRuntime) inspectResponse(next http.Handler, w http.ResponseWriter, r *http.Request, tx *gwaf.Transaction, observePhase func(d gwaf.Decision, phase, outcome string)) {
 	// Narrow what the origin may answer in before the request goes
 	// upstream: an encoding this build cannot undo would hand the
@@ -736,6 +737,7 @@ func (t *wafRuntime) inspectResponse(next http.Handler, w http.ResponseWriter, r
 	ww.finish()
 	ww.release()
 	restoreAcceptEncoding(r.Header, prevAE, hadAE)
+	ww.abortIfCut()
 }
 
 // fastPathFinding is one of the gateon-owned checks the engine cannot make --
@@ -1081,6 +1083,11 @@ func peekBody(r *http.Request, n int64) ([]byte, error) {
 	// client's stream; returning early without them forwards a body with a
 	// hole at the front. Callers treat a peek error as "nothing suspicious"
 	// and continue, so the truncated request goes upstream.
+	//
+	// Restored exactly once. A second restore after the error check (DP-F4)
+	// sent the head of every peeked body twice under the client's own
+	// Content-Length: the proxy refused it with 502 and the engine inspected
+	// a body the client never sent.
 	if len(peeked) > 0 {
 		r.Body = struct {
 			io.Reader
@@ -1092,13 +1099,6 @@ func peekBody(r *http.Request, n int64) ([]byte, error) {
 	}
 	if err != nil {
 		return nil, err
-	}
-	r.Body = struct {
-		io.Reader
-		io.Closer
-	}{
-		Reader: io.MultiReader(bytes.NewReader(peeked), r.Body),
-		Closer: r.Body,
 	}
 	return peeked, nil
 }
@@ -1201,11 +1201,13 @@ func isBase64URL(s string) bool {
 // previous implementation buffered the *entire* response, an allocation bounded
 // only by upstream behaviour; this one buffers to an explicit ceiling.
 //
-// Past the ceiling the buffer is flushed and the remainder streams through
-// uninspected. That is a real limit and it is stated rather than hidden: the
-// alternative is either an unbounded buffer or refusing large responses
-// outright, and inspecting the first N bytes is what every response-inspecting
-// proxy actually does.
+// At the ceiling the held prefix is decided first -- a finding in it is still
+// a complete refusal -- and only then flushed; the remainder streams through
+// uninspected and the response is counted in
+// gateon_middleware_waf_uninspected_responses_total (ADR 0062). That is a real
+// limit and it is stated rather than hidden: the alternative is either an
+// unbounded buffer or refusing large responses outright, and inspecting the
+// first N bytes is what every response-inspecting proxy actually does.
 //
 // Header-phase rules do not need any of this, so a config with response
 // inspection enabled but no body rules never buffers at all.
@@ -1227,6 +1229,17 @@ type wafResponseWriter struct {
 	// finish used to trigger once per WebSocket upgrade by committing a status
 	// line for a response that had already left.
 	hijacked bool
+
+	// bodyDecided records that the response-body phase has run; it runs once,
+	// before the first body byte is committed. pastCeiling records that the
+	// held prefix was decided and flushed at the ceiling, so the rest streams
+	// uninspected. aborted records a refusal reached after the headers left,
+	// which ends the response as an abort. uninspectedNoted keeps the
+	// uninspected-responses counter at one per response.
+	bodyDecided      bool
+	pastCeiling      bool
+	aborted          bool
+	uninspectedNoted bool
 
 	// buf holds the response while it is inspectable. It comes from a pool: at
 	// enterprise tier this grows to the ceiling on every response, and
@@ -1365,6 +1378,15 @@ func (w *wafResponseWriter) WriteHeader(status int) {
 		w.block(d)
 		return
 	}
+	if w.skipBody {
+		// No body byte will be given to the engine, so the body phase can be
+		// decided now, while a refusal is still a complete one; once the
+		// header is committed below it no longer is.
+		w.decideBody()
+		if w.blocked {
+			return
+		}
+	}
 	if w.bufLimit <= 0 {
 		// Nothing is being held back, so the response is already committed and
 		// there is no later flush to wait for. Saying so is what lets Flush pass
@@ -1378,26 +1400,33 @@ func (w *wafResponseWriter) WriteHeader(status int) {
 
 func (w *wafResponseWriter) Write(b []byte) (int, error) {
 	if w.blocked {
-		// The response is refused. Reporting the write as accepted keeps the
-		// upstream handler from logging an error about a client that is not
-		// the reason the write went nowhere.
-		return len(b), nil
+		return w.refusedWrite(b)
 	}
 	if !w.headerWritten {
 		w.WriteHeader(http.StatusOK)
 		if w.blocked {
-			return len(b), nil
+			return w.refusedWrite(b)
 		}
 	}
 
 	if w.skipBody {
 		return w.ResponseWriter.Write(b)
 	}
+	if w.pastCeiling {
+		// Past the ceiling nothing is inspected (ADR 0062). The engine analyses
+		// a body it holds whole, in ProcessResponseBody; feeding it these bytes
+		// would neither stop them -- they leave now -- nor be honest about
+		// having read them, and running the phase again would re-score
+		// everything before them.
+		w.noteUninspectable(reasonCeilingReached)
+		return w.ResponseWriter.Write(b)
+	}
 
 	// Plaintext streams into the engine as it arrives. A compressed body cannot:
 	// no chunk of a DEFLATE stream means anything on its own, so it is held and
 	// inflated once, in inspectHeld.
-	if w.respEnc == encodingIdentity && w.encDecodable {
+	streamed := w.respEnc == encodingIdentity && w.encDecodable
+	if streamed {
 		if d := w.tx.WriteResponseBody(b); d.Blocked() && !w.auditOnly {
 			w.applyDecision(d)
 			if w.blocked {
@@ -1406,31 +1435,78 @@ func (w *wafResponseWriter) Write(b []byte) (int, error) {
 		}
 	}
 
-	if w.buf != nil && w.bufLimit > 0 && !w.flushed {
+	if w.buf != nil && !w.flushed {
 		if w.buf.Len()+len(b) <= w.bufLimit {
 			w.buf.Write(b)
 			return len(b), nil
 		}
-		// The ceiling is reached: everything from here on is uninspectable, so
-		// inspect what is held while the bytes are still here — flush releases
-		// them — then commit and stop buffering.
-		w.inspectHeld()
-		if w.blocked {
-			return len(b), nil
-		}
-		if w.redactPending {
-			// The ceiling arrived with a finding still to remove. The body is no
-			// longer whole, so there is nothing safe to splice — refusing it is
-			// the fallback the operator was trying to avoid, and taking it
-			// anyway is better than forwarding a leak that was reported handled.
-			w.block(w.pendingDecision)
-			return len(b), nil
-		}
-		if err := w.flush(); err != nil {
-			return 0, err
-		}
+		return w.passCeiling(b, streamed)
 	}
 	return w.ResponseWriter.Write(b)
+}
+
+// refusedWrite answers a write to a refused response. A refusal sent before
+// the headers is complete, and reporting the write as accepted keeps the
+// upstream handler from logging an error about a client that is not the reason
+// the write went nowhere. A response cut after the headers is being aborted,
+// and an error is what stops the upstream copy.
+func (w *wafResponseWriter) refusedWrite(b []byte) (int, error) {
+	if w.aborted {
+		return 0, errResponseCut
+	}
+	return len(b), nil
+}
+
+// errResponseCut is what a write to a response the WAF cut returns.
+var errResponseCut = errors.New("waf: the response was cut after its headers were sent")
+
+// passCeiling handles the write that would take the held body past the
+// ceiling (review 3, F1). The response phase decides on what is held -- and,
+// for plaintext, on b, which the engine was already given -- before any of it
+// leaves: a refusal here is still a complete 403. Only then is the prefix
+// flushed; from b on (b itself when it could not be inspected) the response
+// streams uninspected and is counted so.
+func (w *wafResponseWriter) passCeiling(b []byte, inspected bool) (int, error) {
+	w.decideBody()
+	if !w.blocked && w.redactPending {
+		// The ceiling arrived with a finding still to remove. The body is no
+		// longer whole, so there is nothing safe to splice — refusing it is
+		// the fallback the operator was trying to avoid, and taking it
+		// anyway is better than forwarding a leak that was reported handled.
+		w.block(w.pendingDecision)
+	}
+	if w.blocked {
+		return len(b), nil
+	}
+	if err := w.flush(); err != nil {
+		return 0, err
+	}
+	w.pastCeiling = true
+	if !inspected {
+		w.noteUninspectable(reasonCeilingReached)
+	}
+	return w.ResponseWriter.Write(b)
+}
+
+// decideBody runs the response-body phase, once, over everything the engine
+// was given, and applies its decision. It runs before the first body byte is
+// committed: at the ceiling, at the end of a held response, or at the headers
+// of one whose body is never inspected.
+func (w *wafResponseWriter) decideBody() {
+	w.inspectHeld()
+	if w.blocked || w.bodyDecided {
+		return
+	}
+	w.bodyDecided = true
+	d := w.tx.ProcessResponseBody()
+	if d.Reason() == gwaf.ReasonLimit && !d.Blocked() {
+		// The engine's own body limit was reached and a fail-open (or audit-only)
+		// WAF lets what it could not read through: unread, not clean.
+		w.noteUninspectable(reasonCeilingReached)
+	}
+	if d.Blocked() && !w.auditOnly {
+		w.applyDecision(d)
+	}
 }
 
 // inspectHeld inflates the held body and hands it to the engine, for the case
@@ -1491,6 +1567,10 @@ var uninspectedWarned sync.Map
 // is visible, and logged once per route and reason so the log stays readable
 // when an origin is misconfigured for every request it serves.
 func (w *wafResponseWriter) noteUninspectable(reason string) {
+	if w.uninspectedNoted {
+		return // a response is counted once, by the first reason found
+	}
+	w.uninspectedNoted = true
 	telemetry.MiddlewareWAFUninspectedResponsesTotal.
 		WithLabelValues(w.routeID, reason).Inc()
 
@@ -1509,15 +1589,9 @@ func (w *wafResponseWriter) finish() {
 	if w.blocked || w.hijacked {
 		return
 	}
-	w.inspectHeld()
+	w.decideBody()
 	if w.blocked {
 		return
-	}
-	if d := w.tx.ProcessResponseBody(); d.Blocked() && !w.auditOnly {
-		w.applyDecision(d)
-		if w.blocked {
-			return
-		}
 	}
 	w.resolveRedaction()
 	if w.blocked {
@@ -1619,22 +1693,68 @@ func (w *wafResponseWriter) block(d gwaf.Decision) {
 	if w.buf != nil {
 		w.buf.Reset()
 	}
-	if w.onDecision != nil {
-		w.onDecision(d, kind.ActionBlocked)
-	}
 	if w.flushed {
-		// Headers are already on the wire, so the status cannot be changed.
-		// Sending nothing further is all that is left, and it still stops the
-		// remainder of the leak.
+		// Headers, and perhaps part of the body, are on the wire, so this
+		// response can no longer be refused. Every body decision is made before
+		// the first byte is committed, so nothing reaches here today; should
+		// something, the response is cut -- later writes fail, and
+		// inspectResponse aborts the handler so the client sees a reset rather
+		// than a short body that reads as complete -- and recorded as cut, not
+		// as a block that did not happen (ADR 0062).
+		w.aborted = true
+		w.observe(d, kind.ActionAborted)
 		return
 	}
+	w.observe(d, kind.ActionBlocked)
 	w.flushed = true
 	status := d.Status()
 	if status == 0 {
 		status = http.StatusForbidden
 	}
+	frameRefusal(w.Header(), len(responseBlockedBody))
 	w.ResponseWriter.WriteHeader(status)
-	_, _ = w.ResponseWriter.Write([]byte("Forbidden by Security Policy (response blocked)"))
+	_, _ = w.ResponseWriter.Write(responseBlockedBody)
+}
+
+// observe records a response-phase decision with what was done about it.
+func (w *wafResponseWriter) observe(d gwaf.Decision, outcome string) {
+	if w.onDecision != nil {
+		w.onDecision(d, outcome)
+	}
+}
+
+// abortIfCut ends a response the WAF cut after its headers as an abort, the
+// way deadline.StreamWriter.AbortIfCut ends one the deadline cut: HTTP/1
+// closes the connection, HTTP/2 and HTTP/3 reset the stream. Called once the
+// handler has returned and the writer is released.
+func (w *wafResponseWriter) abortIfCut() {
+	if w.aborted {
+		panic(http.ErrAbortHandler)
+	}
+}
+
+// responseBlockedBody is what a refused response is replaced with.
+var responseBlockedBody = []byte("Forbidden by Security Policy (response blocked)")
+
+// originRepresentationHeaders describe the origin's body. A refusal is a
+// different body, so none of them may travel with it.
+var originRepresentationHeaders = [...]string{
+	"Content-Length", "Content-Encoding", "Content-Range", "Content-Disposition",
+	"Content-Md5", "Digest", "Etag", "Last-Modified", "Accept-Ranges",
+}
+
+// frameRefusal replaces the origin's description of its body with one of the
+// refusal (T39). Under the origin's Content-Length the 47-byte refusal of an
+// 83-byte leak read as a truncated response -- an IncompleteRead to the
+// client, and an HTTP/1.1 connection left waiting for the missing bytes --
+// and under its Content-Encoding no client could decode it at all.
+func frameRefusal(h http.Header, n int) {
+	for _, name := range originRepresentationHeaders {
+		h.Del(name)
+	}
+	h.Set("Content-Type", "text/plain; charset=utf-8")
+	h.Set("X-Content-Type-Options", "nosniff")
+	h.Set("Content-Length", strconv.Itoa(n))
 }
 
 func (w *wafResponseWriter) Status() int {

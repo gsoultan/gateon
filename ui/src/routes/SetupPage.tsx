@@ -45,6 +45,13 @@ import { useClipboard } from "@mantine/hooks";
 import { useIsMobile } from "../hooks/useMobile";
 import { generateRandomString } from "../utils/random";
 import { PASSWORD_RULE, passwordPolicyError } from "../components/passwordPolicy";
+import {
+  configuredDatabaseLabel,
+  configuredLoggingLabel,
+  keepConfigured,
+  type SetupStatus,
+} from "../components/setupWizard";
+import { api } from "../services/client";
 import type { DatabaseConfig, SetupRequest } from "../types/gateon";
 
 const WIZARD_STEPS = 6; // Admin, Security, Database, Logging, Management, Review
@@ -101,6 +108,30 @@ export default function SetupPage() {
   const [wizardStep, setWizardStep] = useState(0);
   const clipboard = useClipboard({ timeout: 2000 });
   const navigate = useNavigate();
+  // What Setup keeps rather than takes from this wizard (ADR 0057); null until
+  // asked, or when asking failed -- then the steps ask as they always did, and
+  // Setup still refuses a database other than the configured one.
+  const [status, setStatus] = useState<SetupStatus | null>(null);
+  const dbConfigured = !!status?.databaseConfigured;
+  const keyFromEnv = !!status?.sessionKeyFromEnvironment;
+
+  // Asked once the token is entered: it is what lets the gateway say where the
+  // configured database is, and the question spends from the same per-client
+  // budget as setup itself.
+  const loadStatus = async () => {
+    try {
+      const res = await api.isSetupRequired({ setupToken: form.values.setupToken.trim() });
+      setStatus({
+        databaseConfigured: res.databaseConfigured,
+        databaseDriver: res.databaseDriver,
+        databaseDescription: res.databaseDescription,
+        loggingDatabaseDescription: res.loggingDatabaseDescription,
+        sessionKeyFromEnvironment: res.sessionKeyFromEnvironment,
+      });
+    } catch {
+      setStatus(null);
+    }
+  };
 
   const testDb = async (payload: DbPayload) => {
     setLoading(true);
@@ -155,11 +186,14 @@ export default function SetupPage() {
       form.validate();
       return;
     }
-    if (wizardStep === 1 && !securityValid) {
+    if (wizardStep === 0) {
+      await loadStatus();
+    }
+    if (wizardStep === 1 && !keyFromEnv && !securityValid) {
       form.validate();
       return;
     }
-    if (wizardStep === 2) {
+    if (wizardStep === 2 && !dbConfigured) {
       // Database step: test connection before proceeding
       const db = buildDbPayload(managementDbFields());
       if (!db.ok) {
@@ -168,7 +202,7 @@ export default function SetupPage() {
       }
       if (!(await testDb(db.payload))) return;
     }
-    if (wizardStep === 3 && !form.values.loggingUseSame) {
+    if (wizardStep === 3 && !dbConfigured && !form.values.loggingUseSame) {
       // Logging step: test the dedicated logging database connection
       const db = buildDbPayload(loggingDbFields());
       if (!db.ok) {
@@ -241,8 +275,9 @@ export default function SetupPage() {
 
   const handleSubmit = async (values: typeof form.values) => {
     // Built by the function the connection tests use, so what is submitted is
-    // what was tested.
-    const db = buildDbPayload(managementDbFields());
+    // what was tested. Not built at all when the configuration names the
+    // database: the fields were never shown.
+    const db = dbConfigured ? ({ ok: true, payload: {} } as const) : buildDbPayload(managementDbFields());
     if (!db.ok) {
       setError(db.error);
       return;
@@ -257,7 +292,7 @@ export default function SetupPage() {
       ...db.payload,
     };
     // Dedicated logging database (when the user opted out of reusing the management store)
-    if (!values.loggingUseSame) {
+    if (!dbConfigured && !values.loggingUseSame) {
       const logs = buildDbPayload(loggingDbFields());
       if (!logs.ok) {
         setError(logs.error);
@@ -269,7 +304,7 @@ export default function SetupPage() {
     setLoading(true);
     setError(null);
     try {
-      const res = await setupGateon(payload);
+      const res = await setupGateon(keepConfigured(payload, status));
 
       if (res.success) {
         notifications.show({
@@ -437,6 +472,14 @@ export default function SetupPage() {
 
               <Stepper.Step label="Security">
                 <Stack gap="lg" mt="md">
+                  {keyFromEnv ? (
+                    <Alert color="blue" icon={<IconInfoCircle size={rem(18)} />} title="Session key from the environment">
+                      <Text size="sm">
+                        This gateway's session key comes from its environment (<Code>GATEON_SESSION_KEY</Code>).
+                        Setup keeps it, so no key is generated here. Every replica and every restart uses that key.
+                      </Text>
+                    </Alert>
+                  ) : (
                   <Box>
                     <Group justify="space-between" mb={10}>
                       <Text size="xs" fw={700} c="dimmed" style={{ textTransform: 'uppercase', letterSpacing: 1 }}>
@@ -480,11 +523,30 @@ export default function SetupPage() {
                       This secret is used to encrypt your session tokens. Keep it safe.
                     </Text>
                   </Box>
+                  )}
                 </Stack>
               </Stepper.Step>
 
               <Stepper.Step label="Database">
                 <Stack gap="lg" mt="md">
+                  {status && dbConfigured ? (
+                    <Alert
+                      color="blue"
+                      icon={<IconInfoCircle size={rem(18)} />}
+                      title="Database already configured"
+                      data-testid="setup-database-configured"
+                    >
+                      <Text size="sm">
+                        This gateway's configuration already names its database:{" "}
+                        <Code>{configuredDatabaseLabel(status)}</Code>. Setup creates the administrator there and
+                        keeps it.
+                      </Text>
+                      <Text size="xs" mt={6}>
+                        To use a different database, change <Code>global.json</Code> (or the Helm chart's{" "}
+                        <Code>externalDatabase</Code>) and restart the gateway before running setup.
+                      </Text>
+                    </Alert>
+                  ) : (
                   <Box>
                     <Text size="xs" fw={700} c="dimmed" mb={10} style={{ textTransform: 'uppercase', letterSpacing: 1 }}>
                       Database Selection
@@ -561,11 +623,20 @@ export default function SetupPage() {
                       </Button>
                     </Group>
                   </Box>
+                  )}
                 </Stack>
               </Stepper.Step>
 
               <Stepper.Step label="Logging">
                 <Stack gap="lg" mt="md">
+                  {status && dbConfigured ? (
+                    <Alert color="blue" icon={<IconInfoCircle size={rem(18)} />} title="Logging database already configured">
+                      <Text size="sm">
+                        Audit and security logs stay where the configuration puts them:{" "}
+                        <Code>{configuredLoggingLabel(status)}</Code>.
+                      </Text>
+                    </Alert>
+                  ) : (
                   <Box>
                     <Text size="xs" fw={700} c="dimmed" mb={10} style={{ textTransform: 'uppercase', letterSpacing: 1 }}>
                       Logging Database
@@ -656,6 +727,7 @@ export default function SetupPage() {
                       </Box>
                     )}
                   </Box>
+                  )}
                 </Stack>
               </Stepper.Step>
 
@@ -709,11 +781,17 @@ export default function SetupPage() {
                       </Group>
                       <Group gap="xs">
                         <Text size="xs" fw={600} c="dimmed">PASETO Secret:</Text>
-                        <Code>•••••••• ({form.values.pasetoSecret.length} chars)</Code>
+                        {keyFromEnv ? (
+                          <Code>from the environment (GATEON_SESSION_KEY)</Code>
+                        ) : (
+                          <Code>•••••••• ({form.values.pasetoSecret.length} chars)</Code>
+                        )}
                       </Group>
                       <Group gap="xs">
                         <Text size="xs" fw={600} c="dimmed">Database:</Text>
-                        {form.values.databaseUseUrl ? (
+                        {status && dbConfigured ? (
+                          <Code>{configuredDatabaseLabel(status)} (configured)</Code>
+                        ) : form.values.databaseUseUrl ? (
                           <Code>{form.values.databaseUrl || '—'}</Code>
                         ) : form.values.databaseDriver === 'sqlite' ? (
                           <Code>sqlite:{form.values.sqlitePath}</Code>
@@ -723,7 +801,9 @@ export default function SetupPage() {
                       </Group>
                       <Group gap="xs">
                         <Text size="xs" fw={600} c="dimmed">Logging DB:</Text>
-                        {form.values.loggingUseSame ? (
+                        {status && dbConfigured ? (
+                          <Code>{configuredLoggingLabel(status)} (configured)</Code>
+                        ) : form.values.loggingUseSame ? (
                           <Code>same as management</Code>
                         ) : form.values.loggingUseUrl ? (
                           <Code>{form.values.loggingUrl || '—'}</Code>

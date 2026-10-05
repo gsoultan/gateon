@@ -144,6 +144,8 @@ var apiPermissions = map[string]apiPermission{
 	gateonv1connect.ApiServiceListUsersProcedure:  readOn(auth.ResourceUsers),
 	gateonv1connect.ApiServiceUpdateUserProcedure: writeOn(auth.ResourceUsers),
 	gateonv1connect.ApiServiceDeleteUserProcedure: writeOn(auth.ResourceUsers),
+	// ADR 0057: another account's second factor; admin-only in ApiService too.
+	gateonv1connect.ApiServiceResetUserTwoFactorProcedure: writeOn(auth.ResourceUsers),
 
 	// Scrape credentials (ADR 0050). Credentials, so the users resource; and
 	// ApiService requires admin on all three, as it does for users.

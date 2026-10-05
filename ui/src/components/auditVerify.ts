@@ -17,6 +17,29 @@ export interface VerifyAnswer {
   nextAfterId: string;
   complete: boolean;
   lastTimestamp: string;
+  /** The newest entry this gateway has written, checked when the range ran to now (ADR 0057). */
+  tailAnchorTimestamp?: string;
+  /** That entry is no longer in the log: entries were removed from its end. */
+  tailMissing?: boolean;
+}
+
+/**
+ * What a chain cannot show, said wherever the log is called verified: what is
+ * left of a log cut from its end still verifies. TRUTH-NEW-11 -- the page said
+ * "The audit log verifies" over a log whose newest entries had been deleted.
+ */
+export function tailSentence(answer: VerifyAnswer): string {
+  if (answer.tailAnchorTimestamp) {
+    return (
+      ` The newest entry this gateway has written since it started (${answer.tailAnchorTimestamp}) is still there, ` +
+      "so none were removed from the end since then. Entries removed from the end while the gateway was stopped " +
+      "cannot be detected."
+    );
+  }
+  return (
+    " Whether entries were removed from the end cannot be shown: what is left of a log cut from its end still " +
+    "verifies, and this gateway has no newer entry of its own to look for."
+  );
 }
 
 export interface VerifyOutcome {
@@ -40,6 +63,16 @@ export function describeVerification(answer: VerifyAnswer, checked: number): Ver
       canContinue: false,
     };
   }
+  if (answer.tailMissing) {
+    return {
+      color: "red",
+      title: "The newest audit entries were removed",
+      message:
+        `${checked} entries are signed and each follows the one before, but the newest entry this gateway wrote ` +
+        `(${answer.tailAnchorTimestamp || "since it started"}) is no longer in the log: entries were deleted from its end.`,
+      canContinue: false,
+    };
+  }
   if (!answer.complete) {
     return {
       color: "blue",
@@ -54,7 +87,7 @@ export function describeVerification(answer: VerifyAnswer, checked: number): Ver
     message:
       checked === 0
         ? "There are no entries to check yet."
-        : `All ${checked} entries are signed and each follows the one before.`,
+        : `All ${checked} entries are signed and each follows the one before.` + tailSentence(answer),
     canContinue: false,
   };
 }

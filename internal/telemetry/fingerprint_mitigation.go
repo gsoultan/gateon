@@ -124,6 +124,14 @@ const (
 // analysis engine's harm rule and Graph Intelligence (ADR 0025), and the
 // fingerprint block (ADR 0026).
 func AttackEvidenceWeight(th *SecurityThreat) float64 {
+	// Nothing not held against its source is evidence against it: a detection
+	// a control let through, a refusal of an earlier decision, a threat the
+	// client did not choose to send (ADR 0055, 0059). The recording path
+	// checks first; the analysis engine reads stored threats, where these are
+	// persisted for it to tell.
+	if !th.HeldAgainstSource() {
+		return 0
+	}
 	switch {
 	case th.Type == threatHoneypotTriggered, th.Category == categoryMalware,
 		th.Category == categoryBruteForce, th.Category == categoryExploitScanning:
@@ -345,7 +353,10 @@ func escalateAddress(st *SecurityThreat) {
 	if st.SourceIP == "" || st.Fingerprint == "" || AttackEvidenceWeight(st) == 0 {
 		return
 	}
-	classes := recordAddressEvidence(st.SourceIP, repid.Class(st.Fingerprint), evidenceTime(st))
+	// Kept per repid.Address -- an IPv6 client by its /64 -- the key the shun
+	// is written and enforced under (ADR 0058).
+	key := repid.AddressKey(st.SourceIP)
+	classes := recordAddressEvidence(key, repid.Class(st.Fingerprint), evidenceTime(st))
 	if classes < ipShunMinClasses {
 		return
 	}
@@ -363,7 +374,7 @@ func escalateAddress(st *SecurityThreat) {
 	// Applied or already in force, the evidence has been acted on; a shun that
 	// lapses is earned again only with new evidence (ADR 0031).
 	if res.Shunned() {
-		forgetAddressEvidence(st.SourceIP)
+		forgetAddressEvidence(key)
 	}
 }
 

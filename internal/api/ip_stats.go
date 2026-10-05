@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/telemetry"
 )
 
@@ -76,10 +77,25 @@ type IPStats struct {
 // Connect, gRPC-Web or GraphQL poller re-presenting an expired session over
 // POST -- the dashboard's own calls among them -- is a session that ended, not
 // a guess (ADR 0031). A POST a backend refused is still counted: the gateway
-// did not check its credential and cannot say what it was.
+// did not check its credential and cannot say what it was. So is one the
+// gateway's authentication refused, which it marks as such (ADR 0059).
 func credentialAttempt(tr *telemetry.TraceRecord) bool {
-	return tr.Refusal == "" && (tr.Method == http.MethodPost || tr.PasswordAuth)
+	return refusalMayBeAGuess(tr) && (tr.Method == http.MethodPost || tr.PasswordAuth)
 }
+
+// refusalMayBeAGuess reports whether a 401/403's refusal mark leaves it a
+// possible credential guess: no mark (a backend's answer, or a check that
+// marks nothing) or the gateway's authentication's. A refusal of a token the
+// request presented, or of a shunned or blocked source, checked no guess.
+// Both counts of refused attempts read it, credentialAttempt and
+// PostAuthFailures, so the two cannot disagree again (review 3, F5).
+func refusalMayBeAGuess(tr *telemetry.TraceRecord) bool {
+	return tr.Refusal == "" || tr.Refusal == authenticationRefusal
+}
+
+// authenticationRefusal is how a trace records a refusal by the gateway's
+// authentication (request.RefusalAuthentication).
+var authenticationRefusal = request.RefusalAuthentication.String()
 
 // Failures is how many of the address's traced requests failed (4xx or 5xx).
 func (s *IPStats) Failures() int {

@@ -12,6 +12,7 @@ import (
 	"github.com/gsoultan/gateon/internal/auth"
 	"github.com/gsoultan/gateon/internal/authz/routebind"
 	"github.com/gsoultan/gateon/internal/request"
+	"github.com/gsoultan/gateon/internal/router"
 	"github.com/gsoultan/gateon/pkg/proxy"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
@@ -49,6 +50,21 @@ func registerRouteHandlers(mux *http.ServeMux, d *Deps) {
 			}
 			out[rt.GetId()] = stats
 		}
+		_ = json.NewEncoder(w).Encode(out)
+	})
+	// The routes that cannot serve as configured: those that answer every
+	// request 503 because a security middleware is missing or does not build,
+	// and those whose rule does not parse. After an upgrade both used to show
+	// up nowhere until a request reached them (OPS-N4).
+	mux.HandleFunc("GET /v1/routes/problems", func(w http.ResponseWriter, r *http.Request) {
+		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceRoutes) {
+			return
+		}
+		out := []router.RouteProblem{}
+		if d.RouteProblems != nil {
+			out = append(out, d.RouteProblems(r.Context())...)
+		}
+		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(out)
 	})
 	mux.HandleFunc("GET /v1/routes/{id}/stats", func(w http.ResponseWriter, r *http.Request) {

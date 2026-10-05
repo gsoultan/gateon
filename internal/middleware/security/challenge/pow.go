@@ -84,15 +84,44 @@ func powKey(secret string) []byte {
 
 // powChallenge issues and verifies proof-of-work challenges for one route.
 type powChallenge struct {
-	key        []byte
+	// idKey signs challenge IDs and passKey signs passes. Both are the route's
+	// key bound to the route and the difficulty (DP-N5): a pass signed under
+	// the bare key admitted on every route sharing it -- every route without a
+	// secret shares the generated process key -- so work done at difficulty 1
+	// admitted at difficulty 6, and a pass earned before an operator raised a
+	// route's difficulty outlived the change. Derived once per middleware, so
+	// the request path pays nothing for the binding. Empty when no key could
+	// be had, and then nothing verifies.
+	idKey      []byte
+	passKey    string
 	difficulty int
 	routeID    string
+}
+
+// Domain-separation labels for the two derived keys. Public by design; the
+// secret is the route's proof-of-work key.
+const (
+	powIDBinding   = "gateon-pow-challenge-key-v1"
+	powPassBinding = "gateon-pow-pass-key-v1" // #nosec G101 -- a label, not a credential
+)
+
+// newPowChallenge derives the route's challenge and pass keys.
+func newPowChallenge(difficulty int, secret, routeID string) powChallenge {
+	c := powChallenge{difficulty: difficulty, routeID: routeID}
+	key := powKey(secret)
+	if len(key) == 0 {
+		return c
+	}
+	d := strconv.Itoa(difficulty)
+	c.idKey = botMAC(powIDBinding, string(key), routeID, d)
+	c.passKey = string(botMAC(powPassBinding, string(key), routeID, d))
+	return c
 }
 
 // Pow challenges a client whose threat score exceeds threshold to solve a
 // proof of work before its request reaches the origin.
 func Pow(difficulty int, threshold float64, secret string, routeID string) kind.Middleware {
-	pc := powChallenge{key: powKey(secret), difficulty: difficulty, routeID: routeID}
+	pc := newPowChallenge(difficulty, secret, routeID)
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Scoped to the client's network, not the browser class: a challenge
@@ -196,7 +225,7 @@ func threatExceeds(reputation, threshold float64) bool {
 func (c powChallenge) id(ts int64, r *http.Request) string {
 	fpSum := sha256.Sum256([]byte(telemetry.ClientIPOf(r) + "\x00" + r.UserAgent()))
 	prefix := strconv.FormatInt(ts, 10) + "-" + hex.EncodeToString(fpSum[:8])
-	mac := hmac.New(sha256.New, c.key)
+	mac := hmac.New(sha256.New, c.idKey)
 	_, _ = io.WriteString(mac, prefix)
 	return prefix + "-" + hex.EncodeToString(mac.Sum(nil))[:powMACLen]
 }
@@ -204,7 +233,7 @@ func (c powChallenge) id(ts int64, r *http.Request) string {
 // verify reports whether the request carries a solution to a challenge this
 // route issued to this client within powChallengeTTL.
 func (c powChallenge) verify(r *http.Request) bool {
-	if len(c.key) == 0 {
+	if len(c.idKey) == 0 {
 		return false
 	}
 	id := r.Header.Get(PowHeaderID)

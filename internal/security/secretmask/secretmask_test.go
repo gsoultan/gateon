@@ -73,6 +73,16 @@ func TestIsCredentialNameLeavesOrdinaryHeadersAlone(t *testing.T) {
 	}
 }
 
+// TestIsCredentialNameAllocatesNothing: the telemetry store asks it about every
+// header of every trace it keeps, and canonical header names are mixed case.
+func TestIsCredentialNameAllocatesNothing(t *testing.T) {
+	for _, n := range []string{"Content-Type", "X-Api-Key", "Set-Cookie", "Accept-Language"} {
+		if allocs := testing.AllocsPerRun(100, func() { _ = IsCredentialName(n) }); allocs != 0 {
+			t.Errorf("IsCredentialName(%q) allocated %v times", n, allocs)
+		}
+	}
+}
+
 // TestHeldNamesEveryEntryHoldingThePlaceholder: in a value, in a key, in part
 // of either -- and nothing else.
 func TestHeldNamesEveryEntryHoldingThePlaceholder(t *testing.T) {

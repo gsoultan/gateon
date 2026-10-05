@@ -651,7 +651,7 @@ func hmacSHA256Hex(secret, body []byte) string {
 }
 
 func TestWasm_EmptyBlob(t *testing.T) {
-	_, err := transform.Wasm(t.Context(), nil)
+	_, err := transform.Wasm(t.Context(), nil, "")
 	if err == nil {
 		t.Error("expected error for empty wasm blob")
 	}
@@ -660,7 +660,7 @@ func TestWasm_EmptyBlob(t *testing.T) {
 func TestWasm_MinimalValid(t *testing.T) {
 	// Minimal WASM module header: \x00asm\x01\x00\x00\x00
 	minimalWasm := []byte{0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00}
-	mw, err := transform.Wasm(t.Context(), minimalWasm)
+	mw, err := transform.Wasm(t.Context(), minimalWasm, "")
 	if err != nil {
 		t.Fatalf("failed to create wasm middleware: %v", err)
 	}

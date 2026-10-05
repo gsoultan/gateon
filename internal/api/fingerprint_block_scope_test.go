@@ -113,8 +113,10 @@ func TestAddMitigationBlocksAFingerprintOnANetworkOnly(t *testing.T) {
 }
 
 // "Apply automatic fix" on a finding with a threat blocks the threat's address
-// and the class the threat came from -- on that address's network only.
-func TestTheBlockFixBlocksTheThreatsClassOnItsNetwork(t *testing.T) {
+// and nothing else. It used to block the class the threat came from on that
+// address's network as well: every client of one browser build there, which
+// is not the source the finding names (ADR 0063 decision 3, review-3 F2).
+func TestTheBlockFixBlocksTheAddressNotTheThreatsClass(t *testing.T) {
 	svc := newMitigationTestService(t)
 	telemetry.RecordSecurityThreat(telemetry.SecurityThreat{
 		ID: "scope-fix-1", Type: findingHighTraffic, SourceIP: "203.0.113.7", Fingerprint: blockScopeChrome,
@@ -128,8 +130,11 @@ func TestTheBlockFixBlocksTheThreatsClassOnItsNetwork(t *testing.T) {
 	if err != nil || !res.GetSuccess() {
 		t.Fatalf("the fix failed: err=%v %q", err, res.GetMessage())
 	}
-	if !telemetry.IsUserMitigated(repid.For(blockScopeChromeNoRef, "203.0.113.99")) {
-		t.Error("the threat's client build is not blocked on the threat's network")
+	if !telemetry.IsIPMitigated("203.0.113.7") {
+		t.Error("the threat's address is not blocked")
+	}
+	if telemetry.IsUserMitigated(repid.For(blockScopeChromeNoRef, "203.0.113.99")) {
+		t.Error("the fix blocked the threat's client build on the threat's network")
 	}
 	if telemetry.IsUserMitigated(repid.For(blockScopeChrome, "198.51.100.7")) {
 		t.Error("the fix blocked the threat's client build on a network the threat did not come from")

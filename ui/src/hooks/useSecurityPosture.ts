@@ -30,6 +30,10 @@ export interface RouteCoverage {
   signatureScanning: number;
   /** Routes carrying a bot_management middleware. */
   botManagement: number;
+  /** Routes carrying a ratelimit or inflightreq middleware. */
+  rateLimited: number;
+  /** Routes whose WAF has every attack category switched off: not blocking. */
+  categoriesOff?: number;
 }
 
 /** "enforce" blocks, "detect" is audit-only (records and forwards), "off". */

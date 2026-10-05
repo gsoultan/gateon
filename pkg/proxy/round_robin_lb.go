@@ -81,7 +81,8 @@ func (lb *RoundRobinLB) NextState() *targetState {
 //
 // It used to scan forward to the next live target, which gave a dead target's
 // whole share to its neighbour: one of three down left the next one serving
-// twice what the other did. Nil when no target with a share is alive.
+// twice what the other did. When no target with a share is alive, turns go to
+// the live standbys instead; nil when there are none either.
 func (s *rrSet) pickLive(k uint64) *targetState {
 	var total uint64
 	for i, t := range s.targets {
@@ -90,7 +91,7 @@ func (s *rrSet) pickLive(k uint64) *targetState {
 		}
 	}
 	if total == 0 {
-		return nil
+		return s.pickStandby(k)
 	}
 	k %= total
 	for i, t := range s.targets {
@@ -103,6 +104,34 @@ func (s *rrSet) pickLive(k uint64) *targetState {
 		k -= uint64(s.shares[i])
 	}
 	return nil // a target died between the sum and the walk
+}
+
+// pickStandby deals turn k evenly over the live targets with no share -- the
+// weight-0 standbys beside weighted targets (ADR 0047) -- and is reached only
+// when no weighted target is alive. A standby that never took a request even
+// then made the route answer 503 with a live backend in its pool
+// (TRUTH-NEW-12). Nil when no standby is alive either.
+func (s *rrSet) pickStandby(k uint64) *targetState {
+	var live uint64
+	for i, t := range s.targets {
+		if s.shares[i] <= 0 && t.alive.Load() {
+			live++
+		}
+	}
+	if live == 0 {
+		return nil
+	}
+	k %= live
+	for i, t := range s.targets {
+		if s.shares[i] > 0 || !t.alive.Load() {
+			continue
+		}
+		if k == 0 {
+			return t
+		}
+		k--
+	}
+	return nil // a standby died between the count and the walk
 }
 
 func (lb *RoundRobinLB) UpdateWeightedTargets(targets []*gateonv1.Target) {

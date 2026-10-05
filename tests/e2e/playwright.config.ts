@@ -37,6 +37,27 @@ const firstRunDir =
   process.env.GATEON_E2E_FIRST_RUN_DIR ?? fs.mkdtempSync(path.join(os.tmpdir(), 'gateon-e2e-first-run-'));
 process.env.GATEON_E2E_FIRST_RUN_DIR = firstRunDir;
 
+// A third gateway, never set up, whose global.json already names its database
+// and takes its session key from the environment -- the Helm chart's
+// externalDatabase and GATEON_SESSION_KEY (tests/configured-run.spec.ts, ADR
+// 0057). SQLite, so the suite needs no server; Setup's rule does not look at
+// the engine.
+const configuredRunDir =
+  process.env.GATEON_E2E_CONFIGURED_RUN_DIR ?? fs.mkdtempSync(path.join(os.tmpdir(), 'gateon-e2e-configured-run-'));
+process.env.GATEON_E2E_CONFIGURED_RUN_DIR = configuredRunDir;
+const configuredGlobal = path.join(configuredRunDir, 'global.json');
+if (!fs.existsSync(configuredGlobal)) {
+  fs.writeFileSync(
+    configuredGlobal,
+    JSON.stringify({
+      auth: {
+        paseto_secret: '$env:GATEON_SESSION_KEY',
+        database_config: { driver: 'sqlite', sqlite_path: 'configured.db' },
+      },
+    }),
+  );
+}
+
 // The suite gateway's trace archive, outside the checkout. Before the gateway
 // starts, seed_trace_archive archives an hour of traces into it as another
 // node, gw-seed -- the way gateways sharing an archive's storage see each
@@ -88,7 +109,7 @@ export default defineConfig({
     { name: 'setup', testMatch: /.*\.setup\.ts/ },
     {
       name: 'e2e',
-      testIgnore: /first-run\.spec\.ts/,
+      testIgnore: /(first-run|configured-run)\.spec\.ts/,
       use: {
         ...devices['Desktop Chrome'],
         // The default identity for specs that do not pin one. The rbac specs
@@ -102,6 +123,12 @@ export default defineConfig({
       name: 'first-run',
       testMatch: /first-run\.spec\.ts/,
       use: { ...devices['Desktop Chrome'], baseURL: 'http://127.0.0.1:8090' },
+    },
+    {
+      // The configured, never-set-up gateway below.
+      name: 'configured-run',
+      testMatch: /configured-run\.spec\.ts/,
+      use: { ...devices['Desktop Chrome'], baseURL: 'http://127.0.0.1:8092' },
     },
   ],
   webServer: [
@@ -169,6 +196,28 @@ export default defineConfig({
         GATEON_MANAGEMENT_BIND: '127.0.0.1',
         GATEON_MANAGEMENT_PORT: '8090',
         PORT: '8091',
+        GATEON_TEST: '1',
+      },
+    },
+    {
+      // The configured gateway: global.json names its database and refers to
+      // the session key, as the Helm chart renders them, and nobody has run
+      // setup. Never an existing server, for the reason above.
+      command: path.resolve('../../gateon'),
+      cwd: configuredRunDir,
+      port: 8092,
+      reuseExistingServer: false,
+      stdout: 'pipe',
+      stderr: 'pipe',
+      timeout: 120000,
+      env: {
+        PATH: `${process.cwd()}/mockbin:${process.env.PATH}`,
+        GATEON_DATA_DIR: configuredRunDir,
+        GLOBAL_CONFIG_FILE: configuredGlobal,
+        GATEON_SESSION_KEY: 'configured-run-session-key-32chr',
+        GATEON_MANAGEMENT_BIND: '127.0.0.1',
+        GATEON_MANAGEMENT_PORT: '8092',
+        PORT: '8093',
         GATEON_TEST: '1',
       },
     },

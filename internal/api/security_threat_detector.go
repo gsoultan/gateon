@@ -177,6 +177,14 @@ func (d *SecurityThreatDetector) Detect(ctx context.Context, data *DiagnosticDat
 					Longitude:   anomaly.Longitude,
 					Confidence:  math.Min(1.0, float64(score)/threshold),
 					Reputation:  rep,
+					// A finding about traffic the gateway already let through
+					// or refused, recorded again on every pass: held against
+					// the address, each pass took half its score off the
+					// reputation again for the same requests, and the next
+					// pass read the stored finding back as evidence of its own
+					// (ADR 0059). What the request path refused already
+					// counted, once, when it refused it.
+					Observed: true,
 				}
 
 				if stats.LastTrace != nil {

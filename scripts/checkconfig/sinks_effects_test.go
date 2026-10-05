@@ -94,58 +94,185 @@ func writeFile(t *testing.T, dir, name, body string) string {
 	return path
 }
 
-// The editors write a key through updateConfig or toggle, sometimes on the
-// line after the call; a test file's keys are not the dashboard's.
-func TestDashboardKeysFindsEveryWayAKeyIsWritten(t *testing.T) {
+// editorFixture is a dispatcher and two editor files, in the shapes the
+// dashboard uses: an inline arm, an arm rendering a component that renders
+// another, fallthrough labels with a camelCase alias, and a component no arm
+// renders.
+func editorFixture(t *testing.T) string {
+	t.Helper()
 	dir := t.TempDir()
-	writeFile(t, dir, "Editor.tsx", `
-		updateConfig("one_line", v);
-		updateConfig(
-		  "next_line", v);
-		toggle("toggled", e.currentTarget.checked);
-	`)
-	writeFile(t, dir, "Editor.test.tsx", `updateConfig("from_a_test", v);`)
-	keys, err := dashboardKeys(dir)
+	writeFile(t, dir, "MiddlewareConfigEditor.tsx", `
+export function MiddlewareConfigEditor({ type }) {
+  switch (type) {
+    case "cors":
+      return <CorsEditor />;
+    case "grpcweb":
+      return (<Stack>{updateConfig(
+        "allowed_origins", v)}</Stack>);
+    case "file_security":
+    case "fileSecurity":
+      return <Shared />;
+    default:
+      return <Text>Unknown middleware type</Text>;
+  }
+}
+`)
+	writeFile(t, dir, "Editors.tsx", `
+export function CorsEditor() {
+  updateConfig("allowed_origins", v);
+  toggle("allow_credentials", e.currentTarget.checked);
+}
+
+export function Shared() {
+  return <Inner />;
+}
+
+function Inner() {
+  updateConfig("deep", v);
+}
+
+export function Unrendered() {
+  updateConfig("orphan", v);
+}
+`)
+	writeFile(t, dir, "Editors.test.tsx", `updateConfig("from_a_test", v);`)
+	return dir
+}
+
+// TestDashboardKeysAreAttributedToTheTypeThatWritesThem is truth NEW-10: the
+// gate matched keys by name, so the cors row proving allowed_origins counted
+// for grpcweb too. Each key now belongs to the type whose editor writes it.
+func TestDashboardKeysAreAttributedToTheTypeThatWritesThem(t *testing.T) {
+	keys, orphans, err := dashboardTypeKeys(editorFixture(t))
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, k := range []string{"one_line", "next_line", "toggled"} {
-		if !keys[k] {
-			t.Errorf("key %q not found", k)
-		}
+	want := []string{"cors/allow_credentials", "cors/allowed_origins", "file_security/deep", "grpcweb/allowed_origins"}
+	var got []string
+	for k := range keys {
+		got = append(got, k)
 	}
-	if keys["from_a_test"] {
-		t.Error("a key from a test file was counted")
+	slices.Sort(got)
+	if !slices.Equal(got, want) {
+		t.Errorf("keys = %v, want %v", got, want)
+	}
+	if !slices.Equal(orphans, []string{"orphan"}) {
+		t.Errorf("orphans = %v, want the key only an unrendered editor writes", orphans)
 	}
 }
 
 func TestEffectRowsAndTheComparison(t *testing.T) {
 	path := writeFile(t, t.TempDir(), "effects_test.go", `package m
 var rows = []keyEffect{
-	{mwType: "waf", key: "proven", a: "1", b: "2"},
+	{mwType: "cors", key: "allowed_origins", a: "1", b: "2"},
 	{mwType: "waf", key: "still_inert", a: "1", b: "2", inert: "T8"},
 }`)
 	rows, err := effectRows(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if inert, ok := rows["proven"]; !ok || inert {
-		t.Fatalf("rows = %v, want proven with no inert mark", rows)
+	if inert, ok := rows["cors/allowed_origins"]; !ok || inert {
+		t.Fatalf("rows = %v, want cors/allowed_origins with no inert mark", rows)
 	}
-	if !rows["still_inert"] {
-		t.Fatalf("rows = %v, want still_inert marked inert", rows)
+	if !rows["waf/still_inert"] {
+		t.Fatalf("rows = %v, want waf/still_inert marked inert", rows)
 	}
 
-	ui := map[string]bool{"proven": true, "still_inert": true, "baselined": true, "new_switch": true}
-	baseline := map[string]bool{"baselined": true, "proven": true, "removed_from_ui": true}
+	ui := map[string]bool{"cors/allowed_origins": true, "grpcweb/allowed_origins": true, "waf/still_inert": true,
+		"waf/baselined": true}
+	baseline := map[string]bool{"waf/baselined": true, "cors/allowed_origins": true, "waf/removed_from_ui": true}
 	r := compareEffects(ui, rows, baseline)
-	if !slices.Equal(r.uncovered, []string{"new_switch"}) {
-		t.Errorf("uncovered = %v, want the new switch alone", r.uncovered)
+	// The cors row does not prove grpcweb's key of the same name.
+	if !slices.Equal(r.uncovered, []string{"grpcweb/allowed_origins"}) {
+		t.Errorf("uncovered = %v, want grpcweb's allowed_origins alone", r.uncovered)
 	}
-	if !slices.Equal(r.staleBaseline, []string{"proven", "removed_from_ui"}) {
+	if !slices.Equal(r.staleBaseline, []string{"cors/allowed_origins", "waf/removed_from_ui"}) {
 		t.Errorf("stale baseline = %v, want the key with a row and the key the dashboard dropped", r.staleBaseline)
 	}
 	if r.proven != 1 || r.inert != 1 || r.baselined != 1 {
 		t.Errorf("proven %d, inert %d, baselined %d; want 1 each", r.proven, r.inert, r.baselined)
+	}
+}
+
+// TestABaselineNoteMustCiteAFactoryLevelTest is the rest of NEW-10: notes
+// for window_size, error_threshold and min_requests cited tests that build
+// the breaker's config struct directly, which pass whatever the factory does
+// with the key. A cited test must reach the factory (directly or through a
+// helper in its package); otherwise the note must say unproven.
+func TestABaselineNoteMustCiteAFactoryLevelTest(t *testing.T) {
+	root := t.TempDir()
+	pkg := filepath.Join(root, "mw")
+	if err := os.MkdirAll(pkg, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, pkg, "x_test.go", `package mw
+func build() { NewFactory(nil).Create(nil, "r") }
+func TestDirect(t *testing.T) { _ = CircuitBreaker(CircuitBreakerConfig{WindowSize: 1}) }
+func TestViaFactory(t *testing.T) { NewFactory(nil).Create(nil, "r") }
+func TestViaHelper(t *testing.T) { build() }
+`)
+	idx, err := indexTests(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := map[string]bool{ // note -> holds
+		"unproven: time-based":                    true,
+		"INERT T8":                                true,
+		"proven by TestViaFactory":                true,
+		"proven by TestViaHelper, TestViaFactory": true,
+		"proven by TestDirect":                    false,
+		"proven by TestNoSuchTest":                false,
+		"":                                        false,
+		"time-based; see TestViaFactory":          false,
+	}
+	for note, holds := range cases {
+		if got := noteProblem(note, idx) == ""; got != holds {
+			t.Errorf("note %q: holds = %v, want %v (%s)", note, got, holds, noteProblem(note, idx))
+		}
+	}
+}
+
+// TestThePickerMustOfferEveryFactoryType is T36 / NEW-8 at the gate: the
+// picker's list fell ten types behind the factory and nothing noticed.
+func TestThePickerMustOfferEveryFactoryType(t *testing.T) {
+	factory, err := factoryTypes(`func (f *Factory) Create() {
+	switch m.Type {
+	case "ratelimit":
+		return x
+	case "bot_management":
+		return y
+	case "xss_recognition", "sqli_recognition":
+		return z
+	default:
+		return nil
+	}
+}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	picker := pickerTypes(`[{ label: "Rate Limiting", value: "ratelimit" }, { label: "X", value: "xss_recognition" }, { label: "Old", value: "retired" }]`)
+	missing, unknown := comparePicker(factory, picker)
+	if !slices.Equal(missing, []string{"bot_management", "sqli_recognition"}) {
+		t.Errorf("missing = %v, want the two the picker leaves out", missing)
+	}
+	if !slices.Equal(unknown, []string{"retired"}) {
+		t.Errorf("unknown = %v, want the value the factory does not build", unknown)
+	}
+}
+
+// TestGlobalSecuritySettingsNeedARowOrANote: a global security threshold read
+// and then ignored passed every gate, because global settings had no rows.
+func TestGlobalSecuritySettingsNeedARowOrANote(t *testing.T) {
+	path := writeFile(t, t.TempDir(), "global_test.go", `package r
+var rows = []globalEffect{{field: "security_advanced.pow.score_threshold", a: "1", b: "2"}}`)
+	rows, err := globalRows(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	required := []string{"security_advanced.pow.score_threshold", "security_advanced.entropy.threshold",
+		"security_advanced.ip_reputation.block_threshold"}
+	missing := compareGlobals(required, rows, map[string]string{"security_advanced.entropy.threshold": "unproven: x"})
+	if !slices.Equal(missing, []string{"security_advanced.ip_reputation.block_threshold"}) {
+		t.Errorf("missing = %v, want the setting with neither a row nor a line", missing)
 	}
 }

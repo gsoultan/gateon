@@ -115,7 +115,12 @@ func (c FileSecurityConfig) withDefaults() FileSecurityConfig {
 
 // scanResult communicates the outcome of inspecting a multipart body.
 type scanResult struct {
-	blocked    bool
+	blocked bool
+	// policy marks a refusal of what the upload is -- too large, or a type
+	// the route does not take -- rather than of anything found in it. A body
+	// the parser cannot read is not one: it is how a parser differential
+	// smuggles a part past the scan. See recordFileSecurityThreat.
+	policy     bool
 	status     int
 	message    string
 	scannerErr error // infrastructure failure (clamd unavailable / timeout)
@@ -249,7 +254,7 @@ func (f fileScanRuntime) forwardAfterScan(res scanResult, w http.ResponseWriter,
 		logger.L.LogWarn("ClamAV scan failed (fail-open), forwarding upload", "error", res.scannerErr, "client_ip", r.RemoteAddr)
 		return true
 	case res.blocked:
-		recordFileSecurityThreat(r, f.cfg.RouteID, "file_security_block", res.message)
+		recordFileSecurityThreat(r, f.cfg.RouteID, res)
 		http.Error(w, res.message, res.status)
 		return false
 	default:
@@ -379,7 +384,7 @@ func inspectPart(r *http.Request, p *multipart.Part, cfg FileSecurityConfig, eng
 	if cfg.MaxFileSize > 0 && int64(len(content)) > cfg.MaxFileSize {
 		logger.L.LogWarn("File upload blocked: file too large",
 			"filename", p.FileName(), "size", len(content), "max", cfg.MaxFileSize, "client_ip", r.RemoteAddr)
-		return scanResult{blocked: true, status: http.StatusRequestEntityTooLarge, message: "File too large"}
+		return scanResult{blocked: true, policy: true, status: http.StatusRequestEntityTooLarge, message: "File too large"}
 	}
 
 	head := content
@@ -412,21 +417,42 @@ func inspectPart(r *http.Request, p *multipart.Part, cfg FileSecurityConfig, eng
 	return scanResult{}
 }
 
-func recordFileSecurityThreat(r *http.Request, routeID, ttype, details string) {
-	clientIP := request.ClientAddr(r)
-	logger.SecurityEvent(ttype, r, details)
+// How a refused upload is filed. Malware -- a signature, a ClamAV finding, an
+// executable disguised as an image -- is the strongest attack evidence there
+// is: telemetry.AttackEvidenceWeight counts the category as three WAF blocks
+// towards a fingerprint block and an address shun. A policy refusal is not:
+// a phone photo over the size limit and a .docx on an images-only form are
+// refused for what they are, not for anything in them. They were filed as
+// malware at 90, and after the third oversized photo the user was refused on
+// every route; now they cost what a rate-limit refusal does, and are evidence
+// of nothing (ADR 0059).
+const (
+	threatFileMalware      = "file_security_block"
+	threatFilePolicy       = "file_upload_refused"
+	categoryFileMalware    = "malware"
+	categoryFilePolicy     = "filesecurity"
+	fileMalwareScore       = 90
+	fileUploadRefusedScore = 10
+)
+
+func recordFileSecurityThreat(r *http.Request, routeID string, res scanResult) {
+	ttype, category, severity, score := threatFileMalware, categoryFileMalware, kind.SeverityHigh, float64(fileMalwareScore)
+	if res.policy {
+		ttype, category, severity, score = threatFilePolicy, categoryFilePolicy, kind.SeverityLow, fileUploadRefusedScore
+	}
+	logger.SecurityEvent(ttype, r, res.message)
 
 	telemetry.RecordSecurityThreat(telemetry.RecordSecurityThreatWithJA4(r, telemetry.SecurityThreat{
 		ID:          fmt.Sprintf("file-sec-%d", time.Now().UnixNano()),
 		Type:        ttype,
-		SourceIP:    clientIP,
-		Score:       90,
-		Details:     details,
+		SourceIP:    request.ClientAddr(r),
+		Score:       score,
+		Details:     res.message,
 		Time:        time.Now(),
 		RouteID:     routeID,
 		RequestURI:  r.URL.Path,
-		Category:    "malware",
-		Severity:    kind.SeverityHigh,
+		Category:    category,
+		Severity:    severity,
 		ActionTaken: kind.ActionBlocked,
 	}))
 }
@@ -504,7 +530,7 @@ func validateMime(r *http.Request, p *multipart.Part, head []byte, allowedMap, b
 	if isBlockedMime(mimeType, allowedMap, blockedMap) {
 		logger.L.LogWarn("File upload blocked: suspicious MIME type",
 			"filename", p.FileName(), "mime", mimeType, "client_ip", r.RemoteAddr)
-		return scanResult{blocked: true, status: http.StatusForbidden, message: "File type not allowed"}
+		return scanResult{blocked: true, policy: true, status: http.StatusForbidden, message: "File type not allowed"}
 	}
 
 	ext := strings.ToLower(filepath.Ext(p.FileName()))

@@ -20,7 +20,7 @@ func throughEntrypointAndRoute(t *testing.T, host string, extra ...Middleware) {
 	route := append([]Middleware{MetricsWithService("once-route", "svc")}, extra...)
 	h := Chain(
 		EntryPoint("web", "web", false),
-		Metrics("gateon-web"),
+		EntrypointMetrics("web"),
 	)(Chain(route...)(backend))
 	req := httptest.NewRequest(http.MethodGet, "http://"+host+"/", nil)
 	h.ServeHTTP(httptest.NewRecorder(), req)
@@ -48,17 +48,20 @@ func TestARequestIsCountedOnceWhereTheRouteDoesNotMatter(t *testing.T) {
 	}
 }
 
-// TestEachLabelStillCountsTheRequest: the entrypoint's series and the route's
-// are separate views -- the golden signals read the first, the route pages
-// the second -- and both keep counting.
-func TestEachLabelStillCountsTheRequest(t *testing.T) {
-	ep := telemetry.RequestsTotal.WithLabelValues("gateon-web", "", "GET", "200")
+// TestEachViewCountsTheRequestOnce: the route's series and the entrypoint's
+// are separate views -- the route pages read the first, the entrypoint view
+// the second -- and each counts the request once. The entrypoint view used to
+// be a "gateon-<entrypoint>" series of the same family, so a sum over
+// gateon_requests_total counted every proxied request twice (ADR 0061).
+func TestEachViewCountsTheRequestOnce(t *testing.T) {
+	pseudo := telemetry.RequestsTotal.WithLabelValues("gateon-web", "", "GET", "200")
+	ep := telemetry.EntrypointRequestsTotal.WithLabelValues("web", "200")
 	rt := telemetry.RequestsTotal.WithLabelValues("once-route", "svc", "GET", "200")
-	e0, r0 := counterValue(t, ep), counterValue(t, rt)
+	p0, e0, r0 := counterValue(t, pseudo), counterValue(t, ep), counterValue(t, rt)
 	throughEntrypointAndRoute(t, "labels.example")
-	if counterValue(t, ep)-e0 != 1 || counterValue(t, rt)-r0 != 1 {
-		t.Fatalf("entrypoint +%v, route +%v; want each +1",
-			counterValue(t, ep)-e0, counterValue(t, rt)-r0)
+	if counterValue(t, ep)-e0 != 1 || counterValue(t, rt)-r0 != 1 || counterValue(t, pseudo)-p0 != 0 {
+		t.Fatalf("entrypoint view +%v, route +%v, gateon-web route series +%v; want +1, +1, +0",
+			counterValue(t, ep)-e0, counterValue(t, rt)-r0, counterValue(t, pseudo)-p0)
 	}
 }
 

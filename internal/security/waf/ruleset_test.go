@@ -42,6 +42,28 @@ var seededRuleIDs = []string{
 	"1180000", "1190000",
 }
 
+// TestRepeatsEarlierDecisionNamesTheReputationRules pins which built-in rules
+// refuse on a decision the gateway already made. Their refusal is held against
+// nobody (ADR 0055, review 3 F1), so a rule joining this family stops counting
+// as attack evidence: that must be a decision someone made here, not a side
+// effect of filing a new rule under the category.
+func TestRepeatsEarlierDecisionNamesTheReputationRules(t *testing.T) {
+	want := map[uint32]bool{1910001: true, 1910002: true}
+	for _, s := range defaultSpecs {
+		if got := RepeatsEarlierDecision(s.id); got != want[s.id] {
+			t.Errorf("RepeatsEarlierDecision(%d) = %v, want %v (%s)", s.id, got, want[s.id], s.msg)
+		}
+	}
+	for id := range want {
+		if _, ok := LookupRule(id); !ok {
+			t.Errorf("rule %d is no longer in the corpus", id)
+		}
+	}
+	if RepeatsEarlierDecision(942100) {
+		t.Error("a rule gateon does not own repeats an earlier decision")
+	}
+}
+
 // TestEverySeededRuleIsAccountedFor is the audit that makes the migration
 // safe. Every rule gateon used to seed must now be either a typed rule or an
 // explicit retirement with a reason. A rule that is in neither table has been
@@ -239,6 +261,40 @@ func TestCategoryAndTagDisablingWorks(t *testing.T) {
 			if tag == "dlp" {
 				t.Errorf("rule %d survived the dlp tag being disabled", r.ID)
 			}
+		}
+	}
+}
+
+// TestFamilyTagLeavesOtherFamiliesRules is truth NEW-9 over the whole corpus:
+// disabling one family's tag must leave every rule filed under another
+// switched category in place. The RCE switch's "rce" tag removed the malware
+// family's web-shell rule (1100008) and PHP-upload rule (1100005); the PHP
+// switch removed a DLP rule.
+func TestFamilyTagLeavesOtherFamiliesRules(t *testing.T) {
+	t.Parallel()
+	base := Policy{ParanoiaLevel: 4, ResponseInspection: true}
+	for tag, family := range tagFamily {
+		p := base
+		p.DisabledTags = map[string]bool{tag: true}
+		kept := map[uint32]bool{}
+		for _, r := range p.Ruleset() {
+			kept[uint32(r.ID)] = true
+		}
+		for _, s := range defaultSpecs {
+			if s.pl > 4 || !switchedCategory(s.category) || s.category == family {
+				continue
+			}
+			if !kept[s.id] {
+				t.Errorf("disabling tag %q (family %s) removed rule %d, filed under %s", tag, family, s.id, s.category)
+			}
+		}
+	}
+	// The family's own rules still go.
+	p := base
+	p.DisabledTags = map[string]bool{TagRce: true, TagAttackRce: true}
+	for _, r := range p.Ruleset() {
+		if r.ID == 1100010 {
+			t.Errorf("rule 1100010 (RCE) survived the RCE tags being disabled")
 		}
 	}
 }

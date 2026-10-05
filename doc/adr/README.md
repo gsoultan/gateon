@@ -67,6 +67,13 @@ ADRs follow a lightweight [MADR](https://adr.github.io/madr/)-style format:
 | [0054](./0054-a-block-lookup-waits-a-deadline-not-the-database.md) | A block lookup waits a deadline, not the database | Accepted |
 | [0055](./0055-a-penalty-lands-only-on-the-client-that-did-the-thing.md) | A penalty lands only on the client that did the thing, and only for evidence | Accepted |
 | [0056](./0056-replicas-of-one-gateway-share-one-identity.md) | Replicas of one gateway share one identity, and the chart runs one replica until they share their settings | Accepted |
+| [0057](./0057-setup-keeps-what-the-configuration-decided.md) | Setup keeps what the configuration already decided, an administrator can reset another account's second factor, and audit verification says what it cannot see | Accepted |
+| [0058](./0058-a-block-in-force-is-enforced-without-a-lookup.md) | A block in force is enforced without a lookup, and an IPv6 client is its /64 | Accepted |
+| [0059](./0059-a-request-the-gateway-let-through-is-not-evidence-against-its-client.md) | A request the gateway let through is not evidence against its client | Accepted |
+| [0060](./0060-what-the-gateway-records-never-carries-a-credential.md) | What the gateway records never carries a credential | Accepted |
+| [0061](./0061-feeds-are-bounded-and-trusted-and-a-busy-gateway-logs-at-a-bounded-rate.md) | Feeds are bounded and trusted, and a busy gateway logs at a bounded rate | Accepted |
+| [0062](./0062-what-the-gateway-sends-is-what-it-decided.md) | What the gateway sends is what it decided: framing, paths, streams, passes and listeners | Accepted |
+| [0063](./0063-what-the-dashboard-points-to-can-be-made-and-what-it-reports-is-true.md) | What the dashboard points to can be made, and what it reports is true | Accepted |
 
 ## Conventions
 

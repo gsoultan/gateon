@@ -115,6 +115,11 @@ func assertUnscopedBlockIsInert(t *testing.T) {
 		scopeChrome); err != nil {
 		t.Fatalf("seed a legacy block: %v", err)
 	}
+	// A shared Postgres keeps the row after the test; a later test that lists
+	// or preloads fingerprint blocks would read it.
+	t.Cleanup(func() {
+		_, _ = s.db.Exec(s.dialect.Rebind(`DELETE FROM user_mitigations WHERE fingerprint = ?`), scopeChrome)
+	})
 
 	if IsUserMitigated(scopeChrome) {
 		t.Error("a block on a bare fingerprint, which names a client build on every network, is enforced")

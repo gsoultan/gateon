@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httputil"
 	"strings"
@@ -295,13 +296,7 @@ func (h *ProxyHandler) getOrCreateProxy(state *targetState) *httputil.ReversePro
 		if routeID != "" {
 			telemetry.RequestFailuresTotal.WithLabelValues(routeID, "service_down").Inc()
 		}
-		logger.L.LogError("Proxy error",
-			"error", err,
-			"target", state.url,
-			"route", routeID,
-			"method", r.Method,
-			"path", r.URL.Path,
-			"request_id", request.GetID(r))
+		logProxyError(r, state.url, routeID, err)
 		w.WriteHeader(status)
 	}
 
@@ -309,6 +304,47 @@ func (h *ProxyHandler) getOrCreateProxy(state *targetState) *httputil.ReversePro
 		return rp
 	}
 	return state.proxy.Load()
+}
+
+// proxyErrorLinesPerSecond is how many "Proxy error" lines are written a
+// second; proxyErrorReportEvery is how often, at most, the rest are reported,
+// one ERROR line per route and target.
+//
+// One ERROR line was written per failed request, so a backend that refused
+// connections under load wrote one per request -- past journald's budget of
+// ~333 a second, which then dropped every other line from the service,
+// including the ERRORs that would have said why (ADR 0061). Every failure is
+// still counted in gateon_request_failures_total{reason="service_down"} and
+// answered 502 or 504; the log shows the first ten a second and how many more.
+const (
+	proxyErrorLinesPerSecond = 10
+	proxyErrorReportEvery    = 30 * time.Second
+)
+
+// proxyErrorLines rate-limits the "Proxy error" line across every route.
+var proxyErrorLines = logger.Register(logger.NewLineLimiter(logger.LineLimit{
+	Level:     slog.LevelError,
+	Summary:   "Proxy errors whose lines were not written (over the per-second limit; each is in gateon_request_failures_total)",
+	PerSecond: proxyErrorLinesPerSecond,
+	Every:     proxyErrorReportEvery,
+	Labels:    [2]string{"route", "target"},
+}))
+
+// logProxyError writes the "Proxy error" line for a failed request when the
+// limiter allows one now, and counts it under its route and target when not.
+func logProxyError(r *http.Request, target, routeID string, err error) {
+	now := time.Now()
+	if !proxyErrorLines.Allow(now) {
+		proxyErrorLines.Skip(now, routeID, target)
+		return
+	}
+	logger.L.LogError("Proxy error",
+		"error", err,
+		"target", target,
+		"route", routeID,
+		"method", r.Method,
+		"path", r.URL.Path,
+		"request_id", request.GetID(r))
 }
 
 // GetStats is each target's counters and state as the dashboard shows them,
