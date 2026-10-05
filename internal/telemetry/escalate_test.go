@@ -214,6 +214,11 @@ func TestMitigationFunnelRulePrecedence(t *testing.T) {
 	if wafIdx >= advIdx {
 		t.Errorf("WAF rule at %d must precede advanced-security at %d", wafIdx, advIdx)
 	}
+	// The WAF's reputation rules are still a WAF block in the funnel: only
+	// whom it is held against changed (review 3, F1).
+	if got := firstMatch("Reputation", ThreatWAFReputationBlock); got != wafIdx {
+		t.Errorf("a refusal by the WAF's reputation rules went to rule %d, want the WAF rule %d", got, wafIdx)
+	}
 	if got := firstMatch("waf", "reputation_hit"); got != wafIdx {
 		t.Errorf("a waf-category threat also matching advanced went to rule %d, want the WAF rule %d",
 			got, wafIdx)

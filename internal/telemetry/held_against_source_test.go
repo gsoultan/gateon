@@ -57,6 +57,10 @@ func TestHeldAgainstSource(t *testing.T) {
 		{"a fingerprint block refusal", SecurityThreat{Type: "user_mitigation"}, false},
 		{"a kernel shun", SecurityThreat{Type: "ip_shunning"}, false},
 		{"a reputation refusal", SecurityThreat{Type: "reputation_block"}, false},
+		// A stored row reads the same: the type says it (review 3, F1).
+		{"the WAF's reputation rules refusing", SecurityThreat{
+			Type: ThreatWAFReputationBlock, Category: "Reputation", ActionTaken: "blocked", Mitigated: true,
+		}, false},
 	} {
 		if got := tc.th.HeldAgainstSource(); got != tc.want {
 			t.Errorf("%s: HeldAgainstSource() = %v, want %v", tc.name, got, tc.want)

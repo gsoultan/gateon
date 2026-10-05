@@ -42,6 +42,28 @@ var seededRuleIDs = []string{
 	"1180000", "1190000",
 }
 
+// TestRepeatsEarlierDecisionNamesTheReputationRules pins which built-in rules
+// refuse on a decision the gateway already made. Their refusal is held against
+// nobody (ADR 0055, review 3 F1), so a rule joining this family stops counting
+// as attack evidence: that must be a decision someone made here, not a side
+// effect of filing a new rule under the category.
+func TestRepeatsEarlierDecisionNamesTheReputationRules(t *testing.T) {
+	want := map[uint32]bool{1910001: true, 1910002: true}
+	for _, s := range defaultSpecs {
+		if got := RepeatsEarlierDecision(s.id); got != want[s.id] {
+			t.Errorf("RepeatsEarlierDecision(%d) = %v, want %v (%s)", s.id, got, want[s.id], s.msg)
+		}
+	}
+	for id := range want {
+		if _, ok := LookupRule(id); !ok {
+			t.Errorf("rule %d is no longer in the corpus", id)
+		}
+	}
+	if RepeatsEarlierDecision(942100) {
+		t.Error("a rule gateon does not own repeats an earlier decision")
+	}
+}
+
 // TestEverySeededRuleIsAccountedFor is the audit that makes the migration
 // safe. Every rule gateon used to seed must now be either a typed rule or an
 // explicit retirement with a reason. A rule that is in neither table has been

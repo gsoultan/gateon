@@ -525,6 +525,12 @@ const (
 	threatReputationBlock = "reputation_block"
 )
 
+// ThreatWAFReputationBlock is a WAF refusal by one of its reputation rules
+// (secwaf.RepeatsEarlierDecision): a feed listing or the client's own low
+// score, refused again by the WAF. It is a WAF block in every count, and like
+// the reputation blocker's refusal it is held against nobody.
+const ThreatWAFReputationBlock = "waf_reputation_block"
+
 // HeldAgainstSource reports whether a threat may count against the client that
 // sent it: lower its reputation, count towards a fingerprint block or an
 // address shun, be a correlation signal, or trigger a playbook's block.
@@ -536,7 +542,8 @@ const (
 //     load, loopback, or a data leak in a response it was served).
 //   - Observed: a control recorded a match and did not act on it.
 //   - A refusal that follows an earlier decision (a shun or feed listing, a
-//     fingerprint block, a reputation refusal). It is the gateway's own
+//     fingerprint block, a reputation refusal, the WAF's reputation rules
+//     refusing the same listing or score). It is the gateway's own
 //     decision coming back: counting it made a refused client's every retry a
 //     new penalty, and a feed listing a correlation signal (ADR 0044).
 func (st *SecurityThreat) HeldAgainstSource() bool {
@@ -544,7 +551,8 @@ func (st *SecurityThreat) HeldAgainstSource() bool {
 		return false
 	}
 	switch st.Type {
-	case typeIPMitigation, typeUserMitigation, threatIPShunning, threatReputationBlock:
+	case typeIPMitigation, typeUserMitigation, threatIPShunning, threatReputationBlock,
+		ThreatWAFReputationBlock:
 		return false
 	}
 	return true
@@ -2113,7 +2121,8 @@ type funnelRule struct {
 var mitigationFunnelRules = []funnelRule{
 	{
 		matches: func(cat, typ string) bool {
-			return cat == "waf" || typ == "waf_block" || typ == "waf_blocked" || typ == "waf_violation"
+			return cat == "waf" || typ == "waf_block" || typ == "waf_blocked" || typ == "waf_violation" ||
+				typ == ThreatWAFReputationBlock
 		},
 		record: func(routeID, typ string, st *SecurityThreat) {
 			// firstRuleID, not TriggeredRules. The label is declared rule_id

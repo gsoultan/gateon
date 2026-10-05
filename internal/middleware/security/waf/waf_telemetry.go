@@ -119,12 +119,31 @@ func recordWAFDecision(o wafObservation) {
 	}
 
 	clientIP := request.GetClientIP(o.request, o.cfg.TrustCloudflare)
-	if blocked && clientIP != "" {
+	th := o.threat(clientIP)
+	switch {
+	case blocked && secwaf.RepeatsEarlierDecision(uint32(o.decision.RuleID())):
+		o.refusedOnEarlierDecision(&th)
+	case blocked && clientIP != "":
 		telemetry.GetAggregator().RecordWAFBlock(clientIP)
 		o.applyAdaptiveMitigation(clientIP)
 	}
 
-	telemetry.RecordSecurityThreat(telemetry.RecordSecurityThreatWithJA4(o.request, o.threat(clientIP)))
+	telemetry.RecordSecurityThreat(telemetry.RecordSecurityThreatWithJA4(o.request, th))
+}
+
+// refusedOnEarlierDecision files a refusal by one of the WAF's reputation
+// rules as what it is: the gateway refusing again on a feed listing or a low
+// score it already held, not on anything the client just sent. Recorded under
+// its own type, which nothing holds against the source (ADR 0055) -- no
+// reputation, fingerprint-block or shun evidence, no correlation -- and kept
+// out of the exploit-scan tally and the adaptive rate limit, which act on the
+// address with no predicate to ask. Held, each refused retry cost the client
+// another 50 and the third blocked its build on its whole /24. Marked a
+// mitigation refusal, as the reputation blocker marks its own: no credential
+// was checked (ADR 0031).
+func (o wafObservation) refusedOnEarlierDecision(th *telemetry.SecurityThreat) {
+	th.Type = telemetry.ThreatWAFReputationBlock
+	request.MarkRefused(o.request, request.RefusalMitigation)
 }
 
 // wafLinesPerSecond is how many "WAF blocked" lines, and separately how many
