@@ -1665,6 +1665,17 @@ func init() {
 		}
 		return markLegacyThreats(db, dialect)
 	})
+
+	// ADR 0064. A route says which of its responses are streams
+	// (Route.stream_mode): 0 is auto -- a 200 text/event-stream with no length
+	// -- which is what every route did before, so every existing row keeps it.
+	Register(70, "routes_stream_mode", func(db *sql.DB, dialect Dialect) error {
+		stmt := `ALTER TABLE routes ADD COLUMN stream_mode INTEGER NOT NULL DEFAULT 0`
+		if dialect.Driver == DriverPostgres {
+			stmt = `ALTER TABLE routes ADD COLUMN IF NOT EXISTS stream_mode INTEGER NOT NULL DEFAULT 0`
+		}
+		return addColumns(db, dialect, stmt)
+	})
 }
 
 // legacyObservedThreatTypes are the types only a control that let the request

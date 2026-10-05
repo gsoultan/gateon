@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
 // SPDX-License-Identifier: MIT
 
-import type { Route } from "../../types/gateon";
+import { ROUTE_STREAM_MODE, type Route, type RouteStreamMode } from "../../types/gateon";
 
 const isL4 = (type: Route["type"]) => type === "tcp" || type === "udp";
 
@@ -19,7 +19,15 @@ export function routeToFormValues(route: Route): Route {
     serviceId: route.serviceId || "",
     tls: route.tls || { certificateIds: [], optionId: "" },
     disabled: route.disabled ?? false,
+    streamMode: knownStreamMode(route.streamMode),
   };
+}
+
+/** A stream mode the gateway knows, or auto: what the router reads any other value as. */
+function knownStreamMode(mode: number | undefined): RouteStreamMode {
+  return (Object.values(ROUTE_STREAM_MODE) as number[]).includes(mode ?? -1)
+    ? (mode as RouteStreamMode)
+    : ROUTE_STREAM_MODE.AUTO;
 }
 
 /**

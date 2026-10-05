@@ -46,6 +46,10 @@ func setNonZero(t *testing.T, name string, f reflect.Value) {
 	case reflect.Pointer:
 		f.Set(reflect.New(f.Type().Elem()))
 	case reflect.Interface:
+		if f.Type() == reflect.TypeFor[StreamControl]() {
+			f.Set(reflect.ValueOf(&fakeStreamControl{}))
+			return
+		}
 		f.Set(reflect.ValueOf("x"))
 	default:
 		t.Fatalf("field %s has kind %s; teach setNonZero to fill it", name, f.Kind())

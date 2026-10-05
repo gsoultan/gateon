@@ -41,7 +41,7 @@ func (s *ApiService) UpdateRoute(ctx context.Context, req *gateonv1.UpdateRouteR
 // InvalidArgument, with the position and reason, where it used to surface as
 // Unknown; a binding refusal maps as mapBindingRefusal says.
 func mapRouteSaveError(err error) error {
-	if errors.Is(err, route.ErrInvalidRule) {
+	if errors.Is(err, route.ErrInvalidRule) || errors.Is(err, route.ErrInvalidStreamMode) {
 		return status.Error(codes.InvalidArgument, err.Error())
 	}
 	return mapBindingRefusal(err)

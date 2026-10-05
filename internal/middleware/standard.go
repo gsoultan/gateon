@@ -58,6 +58,9 @@ func EntryPoint(epID, epLabel string, isMgmt bool) Middleware {
 			rs.RouteName = "gateon-" + epLabel
 			rs.IsManagement = isMgmt
 			rs.TEntrypoint = time.Now().UnixNano()
+			// The listener's stream decision, for the matched route to set
+			// (ADR 0064). Nothing has wrapped the writer yet.
+			rs.Stream = request.FindStreamControl(w)
 			defer RequestStatePool.Put(rs)
 
 			// 2. Handle Request ID

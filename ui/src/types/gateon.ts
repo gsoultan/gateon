@@ -181,7 +181,17 @@ export type Route = {
   serviceId: string;
   tls?: RouteTLSConfig;
   disabled?: boolean;
+  /**
+   * Which responses are streams, lifted off the entrypoint's timeouts and
+   * bounded by the stream idle timeout and maximum lifetime instead
+   * (Route.stream_mode, ADR 0064). The gateway sends and accepts the number.
+   */
+  streamMode?: RouteStreamMode;
 };
+
+/** Route.StreamMode in proto/gateon/v1/route.proto. */
+export const ROUTE_STREAM_MODE = { AUTO: 0, ALWAYS: 1, NEVER: 2 } as const;
+export type RouteStreamMode = (typeof ROUTE_STREAM_MODE)[keyof typeof ROUTE_STREAM_MODE];
 
 export type StatusResponse = {
   status: string;

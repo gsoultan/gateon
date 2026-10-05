@@ -47,6 +47,25 @@ message Route {
   string service_id = 8;
   RouteTLSConfig tls = 9;
   bool disabled = 10; // When true, route is not matched (paused)
+
+  // StreamMode says which of this route's responses are streams: lifted off
+  // the entrypoint's read and write timeouts and bounded instead by the stream
+  // idle timeout and maximum lifetime (ADR 0042, ADR 0064). It never removes
+  // every bound -- a stream is always ended by those two.
+  enum StreamMode {
+    // A 200 whose Content-Type is text/event-stream and that declares no
+    // Content-Length (ADR 0062, DP-N7). What every route did before this
+    // field existed, and what an unset value still means.
+    STREAM_MODE_AUTO = 0;
+    // Every response this route answers, once its status is written: for a
+    // backend that streams under another type (NDJSON, chunked long-poll,
+    // gRPC-Web). The backend must still answer within the write timeout.
+    STREAM_MODE_ALWAYS = 1;
+    // No response: the entrypoint's timeouts bound every response, an event
+    // stream included.
+    STREAM_MODE_NEVER = 2;
+  }
+  StreamMode stream_mode = 11;
 }
 
 message RouteTLSConfig {

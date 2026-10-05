@@ -34,7 +34,7 @@ func (r *DBRouteRegistry) loadFromDB() {
 	r.Mu().Lock()
 	defer r.Mu().Unlock()
 
-	query := "SELECT id, name, type, entrypoints, rule, priority, middlewares, service_id, tls_config, disabled FROM routes"
+	query := "SELECT id, name, type, entrypoints, rule, priority, middlewares, service_id, tls_config, disabled, stream_mode FROM routes"
 	rows, err := r.db.Query(query)
 	if err != nil {
 		logLoadQueryFailed("routes", err)
@@ -45,10 +45,12 @@ func (r *DBRouteRegistry) loadFromDB() {
 	for rows.Next() {
 		var rt gateonv1.Route
 		var entrypoints, middlewares, tlsConfig string
-		if err := rows.Scan(&rt.Id, &rt.Name, &rt.Type, &entrypoints, &rt.Rule, &rt.Priority, &middlewares, &rt.ServiceId, &tlsConfig, &rt.Disabled); err != nil {
+		var streamMode int32
+		if err := rows.Scan(&rt.Id, &rt.Name, &rt.Type, &entrypoints, &rt.Rule, &rt.Priority, &middlewares, &rt.ServiceId, &tlsConfig, &rt.Disabled, &streamMode); err != nil {
 			logRecordDropped("route", "", "", err)
 			continue
 		}
+		rt.StreamMode = gateonv1.Route_StreamMode(streamMode)
 		if entrypoints != "" {
 			rt.Entrypoints = strings.Split(entrypoints, ",")
 		}
@@ -94,8 +96,8 @@ func (r *DBRouteRegistry) Update(ctx context.Context, rt *gateonv1.Route) error 
 
 	var query string
 	if r.dialect.Driver == db.DriverPostgres {
-		query = `INSERT INTO routes (id, name, type, entrypoints, rule, priority, middlewares, service_id, tls_config, disabled, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+		query = `INSERT INTO routes (id, name, type, entrypoints, rule, priority, middlewares, service_id, tls_config, disabled, stream_mode, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
 			ON CONFLICT (id) DO UPDATE SET
 				name = EXCLUDED.name,
 				type = EXCLUDED.type,
@@ -106,14 +108,15 @@ func (r *DBRouteRegistry) Update(ctx context.Context, rt *gateonv1.Route) error 
 				service_id = EXCLUDED.service_id,
 				tls_config = EXCLUDED.tls_config,
 				disabled = EXCLUDED.disabled,
+				stream_mode = EXCLUDED.stream_mode,
 				updated_at = CURRENT_TIMESTAMP`
 	} else {
 		// SQLite
-		query = `REPLACE INTO routes (id, name, type, entrypoints, rule, priority, middlewares, service_id, tls_config, disabled, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`
+		query = `REPLACE INTO routes (id, name, type, entrypoints, rule, priority, middlewares, service_id, tls_config, disabled, stream_mode, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`
 	}
 
-	if _, err := r.db.Exec(r.dialect.Rebind(query), rt.Id, rt.Name, rt.Type, entrypoints, rt.Rule, rt.Priority, middlewares, rt.ServiceId, tlsConfig, rt.Disabled); err != nil {
+	if _, err := r.db.Exec(r.dialect.Rebind(query), rt.Id, rt.Name, rt.Type, entrypoints, rt.Rule, rt.Priority, middlewares, rt.ServiceId, tlsConfig, rt.Disabled, int32(rt.StreamMode)); err != nil {
 		return err
 	}
 
