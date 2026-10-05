@@ -169,6 +169,7 @@ func globalWAFConfig(w *gateonv1.WafConfig, tier config.Tier, d security.Deps) W
 	// upgrade: a user who deliberately enabled DLP gets response inspection even
 	// at the standard tier, while DLP stays off by default below enterprise.
 	applyWAFTier(&cfg, tier)
+	applyGlobalCategories(&cfg, w.GetCategories())
 	if w.GetDlp() {
 		cfg.EnableDLP = true
 		cfg.EnableResponseInspection = true
@@ -182,6 +183,35 @@ func globalWAFConfig(w *gateonv1.WafConfig, tier config.Tier, d security.Deps) W
 	// wire so existing configuration still loads; it no longer does anything.
 
 	return cfg
+}
+
+// applyGlobalCategories applies the gateway-wide WAF's category switches
+// over the tier baseline (ADR 0064). Unset leaves the tier's choice -- every
+// family at standard and enterprise -- which is all an install that never set
+// one has ever run; true runs the family even where the tier would not; false
+// removes it, through the same switches a route WAF's keys set, so it removes
+// exactly the rules a route WAF's switch of that name does (ADR 0063 decision
+// 4). A route WAF inherits the result for every switch it leaves unset.
+func applyGlobalCategories(cfg *WAFConfig, c *gateonv1.WafCategories) {
+	if c == nil {
+		return
+	}
+	for _, s := range []struct {
+		set     *bool
+		disable *bool
+	}{
+		{c.Sqli, &cfg.DisableSQLI}, {c.Xss, &cfg.DisableXSS}, {c.Lfi, &cfg.DisableLFI},
+		{c.Rce, &cfg.DisableRCE}, {c.Php, &cfg.DisablePHP}, {c.Java, &cfg.DisableJava},
+		{c.Nodejs, &cfg.DisableNodeJS}, {c.Scanner, &cfg.DisableScanner},
+		{c.Protocol, &cfg.DisableProtocol},
+	} {
+		if s.set != nil {
+			*s.disable = !*s.set
+		}
+	}
+	if c.RansomwareDetection != nil {
+		cfg.EnableRansomwareDetection = *c.RansomwareDetection
+	}
 }
 
 func hashWAFProto(w *gateonv1.WafConfig) string {

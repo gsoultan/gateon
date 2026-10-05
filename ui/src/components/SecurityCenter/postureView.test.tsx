@@ -26,6 +26,13 @@ describe("the WAF card (T12)", () => {
     expect(view.wafStatus(waf("detect", 0, 0, 0)).label).toBe(view.DETECTING_ONLY);
   });
 
+  // ADR 0064: a gateway-wide WAF with every attack family switched off.
+  test("a global WAF with every family off is not blocking, even with no route", () => {
+    const s = view.wafStatus(waf("no_categories", 0, 0, 0));
+    expect(s.label).toBe("Not blocking attacks");
+    expect(s.color).toBe("red");
+  });
+
   test("a route whose own WAF is audit-only is not counted as blocking", () => {
     const s = view.wafStatus(waf("enforce", 2, 1, 1));
     expect(s.label).toBe("Blocking on 1 of 2 routes");

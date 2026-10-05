@@ -43,7 +43,7 @@ func doGet(t *testing.T, h http.Handler, url string, reputation int) int {
 // core request-phase protections (SQLi/XSS) even though it drops the heavier
 // rule groups. Lowering footprint must never silently disable core coverage.
 func TestWAFTier_MinimalStillBlocksCoreAttacks(t *testing.T) {
-	h := buildTierWAF(t, &gateonv1.WafConfig{Enabled: true, UseCrs: true, Tier: "minimal"})
+	h := buildTierWAF(t, &gateonv1.WafConfig{Enabled: true, Tier: "minimal"})
 
 	if code := doGet(t, h, "/?name=test", 100); code != http.StatusOK {
 		t.Errorf("safe request: expected 200, got %d", code)
@@ -60,7 +60,7 @@ func TestWAFTier_MinimalStillBlocksCoreAttacks(t *testing.T) {
 // on response-phase inspection + malware/ransomware) still compiles and enforces
 // request-phase attacks.
 func TestWAFTier_EnterpriseBuildsAndBlocks(t *testing.T) {
-	h := buildTierWAF(t, &gateonv1.WafConfig{Enabled: true, UseCrs: true, Tier: "enterprise"})
+	h := buildTierWAF(t, &gateonv1.WafConfig{Enabled: true, Tier: "enterprise"})
 	if code := doGet(t, h, "/?id=1%27%20OR%20%271%27%3D%271%20--%20", 0); code != http.StatusForbidden {
 		t.Errorf("SQLi under enterprise tier: expected 403, got %d", code)
 	}
@@ -70,7 +70,7 @@ func TestWAFTier_EnterpriseBuildsAndBlocks(t *testing.T) {
 // when WafConfig.tier is unset.
 func TestWAFTier_ProfileEnvDrivesTier(t *testing.T) {
 	t.Setenv("GATEON_PROFILE", "minimal")
-	h := buildTierWAF(t, &gateonv1.WafConfig{Enabled: true, UseCrs: true})
+	h := buildTierWAF(t, &gateonv1.WafConfig{Enabled: true})
 	if code := doGet(t, h, "/?id=1%27%20OR%20%271%27%3D%271%20--%20", 0); code != http.StatusForbidden {
 		t.Errorf("SQLi with profile=minimal: expected 403, got %d", code)
 	}
@@ -83,7 +83,7 @@ func TestWAFTier_ProfileEnvDrivesTier(t *testing.T) {
 // accurate, grammar-based check instead of a substring prefilter that ran ahead
 // of it.
 func TestWAFEngine_BlocksHeaderInjection(t *testing.T) {
-	h := buildTierWAF(t, &gateonv1.WafConfig{Enabled: true, UseCrs: true, Tier: "standard"})
+	h := buildTierWAF(t, &gateonv1.WafConfig{Enabled: true, Tier: "standard"})
 
 	req := httptest.NewRequest(http.MethodGet, "/", strings.NewReader(""))
 	req.Header.Set("User-Agent", "sqlmap/1.0 UNION SELECT password FROM users")

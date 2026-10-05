@@ -37,6 +37,17 @@ var globalSecuritySettings = []string{
 	"security_advanced.tarpit.delay_max_ms",
 	"security_advanced.tarpit.score_threshold",
 	"security_advanced.entropy.threshold",
+	// The gateway-wide WAF's attack families (ADR 0064).
+	"waf.categories.sqli",
+	"waf.categories.xss",
+	"waf.categories.lfi",
+	"waf.categories.rce",
+	"waf.categories.php",
+	"waf.categories.java",
+	"waf.categories.nodejs",
+	"waf.categories.scanner",
+	"waf.categories.protocol",
+	"waf.categories.ransomware_detection",
 }
 
 // globalRows reads the registry's rows: field -> inert.

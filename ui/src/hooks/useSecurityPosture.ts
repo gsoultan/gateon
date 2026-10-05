@@ -36,8 +36,11 @@ export interface RouteCoverage {
   categoriesOff?: number;
 }
 
-/** "enforce" blocks, "detect" is audit-only (records and forwards), "off". */
-export type WafMode = "enforce" | "detect" | "off";
+/**
+ * "enforce" blocks, "detect" is audit-only (records and forwards), "off";
+ * "no_categories" runs with every attack family switched off (ADR 0064).
+ */
+export type WafMode = "enforce" | "detect" | "off" | "no_categories";
 
 export interface WafPosture {
   enabled: boolean;

@@ -411,25 +411,34 @@ export type Middleware = {
   wasmBlob?: string; // base64 encoded
 };
 
-export type WafConfig = {
-  enabled: boolean;
-  useCrs: boolean;
-  paranoiaLevel: number;
-  customDirectives?: string;
+/**
+ * The gateway-wide WAF's attack-family switches (WafCategories, ADR 0064).
+ * Absent: the family runs as the WAF tier decides. true: it runs even where
+ * the tier would not. false: its rules are removed.
+ */
+export type WafCategories = {
   sqli?: boolean;
   xss?: boolean;
   lfi?: boolean;
   rce?: boolean;
   php?: boolean;
-  scanner?: boolean;
-  protocol?: boolean;
   java?: boolean;
   nodejs?: boolean;
+  scanner?: boolean;
+  protocol?: boolean;
+  ransomwareDetection?: boolean;
+};
+
+export type WafConfig = {
+  enabled: boolean;
+  paranoiaLevel: number;
+  customDirectives?: string;
+  /** The gateway sends null when no switch was ever set. */
+  categories?: WafCategories | null;
   wordpress?: boolean;
   ipReputation?: boolean;
   dosProtection?: boolean;
   malwareDetection?: boolean;
-  ransomwareDetection?: boolean;
   dlp?: boolean;
   /**
    * What to do when a data-leak rule fires: "block" (the default) refuses the
