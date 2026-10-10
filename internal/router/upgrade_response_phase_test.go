@@ -65,7 +65,7 @@ func newDLPGateway(t *testing.T, backendURL string) string {
 	t.Helper()
 	rt := &gateonv1.Route{Id: "r-dlp", ServiceId: "svc", Rule: "PathPrefix(`/`)", Type: "http"}
 	gStore := fakeGlobalStore{cfg: &gateonv1.GlobalConfig{
-		Waf: &gateonv1.WafConfig{Enabled: true, UseCrs: true, Dlp: true, ParanoiaLevel: 2},
+		Waf: &gateonv1.WafConfig{Enabled: true, Dlp: true, ParanoiaLevel: 2},
 	}}
 	return newRouteGateway(t, backendURL, rt, fakeMWStore{}, gStore)
 }

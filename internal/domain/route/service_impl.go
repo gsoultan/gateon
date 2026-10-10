@@ -59,6 +59,9 @@ func (s *serviceImpl) SaveRoute(ctx context.Context, rt *gateonv1.Route) error {
 	if err := ValidateRule(rt); err != nil {
 		return err
 	}
+	if err := ValidateStreamMode(rt); err != nil {
+		return err
+	}
 	if rt.Id == "" {
 		rt.Id = uuid.NewString()
 	}
@@ -103,6 +106,21 @@ func ValidateRule(rt *gateonv1.Route) error {
 	}
 	if _, err := rule.Parse(rt.GetRule()); err != nil {
 		return fmt.Errorf("%w %w", ErrInvalidRule, err)
+	}
+	return nil
+}
+
+// ErrInvalidStreamMode is returned for a route whose stream_mode names no
+// value the gateway knows.
+var ErrInvalidStreamMode = errors.New("invalid route stream_mode")
+
+// ValidateStreamMode refuses a stream_mode outside the enum (ADR 0064). The
+// router reads an unknown value as auto, so storing one would save a setting
+// that does nothing while the route list showed a number nobody chose.
+func ValidateStreamMode(rt *gateonv1.Route) error {
+	m := rt.GetStreamMode()
+	if m.Descriptor().Values().ByNumber(m.Number()) == nil {
+		return fmt.Errorf("%w: %d (want 0 auto, 1 always or 2 never)", ErrInvalidStreamMode, m)
 	}
 	return nil
 }

@@ -69,7 +69,6 @@ func NewGlobalRegistry(path string) *GlobalRegistry {
 		Transport: &gateonv1.TransportConfig{},
 		Waf: &gateonv1.WafConfig{
 			Enabled:       false,
-			UseCrs:        true,
 			ParanoiaLevel: 1,
 			Clamav: &gateonv1.ClamavConfig{
 				InstallationMode: gateonv1.ClamavConfig_INSTALLATION_MODE_DOCKER,

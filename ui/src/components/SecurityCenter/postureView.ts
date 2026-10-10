@@ -32,6 +32,12 @@ export function wafStatus(waf: WafPosture): StatusView {
         return { label: "Blocking", color: "teal", detail: "The gateway-wide WAF blocks; no HTTP route yet." };
       case "detect":
         return { label: DETECTING_ONLY, color: "orange", detail: "The gateway-wide WAF records attacks and forwards them." };
+      case "no_categories":
+        return {
+          label: "Not blocking attacks",
+          color: "red",
+          detail: "The gateway-wide WAF runs with every attack family switched off; no HTTP route yet.",
+        };
       default:
         return { label: "Disabled", color: "gray", detail: "No WAF inspects requests." };
     }

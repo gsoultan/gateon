@@ -11,6 +11,7 @@ import { ClamAVSection } from "./ClamAVSection";
 import { BotManagementSection } from "./BotManagementSection";
 import { DLP_ACTION_HELP, GLOBAL_AUDIT_ONLY_HELP } from "../../MiddlewareConfig/wafCopy";
 import { ADMIN_ONLY_REASON, useAdminOnlySetting } from "../../../hooks/usePermissions";
+import { GLOBAL_WAF_FAMILIES, familiesOff, familySwitchOn, withFamily } from "../../../utils/wafCategories";
 
 interface WafSettingsCardProps {
   waf: WafConfig | undefined;
@@ -43,8 +44,8 @@ export function WafSettingsCard({
 }: WafSettingsCardProps) {
   // Which header names the client address is administrator-only (ADR 0040).
   const clientTrust = useAdminOnlySetting(disabled);
-  // What the running WAF does, from the gateway -- not from the switches above,
-  // which the global WAF does not read for its categories (ADR 0044).
+  // What the running WAF does, from the gateway: the tier can drop a family
+  // whose switch is on, so the switches alone do not say what runs.
   const effective = useEffectiveWaf();
   const queryClient = useQueryClient();
   const save = async () => {
@@ -65,7 +66,6 @@ export function WafSettingsCard({
             onChange={(e) =>
               onChange({
                 ...(waf || {
-                  useCrs: true,
                   paranoiaLevel: 1,
                 }),
                 enabled: e.currentTarget.checked,
@@ -118,8 +118,8 @@ export function WafSettingsCard({
             </Group>
 
             <>
-                <Divider label="What the global WAF runs" labelPosition="center" />
-                <GlobalWafCategories effective={effective} />
+                <Divider label="Attack families" labelPosition="center" />
+                <GlobalWafCategories waf={waf} onChange={onChange} disabled={disabled} effective={effective} />
 
                 <Divider label="Optional protections" labelPosition="center" />
                 <Group grow align="flex-start">
@@ -287,21 +287,6 @@ export function WafSettingsCard({
   );
 }
 
-// The rule families the global WAF runs, in the order the dashboard lists them.
-const GLOBAL_CATEGORIES: { key: string; label: string }[] = [
-  { key: "sqli", label: "SQL Injection" },
-  { key: "xss", label: "Cross-Site Scripting" },
-  { key: "lfi", label: "File Inclusion & Traversal" },
-  { key: "rce", label: "Code Execution" },
-  { key: "php", label: "PHP" },
-  { key: "java", label: "Java" },
-  { key: "nodejs", label: "Node.js" },
-  { key: "scanner", label: "Scanner Detection" },
-  { key: "protocol", label: "Protocol Enforcement" },
-  { key: "malware_detection", label: "Malware (web shells)" },
-  { key: "ransomware_detection", label: "Ransomware" },
-];
-
 type EffectiveQuery = UseQueryResult<EffectiveWafView>;
 
 // One line saying what the global WAF does with a match. "Audit only" is said
@@ -327,11 +312,68 @@ function WafModeLine({ effective }: { effective: EffectiveQuery }) {
   );
 }
 
-// The categories as the running WAF has them. They are shown rather than
-// offered as switches: the global WAF runs every family, and a saved "off"
-// cannot be told apart from a switch nobody touched, so a switch here would
-// either do nothing or turn detection off on every install that never set it.
-function GlobalWafCategories({ effective }: { effective: EffectiveQuery }) {
+// The attack-family switches (ADR 0064) beside what the running WAF does with
+// each. A switch nobody touched is on; switching one off removes the rules
+// filed under that family and nothing else. Malware detection is not a switch
+// here: the gateway-wide WAF always runs it.
+function GlobalWafCategories({
+  waf,
+  onChange,
+  disabled,
+  effective,
+}: {
+  waf: WafConfig;
+  onChange: (waf: WafConfig) => void;
+  disabled: boolean;
+  effective: EffectiveQuery;
+}) {
+  const off = familiesOff(waf);
+  return (
+    <Stack gap="xs">
+      <Text size="sm" c="dimmed">
+        Switching a family off removes the rules filed under it from the gateway-wide WAF, on every
+        route without a WAF of its own. A route WAF&apos;s own switch wins over these; one it leaves
+        unset follows them. Code Execution off also lets PHP, Java and Node.js code injection
+        through. Malware (web shell) detection always runs.
+      </Text>
+      <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="xs">
+        {GLOBAL_WAF_FAMILIES.map((f) => (
+          <Group key={f.key} gap={8} wrap="nowrap" justify="space-between">
+            <Switch
+              label={f.label}
+              checked={familySwitchOn(waf, f.key)}
+              onChange={(e) => onChange(withFamily(waf, f.key, e.currentTarget.checked))}
+              disabled={disabled}
+            />
+            <RunningBadge effective={effective} effectiveKey={f.effectiveKey} />
+          </Group>
+        ))}
+      </SimpleGrid>
+      {off.length > 0 && (
+        <Alert color="yellow" title="Switched off gateway-wide">
+          {off.join(", ")}: requests carrying these attacks reach the backends of routes without a
+          WAF of their own.
+        </Alert>
+      )}
+      <EffectiveState effective={effective} />
+    </Stack>
+  );
+}
+
+// Whether the saved configuration runs the family, from the gateway.
+function RunningBadge({ effective, effectiveKey }: { effective: EffectiveQuery; effectiveKey: string }) {
+  const categories = effective.data?.global.categories;
+  if (!categories) return null;
+  const running = categories[effectiveKey] === true;
+  return (
+    <Badge size="sm" color={running ? "green" : "gray"} variant="light">
+      {running ? "Running" : "Not running"}
+    </Badge>
+  );
+}
+
+// Loading and error for the running-state badges; nothing once they are shown.
+function EffectiveState({ effective }: { effective: EffectiveQuery }) {
   if (effective.isLoading) {
     return (
       <Group gap="xs">
@@ -347,23 +389,10 @@ function GlobalWafCategories({ effective }: { effective: EffectiveQuery }) {
       </Alert>
     );
   }
-  const categories = effective.data.global.categories;
   return (
-    <Stack gap="xs">
-      <SimpleGrid cols={{ base: 2, sm: 3 }} spacing="xs">
-        {GLOBAL_CATEGORIES.map(({ key, label }) => (
-          <Group key={key} gap={6} wrap="nowrap">
-            <Badge size="sm" color={categories[key] ? "green" : "gray"} variant="light">
-              {categories[key] ? "On" : "Off"}
-            </Badge>
-            <Text size="sm">{label}</Text>
-          </Group>
-        ))}
-      </SimpleGrid>
-      <Text size="xs" c="dimmed">
-        To switch a family off for one application, attach a WAF to its route and turn the family
-        off there. That route WAF starts from everything shown here.
-      </Text>
-    </Stack>
+    <Text size="xs" c="dimmed">
+      Running and Not running are what the saved configuration does, the WAF tier included; save to
+      update them.
+    </Text>
   );
 }

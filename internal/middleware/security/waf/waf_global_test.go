@@ -31,7 +31,6 @@ func TestCreateGlobalWAF_LoadsCRSWithDefaultFlags(t *testing.T) {
 	store := &mockGlobalConfigStore{config: &gateonv1.GlobalConfig{
 		Waf: &gateonv1.WafConfig{
 			Enabled:       true,
-			UseCrs:        true,
 			ParanoiaLevel: 1,
 			// All Sqli/Xss/Lfi/... left false (proto zero value) — the trap scenario.
 		},
@@ -95,7 +94,7 @@ func TestCreateGlobalWAF_LoadsCRSWithDefaultFlags(t *testing.T) {
 // while still inspecting headers/URI.
 func TestCreateGlobalWAF_AllowsGRPC(t *testing.T) {
 	store := &mockGlobalConfigStore{config: &gateonv1.GlobalConfig{
-		Waf: &gateonv1.WafConfig{Enabled: true, UseCrs: true, ParanoiaLevel: 1},
+		Waf: &gateonv1.WafConfig{Enabled: true, ParanoiaLevel: 1},
 	}}
 	// A trusted route type unlocks the gRPC transport relaxations.
 	mw, err := NewGlobalWAF(security.Deps{GlobalStore: store, RouteType: "grpc"})
@@ -143,7 +142,7 @@ func TestCreateGlobalWAF_GRPCRelaxationNotBypassableByHeader(t *testing.T) {
 	t.Setenv(testReputationEnv, "1")
 	store := &mockGlobalConfigStore{config: &gateonv1.GlobalConfig{
 		Waf: &gateonv1.WafConfig{
-			Enabled: true, UseCrs: true, ParanoiaLevel: 1,
+			Enabled: true, ParanoiaLevel: 1,
 			// Force CRS to inspect the request body so the bypass would be observable.
 			RequestBodyLimit: 1 << 20,
 		},
@@ -178,7 +177,7 @@ func TestCreateGlobalWAF_GRPCRelaxationNotBypassableByHeader(t *testing.T) {
 func TestCreateGlobalWAF_DisabledReturnsNil(t *testing.T) {
 	cases := map[string]*gateonv1.GlobalConfig{
 		"nil waf":      {},
-		"waf disabled": {Waf: &gateonv1.WafConfig{Enabled: false, UseCrs: true}},
+		"waf disabled": {Waf: &gateonv1.WafConfig{Enabled: false}},
 	}
 	for name, cfg := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -201,7 +200,6 @@ func TestWAF_JWTFastCheck(t *testing.T) {
 	store := &mockGlobalConfigStore{config: &gateonv1.GlobalConfig{
 		Waf: &gateonv1.WafConfig{
 			Enabled:       true,
-			UseCrs:        true,
 			ParanoiaLevel: 1,
 		},
 	}}

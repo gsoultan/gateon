@@ -82,7 +82,7 @@ func TestOverlappingDetectionPassesDoNotRace(t *testing.T) {
 		at := time.Now().Add(-5 * time.Minute)
 		for c := range 25 {
 			for r := range 6 {
-				d.Traces = append(d.Traces, &telemetry.TraceRecord{
+				d.Traces = append(d.Traces, &telemetry.TraceRecord{ServiceDelay: 1,
 					SourceIP: fmt.Sprintf("10.52.0.%d", c+1), Path: "/", Method: "GET", Status: "200",
 					DurationMs: 10, Timestamp: at.Add(time.Duration(c*6+r) * time.Second),
 				})

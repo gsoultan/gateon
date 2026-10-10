@@ -17,7 +17,7 @@ import (
 // malware/ransomware at their zero value.
 func dashboardGlobalWAF() security.Deps {
 	return security.Deps{GlobalStore: &mockGlobalConfigStore{config: &gateonv1.GlobalConfig{
-		Waf: &gateonv1.WafConfig{Enabled: true, UseCrs: true, ParanoiaLevel: 1},
+		Waf: &gateonv1.WafConfig{Enabled: true, ParanoiaLevel: 1},
 	}}}
 }
 
@@ -81,7 +81,7 @@ func TestRouteWAFNarrowsOnlyWhenItSaysSo(t *testing.T) {
 // does; one that asks for audit-only gets it.
 func TestRouteWAFInheritsParanoiaAndEnforcement(t *testing.T) {
 	d := security.Deps{GlobalStore: &mockGlobalConfigStore{config: &gateonv1.GlobalConfig{
-		Waf: &gateonv1.WafConfig{Enabled: true, UseCrs: true, ParanoiaLevel: 3},
+		Waf: &gateonv1.WafConfig{Enabled: true, ParanoiaLevel: 3},
 	}}}
 	cfg := map[string]string{}
 	mergeGlobalWAFDefaults(cfg, d)

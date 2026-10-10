@@ -64,6 +64,10 @@ type Config struct {
 	// the report and the engine answer from one rule; without it the
 	// coverage falls back to routeWAFConfigMode, a copy of that rule.
 	RouteWAF func(cfg map[string]string) Mode
+	// GlobalWAF, when set, is the mode the gateway-wide WAF runs in, as the
+	// WAF package builds it (tier and category switches applied). Without it
+	// the mode is read from the proto (GlobalWAFMode).
+	GlobalWAF func() Mode
 }
 
 // RouteCoverage counts the enabled HTTP routes by what inspects them.
@@ -97,16 +101,97 @@ var AttackCategoryKeys = []string{
 	"sqli", "xss", "lfi", "rce", "php", "java", "nodejs", "scanner", "protocol", "wordpress",
 }
 
-// GlobalWAFMode is the mode the gateway-wide WAF runs in.
+// GlobalWAFMode is the mode the gateway-wide WAF runs in, read from its
+// config: a WAF whose category switches turn every attack family off (ADR
+// 0064) refuses none of them, whatever its mode -- as a route WAF with every
+// switch off does not (truth NEW-13). It cannot see the tier; GlobalMode with
+// a GlobalWAF resolver can.
 func GlobalWAFMode(w *gateonv1.WafConfig) Mode {
 	switch {
 	case !w.GetEnabled():
 		return ModeOff
+	case globalCategoriesAllOff(w):
+		return ModeNoCategories
 	case w.GetAuditOnly():
 		return ModeDetect
 	default:
 		return ModeEnforce
 	}
+}
+
+// GlobalMode is the gateway-wide WAF's mode for c: its GlobalWAF resolver's
+// answer when it has one, else GlobalWAFMode.
+func GlobalMode(c Config) Mode {
+	if c.GlobalWAF != nil {
+		return c.GlobalWAF()
+	}
+	return GlobalWAFMode(c.Global.GetWaf())
+}
+
+// GlobalCategoriesOff names the attack families the gateway-wide WAF's
+// switches turn off explicitly, in AttackCategoryKeys order. An unset switch
+// is not off (ADR 0064).
+func GlobalCategoriesOff(w *gateonv1.WafConfig) []string {
+	var off []string
+	for _, k := range AttackCategoryKeys {
+		if on, set := globalCategory(w, k); set && !on {
+			off = append(off, k)
+		}
+	}
+	return off
+}
+
+// globalCategoriesAllOff reports whether every attack family is off on the
+// gateway-wide WAF: each family switch explicitly false, and the WordPress
+// rules, which are opt-in there, not turned on.
+func globalCategoriesAllOff(w *gateonv1.WafConfig) bool {
+	return len(GlobalCategoriesOff(w)) == len(AttackCategoryKeys)-1 && !w.GetWordpress()
+}
+
+// globalRunsFamily reports whether the gateway-wide WAF runs the attack
+// family k, which a route WAF leaving k unset inherits: WordPress only when it
+// is turned on, every other family unless its switch is explicitly off.
+func globalRunsFamily(w *gateonv1.WafConfig, k string) bool {
+	if k == "wordpress" {
+		return w.GetWordpress()
+	}
+	on, set := globalCategory(w, k)
+	return on || !set
+}
+
+// globalCategory is the gateway-wide WAF's switch for the attack family k,
+// and whether it is set. WordPress is a plain opt-in there and never reports
+// set.
+func globalCategory(w *gateonv1.WafConfig, k string) (on, set bool) {
+	c := w.GetCategories()
+	if c == nil {
+		return false, false
+	}
+	var v *bool
+	switch k {
+	case "sqli":
+		v = c.Sqli
+	case "xss":
+		v = c.Xss
+	case "lfi":
+		v = c.Lfi
+	case "rce":
+		v = c.Rce
+	case "php":
+		v = c.Php
+	case "java":
+		v = c.Java
+	case "nodejs":
+		v = c.Nodejs
+	case "scanner":
+		v = c.Scanner
+	case "protocol":
+		v = c.Protocol
+	}
+	if v == nil {
+		return false, false
+	}
+	return *v, true
 }
 
 // Coverage walks every enabled HTTP route the way the router composes it: a
@@ -115,13 +200,12 @@ func GlobalWAFMode(w *gateonv1.WafConfig) Mode {
 // every other route runs the global WAF, if any.
 func Coverage(c Config) RouteCoverage {
 	var cov RouteCoverage
-	global := c.Global.GetWaf()
 	for _, rt := range c.Routes {
 		if rt.GetDisabled() || isL4(rt.GetType()) {
 			continue
 		}
 		cov.Total++
-		switch routeWAFMode(rt, c.Middlewares, global, c.RouteWAF) {
+		switch routeWAFMode(rt, c) {
 		case ModeEnforce:
 			cov.Enforcing++
 		case ModeDetect:
@@ -155,12 +239,12 @@ func isL4(routeType string) bool {
 //
 // Every "waf" middleware a route lists runs, so one that enforces refuses
 // what it matches whatever the others do.
-func routeWAFMode(rt *gateonv1.Route, mws map[string]*gateonv1.Middleware, global *gateonv1.WafConfig,
-	resolve func(map[string]string) Mode) Mode {
-	own := routeMiddlewares(rt, mws, typeWAF)
+func routeWAFMode(rt *gateonv1.Route, c Config) Mode {
+	own := routeMiddlewares(rt, c.Middlewares, typeWAF)
 	if len(own) == 0 {
-		return GlobalWAFMode(global)
+		return GlobalMode(c)
 	}
+	global, resolve := c.Global.GetWaf(), c.RouteWAF
 	if resolve == nil {
 		resolve = func(cfg map[string]string) Mode { return routeWAFConfigMode(cfg, global) }
 	}
@@ -182,7 +266,7 @@ func routeWAFMode(rt *gateonv1.Route, mws map[string]*gateonv1.Middleware, globa
 // mergeGlobalWAF), so an unset audit_only under an enabled audit-only global
 // WAF detects. It used to inherit only with use_crs on, which ADR 0044 removed.
 func routeWAFConfigMode(cfg map[string]string, global *gateonv1.WafConfig) Mode {
-	if everyCategoryOff(cfg) {
+	if everyCategoryOff(cfg, global) {
 		return ModeNoCategories
 	}
 	v := strings.ToLower(strings.TrimSpace(cfg[keyAuditOnly]))
@@ -202,11 +286,15 @@ func routeWAFConfigMode(cfg map[string]string, global *gateonv1.WafConfig) Mode 
 
 // everyCategoryOff reports whether a route WAF config switches off every
 // attack category, read as the WAF factory reads a switch: only an explicit
-// "false" turns one off, and an unset key inherits the global WAF, which runs
-// every category (ADR 0044).
-func everyCategoryOff(cfg map[string]string) bool {
+// "false" turns one off, and an unset key inherits what the enabled global
+// WAF runs (globalRunsFamily, ADR 0064).
+func everyCategoryOff(cfg map[string]string, global *gateonv1.WafConfig) bool {
 	for _, k := range AttackCategoryKeys {
-		if strings.ToLower(strings.TrimSpace(cfg[k])) != "false" {
+		v := strings.ToLower(strings.TrimSpace(cfg[k]))
+		if v == "" && global.GetEnabled() && !globalRunsFamily(global, k) {
+			continue
+		}
+		if v != "false" {
 			return false
 		}
 	}

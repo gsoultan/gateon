@@ -8,8 +8,12 @@ import { apiFetch } from "./api";
 export interface RouteProblem {
   routeId: string;
   route: string;
-  /** "refuses": every request is answered 503; "matches_nothing": its rule does not parse. */
-  kind: "refuses" | "matches_nothing";
+  /**
+   * "refuses": every request is answered 503; "matches_nothing": its rule does not parse;
+   * "middleware_off": it serves, without a middleware it names that was saved with a config
+   * the gateway now refuses.
+   */
+  kind: "refuses" | "matches_nothing" | "middleware_off";
   reason: string;
 }
 

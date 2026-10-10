@@ -4,10 +4,16 @@
 package transform
 
 import (
+	"container/list"
 	"context"
+	"crypto/sha256"
+	"errors"
 	"fmt"
 	"math"
 	"net/http"
+	"runtime"
+	"sync"
+	"sync/atomic"
 
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware/kind"
@@ -18,9 +24,11 @@ import (
 	"github.com/tetratelabs/wazero/imports/wasi_snapshot_preview1"
 )
 
+// wasmMiddleware is one built WASM middleware. Its guest is shared: every
+// build of a route's middleware with the same module serves from one compiled
+// module, held while any middleware built on it is reachable.
 type wasmMiddleware struct {
-	runtime wazero.Runtime
-	module  wazero.CompiledModule
+	guest *wasmModule
 	// instance configures the per-request instance. The empty name is
 	// deliberate: without WithName an instance takes the module's own name,
 	// wazero holds only one live instance per name in a runtime, and every
@@ -31,53 +39,261 @@ type wasmMiddleware struct {
 	instance wazero.ModuleConfig
 }
 
+// wasmKey is what makes two builds share a compiled guest: the module, and
+// the route, because the host functions a runtime exports file the threats
+// its guest records under the route it was built for.
+type wasmKey struct {
+	blob    [sha256.Size]byte
+	routeID string
+}
+
+// wasmModule is one compiled guest and the runtime that owns it.
+type wasmModule struct {
+	key     wasmKey
+	runtime wazero.Runtime
+	module  wazero.CompiledModule
+	// refs counts the built middlewares still reachable that serve from this
+	// module, and idle is its place in the idle list while refs is 0. Both are
+	// guarded by the cache's mu.
+	refs int
+	idle *list.Element
+}
+
+// maxIdleWasmModules bounds the compiled guests kept with no middleware
+// built on them. Each is the compiled code of one module (megabytes for a
+// toolchain-built guest), kept so that the rebuild which follows a route
+// invalidation, and the route-problem report's own build (ADR 0063), find it
+// compiled rather than compiling again; beyond the bound the least recently
+// idled is closed. A guest a reachable middleware serves from is never
+// closed, so the modules held are the distinct (module, route) pairs the
+// live chains use -- one per configured WASM middleware per route -- plus at
+// most this many.
+const maxIdleWasmModules = 4
+
+// wasmCache shares compiled guests between builds, and closes them.
+//
+// Building a WASM middleware compiled its module into a new runtime that
+// nothing closed. Every rebuild of the route -- each invalidation, each
+// configuration change, and the route-problem report, which builds every
+// route again -- compiled it again: a 2 MB module took 370 ms of CPU and 25 MB
+// of allocation per build, and the compiled code, mapped outside the Go heap
+// where the collector does not see it, waited for a collection and a
+// finalizer to be unmapped.
+type wasmCache struct {
+	mu     sync.Mutex
+	byKey  map[wasmKey]*wasmModule
+	idle   list.List // of *wasmModule, most recently idled at the front
+	closed bool
+	// compiles and closes count runtimes created and closed.
+	compiles, closes atomic.Uint64
+}
+
+func newWasmCache() *wasmCache {
+	return &wasmCache{byKey: make(map[wasmKey]*wasmModule)}
+}
+
+// wasmModules is the process's compiled guests.
+var wasmModules = newWasmCache()
+
+// errWasmClosed refuses a build after CloseWasmModules.
+var errWasmClosed = errors.New("wasm runtime is shut down")
+
+// CloseWasmModules closes every compiled guest, in use or idle. It is for
+// shutdown, after the listeners have drained: a request still in a WASM
+// middleware afterwards finds its guest closed.
+func CloseWasmModules(ctx context.Context) {
+	wasmModules.closeAll(ctx)
+}
+
 // Wasm builds the middleware for one route: routeID is what the threats its
 // guest records are filed under.
 func Wasm(ctx context.Context, blob []byte, routeID string) (kind.Middleware, error) {
+	return wasmModules.middleware(ctx, blob, routeID)
+}
+
+func (c *wasmCache) middleware(ctx context.Context, blob []byte, routeID string) (kind.Middleware, error) {
 	if len(blob) == 0 {
-		return nil, fmt.Errorf("wasm blob is empty")
+		return nil, errors.New("wasm blob is empty")
 	}
-
-	r := wazero.NewRuntime(ctx)
-	wasi_snapshot_preview1.MustInstantiate(ctx, r)
-
-	if err := registerHostFuncs(ctx, r, routeID); err != nil {
+	guest, err := c.acquire(ctx, wasmKey{blob: sha256.Sum256(blob), routeID: routeID}, blob)
+	if err != nil {
 		return nil, err
 	}
+	mw := &wasmMiddleware{guest: guest, instance: wazero.NewModuleConfig().WithName("")}
+	// The guest is released when the middleware is unreachable: when the
+	// chain holding it has been replaced or dropped and the last request in
+	// it has returned. Nothing else knows when that is -- a chain is a
+	// closure, cached, swapped, and built and thrown away by the report.
+	runtime.AddCleanup(mw, c.release, guest)
+	return mw.wrap, nil
+}
 
-	m, err := r.CompileModule(ctx, blob)
+// wrap is the middleware. The guest is closed only once mw is unreachable,
+// so mw is kept alive until the request has left it.
+func (mw *wasmMiddleware) wrap(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer runtime.KeepAlive(mw)
+		ctx := context.WithValue(r.Context(), wasmRequestContextKey, r)
+		mod, err := mw.guest.runtime.InstantiateModule(ctx, mw.guest.module, mw.instance)
+		if err != nil {
+			logger.L.LogError("failed to instantiate wasm module for request", "error", err)
+			next.ServeHTTP(w, r)
+			return
+		}
+		defer mod.Close(ctx)
+
+		handle := mod.ExportedFunction("handle")
+		if handle != nil {
+			_, err := handle.Call(ctx)
+			if err != nil {
+				logger.L.LogError("failed to call wasm handle function", "error", err)
+			}
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+// acquire returns the compiled guest for key, compiling it when no build
+// holds or keeps it. Compiled outside the lock, which is held for map work
+// only: two first builds of one module at once each compile, and the second
+// to finish closes its own and takes the first's.
+func (c *wasmCache) acquire(ctx context.Context, key wasmKey, blob []byte) (*wasmModule, error) {
+	if m, err := c.take(key); m != nil || err != nil {
+		return m, err
+	}
+	m, err := c.compile(ctx, key, blob)
 	if err != nil {
+		return nil, err
+	}
+	kept, err := c.insert(m)
+	if kept != m {
+		c.closeRuntime(ctx, m)
+	}
+	return kept, err
+}
+
+// take refs the guest cached under key, if there is one.
+func (c *wasmCache) take(key wasmKey) (*wasmModule, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed {
+		return nil, errWasmClosed
+	}
+	m, ok := c.byKey[key]
+	if !ok {
+		return nil, nil
+	}
+	c.refLocked(m)
+	return m, nil
+}
+
+// insert caches m with one ref, or refs the guest another build cached first
+// and returns that one instead.
+func (c *wasmCache) insert(m *wasmModule) (*wasmModule, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed {
+		return nil, errWasmClosed
+	}
+	if prev, ok := c.byKey[m.key]; ok {
+		c.refLocked(prev)
+		return prev, nil
+	}
+	c.byKey[m.key] = m
+	m.refs = 1
+	return m, nil
+}
+
+func (c *wasmCache) refLocked(m *wasmModule) {
+	if m.idle != nil {
+		c.idle.Remove(m.idle)
+		m.idle = nil
+	}
+	m.refs++
+}
+
+// release drops one middleware's ref. A guest no middleware holds is kept
+// idle, and the oldest idle beyond maxIdleWasmModules is closed. Run by the
+// runtime's cleanup goroutine.
+func (c *wasmCache) release(m *wasmModule) {
+	c.mu.Lock()
+	if c.closed || m.refs == 0 {
+		c.mu.Unlock()
+		return
+	}
+	m.refs--
+	if m.refs > 0 {
+		c.mu.Unlock()
+		return
+	}
+	m.idle = c.idle.PushFront(m)
+	var evicted []*wasmModule
+	for c.idle.Len() > maxIdleWasmModules {
+		oldest, ok := c.idle.Remove(c.idle.Back()).(*wasmModule)
+		if !ok {
+			break
+		}
+		oldest.idle = nil
+		delete(c.byKey, oldest.key)
+		evicted = append(evicted, oldest)
+	}
+	c.mu.Unlock()
+	for _, e := range evicted {
+		c.closeRuntime(context.Background(), e)
+	}
+}
+
+func (c *wasmCache) closeAll(ctx context.Context) {
+	c.mu.Lock()
+	all := make([]*wasmModule, 0, len(c.byKey))
+	for _, m := range c.byKey {
+		all = append(all, m)
+	}
+	clear(c.byKey)
+	c.idle.Init()
+	c.closed = true
+	c.mu.Unlock()
+	for _, m := range all {
+		c.closeRuntime(ctx, m)
+	}
+}
+
+// held reports the guests cached: in use, and idle.
+func (c *wasmCache) held() (inUse, idle int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.byKey) - c.idle.Len(), c.idle.Len()
+}
+
+// compile builds a runtime with the host functions for key's route and
+// compiles blob in it. A runtime whose module does not compile is closed.
+func (c *wasmCache) compile(ctx context.Context, key wasmKey, blob []byte) (*wasmModule, error) {
+	r := wazero.NewRuntime(ctx)
+	c.compiles.Add(1)
+	m := &wasmModule{key: key, runtime: r}
+	if _, err := wasi_snapshot_preview1.Instantiate(ctx, r); err != nil {
+		c.closeRuntime(ctx, m)
+		return nil, fmt.Errorf("failed to instantiate wasi: %w", err)
+	}
+	if err := registerHostFuncs(ctx, r, key.routeID); err != nil {
+		c.closeRuntime(ctx, m)
+		return nil, err
+	}
+	compiled, err := r.CompileModule(ctx, blob)
+	if err != nil {
+		c.closeRuntime(ctx, m)
 		return nil, fmt.Errorf("failed to compile wasm module: %w", err)
 	}
+	m.module = compiled
+	return m, nil
+}
 
-	mw := &wasmMiddleware{
-		runtime:  r,
-		module:   m,
-		instance: wazero.NewModuleConfig().WithName(""),
+func (c *wasmCache) closeRuntime(ctx context.Context, m *wasmModule) {
+	c.closes.Add(1)
+	if err := m.runtime.Close(ctx); err != nil {
+		logger.L.LogWarn("failed to close a wasm runtime", "error", err)
 	}
-
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			ctx := context.WithValue(r.Context(), wasmRequestContextKey, r)
-			mod, err := mw.runtime.InstantiateModule(ctx, mw.module, mw.instance)
-			if err != nil {
-				logger.L.LogError("failed to instantiate wasm module for request", "error", err)
-				next.ServeHTTP(w, r)
-				return
-			}
-			defer mod.Close(ctx)
-
-			handle := mod.ExportedFunction("handle")
-			if handle != nil {
-				_, err := handle.Call(ctx)
-				if err != nil {
-					logger.L.LogError("failed to call wasm handle function", "error", err)
-				}
-			}
-
-			next.ServeHTTP(w, r)
-		})
-	}, nil
 }
 
 // requestFromGuest returns the request the current guest call is serving.

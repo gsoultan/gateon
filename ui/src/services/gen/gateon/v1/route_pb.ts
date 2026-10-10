@@ -5,15 +5,15 @@
 // @generated from file gateon/v1/route.proto (package gateon.v1, syntax proto3)
 /* eslint-disable */
 
-import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
-import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
+import type { GenEnum, GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
+import { enumDesc, fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
 import type { Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file gateon/v1/route.proto.
  */
 export const file_gateon_v1_route: GenFile = /*@__PURE__*/
-  fileDesc("ChVnYXRlb24vdjEvcm91dGUucHJvdG8SCWdhdGVvbi52MSJEChFMaXN0Um91dGVzUmVxdWVzdBIMCgRwYWdlGAEgASgFEhEKCXBhZ2Vfc2l6ZRgCIAEoBRIOCgZzZWFyY2gYAyABKAkibAoSTGlzdFJvdXRlc1Jlc3BvbnNlEiAKBnJvdXRlcxgBIAMoCzIQLmdhdGVvbi52MS5Sb3V0ZRITCgt0b3RhbF9jb3VudBgCIAEoBRIMCgRwYWdlGAMgASgFEhEKCXBhZ2Vfc2l6ZRgEIAEoBSI1ChJVcGRhdGVSb3V0ZVJlcXVlc3QSHwoFcm91dGUYASABKAsyEC5nYXRlb24udjEuUm91dGUiJgoTVXBkYXRlUm91dGVSZXNwb25zZRIPCgdzdWNjZXNzGAEgASgIIiAKEkRlbGV0ZVJvdXRlUmVxdWVzdBIKCgJpZBgBIAEoCSImChNEZWxldGVSb3V0ZVJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgixwEKBVJvdXRlEgoKAmlkGAEgASgJEgwKBG5hbWUYAiABKAkSDAoEdHlwZRgDIAEoCRITCgtlbnRyeXBvaW50cxgEIAMoCRIMCgRydWxlGAUgASgJEhAKCHByaW9yaXR5GAYgASgFEhMKC21pZGRsZXdhcmVzGAcgAygJEhIKCnNlcnZpY2VfaWQYCCABKAkSJgoDdGxzGAkgASgLMhkuZ2F0ZW9uLnYxLlJvdXRlVExTQ29uZmlnEhAKCGRpc2FibGVkGAogASgIIlIKDlJvdXRlVExTQ29uZmlnEhcKD2NlcnRpZmljYXRlX2lkcxgBIAMoCRIRCglvcHRpb25faWQYAiABKAkSFAoMYWNtZV9lbmFibGVkGAMgASgIQpUBCg1jb20uZ2F0ZW9uLnYxQgpSb3V0ZVByb3RvUAFaM2dpdGh1Yi5jb20vZ3NvdWx0YW4vZ2F0ZW9uL3Byb3RvL2dhdGVvbi92MTtnYXRlb252MaICA0dYWKoCCUdhdGVvbi5WMcoCCUdhdGVvblxWMeICFUdhdGVvblxWMVxHUEJNZXRhZGF0YeoCCkdhdGVvbjo6VjFiBnByb3RvMw");
+  fileDesc("ChVnYXRlb24vdjEvcm91dGUucHJvdG8SCWdhdGVvbi52MSJEChFMaXN0Um91dGVzUmVxdWVzdBIMCgRwYWdlGAEgASgFEhEKCXBhZ2Vfc2l6ZRgCIAEoBRIOCgZzZWFyY2gYAyABKAkibAoSTGlzdFJvdXRlc1Jlc3BvbnNlEiAKBnJvdXRlcxgBIAMoCzIQLmdhdGVvbi52MS5Sb3V0ZRITCgt0b3RhbF9jb3VudBgCIAEoBRIMCgRwYWdlGAMgASgFEhEKCXBhZ2Vfc2l6ZRgEIAEoBSI1ChJVcGRhdGVSb3V0ZVJlcXVlc3QSHwoFcm91dGUYASABKAsyEC5nYXRlb24udjEuUm91dGUiJgoTVXBkYXRlUm91dGVSZXNwb25zZRIPCgdzdWNjZXNzGAEgASgIIiAKEkRlbGV0ZVJvdXRlUmVxdWVzdBIKCgJpZBgBIAEoCSImChNEZWxldGVSb3V0ZVJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgizAIKBVJvdXRlEgoKAmlkGAEgASgJEgwKBG5hbWUYAiABKAkSDAoEdHlwZRgDIAEoCRITCgtlbnRyeXBvaW50cxgEIAMoCRIMCgRydWxlGAUgASgJEhAKCHByaW9yaXR5GAYgASgFEhMKC21pZGRsZXdhcmVzGAcgAygJEhIKCnNlcnZpY2VfaWQYCCABKAkSJgoDdGxzGAkgASgLMhkuZ2F0ZW9uLnYxLlJvdXRlVExTQ29uZmlnEhAKCGRpc2FibGVkGAogASgIEjAKC3N0cmVhbV9tb2RlGAsgASgOMhsuZ2F0ZW9uLnYxLlJvdXRlLlN0cmVhbU1vZGUiUQoKU3RyZWFtTW9kZRIUChBTVFJFQU1fTU9ERV9BVVRPEAASFgoSU1RSRUFNX01PREVfQUxXQVlTEAESFQoRU1RSRUFNX01PREVfTkVWRVIQAiJSCg5Sb3V0ZVRMU0NvbmZpZxIXCg9jZXJ0aWZpY2F0ZV9pZHMYASADKAkSEQoJb3B0aW9uX2lkGAIgASgJEhQKDGFjbWVfZW5hYmxlZBgDIAEoCEKVAQoNY29tLmdhdGVvbi52MUIKUm91dGVQcm90b1ABWjNnaXRodWIuY29tL2dzb3VsdGFuL2dhdGVvbi9wcm90by9nYXRlb24vdjE7Z2F0ZW9udjGiAgNHWFiqAglHYXRlb24uVjHKAglHYXRlb25cVjHiAhVHYXRlb25cVjFcR1BCTWV0YWRhdGHqAgpHYXRlb246OlYxYgZwcm90bzM");
 
 /**
  * @generated from message gateon.v1.ListRoutesRequest
@@ -201,6 +201,11 @@ export type Route = Message<"gateon.v1.Route"> & {
    * @generated from field: bool disabled = 10;
    */
   disabled: boolean;
+
+  /**
+   * @generated from field: gateon.v1.Route.StreamMode stream_mode = 11;
+   */
+  streamMode: Route_StreamMode;
 };
 
 /**
@@ -209,6 +214,48 @@ export type Route = Message<"gateon.v1.Route"> & {
  */
 export const RouteSchema: GenMessage<Route> = /*@__PURE__*/
   messageDesc(file_gateon_v1_route, 6);
+
+/**
+ * StreamMode says which of this route's responses are streams: lifted off
+ * the entrypoint's read and write timeouts and bounded instead by the stream
+ * idle timeout and maximum lifetime (ADR 0042, ADR 0064). It never removes
+ * every bound -- a stream is always ended by those two.
+ *
+ * @generated from enum gateon.v1.Route.StreamMode
+ */
+export enum Route_StreamMode {
+  /**
+   * A 200 whose Content-Type is text/event-stream and that declares no
+   * Content-Length (ADR 0062, DP-N7). What every route did before this
+   * field existed, and what an unset value still means.
+   *
+   * @generated from enum value: STREAM_MODE_AUTO = 0;
+   */
+  AUTO = 0,
+
+  /**
+   * Every response this route answers, once its status is written: for a
+   * backend that streams under another type (NDJSON, chunked long-poll,
+   * gRPC-Web). The backend must still answer within the write timeout.
+   *
+   * @generated from enum value: STREAM_MODE_ALWAYS = 1;
+   */
+  ALWAYS = 1,
+
+  /**
+   * No response: the entrypoint's timeouts bound every response, an event
+   * stream included.
+   *
+   * @generated from enum value: STREAM_MODE_NEVER = 2;
+   */
+  NEVER = 2,
+}
+
+/**
+ * Describes the enum gateon.v1.Route.StreamMode.
+ */
+export const Route_StreamModeSchema: GenEnum<Route_StreamMode> = /*@__PURE__*/
+  enumDesc(file_gateon_v1_route, 6, 0);
 
 /**
  * @generated from message gateon.v1.RouteTLSConfig

@@ -4,6 +4,7 @@
 package router
 
 import (
+	"cmp"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -16,6 +17,7 @@ import (
 	"github.com/gsoultan/gateon/internal/security/reputation"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
+	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
 // globalEffect is one entry of the global-setting effect registry (truth
@@ -37,7 +39,25 @@ type globalEffect struct {
 	setup  func(t *testing.T, peer string, c *gateonv1.GlobalConfig) // before each probe
 	header string                                                    // a response header to record as well as the status
 	inert  string                                                    // the finding that says it does nothing
+	target string                                                    // the probe's path and query; "/" when empty
+	ua     string                                                    // the probe's User-Agent; the default when empty
 }
+
+// The gateway-wide WAF's category switches (ADR 0064): each row compares an
+// unset switch -- every install upgraded from v1.1.0 -- with an explicit off,
+// on a probe of that family.
+const (
+	sqliProbe    = "/?id=1%27%20OR%20%271%27%3D%271%27%20--%20"
+	xssProbe     = "/?q=%3Cscript%3Ealert(1)%3C%2Fscript%3E"
+	lfiProbe     = "/?f=..%2F..%2F..%2F..%2Fetc%2Fpasswd"
+	rceProbe     = "/?c=%3Buname%20-a"
+	phpProbe     = "/?x=%24_SERVER"
+	javaProbe    = "/?q=java.lang.Runtime"
+	nodejsProbe  = "/?q=process.mainModule"
+	ransomProbe  = "/decrypt_files.txt"
+	sqlmapAgent  = "sqlmap/1.7.2#stable (https://sqlmap.org)"
+	browserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/129.0 Safari/537.36"
+)
 
 const effectPowSecret = "global-effect-pow-secret-0123456789abcdef"
 
@@ -53,6 +73,34 @@ var globalSettingEffects = []globalEffect{
 			c.SecurityAdvanced.IpReputation = &gateonv1.IPReputationConfig{Enabled: true, BlockThreshold: mustFloat(v)}
 		},
 		setup: listInFeed(90)},
+	{field: "waf.categories.sqli", a: "", b: "false", set: wafCategory("sqli"), target: sqliProbe, ua: browserAgent},
+	{field: "waf.categories.xss", a: "", b: "false", set: wafCategory("xss"), target: xssProbe, ua: browserAgent},
+	{field: "waf.categories.lfi", a: "", b: "false", set: wafCategory("lfi"), target: lfiProbe, ua: browserAgent},
+	{field: "waf.categories.rce", a: "", b: "false", set: wafCategory("rce"), target: rceProbe, ua: browserAgent},
+	{field: "waf.categories.php", a: "", b: "false", set: wafCategory("php"), target: phpProbe, ua: browserAgent},
+	{field: "waf.categories.java", a: "", b: "false", set: wafCategory("java"), target: javaProbe, ua: browserAgent},
+	{field: "waf.categories.nodejs", a: "", b: "false", set: wafCategory("nodejs"), target: nodejsProbe, ua: browserAgent},
+	{field: "waf.categories.scanner", a: "", b: "false", set: wafCategory("scanner"), ua: sqlmapAgent},
+	{field: "waf.categories.ransomware_detection", a: "", b: "false", set: wafCategory("ransomware_detection"),
+		target: ransomProbe, ua: browserAgent},
+}
+
+// wafCategory turns the gateway-wide WAF on and sets one category switch: an
+// empty value leaves it unset, any other is parsed as a bool.
+func wafCategory(name string) func(c *gateonv1.GlobalConfig, v string) {
+	return func(c *gateonv1.GlobalConfig, v string) {
+		cats := &gateonv1.WafCategories{}
+		c.Waf = &gateonv1.WafConfig{Enabled: true, ParanoiaLevel: 1, Categories: cats}
+		if v == "" {
+			return
+		}
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			panic(err)
+		}
+		m := cats.ProtoReflect()
+		m.Set(m.Descriptor().Fields().ByName(protoreflect.Name(name)), protoreflect.ValueOfBool(b))
+	}
 }
 
 func TestGlobalSecuritySettingsChangeWhatTheGatewayDoes(t *testing.T) {
@@ -94,9 +142,9 @@ func observeGlobal(t *testing.T, row globalEffect, value string, rowIndex int) s
 	rt := &gateonv1.Route{Id: fmt.Sprintf("global-effect-%d", n), Name: "global-effect", Type: "http"}
 	backend := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusTeapot) })
 	h := ApplyRouteMiddlewares(backend, rt, nil, &stubMiddlewareStore{}, store, nil, nil)
-	req := httptest.NewRequest(http.MethodGet, "http://app.example/", nil)
+	req := httptest.NewRequest(http.MethodGet, "http://app.example"+cmp.Or(row.target, "/"), nil)
 	req.RemoteAddr = peer + ":4444"
-	req.Header.Set("User-Agent", "global-effect-test")
+	req.Header.Set("User-Agent", cmp.Or(row.ua, "global-effect-test"))
 	req.Header.Set("Accept", "application/json")
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)

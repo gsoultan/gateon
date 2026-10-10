@@ -158,7 +158,7 @@ func TestTheAnalysisEnginesFindingIsNotHeldAgainstTheAddress(t *testing.T) {
 	t.Cleanup(func() { telemetry.ResetReputation(id) })
 	recordN(3, telemetry.SecurityThreat{Type: "waf_blocked", SourceIP: attacker, Score: 100,
 		Category: "waf", ActionTaken: telemetry.ActionBlocked})
-	traces := []*telemetry.TraceRecord{{SourceIP: attacker, Fingerprint: build, Path: "/search",
+	traces := []*telemetry.TraceRecord{{ServiceDelay: 1, SourceIP: attacker, Fingerprint: build, Path: "/search",
 		Method: "GET", Status: "403 Forbidden", Timestamp: time.Now()}}
 
 	for pass := range 3 {

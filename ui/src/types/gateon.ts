@@ -181,7 +181,17 @@ export type Route = {
   serviceId: string;
   tls?: RouteTLSConfig;
   disabled?: boolean;
+  /**
+   * Which responses are streams, lifted off the entrypoint's timeouts and
+   * bounded by the stream idle timeout and maximum lifetime instead
+   * (Route.stream_mode, ADR 0064). The gateway sends and accepts the number.
+   */
+  streamMode?: RouteStreamMode;
 };
+
+/** Route.StreamMode in proto/gateon/v1/route.proto. */
+export const ROUTE_STREAM_MODE = { AUTO: 0, ALWAYS: 1, NEVER: 2 } as const;
+export type RouteStreamMode = (typeof ROUTE_STREAM_MODE)[keyof typeof ROUTE_STREAM_MODE];
 
 export type StatusResponse = {
   status: string;
@@ -401,25 +411,34 @@ export type Middleware = {
   wasmBlob?: string; // base64 encoded
 };
 
-export type WafConfig = {
-  enabled: boolean;
-  useCrs: boolean;
-  paranoiaLevel: number;
-  customDirectives?: string;
+/**
+ * The gateway-wide WAF's attack-family switches (WafCategories, ADR 0064).
+ * Absent: the family runs as the WAF tier decides. true: it runs even where
+ * the tier would not. false: its rules are removed.
+ */
+export type WafCategories = {
   sqli?: boolean;
   xss?: boolean;
   lfi?: boolean;
   rce?: boolean;
   php?: boolean;
-  scanner?: boolean;
-  protocol?: boolean;
   java?: boolean;
   nodejs?: boolean;
+  scanner?: boolean;
+  protocol?: boolean;
+  ransomwareDetection?: boolean;
+};
+
+export type WafConfig = {
+  enabled: boolean;
+  paranoiaLevel: number;
+  customDirectives?: string;
+  /** The gateway sends null when no switch was ever set. */
+  categories?: WafCategories | null;
   wordpress?: boolean;
   ipReputation?: boolean;
   dosProtection?: boolean;
   malwareDetection?: boolean;
-  ransomwareDetection?: boolean;
   dlp?: boolean;
   /**
    * What to do when a data-leak rule fires: "block" (the default) refuses the

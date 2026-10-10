@@ -118,8 +118,9 @@ func (c *ProxyCache) WarnRouteProblems(ctx context.Context) {
 	for _, p := range problems[:min(len(problems), maxProblemsLogged)] {
 		lines = append(lines, p.Route+" ("+p.Kind+"): "+p.Reason)
 	}
-	logger.L.LogWarn("routes that cannot serve as configured: each answers 503 or matches no request until "+
-		"fixed; the dashboard's route list marks them", "count", len(problems), "routes", lines)
+	logger.L.LogWarn("routes that cannot serve as configured: each answers 503, matches no request, or serves "+
+		"without a middleware it names until fixed; the dashboard's route list marks them",
+		"count", len(problems), "routes", lines)
 }
 
 // defaultRefusalRetry bounds how long a route stays refused after the

@@ -110,9 +110,9 @@ func wafControl(c Config) Control {
 	const id, label = "waf", "Web application firewall"
 	cov := Coverage(c)
 	if cov.Total == 0 {
-		mode := GlobalWAFMode(c.Global.GetWaf())
+		mode := GlobalMode(c)
 		return newControl(id, label, weightWAF, modeCredit(mode),
-			fmt.Sprintf("No HTTP route yet; the gateway-wide WAF is %s.", modeWords(mode)))
+			fmt.Sprintf("No HTTP route yet; the gateway-wide WAF is %s.", modeWords(mode))+globalOffWords(c))
 	}
 	credit := (float64(cov.Enforcing) + halfCredit*float64(cov.Detecting)) / float64(cov.Total)
 	detail := fmt.Sprintf("%d of %d routes blocking, %d detecting only (audit), %d with no WAF.",
@@ -120,7 +120,21 @@ func wafControl(c Config) Control {
 	if cov.CategoriesOff > 0 {
 		detail += fmt.Sprintf(" %d run a WAF with every attack category switched off, which earns nothing.", cov.CategoriesOff)
 	}
-	return newControl(id, label, weightWAF, credit, detail)
+	return newControl(id, label, weightWAF, credit, detail+globalOffWords(c))
+}
+
+// globalOffWords names the attack families switched off on the gateway-wide
+// WAF (ADR 0064), or is empty when none is.
+func globalOffWords(c Config) string {
+	w := c.Global.GetWaf()
+	if !w.GetEnabled() {
+		return ""
+	}
+	off := GlobalCategoriesOff(w)
+	if len(off) == 0 {
+		return ""
+	}
+	return " The gateway-wide WAF has " + strings.Join(off, ", ") + " switched off."
 }
 
 // modeWords is a mode as the dashboard says it.
@@ -130,6 +144,8 @@ func modeWords(m Mode) string {
 		return "blocking"
 	case ModeDetect:
 		return "detecting only (audit)"
+	case ModeNoCategories:
+		return "on with every attack category switched off"
 	default:
 		return "off"
 	}

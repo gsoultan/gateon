@@ -182,6 +182,8 @@ func wafInsights(waf *gateonv1.WafConfig, cov wafCoverage) []aiInsight {
 			cov.Enforcing = 1
 		case posture.ModeDetect:
 			cov.Detecting = 1
+		case posture.ModeNoCategories:
+			cov.CategoriesOff = 1
 		default:
 			cov.Off = 1
 		}
@@ -261,7 +263,7 @@ func wafNoCategoriesInsight(cov wafCoverage) aiInsight {
 }
 
 // wafEnableSuggestion is the config that turns the gateway-wide WAF on.
-const wafEnableSuggestion = "waf:\n  enabled: true\n  use_crs: true\n  paranoia_level: 1"
+const wafEnableSuggestion = "waf:\n  enabled: true\n  paranoia_level: 1"
 
 // globalWAFInsights reviews the gateway-wide WAF's own settings.
 func globalWAFInsights(waf *gateonv1.WafConfig) []aiInsight {

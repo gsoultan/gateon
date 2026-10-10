@@ -42,7 +42,7 @@ func TestWAFHardeningFixReachesCachedChains(t *testing.T) {
 	routes := config.NewRouteRegistry(filepath.Join(dir, "routes.json"))
 	mws := config.NewMiddlewareRegistry(filepath.Join(dir, "middlewares.json"))
 	globals := config.NewGlobalRegistry(filepath.Join(dir, "global.json"))
-	mustSave(t, globals.Update(ctx, &gateonv1.GlobalConfig{Waf: &gateonv1.WafConfig{Enabled: true, AuditOnly: true, UseCrs: true}}))
+	mustSave(t, globals.Update(ctx, &gateonv1.GlobalConfig{Waf: &gateonv1.WafConfig{Enabled: true, AuditOnly: true}}))
 	rt := &gateonv1.Route{Id: "r1", Name: "r1", ServiceId: "svc", Rule: "PathPrefix(`/`)"}
 	mustSave(t, routes.Update(ctx, rt))
 	cache := NewProxyCache(routes, services, mws, nil, globals, nil, nil)

@@ -33,7 +33,7 @@ func storedGlobalConfig() *gateonv1.GlobalConfig {
 		Tls: &gateonv1.TlsConfig{Enabled: true, Certificates: []*gateonv1.Certificate{
 			{Id: "prod-cert", CertFile: "/etc/gateon/certs/prod.crt", KeyFile: "/etc/gateon/certs/prod.key"},
 		}},
-		Waf:     &gateonv1.WafConfig{Enabled: true, UseCrs: true, ParanoiaLevel: 2},
+		Waf:     &gateonv1.WafConfig{Enabled: true, ParanoiaLevel: 2},
 		Profile: "minimal",
 	}
 }

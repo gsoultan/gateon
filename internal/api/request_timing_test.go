@@ -206,7 +206,7 @@ func recordPolling(ip, path string, gap time.Duration, n int) {
 }
 
 func trace(ip, path, status string, ms float64, at time.Time) *telemetry.TraceRecord {
-	return &telemetry.TraceRecord{
+	return &telemetry.TraceRecord{ServiceDelay: 1,
 		SourceIP: ip, Path: path, Method: http.MethodGet, Status: status, DurationMs: ms,
 		Timestamp: at, UserAgent: "Mozilla/5.0",
 	}

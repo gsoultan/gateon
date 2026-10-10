@@ -74,6 +74,8 @@ ADRs follow a lightweight [MADR](https://adr.github.io/madr/)-style format:
 | [0061](./0061-feeds-are-bounded-and-trusted-and-a-busy-gateway-logs-at-a-bounded-rate.md) | Feeds are bounded and trusted, and a busy gateway logs at a bounded rate | Accepted |
 | [0062](./0062-what-the-gateway-sends-is-what-it-decided.md) | What the gateway sends is what it decided: framing, paths, streams, passes and listeners | Accepted |
 | [0063](./0063-what-the-dashboard-points-to-can-be-made-and-what-it-reports-is-true.md) | What the dashboard points to can be made, and what it reports is true | Accepted |
+| [0064](./0064-a-route-says-whether-it-streams-and-the-global-waf-can-switch-a-family-off.md) | A route says whether it streams, and the global WAF can switch a family off | Accepted |
+| [0065](./0065-the-published-image-is-the-release-tarballs-binary.md) | The published image is the release tarball's binary | Accepted |
 
 ## Conventions
 

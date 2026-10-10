@@ -151,9 +151,6 @@ const (
 	// ApiServiceApplyRecommendationProcedure is the fully-qualified name of the ApiService's
 	// ApplyRecommendation RPC.
 	ApiServiceApplyRecommendationProcedure = "/gateon.v1.ApiService/ApplyRecommendation"
-	// ApiServiceTriggerWafUpdateProcedure is the fully-qualified name of the ApiService's
-	// TriggerWafUpdate RPC.
-	ApiServiceTriggerWafUpdateProcedure = "/gateon.v1.ApiService/TriggerWafUpdate"
 	// ApiServiceTraceRouteProcedure is the fully-qualified name of the ApiService's TraceRoute RPC.
 	ApiServiceTraceRouteProcedure = "/gateon.v1.ApiService/TraceRoute"
 	// ApiServiceValidateCORSProcedure is the fully-qualified name of the ApiService's ValidateCORS RPC.
@@ -241,7 +238,9 @@ type ApiServiceClient interface {
 	ListAuditArchives(context.Context, *connect.Request[v1.ListAuditArchivesRequest]) (*connect.Response[v1.ListAuditArchivesResponse], error)
 	GetAuditArchive(context.Context, *connect.Request[v1.GetAuditArchiveRequest]) (*connect.Response[v1.GetAuditArchiveResponse], error)
 	ApplyRecommendation(context.Context, *connect.Request[v1.ApplyRecommendationRequest]) (*connect.Response[v1.ApplyRecommendationResponse], error)
-	TriggerWafUpdate(context.Context, *connect.Request[v1.TriggerWafUpdateRequest]) (*connect.Response[v1.TriggerWafUpdateResponse], error)
+	// TriggerWafUpdate (POST /v1/waf/update) was removed (ADR 0064): there is no
+	// rule source to update from since ADR 0004, so it could only fail. The
+	// name and its two messages are retired; do not reuse them.
 	TraceRoute(context.Context, *connect.Request[v1.TraceRouteRequest]) (*connect.Response[v1.TraceRouteResponse], error)
 	ValidateCORS(context.Context, *connect.Request[v1.ValidateCORSRequest]) (*connect.Response[v1.ValidateCORSResponse], error)
 	InstallClamav(context.Context, *connect.Request[v1.InstallClamavRequest]) (*connect.Response[v1.InstallClamavResponse], error)
@@ -532,12 +531,6 @@ func NewApiServiceClient(httpClient connect.HTTPClient, baseURL string, opts ...
 			connect.WithSchema(apiServiceMethods.ByName("ApplyRecommendation")),
 			connect.WithClientOptions(opts...),
 		),
-		triggerWafUpdate: connect.NewClient[v1.TriggerWafUpdateRequest, v1.TriggerWafUpdateResponse](
-			httpClient,
-			baseURL+ApiServiceTriggerWafUpdateProcedure,
-			connect.WithSchema(apiServiceMethods.ByName("TriggerWafUpdate")),
-			connect.WithClientOptions(opts...),
-		),
 		traceRoute: connect.NewClient[v1.TraceRouteRequest, v1.TraceRouteResponse](
 			httpClient,
 			baseURL+ApiServiceTraceRouteProcedure,
@@ -670,7 +663,6 @@ type apiServiceClient struct {
 	listAuditArchives     *connect.Client[v1.ListAuditArchivesRequest, v1.ListAuditArchivesResponse]
 	getAuditArchive       *connect.Client[v1.GetAuditArchiveRequest, v1.GetAuditArchiveResponse]
 	applyRecommendation   *connect.Client[v1.ApplyRecommendationRequest, v1.ApplyRecommendationResponse]
-	triggerWafUpdate      *connect.Client[v1.TriggerWafUpdateRequest, v1.TriggerWafUpdateResponse]
 	traceRoute            *connect.Client[v1.TraceRouteRequest, v1.TraceRouteResponse]
 	validateCORS          *connect.Client[v1.ValidateCORSRequest, v1.ValidateCORSResponse]
 	installClamav         *connect.Client[v1.InstallClamavRequest, v1.InstallClamavResponse]
@@ -902,11 +894,6 @@ func (c *apiServiceClient) ApplyRecommendation(ctx context.Context, req *connect
 	return c.applyRecommendation.CallUnary(ctx, req)
 }
 
-// TriggerWafUpdate calls gateon.v1.ApiService.TriggerWafUpdate.
-func (c *apiServiceClient) TriggerWafUpdate(ctx context.Context, req *connect.Request[v1.TriggerWafUpdateRequest]) (*connect.Response[v1.TriggerWafUpdateResponse], error) {
-	return c.triggerWafUpdate.CallUnary(ctx, req)
-}
-
 // TraceRoute calls gateon.v1.ApiService.TraceRoute.
 func (c *apiServiceClient) TraceRoute(ctx context.Context, req *connect.Request[v1.TraceRouteRequest]) (*connect.Response[v1.TraceRouteResponse], error) {
 	return c.traceRoute.CallUnary(ctx, req)
@@ -1024,7 +1011,9 @@ type ApiServiceHandler interface {
 	ListAuditArchives(context.Context, *connect.Request[v1.ListAuditArchivesRequest]) (*connect.Response[v1.ListAuditArchivesResponse], error)
 	GetAuditArchive(context.Context, *connect.Request[v1.GetAuditArchiveRequest]) (*connect.Response[v1.GetAuditArchiveResponse], error)
 	ApplyRecommendation(context.Context, *connect.Request[v1.ApplyRecommendationRequest]) (*connect.Response[v1.ApplyRecommendationResponse], error)
-	TriggerWafUpdate(context.Context, *connect.Request[v1.TriggerWafUpdateRequest]) (*connect.Response[v1.TriggerWafUpdateResponse], error)
+	// TriggerWafUpdate (POST /v1/waf/update) was removed (ADR 0064): there is no
+	// rule source to update from since ADR 0004, so it could only fail. The
+	// name and its two messages are retired; do not reuse them.
 	TraceRoute(context.Context, *connect.Request[v1.TraceRouteRequest]) (*connect.Response[v1.TraceRouteResponse], error)
 	ValidateCORS(context.Context, *connect.Request[v1.ValidateCORSRequest]) (*connect.Response[v1.ValidateCORSResponse], error)
 	InstallClamav(context.Context, *connect.Request[v1.InstallClamavRequest]) (*connect.Response[v1.InstallClamavResponse], error)
@@ -1311,12 +1300,6 @@ func NewApiServiceHandler(svc ApiServiceHandler, opts ...connect.HandlerOption) 
 		connect.WithSchema(apiServiceMethods.ByName("ApplyRecommendation")),
 		connect.WithHandlerOptions(opts...),
 	)
-	apiServiceTriggerWafUpdateHandler := connect.NewUnaryHandler(
-		ApiServiceTriggerWafUpdateProcedure,
-		svc.TriggerWafUpdate,
-		connect.WithSchema(apiServiceMethods.ByName("TriggerWafUpdate")),
-		connect.WithHandlerOptions(opts...),
-	)
 	apiServiceTraceRouteHandler := connect.NewUnaryHandler(
 		ApiServiceTraceRouteProcedure,
 		svc.TraceRoute,
@@ -1489,8 +1472,6 @@ func NewApiServiceHandler(svc ApiServiceHandler, opts ...connect.HandlerOption) 
 			apiServiceGetAuditArchiveHandler.ServeHTTP(w, r)
 		case ApiServiceApplyRecommendationProcedure:
 			apiServiceApplyRecommendationHandler.ServeHTTP(w, r)
-		case ApiServiceTriggerWafUpdateProcedure:
-			apiServiceTriggerWafUpdateHandler.ServeHTTP(w, r)
 		case ApiServiceTraceRouteProcedure:
 			apiServiceTraceRouteHandler.ServeHTTP(w, r)
 		case ApiServiceValidateCORSProcedure:
@@ -1698,10 +1679,6 @@ func (UnimplementedApiServiceHandler) GetAuditArchive(context.Context, *connect.
 
 func (UnimplementedApiServiceHandler) ApplyRecommendation(context.Context, *connect.Request[v1.ApplyRecommendationRequest]) (*connect.Response[v1.ApplyRecommendationResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gateon.v1.ApiService.ApplyRecommendation is not implemented"))
-}
-
-func (UnimplementedApiServiceHandler) TriggerWafUpdate(context.Context, *connect.Request[v1.TriggerWafUpdateRequest]) (*connect.Response[v1.TriggerWafUpdateResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gateon.v1.ApiService.TriggerWafUpdate is not implemented"))
 }
 
 func (UnimplementedApiServiceHandler) TraceRoute(context.Context, *connect.Request[v1.TraceRouteRequest]) (*connect.Response[v1.TraceRouteResponse], error) {

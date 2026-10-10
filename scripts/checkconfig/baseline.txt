@@ -56,27 +56,9 @@ TlsBindingConfig.cookie_name
 # did not get it. Security-adjacent.
 
 # --- WafConfig ---
-# java, nodejs, php, protocol, ransomware_detection: the GLOBAL WAF's category
-# booleans. The global WAF runs every family and ignores them on purpose: with
-# no presence and omitempty storage, an untouched switch and a switched-off one
-# both store false, and honouring them would strip detection from every install
-# that never set them (ADR 0044). The dashboard no longer offers them; it shows
-# what runs from GET /v1/waf/effective. They were "read" only by the copy into a
-# route WAF that T7 removed. Needs a field recording an explicit "off".
-# lfi, rce, scanner, sqli, xss joined them when the WAF-hardening "Apply fix"
-# stopped setting them (truth NEW-7): it was their last writer that anything
-# read, and setting them changed nothing. use_crs selects nothing since ADR 0044.
-WafConfig.java
-WafConfig.lfi
-WafConfig.nodejs
-WafConfig.php
-WafConfig.protocol
-WafConfig.ransomware_detection
-WafConfig.rce
-WafConfig.scanner
-WafConfig.sqli
-WafConfig.use_crs
-WafConfig.xss
+# The global category booleans and use_crs that stood here are gone: ADR 0064
+# replaced them with WafCategories, whose switches have presence and are read
+# by the global WAF factory (applyGlobalCategories).
 # rules_url: the updater cannot be pointed at a mirror or private
 # ruleset. update_interval_hours: the WafConfig one is dead; the identically
 # named IPReputationConfig field is what is actually read.
