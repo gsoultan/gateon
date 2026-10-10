@@ -136,7 +136,7 @@ control, from rate limits to blocks, keys on the address this decides.
 ## 2. Install and verify the artifact
 
 ```sh
-VER=1.1.0; ARCH=amd64     # or arm64
+VER=1.2.0; ARCH=amd64     # or arm64
 gh release download v$VER -R gsoultan/gateon -p "gateon_${VER}_linux_${ARCH}.deb" -p checksums.txt
 sha256sum --ignore-missing -c checksums.txt     # must print OK
 sudo apt install ./gateon_${VER}_linux_${ARCH}.deb   # or: sudo dnf install ./...rpm
