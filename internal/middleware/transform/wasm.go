@@ -295,6 +295,7 @@ func (c *wasmCache) closeRuntime(ctx context.Context, m *wasmModule) {
 		logger.L.LogWarn("failed to close a wasm runtime", "error", err)
 	}
 }
+
 // requestFromGuest returns the request the current guest call is serving.
 // Absent means the guest called a host function outside a request, so the
 // caller returns rather than acting on a zero value.

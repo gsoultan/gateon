@@ -155,12 +155,18 @@ test.describe('Advanced Security & Global WAF E2E', () => {
 
     // The card says what the running WAF does, read from the gateway rather
     // than from switches the global WAF never read: it used to show every
-    // category OFF while each was enforced (ADR 0044).
-    const categoryState = (label: string) =>
-      page.getByText(label, { exact: true }).locator('xpath=..').getByText(/^(On|Off)$/);
+    // category OFF while each was enforced (ADR 0044). Since ADR 0064 each
+    // family is a switch with the gateway's own "Running" badge beside it;
+    // malware detection has no switch because it always runs.
+    const family = (label: string) => page.getByRole('switch', { name: label, exact: true });
+    // Ancestors come first in document order, so the last group holding the
+    // switch is the row that holds its badge and nothing else.
+    const familyRow = (label: string) =>
+      page.locator('.mantine-Group-root').filter({ has: family(label) }).last();
     await expect(page.getByText('Enforcing', { exact: true })).toBeVisible({ timeout: 20000 });
-    for (const label of ['SQL Injection', 'Cross-Site Scripting', 'Malware (web shells)', 'Ransomware']) {
-      await expect(categoryState(label)).toHaveText('On');
+    for (const label of ['SQL Injection', 'Cross-Site Scripting', 'Ransomware']) {
+      await expect(family(label)).toBeChecked();
+      await expect(familyRow(label).getByText(/^(Running|Not running)$/)).toHaveText('Running', { timeout: 20000 });
     }
 
     // 2. Verify Global WAF blocks attack on ANY route
