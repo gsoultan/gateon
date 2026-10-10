@@ -11,8 +11,13 @@ here after the fact.
 
 ## Unreleased
 
-The database migrates on first start (migration 70, SQLite and Postgres); take the
-backup in [backup-restore.md](backup-restore.md) first.
+## v1.2.0
+
+Upgrading from v1.1.0: read this section. The database migrates on first start
+(migration 70, SQLite and Postgres); take the backup in
+[backup-restore.md](backup-restore.md) first. A custom WAF rule on one of the
+targets below that has never matched starts refusing, scoring or logging on
+upgrade; check yours before you start the new binary.
 
 ### Custom WAF rules on cookies, query or body arguments, the joined arguments, or the response status now fire
 
@@ -231,11 +236,13 @@ mounts never took their mode from the image and are unaffected.
 
 ### Chart 0.3.1
 
-README and `values.yaml` comments only: the published image, how to pin a
-digest, and the pull secret a private package needs. No template or default
-changed.
+README and `values.yaml` comments: the published image, how to pin a digest,
+and the pull secret a private package needs. `appVersion` is `1.2.0`, so an
+install that leaves `image.tag` empty runs `ghcr.io/gsoultan/gateon:1.2.0`, the
+first release whose image the release workflow publishes. No template changed.
 
-**Who is affected:** no one's rendered manifests change.
+**Who is affected:** an install that leaves `image.tag` empty renders the 1.2.0
+image; one that sets it renders what it sets.
 
 ### A WASM middleware's module is compiled once per route and closed when nothing uses it
 
