@@ -12,7 +12,7 @@
 # a tag older than the go directive is a hard error rather than a silent
 # toolchain download -- which is how this went stale: go.mod moved to 1.27.0 and
 # codegen started failing with "go.mod requires go >= 1.27.0".
-FROM golang:1.27.0-bookworm
+FROM golang:1.27.2-bookworm
 
 # clang/llvm provide the BPF-target compiler + llvm-strip; libbpf-dev provides
 # <bpf/bpf_helpers.h>; linux-headers + libc headers provide <linux/*.h>.
