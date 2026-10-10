@@ -44,7 +44,7 @@ func recordRequests(t *testing.T, req tracedRequest, n int, every time.Duration,
 		telemetry.RecordTrace(fmt.Sprintf("%s-%s-%d", req.ip, req.path, i), req.method+" "+req.path,
 			"rt-app", "svc-app", 4, start.Add(time.Duration(i)*every), req.status, req.path, req.ip, "", "",
 			"Mozilla/5.0 (Windows NT 10.0; Win64; x64)", req.method, "", "app.example.com"+req.path, "", "",
-			req.header(i), nil, "", 100, 0, 0, 0, 0)
+			req.header(i), nil, "", 100, 0, 0, 0, 3)
 	}
 }
 

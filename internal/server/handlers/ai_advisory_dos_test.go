@@ -19,7 +19,7 @@ import (
 func TestAnalyzeConfigDoesNotRecommendTheRemovedDoSSwitch(t *testing.T) {
 	cov := wafCoverage{Total: 2, Enforcing: 2}
 	for _, dos := range []bool{false, true} {
-		cfg := &gateonv1.GlobalConfig{Waf: &gateonv1.WafConfig{Enabled: true, UseCrs: true, DosProtection: dos}}
+		cfg := &gateonv1.GlobalConfig{Waf: &gateonv1.WafConfig{Enabled: true, DosProtection: dos}}
 		for _, in := range analyzeConfig(t.Context(), cfg, cov).Insights {
 			text := strings.ToLower(in.Title + " " + in.Description + " " + in.Recommendation + " " + in.SuggestedConfig)
 			if strings.Contains(text, "dos protection") || strings.Contains(text, "dos_protection") {

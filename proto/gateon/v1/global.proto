@@ -281,24 +281,23 @@ message Permission {
 
 message WafConfig {
   bool enabled = 1;
-  bool use_crs = 2;
   int32 paranoia_level = 3;
   string custom_directives = 4;
-  // Protection categories
-  bool sqli = 5;
-  bool xss = 6;
-  bool lfi = 7;
-  bool rce = 8;
-  bool php = 9;
-  bool scanner = 10;
-  bool protocol = 11;
-  bool java = 12;
-  bool nodejs = 14;
+
+  // 2 and 5-12, 14 and 20 were use_crs and the attack-family switches (sqli,
+  // xss, lfi, rce, php, scanner, protocol, java, nodejs, ransomware_detection),
+  // removed by ADR 0064. They had no presence: a switch nobody touched and one
+  // switched off were both stored as false (or not stored at all), so the
+  // gateway-wide WAF never read them (ADR 0044). `categories` replaces them
+  // under a new tag, so no value written before it can read as "off".
+  reserved 2, 5, 6, 7, 8, 9, 10, 11, 12, 14, 20;
+  reserved "use_crs", "sqli", "xss", "lfi", "rce", "php", "scanner", "protocol",
+    "java", "nodejs", "ransomware_detection";
+
   bool wordpress = 15;
   bool ip_reputation = 16;
   bool dos_protection = 17;
   bool malware_detection = 18;
-  bool ransomware_detection = 20;
   bool dlp = 21;
   int32 anomaly_threshold = 19;
   int32 request_body_limit = 22;
@@ -317,7 +316,7 @@ message WafConfig {
   // 28 and 29 were update_interval_hours and rules_url, removed 2026-08-27.
   // They configured the retired downloader: an interval for a loop that no
   // longer runs and a source URL for a fetch that no longer happens.
-  // WAFUpdater.Start is a no-op and PerformUpdate returns ErrRuleUpdatesRetired.
+  // WAFUpdater.Start is a no-op; the manual update RPC is gone (ADR 0064).
   reserved 28, 29;
   reserved "update_interval_hours", "rules_url";
   string clamav_addr = 30; // Deprecated: use clamav.clamav_addr
@@ -370,6 +369,31 @@ message WafConfig {
   // known. An organisation that cannot risk a 403 on a customer-facing page
   // will not enable a control whose only setting is 403.
   string dlp_action = 43;
+  // Which attack families the gateway-wide WAF runs (ADR 0064). Unset, or a
+  // family left unset inside it, runs that family as before this existed.
+  WafCategories categories = 44;
+}
+
+// WafCategories switches the gateway-wide WAF's attack families. Each is a
+// tri-state: unset runs the family as the WAF tier decides (every family, at
+// the standard and enterprise tiers), true runs it even where the tier would
+// not, and false removes the rules filed under that family -- the same rules a
+// route WAF's switch of the same name removes (ADR 0063 decision 4). A route
+// WAF's own switch, where it sets one, wins over the value here; one it leaves
+// unset inherits it.
+message WafCategories {
+  optional bool sqli = 1;
+  optional bool xss = 2;
+  optional bool lfi = 3;
+  // Code execution. Off also lets PHP, Java and Node.js code injection
+  // through: those are code execution too.
+  optional bool rce = 4;
+  optional bool php = 5;
+  optional bool java = 6;
+  optional bool nodejs = 7;
+  optional bool scanner = 8;
+  optional bool protocol = 9;
+  optional bool ransomware_detection = 10;
 }
 
 message ClamavConfig {

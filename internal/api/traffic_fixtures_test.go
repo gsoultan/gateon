@@ -32,7 +32,7 @@ func newTraffic(seed uint64, base time.Time) *traffic {
 }
 
 func (tf *traffic) request(ip, method, path, status string, ms float64, at time.Time, ua string) {
-	tf.traces = append(tf.traces, &telemetry.TraceRecord{
+	tf.traces = append(tf.traces, &telemetry.TraceRecord{ServiceDelay: 1,
 		SourceIP: ip, Method: method, Path: path, Status: status, DurationMs: ms, Timestamp: at, UserAgent: ua,
 	})
 }
@@ -161,7 +161,7 @@ func (tf *traffic) wafBlock(ip string, at time.Time) {
 func (tf *traffic) classVisitor(ip, class string, at time.Time) {
 	ja4, ja4h, _ := strings.Cut(class, "_")
 	for r, page := range []string{"/", "/app.js", "/style.css"} {
-		tf.traces = append(tf.traces, &telemetry.TraceRecord{
+		tf.traces = append(tf.traces, &telemetry.TraceRecord{ServiceDelay: 1,
 			SourceIP: ip, Method: http.MethodGet, Path: page, Status: "200", DurationMs: 20,
 			Timestamp: at.Add(time.Duration(r) * time.Second), UserAgent: "Mozilla/5.0",
 			JA4: ja4, JA4H: ja4h, Fingerprint: class,

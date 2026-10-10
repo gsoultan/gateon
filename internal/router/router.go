@@ -350,6 +350,12 @@ func ApplyRouteMiddlewares(h http.Handler, rt *gateonv1.Route, redisClient redis
 	routeLabel := RouteLabel(rt)
 	ctx := context.Background()
 
+	// 0. Which responses are streams, when the route says (ADR 0064): set
+	// before anything can begin the response.
+	if sm := streamModeMiddleware(rt); sm != nil {
+		chain = append(chain, sm)
+	}
+
 	// 1. Infrastructure Middlewares (Recovery, Logging & Monitoring)
 	// Recovery is outer-most to catch panics in logging or metrics.
 	chain = append(chain,

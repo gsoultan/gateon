@@ -1,0 +1,26 @@
+{
+  "about": "The tarpit configs the gateway refuses at save (CheckTarpitSave) and the dashboard refuses before the round trip (tarpitProblem in ui/src/components/MiddlewareConfig/middlewareConfigProblems.ts). Both test suites read this file, so the two rules cannot drift apart. messages are the dashboard's words; the gateway says the same with a lower-case first letter and no full stop. refused names the key whose message is expected, or is empty when the config saves.",
+  "messages": {
+    "threshold": "Set a threat score threshold above 0: the delay is the base delay scaled by a client's threat score over the threshold, and every client's score reaches 0.",
+    "max_delay": "Set a maximum delay: every delay is capped at it, so without one the tarpit delays nobody."
+  },
+  "cases": [
+    { "name": "nothing set", "config": {}, "refused": "threshold" },
+    { "name": "empty threshold", "config": { "threshold": "", "max_delay": "5s" }, "refused": "threshold" },
+    { "name": "blank threshold", "config": { "threshold": "  ", "max_delay": "5s" }, "refused": "threshold" },
+    { "name": "threshold 0", "config": { "threshold": "0", "max_delay": "5s" }, "refused": "threshold" },
+    { "name": "negative threshold", "config": { "threshold": "-1", "max_delay": "5s" }, "refused": "threshold" },
+    { "name": "threshold not a number", "config": { "threshold": "high", "max_delay": "5s" }, "refused": "threshold" },
+    { "name": "threshold NaN", "config": { "threshold": "NaN", "max_delay": "5s" }, "refused": "threshold" },
+    { "name": "threshold Infinity", "config": { "threshold": "Infinity", "max_delay": "5s" }, "refused": "threshold" },
+    { "name": "threshold beyond float range", "config": { "threshold": "1e400", "max_delay": "5s" }, "refused": "threshold" },
+    { "name": "threshold 0 and no maximum delay", "config": { "threshold": "0" }, "refused": "threshold" },
+    { "name": "no maximum delay", "config": { "threshold": "50" }, "refused": "max_delay" },
+    { "name": "empty maximum delay", "config": { "threshold": "50", "max_delay": "" }, "refused": "max_delay" },
+    { "name": "blank maximum delay", "config": { "threshold": "50", "max_delay": "   " }, "refused": "max_delay" },
+    { "name": "threshold and maximum delay", "config": { "threshold": "50", "base_delay": "500ms", "max_delay": "5s" }, "refused": "" },
+    { "name": "padded threshold", "config": { "threshold": " 7.5 ", "max_delay": "5s" }, "refused": "" },
+    { "name": "small threshold", "config": { "threshold": "0.001", "max_delay": "500ms" }, "refused": "" },
+    { "name": "exponent threshold", "config": { "threshold": "1e1", "max_delay": "5s" }, "refused": "" }
+  ]
+}

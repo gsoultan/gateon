@@ -69,7 +69,7 @@ func TestApplyRouteMiddlewares_GlobalWAFDeduplication(t *testing.T) {
 	}}
 	// Global WAF enabled and blocking.
 	gStore := fakeGlobalStore{cfg: &gateonv1.GlobalConfig{
-		Waf: &gateonv1.WafConfig{Enabled: true, UseCrs: true, ParanoiaLevel: 1},
+		Waf: &gateonv1.WafConfig{Enabled: true, ParanoiaLevel: 1},
 	}}
 
 	backend := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -141,7 +141,7 @@ func TestApplyRouteMiddlewares_GlobalWAFDeduplication(t *testing.T) {
 // "protect all routes" and attaching nothing per route.
 func TestApplyRouteMiddlewares_GlobalWAFProtectsUnconfiguredRoutes(t *testing.T) {
 	gStore := fakeGlobalStore{cfg: &gateonv1.GlobalConfig{
-		Waf: &gateonv1.WafConfig{Enabled: true, UseCrs: true, ParanoiaLevel: 1},
+		Waf: &gateonv1.WafConfig{Enabled: true, ParanoiaLevel: 1},
 	}}
 	backend := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)

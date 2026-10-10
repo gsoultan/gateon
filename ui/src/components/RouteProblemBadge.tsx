@@ -10,11 +10,19 @@ export function routeProblemLabel(kind: RouteProblem["kind"]): { label: string; 
   if (kind === "matches_nothing") {
     return { label: "MATCHES NOTHING", color: "orange", summary: "Its rule does not parse, so no request reaches it." };
   }
+  if (kind === "middleware_off") {
+    return {
+      label: "MIDDLEWARE OFF",
+      color: "yellow",
+      summary: "It serves requests, but without a middleware it names until that middleware is fixed.",
+    };
+  }
   return { label: "REFUSES REQUESTS", color: "red", summary: "It answers every request 503 until fixed." };
 }
 
 /**
- * The marker on a route that answers 503 or matches nothing (OPS-N4). After an
+ * The marker on a route that answers 503, matches nothing, or serves without a
+ * middleware it names that is switched off (OPS-N4). After an
  * upgrade such a route used to look like every other until a request reached
  * it. The reason is configuration the operator wrote, shown as text.
  */

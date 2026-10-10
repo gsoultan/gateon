@@ -156,13 +156,19 @@ func postureConfig(ctx context.Context, d postureDeps) posture.Config {
 	pc.RouteWAF = func(cfg map[string]string) posture.Mode {
 		return effectiveRouteMode(wafmw.EffectiveRoute(ctx, cfg, d.globalStore))
 	}
+	// The gateway-wide WAF's too: its tier and category switches (ADR 0064)
+	// decide which families it runs, as they do for the engine.
+	pc.GlobalWAF = func() posture.Mode {
+		return effectiveRouteMode(wafmw.EffectiveGlobal(ctx, d.globalStore))
+	}
 	mgmt := pc.Global.GetManagement()
 	pc.ManagementWorldOpen = epserver.ManagementListenerWorldOpen(mgmt)
 	pc.PublicManagement = managementOnEveryEntrypoint(mgmt)
 	return pc
 }
 
-// effectiveRouteMode is the posture mode of a route WAF the engine runs as e.
+// effectiveRouteMode is the posture mode of a WAF -- a route's, or the
+// gateway-wide one -- the engine runs as e.
 // A WAF that runs no attack category refuses none of the attacks the WAF
 // control is about (truth NEW-13), whatever its mode.
 func effectiveRouteMode(e wafmw.Effective) posture.Mode {
@@ -210,7 +216,7 @@ func wafPosture(pc posture.Config, cov posture.RouteCoverage, waf *wafmw.WAFUpda
 	w := pc.Global.GetWaf()
 	p := handlers.WAFPosture{
 		Enabled: w.GetEnabled(),
-		Mode:    string(posture.GlobalWAFMode(w)),
+		Mode:    string(posture.GlobalMode(pc)),
 		Routes:  cov,
 		// auto_update_rules was repurposed: nothing downloads rules any more,
 		// and the flag only loads a rules directory already on disk.

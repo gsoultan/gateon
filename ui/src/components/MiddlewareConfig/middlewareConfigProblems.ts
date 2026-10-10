@@ -53,18 +53,24 @@ export function tlsBindingProblem(config: Record<string, string>): string | unde
   return secret.length >= 32 ? undefined : TLS_BINDING_SECRET_REQUIRED;
 }
 
+export const TARPIT_THRESHOLD_REQUIRED =
+  "Set a threat score threshold above 0: the delay is the base delay scaled by a client's threat score " +
+  "over the threshold, and every client's score reaches 0.";
+export const TARPIT_MAX_DELAY_REQUIRED =
+  "Set a maximum delay: every delay is capped at it, so without one the tarpit delays nobody.";
+
 /**
  * Why a tarpit config cannot be saved, or undefined. The factory reads an
  * unset threshold as 0, and the delay is the base delay scaled by the score
  * over the threshold: at 0 every client, a clean one included, meets it and
- * the delay is a division by zero.
+ * the delay is a division by zero. The gateway refuses the same configs
+ * (CheckTarpitSave); internal/middleware/security/testdata/tarpit_save.json
+ * holds both to the same cases.
  */
 export function tarpitProblem(config: Record<string, string>): string | undefined {
   const t = Number(config.threshold);
-  if (!config.threshold || !Number.isFinite(t) || t <= 0) {
-    return "Set a threat score threshold above 0: at 0 every client is delayed.";
-  }
-  if (!config.max_delay) return "Set a maximum delay, so no request is held indefinitely.";
+  if (!config.threshold || !Number.isFinite(t) || t <= 0) return TARPIT_THRESHOLD_REQUIRED;
+  if (!(config.max_delay || "").trim()) return TARPIT_MAX_DELAY_REQUIRED;
   return undefined;
 }
 

@@ -24,20 +24,23 @@ import (
 func TestRefusedPOSTsCountAsGuessingOnlyWhenTheRefusalCouldBeOne(t *testing.T) {
 	const ip, posts = "100.64.70.1", 12
 	for _, tc := range []struct {
-		refusal request.Refusal
-		counted bool
+		refusal      request.Refusal
+		serviceDelay float64 // ms the router spent in a backend; 0 = none reached
+		counted      bool
 	}{
-		{request.RefusalNone, true},           // a backend's login form, or Basic auth
-		{request.RefusalAuthentication, true}, // the gateway's authentication refused it
-		{request.RefusalToken, false},
-		{request.RefusalMitigation, false},
+		{request.RefusalNone, 3, true},           // a backend's login form, or Basic auth
+		{request.RefusalNone, 0, false},          // the WAF or geofence, before any backend
+		{request.RefusalAuthentication, 0, true}, // the gateway's authentication refused it
+		{request.RefusalToken, 0, false},
+		{request.RefusalMitigation, 0, false},
 	} {
 		data := &DiagnosticData{}
 		start := time.Now().Add(-5 * time.Minute)
 		for i := range posts {
 			data.Traces = append(data.Traces, &telemetry.TraceRecord{
 				SourceIP: ip, Method: http.MethodPost, Path: "/rpc/gateon.v1.Service/Poll", Status: "401",
-				Refusal: tc.refusal.String(), Timestamp: start.Add(time.Duration(i) * time.Second),
+				Refusal: tc.refusal.String(), ServiceDelay: tc.serviceDelay,
+				Timestamp: start.Add(time.Duration(i) * time.Second),
 			})
 		}
 		(&AnomalyAnalysisEngine{}).aggregate(data)
@@ -48,11 +51,12 @@ func TestRefusedPOSTsCountAsGuessingOnlyWhenTheRefusalCouldBeOne(t *testing.T) {
 			want = posts
 		}
 		if stats.PostAuthFailures != want || stats.CredentialFailures != want {
-			t.Errorf("refusal %q: PostAuthFailures=%d CredentialFailures=%d, want %d each",
-				tc.refusal, stats.PostAuthFailures, stats.CredentialFailures, want)
+			t.Errorf("refusal %q, %vms in a backend: PostAuthFailures=%d CredentialFailures=%d, want %d each",
+				tc.refusal, tc.serviceDelay, stats.PostAuthFailures, stats.CredentialFailures, want)
 		}
 		if why, harmful := stats.harmEvidence(1); harmful != tc.counted {
-			t.Errorf("refusal %q: harmful=%v (%q), want %v", tc.refusal, harmful, why, tc.counted)
+			t.Errorf("refusal %q, %vms in a backend: harmful=%v (%q), want %v",
+				tc.refusal, tc.serviceDelay, harmful, why, tc.counted)
 		}
 	}
 }

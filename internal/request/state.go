@@ -88,6 +88,11 @@ type RequestState struct {
 	// (MarkRefused). Written only by the code that refused, never from
 	// anything the client sent.
 	Refused Refusal
+	// Stream is the listener's decision whether this response is a stream
+	// (deadline.StreamWriter), found once at the entrypoint so the route the
+	// request matches can override it (ADR 0064). Nil when the request was not
+	// served behind one.
+	Stream StreamControl
 }
 
 // Refusal is why the gateway itself refused a request, as far as the
@@ -256,4 +261,5 @@ func (rs *RequestState) Reset() {
 	rs.CredentialsWithheld = false
 	rs.BlockLookupsUntil = 0
 	rs.Refused = RefusalNone
+	rs.Stream = nil
 }

@@ -30,7 +30,7 @@ func index(mws ...*gateonv1.Middleware) map[string]*gateonv1.Middleware {
 // WAF blocks nothing anywhere. Both used to read as "protecting".
 func TestCoverageReadsTheWAFThatRuns(t *testing.T) {
 	enforcingGlobal := &gateonv1.GlobalConfig{Waf: &gateonv1.WafConfig{Enabled: true}}
-	auditGlobal := &gateonv1.GlobalConfig{Waf: &gateonv1.WafConfig{Enabled: true, AuditOnly: true, UseCrs: true}}
+	auditGlobal := &gateonv1.GlobalConfig{Waf: &gateonv1.WafConfig{Enabled: true, AuditOnly: true}}
 	mws := index(
 		mw("w-audit", "waf", map[string]string{"audit_only": "true"}),
 		mw("w-one", "waf", map[string]string{"audit_only": "1"}),

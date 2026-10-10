@@ -10,3 +10,4 @@ security_advanced.tarpit.delay_base_ms  # unproven: its effect is a delay; the r
 security_advanced.tarpit.delay_max_ms  # unproven: its effect is a delay; the registry records answers, not time
 security_advanced.tarpit.score_threshold  # unproven: its effect is a delay; the registry records answers, not time
 security_advanced.entropy.threshold  # unproven: detection only -- it records a threat and forwards the request, so the answer does not change
+waf.categories.protocol  # unproven: a protocol violation (smuggling, malformed framing) cannot be built with httptest.NewRequest, which the registry probes with

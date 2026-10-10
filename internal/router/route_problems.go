@@ -5,6 +5,7 @@ package router
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -25,6 +26,11 @@ const (
 	// ProblemMatchesNothing is a route whose rule does not parse; it matches
 	// no request.
 	ProblemMatchesNothing = "matches_nothing"
+	// ProblemMiddlewareOff is a route that serves, but without a middleware it
+	// names: one stored with a config the save check now refuses, built
+	// switched off rather than taking the route out of service (a tarpit
+	// with no threshold above 0 or no maximum delay).
+	ProblemMiddlewareOff = "middleware_off"
 )
 
 // RouteProblem is why a route cannot serve as configured (ops OPS-N4). Both
@@ -80,6 +86,10 @@ func routeProblem(ctx context.Context, rt *gateonv1.Route, d ChainDeps) (RoutePr
 		p.Kind, p.Reason = ProblemRefuses, strings.Join(reasons, "; ")
 		return p, true
 	}
+	if reasons := built.offReasons(); len(reasons) > 0 {
+		p.Kind, p.Reason = ProblemMiddlewareOff, strings.Join(reasons, "; ")
+		return p, true
+	}
 	return p, false
 }
 
@@ -102,6 +112,9 @@ type routeBuild struct {
 	hasCORS  bool
 	hasWAF   bool
 	failures []buildFailure
+	// off are the middlewares that built switched off (Factory.Off); err
+	// holds why.
+	off []buildFailure
 }
 
 // buildRouteMiddlewares builds the middlewares rt names, in order.
@@ -134,6 +147,9 @@ func buildRouteMiddlewares(ctx context.Context, f *middleware.Factory, rt *gateo
 		if err != nil {
 			b.failures = append(b.failures, buildFailure{id: mid, typ: conf.Type, err: err, security: isSecurityMiddleware(conf.Type)})
 			continue
+		}
+		if why := f.Off(conf); why != "" {
+			b.off = append(b.off, buildFailure{id: mid, typ: conf.Type, err: errors.New(why)})
 		}
 		b.add(conf.Type, mw)
 	}
@@ -180,10 +196,23 @@ func (b routeBuild) refusalReasons() []string {
 	return out
 }
 
+// offReasons says, per middleware built switched off, why.
+func (b routeBuild) offReasons() []string {
+	out := make([]string, 0, len(b.off))
+	for _, f := range b.off {
+		out = append(out, fmt.Sprintf("%s middleware %q is off until fixed: %v", f.typ, f.id, f.err))
+	}
+	return out
+}
+
 // log writes what the router has always written for each failure: an error
 // when the route fails closed, a warning when it serves without a cosmetic
-// middleware.
+// middleware, or without one built switched off.
 func (b routeBuild) log(label string) {
+	for _, f := range b.off {
+		logger.L.LogWarn("middleware is switched off; the route serves without it until it is fixed",
+			"route", label, "middleware", f.id, "type", f.typ, "reason", f.err)
+	}
 	for _, f := range b.failures {
 		switch {
 		case f.err == nil:

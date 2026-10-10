@@ -36,7 +36,7 @@ func TestFactoryRejectsMalformedNumericConfig(t *testing.T) {
 		{"cors max_age", "cors", map[string]string{"max_age": "1 hour"}, "max_age"},
 		{"retry attempts", "retry", map[string]string{"attempts": "three"}, "attempts"},
 		{"pow difficulty", "pow", map[string]string{"difficulty": "hard"}, "difficulty"},
-		{"tarpit base_delay", "tarpit", map[string]string{"base_delay": "5"}, "base_delay"},
+		{"tarpit base_delay", "tarpit", map[string]string{"base_delay": "5", "threshold": "50", "max_delay": "5s"}, "base_delay"},
 		{"circuit breaker window", "circuit_breaker", map[string]string{"window_size": "1min"}, "window_size"},
 		{"inflight amount", "inflightreq", map[string]string{"amount": "lots"}, "amount"},
 		{"ratelimit rpm", "ratelimit", map[string]string{"requests_per_minute": "60/min"}, "requests_per_minute"},

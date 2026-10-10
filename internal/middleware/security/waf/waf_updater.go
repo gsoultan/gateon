@@ -5,7 +5,6 @@ package waf
 
 import (
 	"context"
-	"errors"
 	"time"
 
 	"github.com/gsoultan/gateon/internal/config"
@@ -21,17 +20,13 @@ import (
 // version depended on when the machine last had network access, and no test
 // covered the combination actually running in production.
 //
-// The type remains because the API and the security-posture view report on it.
-// It no longer fetches anything, and it says so rather than reporting a
-// successful update that did nothing.
+// The type remains because the security-posture view reports on it. It no
+// longer fetches anything. It had a PerformUpdate that could only fail, behind
+// a TriggerWafUpdate RPC and POST /v1/waf/update; all three are gone (ADR 0064).
 type WAFUpdater struct {
 	globalStore config.GlobalConfigStore
 	rulesPath   string
 }
-
-// ErrRuleUpdatesRetired is returned by PerformUpdate.
-var ErrRuleUpdatesRetired = errors.New(
-	"WAF rule updates are retired: rules are compiled into the binary, so upgrade gateon to update them")
 
 // NewWAFUpdater returns an updater. The arguments are retained so callers do
 // not have to change.
@@ -49,10 +44,3 @@ func (u *WAFUpdater) LastUpdated() time.Time { return time.Time{} }
 
 // Start does nothing. It is kept so the server's startup sequence is unchanged.
 func (u *WAFUpdater) Start(ctx context.Context) {}
-
-// PerformUpdate reports that rule updates are retired.
-//
-// It returns an error rather than succeeding silently: an operator who presses
-// "update rules" and is told it worked would reasonably believe their WAF
-// changed.
-func (u *WAFUpdater) PerformUpdate(force bool) error { return ErrRuleUpdatesRetired }

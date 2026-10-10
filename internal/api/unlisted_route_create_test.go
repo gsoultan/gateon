@@ -417,9 +417,9 @@ func TestUnlistedRouteDetectorSaysWhereTheRequestArrived(t *testing.T) {
 	// Private addresses: the detector resolves each one's location, and a
 	// public one would be looked up over the network.
 	data := &DiagnosticData{Traces: []*telemetry.TraceRecord{
-		{ServiceName: "gateon-Public HTTPS", Path: "/new-page", Host: "app.example.com:8443", SourceIP: "10.0.0.7"},
-		{ServiceName: "gateon-http-plain", Path: "/.env", Host: "localhost:8081", SourceIP: "10.0.0.8"},
-		{ServiceName: "Test Route", Path: "/test", Host: "localhost:8081", SourceIP: "10.0.0.9"},
+		{ServiceDelay: 1, ServiceName: "gateon-Public HTTPS", Path: "/new-page", Host: "app.example.com:8443", SourceIP: "10.0.0.7"},
+		{ServiceDelay: 1, ServiceName: "gateon-http-plain", Path: "/.env", Host: "localhost:8081", SourceIP: "10.0.0.8"},
+		{ServiceDelay: 1, ServiceName: "Test Route", Path: "/test", Host: "localhost:8081", SourceIP: "10.0.0.9"},
 	}}
 	got := (&UnlistedRouteDetector{}).Detect(t.Context(), data)
 	if len(got) != 2 {
@@ -526,7 +526,7 @@ func TestUnlistedRouteFixCopiesNoMiddlewaresWhenTheSiblingsDisagree(t *testing.T
 func TestUnlistedRouteDetectorFoldsRepeatsIntoOneFinding(t *testing.T) {
 	t0 := time.Date(2026, 9, 27, 12, 0, 0, 0, time.UTC)
 	at := func(path, host, ip string, sec int) *telemetry.TraceRecord {
-		return &telemetry.TraceRecord{ServiceName: "gateon-http-plain", Path: path, Host: host, SourceIP: ip,
+		return &telemetry.TraceRecord{ServiceDelay: 1, ServiceName: "gateon-http-plain", Path: path, Host: host, SourceIP: ip,
 			Timestamp: t0.Add(time.Duration(sec) * time.Second)}
 	}
 	got := (&UnlistedRouteDetector{}).Detect(t.Context(), &DiagnosticData{Traces: []*telemetry.TraceRecord{
@@ -568,7 +568,7 @@ func TestUnlistedRouteDetectorFoldsRepeatsIntoOneFinding(t *testing.T) {
 func TestUnlistedRouteDetectorBoundsWhatAFindingKeeps(t *testing.T) {
 	traces := make([]*telemetry.TraceRecord, 0, 1000)
 	for i := range 1000 {
-		traces = append(traces, &telemetry.TraceRecord{ServiceName: "gateon-http-plain", Path: "/sweep",
+		traces = append(traces, &telemetry.TraceRecord{ServiceDelay: 1, ServiceName: "gateon-http-plain", Path: "/sweep",
 			SourceIP: fmt.Sprintf("10.1.%d.%d", i/250, i%250), Timestamp: time.Unix(int64(i), 0)})
 	}
 	got := (&UnlistedRouteDetector{}).Detect(t.Context(), &DiagnosticData{Traces: traces})
@@ -587,7 +587,7 @@ func TestUnlistedRouteDetectorBoundsWhatAFindingKeeps(t *testing.T) {
 func TestAFoldedFindingIsMitigatedOnlyWhenEveryClientIs(t *testing.T) {
 	blocked := []*gateonv1.Middleware{{Type: "ipfilter", Config: map[string]string{"deny_list": "10.0.0.1"}}}
 	trace := func(ip string, sec int) *telemetry.TraceRecord {
-		return &telemetry.TraceRecord{ServiceName: "gateon-http-plain", Path: "/m", SourceIP: ip,
+		return &telemetry.TraceRecord{ServiceDelay: 1, ServiceName: "gateon-http-plain", Path: "/m", SourceIP: ip,
 			Timestamp: time.Unix(int64(sec), 0)}
 	}
 	for _, tc := range []struct {

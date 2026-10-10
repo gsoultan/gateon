@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -57,8 +58,95 @@ var fileUploadScanner = scanner.NewScanner([]string{
 	".php", ".phtml", ".php3", ".php4", ".php5", ".phps", ".asp", ".aspx", ".jsp", ".jspx", ".sh", ".py", ".pl", ".exe", ".cgi", ".htaccess",
 })
 
+// Why a tarpit cannot be saved. The dashboard says the same, capitalised and
+// with a full stop (tarpitProblem in
+// ui/src/components/MiddlewareConfig/middlewareConfigProblems.ts), and
+// testdata/tarpit_save.json holds both to the same cases and words.
+const (
+	TarpitThresholdRequired = "set a threat score threshold above 0: the delay is the base delay scaled by a " +
+		"client's threat score over the threshold, and every client's score reaches 0"
+	TarpitMaxDelayRequired = "set a maximum delay: every delay is capped at it, so without one the tarpit " +
+		"delays nobody"
+)
+
+// CheckTarpitSave refuses, at save, the tarpit the dashboard refuses: a
+// threshold that is not a number above 0, or no maximum delay. The factory
+// reads an unset threshold as 0, which is how a tarpit saved through the API
+// or an import came to compare every client against 0.
+func CheckTarpitSave(cfg map[string]string) error {
+	v := strings.TrimSpace(cfg["threshold"])
+	if !validTarpitThreshold(v) {
+		return kind.CfgError("threshold", v, errors.New(TarpitThresholdRequired))
+	}
+	if strings.TrimSpace(cfg["max_delay"]) == "" {
+		return kind.CfgError("max_delay", "", errors.New(TarpitMaxDelayRequired))
+	}
+	return nil
+}
+
+// validTarpitThreshold is the dashboard's test: a finite number above 0.
+func validTarpitThreshold(v string) bool {
+	t, err := strconv.ParseFloat(v, 64)
+	return err == nil && usableTarpitThreshold(t)
+}
+
+func usableTarpitThreshold(t float64) bool {
+	return t > 0 && !math.IsInf(t, 1)
+}
+
+// NewTarpit builds a tarpit middleware from its config. One that TarpitOff
+// names a reason for is built switched off -- it delays nobody -- rather than
+// refused: a tarpit is a delay, and refusing it would take its route out of
+// service on upgrade for a config that was saved before the save check.
+func NewTarpit(cfg map[string]string) (kind.Middleware, error) {
+	baseDelay, err := kind.ParseDurationStrict(cfg["base_delay"], 0)
+	if err != nil {
+		return nil, kind.CfgError("base_delay", cfg["base_delay"], err)
+	}
+	maxDelay, err := kind.ParseDurationStrict(cfg["max_delay"], 0)
+	if err != nil {
+		return nil, kind.CfgError("max_delay", cfg["max_delay"], err)
+	}
+	threshold, err := kind.ParseFloatStrict(cfg["threshold"], 0)
+	if err != nil {
+		return nil, kind.CfgError("threshold", cfg["threshold"], err)
+	}
+	return Tarpit(baseDelay, maxDelay, threshold), nil
+}
+
+// TarpitOff says why a tarpit stored with this config is built switched off,
+// or "" when it is not. The router reports it as a route problem and logs it
+// at every build. A config the factory cannot parse is not off but refused,
+// by NewTarpit, so it has no reason here.
+func TarpitOff(cfg map[string]string) string {
+	maxDelay, err := kind.ParseDurationStrict(cfg["max_delay"], 0)
+	if err != nil {
+		return ""
+	}
+	threshold, err := kind.ParseFloatStrict(cfg["threshold"], 0)
+	if err != nil {
+		return ""
+	}
+	switch {
+	case !usableTarpitThreshold(threshold):
+		return TarpitThresholdRequired
+	case maxDelay <= 0:
+		return TarpitMaxDelayRequired
+	}
+	return ""
+}
+
 // Tarpit middleware introduces progressive delays for suspicious clients based on fingerprint reputation.
+//
+// A threshold that is not above 0, or no maximum delay, delays nobody. With a
+// threshold of 0 every client's threat score reached it and the delay was
+// the base delay times score/0: +Inf, or NaN for a clean client, converted to
+// a Duration in a way Go leaves to the platform -- on arm64 every client with
+// any threat score was held for the maximum delay, on amd64 nobody was.
 func Tarpit(baseDelay, maxDelay time.Duration, scoreThreshold float64) kind.Middleware {
+	if !usableTarpitThreshold(scoreThreshold) || maxDelay <= 0 {
+		return func(next http.Handler) http.Handler { return next }
+	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// IsLoopback was being handed a JA4+ fingerprint, which is never an
@@ -75,17 +163,25 @@ func Tarpit(baseDelay, maxDelay time.Duration, scoreThreshold float64) kind.Midd
 			threatScore := 100.0 - reputation
 
 			if threatScore >= scoreThreshold {
-				delay := time.Duration(float64(baseDelay) * (threatScore / scoreThreshold))
-				if delay > maxDelay {
-					delay = maxDelay
-				}
-				if delay > 0 {
+				if delay := tarpitDelay(baseDelay, maxDelay, threatScore/scoreThreshold); delay > 0 {
 					time.Sleep(delay)
 				}
 			}
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// tarpitDelay is base scaled by ratio, capped at maxDelay. Compared before
+// converting: a product past the range of a Duration converts to whatever
+// the platform makes of it -- negative on amd64, so a very small threshold
+// delayed the worst clients least.
+func tarpitDelay(base, maxDelay time.Duration, ratio float64) time.Duration {
+	d := float64(base) * ratio
+	if d >= float64(maxDelay) {
+		return maxDelay
+	}
+	return time.Duration(d)
 }
 
 // Entropy middleware calculates Shannon entropy of the request body.

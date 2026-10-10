@@ -23,7 +23,7 @@ const render = () =>
     <QueryClientProvider client={new QueryClient()}>
       <MantineProvider>
         <WafSettingsCard
-          waf={{ enabled: true, useCrs: true, paranoiaLevel: 1 }}
+          waf={{ enabled: true, paranoiaLevel: 1, categories: { sqli: false } }}
           onChange={() => {}}
           disabled={false}
           canEdit
@@ -47,5 +47,13 @@ describe("the global WAF card", () => {
     const html = render();
     expect(html).toContain("Global WAF Settings");
     expect(html).not.toContain("Update WAF Rules Now");
+  });
+
+  // ADR 0064: the families are switches now, and one switched off is named.
+  test("offers the attack-family switches and names the ones switched off", () => {
+    const html = render();
+    expect(html).toContain("Cross-Site Scripting");
+    expect(html).toContain("Switched off gateway-wide");
+    expect(html).toContain("requests carrying these attacks reach the backends");
   });
 });

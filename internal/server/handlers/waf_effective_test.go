@@ -68,7 +68,7 @@ func TestEffectiveWAFReportsWhatRuns(t *testing.T) {
 	// The tier is named: unset, it comes from the process-wide profile, which
 	// another test in this package leaves at "minimal" -- a tier that does
 	// switch LFI, RCE and malware off, so the answer would depend on test order.
-	waf := &gateonv1.WafConfig{Enabled: true, UseCrs: true, ParanoiaLevel: 1, AuditOnly: true, Tier: "standard"}
+	waf := &gateonv1.WafConfig{Enabled: true, ParanoiaLevel: 1, AuditOnly: true, Tier: "standard"}
 	svc := &api.ApiService{
 		Globals: fixedGlobalStore{&gateonv1.GlobalConfig{Waf: waf}},
 		Middlewares: listedMiddlewares{

@@ -4,7 +4,7 @@
 import { expect, test } from "bun:test";
 import { create, fromJson, toJson, type JsonValue } from "@bufbuild/protobuf";
 
-import { RouteSchema } from "../../services/gen/gateon/v1/route_pb";
+import { RouteSchema, Route_StreamMode } from "../../services/gen/gateon/v1/route_pb";
 import type { Route } from "../../types/gateon";
 import { formValuesToRoute, routeToFormValues } from "./routePayload";
 
@@ -12,8 +12,9 @@ import { formValuesToRoute, routeToFormValues } from "./routePayload";
 // protojson and DiscardUnknown. These two helpers are those halves, taken from
 // the generated schema, so a field the form spells differently from the proto
 // vanishes here exactly as it does on the wire: silently.
+// enumAsInteger: the gateway marshals with UseEnumNumbers (handlers/response.go).
 const fromGateway = (msg: ReturnType<typeof stored>): Route =>
-  toJson(RouteSchema, msg, { alwaysEmitImplicit: true }) as unknown as Route;
+  toJson(RouteSchema, msg, { alwaysEmitImplicit: true, enumAsInteger: true }) as unknown as Route;
 const onTheWire = (route: Route): JsonValue => JSON.parse(JSON.stringify(route));
 
 const stored = () =>
@@ -64,4 +65,24 @@ test("a route with a TLS option or a certificate keeps its tls section", () => {
 
   expect(fromJson(RouteSchema, onTheWire(option)).tls?.optionId).toBe("modern");
   expect(fromJson(RouteSchema, onTheWire(cert)).tls?.certificateIds).toEqual(["c1"]);
+});
+
+// A route's stream mode (ADR 0064) survives the edit form: a route set to
+// always or never stream, opened and saved unchanged, keeps that setting, and
+// one that never had it saves auto.
+test("editing and saving a route keeps its stream mode", () => {
+  for (const mode of [Route_StreamMode.ALWAYS, Route_StreamMode.NEVER]) {
+    const msg = stored();
+    msg.streamMode = mode;
+    const values = routeToFormValues(fromGateway(msg));
+    const saved = fromJson(RouteSchema, onTheWire(formValuesToRoute(values)));
+    expect(saved.streamMode).toBe(mode);
+  }
+  const plain = fromJson(RouteSchema, onTheWire(formValuesToRoute(routeToFormValues(fromGateway(stored())))));
+  expect(plain.streamMode).toBe(Route_StreamMode.AUTO);
+});
+
+test("a stream mode the dashboard does not know is shown and saved as auto", () => {
+  const values = routeToFormValues({ ...fromGateway(stored()), streamMode: 7 as never });
+  expect(values.streamMode).toBe(0);
 });

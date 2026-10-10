@@ -11,7 +11,7 @@ import {
   Alert,
 } from "@mantine/core";
 import { IconInfoCircle } from "@tabler/icons-react";
-import type { Route } from "../../types/gateon";
+import { ROUTE_STREAM_MODE, type Route } from "../../types/gateon";
 import type { FormApi } from "@tanstack/react-form";
 import { RuleBuilder } from "./RuleBuilder";
 
@@ -126,6 +126,26 @@ export function RoutingConfig({ form, entryPointOptions }: RoutingConfigProps) {
       />
 
       <form.Field
+        name="streamMode"
+        children={(field: any) => {
+          const routeType = form.state.values.type;
+          if (routeType === "tcp" || routeType === "udp") return null;
+          return (
+            <Select
+              label="Streaming responses"
+              description={STREAM_MODE_HELP[String(field.state.value ?? 0)]}
+              data={STREAM_MODE_OPTIONS}
+              value={String(field.state.value ?? ROUTE_STREAM_MODE.AUTO)}
+              onBlur={field.handleBlur}
+              onChange={(v) => field.handleChange(Number(v ?? ROUTE_STREAM_MODE.AUTO))}
+              allowDeselect={false}
+              w={{ base: "100%", sm: 360 }}
+            />
+          );
+        }}
+      />
+
+      <form.Field
         name="priority"
         children={(field: any) => (
           <NumberInput
@@ -141,3 +161,20 @@ export function RoutingConfig({ form, entryPointOptions }: RoutingConfigProps) {
     </Stack>
   );
 }
+
+// Route.stream_mode (ADR 0064). Every mode keeps a stream bounded: a lifted
+// response is ended by the stream idle timeout and maximum lifetime.
+const STREAM_MODE_OPTIONS = [
+  { value: String(ROUTE_STREAM_MODE.AUTO), label: "Automatic — event streams only (default)" },
+  { value: String(ROUTE_STREAM_MODE.ALWAYS), label: "Always — every response streams" },
+  { value: String(ROUTE_STREAM_MODE.NEVER), label: "Never — no response streams" },
+];
+
+const STREAM_MODE_HELP: Record<string, string> = {
+  [ROUTE_STREAM_MODE.AUTO]:
+    "A 200 text/event-stream response with no Content-Length outlives the entrypoint's read and write timeouts; every other response keeps them.",
+  [ROUTE_STREAM_MODE.ALWAYS]:
+    "For a backend that streams under another type (NDJSON, long-poll, chunked). Once the backend answers, every response outlives the entrypoint's timeouts, ended instead by the stream idle timeout and maximum lifetime. The backend must still answer within the write timeout.",
+  [ROUTE_STREAM_MODE.NEVER]:
+    "Every response, an event stream included, is cut at the entrypoint's write timeout.",
+};

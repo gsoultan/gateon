@@ -89,9 +89,9 @@ ARG TARGETOS TARGETARCH VERSION
 RUN GOOS=$TARGETOS GOARCH=$TARGETARCH \
     go build -trimpath -ldflags="-s -w -X main.Version=${VERSION}" -o /out/gateon ./cmd/gateon
 # The data directory the runtime stage hands to the nonroot user. distroless
-# has no shell to mkdir and chown with, so it is made here and copied over
-# with its owner.
-RUN mkdir -p /out/var-lib-gateon && chmod 0700 /out/var-lib-gateon
+# has no shell to mkdir and chown with, so it is made here and copied over;
+# its owner and mode are set by that COPY, not here (see the runtime stage).
+RUN mkdir -p /out/var-lib-gateon
 
 # ---- Stage 3: runtime -------------------------------------------------------
 FROM gcr.io/distroless/static-debian12:nonroot
@@ -134,11 +134,17 @@ ENV GATEON_DATA_DIR=/var/lib/gateon \
     ENTRYPOINTS_FILE=/etc/gateon/entrypoints.json \
     MIDDLEWARES_FILE=/etc/gateon/middlewares.json \
     TLS_OPTIONS_FILE=/etc/gateon/tls_options.json
-# Owned by nonroot (65532), so a named volume mounted here -- which starts as
-# a copy of this directory -- is writable by the gateway. Run with
+# Owned by nonroot (65532), mode 0700, so a named volume mounted here -- which
+# starts as a copy of this directory -- is writable by the gateway and nobody
+# else. Run with
 #   docker run -v gateon-data:/var/lib/gateon -p 8080:8080 gateon
 # or the state, global.json included, goes with the container.
-COPY --from=builder --chown=65532:65532 /out/var-lib-gateon /var/lib/gateon
+#
+# --chmod is what sets the mode. COPY of a directory copies its contents into a
+# destination it creates 0755, so the `chmod 0700` the builder stage used to do
+# never reached the image: it shipped /var/lib/gateon 0755 until ADR 0065's
+# image check read the mode back. packaging/image/Dockerfile does the same.
+COPY --from=builder --chown=65532:65532 --chmod=0700 /out/var-lib-gateon /var/lib/gateon
 WORKDIR /var/lib/gateon
 COPY --from=builder /out/gateon /usr/local/bin/gateon
 EXPOSE 8080

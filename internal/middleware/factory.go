@@ -29,6 +29,11 @@ import (
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
+// typeTarpit is the tarpit middleware type, which the save check and Off
+// name. Create spells it out: scripts/checkconfig reads the types Create builds
+// from its case literals.
+const typeTarpit = "tarpit"
+
 // Factory creates a Middleware from a configuration.
 type Factory struct {
 	redisClient redis.Client
@@ -133,8 +138,22 @@ func (f *Factory) checkSave(m *gateonv1.Middleware) error {
 		return f.checkClientTrust(cfg)
 	case "entropy":
 		return security.CheckEntropySave(cfg)
+	case typeTarpit:
+		return security.CheckTarpitSave(cfg)
 	}
 	return nil
+}
+
+// Off says why a middleware that builds is built switched off -- serving
+// requests as if it were absent -- or "" when it is not. Only a stored config
+// the save check now refuses gets here: it keeps its route serving, and the
+// router logs the reason and reports it as a route problem (ADR 0063) rather
+// than leaving the middleware listed on the route as though it ran.
+func (f *Factory) Off(m *gateonv1.Middleware) string {
+	if m.GetType() == typeTarpit {
+		return security.TarpitOff(m.GetConfig())
+	}
+	return ""
 }
 
 // checkClientTrust refuses a per-middleware trust_cloudflare_headers that
@@ -344,19 +363,7 @@ func (f *Factory) Create(m *gateonv1.Middleware, routeID string) (Middleware, er
 		}
 		return security.Deception(dc), nil
 	case "tarpit":
-		baseDelay, err := kind.ParseDurationStrict(cfg["base_delay"], 0)
-		if err != nil {
-			return nil, kind.CfgError("base_delay", cfg["base_delay"], err)
-		}
-		maxDelay, err := kind.ParseDurationStrict(cfg["max_delay"], 0)
-		if err != nil {
-			return nil, kind.CfgError("max_delay", cfg["max_delay"], err)
-		}
-		threshold, err := kind.ParseFloatStrict(cfg["threshold"], 0)
-		if err != nil {
-			return nil, kind.CfgError("threshold", cfg["threshold"], err)
-		}
-		return security.Tarpit(baseDelay, maxDelay, threshold), nil
+		return security.NewTarpit(cfg)
 	case "entropy":
 		threshold, err := kind.ParseFloatStrict(cfg["threshold"], security.DefaultEntropyThreshold)
 		if err != nil {

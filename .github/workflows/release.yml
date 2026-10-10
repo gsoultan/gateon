@@ -10,12 +10,32 @@ on:
   # out without cutting a real tag and publishing whatever came back.
   #
   # A dispatch run builds everything a tagged run builds -- eBPF generation,
-  # proto, the UI, both architectures, the archives, packages and SBOM -- and
-  # then stops. Nothing is published and no tag is required.
+  # proto, the UI, both architectures, the archives, packages and SBOM, and the
+  # container image from those archives -- and then stops. The image is pushed
+  # to a registry that lives only inside the job, pulled back by digest and run,
+  # exactly as a tag's is from ghcr.io. Nothing is published and no tag is
+  # required.
+  #
+  # With publish_tag set, a dispatch instead publishes the image for a release
+  # that already exists -- v1.1.0 shipped before images were published -- from
+  # that release's own tarballs, through the same steps a tag push runs. It
+  # refuses anything that is not an existing, published release tag, and runs
+  # only from main (ADR 0065).
   workflow_dispatch:
+    inputs:
+      publish_tag:
+        description: >-
+          Publish the container image for this existing release tag (e.g.
+          v1.1.0). Leave empty for the dry run, which publishes nothing.
+        required: false
+        default: ""
+        type: string
 
+# Read-only by default; each job asks for what it needs. Only the goreleaser job
+# writes releases, and only the image job can push packages -- so the dry run,
+# which any branch can dispatch, holds neither.
 permissions:
-  contents: write
+  contents: read
 
 # <asm/*.h>, which <linux/types.h> includes, sits under the multiarch triplet
 # rather than on clang's default search path, so the BPF compile in goreleaser's
@@ -33,6 +53,11 @@ env:
 jobs:
   goreleaser:
     runs-on: ubuntu-latest
+    # Not when publishing an existing tag's image: that release is already
+    # built and published, and its image is made from what it published.
+    if: github.event_name == 'push' || inputs.publish_tag == ''
+    permissions:
+      contents: write
 
     # This job used to run on the self-hosted Apple-silicon Mac, building inside
     # the Linux container from .github/ci/Dockerfile.ci. That runner is a single
@@ -183,3 +208,239 @@ jobs:
             dist/checksums.txt
           if-no-files-found: error
           retention-days: 7
+
+  # The container image, published (ADR 0065). It compiles nothing: it copies
+  # the binary out of the release's own linux tarballs, after checking them
+  # against the release's checksums.txt, onto distroless/static:nonroot -- so
+  # the image's binary is byte-for-byte the tarball's, with the tarball's PGO,
+  # -trimpath, CGO_ENABLED=0 and version stamp. packaging/image/build.sh does
+  # every step; this job only decides where the tarballs come from.
+  #
+  # A tag push takes them from the release goreleaser just published. A
+  # dispatch with publish_tag takes them from that existing release. Either way
+  # the image is built for linux/amd64 and linux/arm64, pushed with an SBOM and
+  # a provenance attestation, then pulled back by digest and run on each
+  # platform (arm64 under QEMU): it must hold the tarball's exact binary, run as
+  # uid 65532, serve /healthz and drain on SIGTERM. A failure there fails the
+  # release visibly even though the push has happened.
+  image:
+    needs: goreleaser
+    if: >-
+      !cancelled() &&
+      ((github.event_name == 'push' && needs.goreleaser.result == 'success') ||
+       (github.event_name == 'workflow_dispatch' && inputs.publish_tag != ''))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      # actions/attest-build-provenance: a Sigstore-signed provenance statement
+      # for the pushed digest, verifiable with `gh attestation verify`.
+      id-token: write
+      attestations: write
+    # Two publishes of one tag must not interleave their pushes.
+    concurrency:
+      group: release-image-${{ github.event_name == 'push' && github.ref_name || inputs.publish_tag }}
+      cancel-in-progress: false
+    env:
+      IMAGE: ghcr.io/gsoultan/gateon
+      # Through the environment, never interpolated into a script: it is a
+      # free-text dispatch input.
+      TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.publish_tag }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      # A dispatch runs the workflow file of the branch it names. Publishing
+      # under the project's image name is for what main has reviewed.
+      - name: Publish only from main or a tag
+        if: github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main'
+        run: |
+          echo "::error::publish_tag runs only from main (this run is on ${GITHUB_REF}); dispatch it with --ref main"
+          exit 1
+
+      - name: Checkout
+        # Full history and tags: resolve reads the tag list and the tag's commit.
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go
+        # For `go version -m`, which reads the tarball binaries' build settings.
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Self-test the image script and check the runtime stages agree
+        run: |
+          packaging/image/build.sh selftest
+          packaging/image/build.sh parity
+
+      - name: Resolve the release tag
+        id: resolve
+        # Refuses anything that is not an existing, published (non-draft)
+        # release tag. Prints the version, the tag's commit and time, and the
+        # image tags: X.Y.Z always; X.Y and latest only for a non-prerelease
+        # that is the newest patch of its line / GitHub's Latest release.
+        run: packaging/image/build.sh resolve | tee -a "$GITHUB_OUTPUT"
+
+      # The image of an older tag is described by that tag's own image
+      # definition when it has one; v1.1.0 predates packaging/image, so it uses
+      # this commit's, whose runtime stage parity has just checked.
+      - name: Use the tag's own image definition when it has one
+        run: |
+          if git cat-file -e "${TAG}:packaging/image/Dockerfile" 2>/dev/null; then
+            git show "${TAG}:packaging/image/Dockerfile" > packaging/image/Dockerfile
+            echo "::notice::building with ${TAG}'s packaging/image/Dockerfile"
+          else
+            echo "::notice::${TAG} predates packaging/image/Dockerfile; building with $(git rev-parse --short HEAD)'s"
+          fi
+
+      - name: Download the release's tarballs and checksums
+        env:
+          VERSION: ${{ steps.resolve.outputs.version }}
+        run: |
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir archives \
+            --pattern "gateon_${VERSION}_linux_amd64.tar.gz" \
+            --pattern "gateon_${VERSION}_linux_arm64.tar.gz" \
+            --pattern checksums.txt
+          ls -l archives
+
+      - name: Stage the build context from the tarballs
+        env:
+          ARCHIVES: archives
+          CONTEXT: ${{ runner.temp }}/image-context
+          VERSION: ${{ steps.resolve.outputs.version }}
+          REVISION: ${{ steps.resolve.outputs.revision }}
+        run: packaging/image/build.sh stage
+
+      - name: Set up QEMU (to run the arm64 image in verify)
+        uses: docker/setup-qemu-action@v4
+        with:
+          platforms: arm64
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v4
+
+      # GITHUB_TOKEN with packages: write -- no personal token. --password-stdin
+      # keeps it out of the process list; Actions masks it in the log.
+      - name: Log in to ghcr.io
+        run: echo "$GH_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+
+      - name: Build and push linux/amd64 + linux/arm64
+        id: build
+        env:
+          CONTEXT: ${{ runner.temp }}/image-context
+          TAGS: ${{ steps.resolve.outputs.tags }}
+          VERSION: ${{ steps.resolve.outputs.version }}
+          REVISION: ${{ steps.resolve.outputs.revision }}
+          CREATED: ${{ steps.resolve.outputs.created }}
+        run: packaging/image/build.sh build | tee -a "$GITHUB_OUTPUT"
+
+      - name: Pull back by digest and run each platform
+        env:
+          CONTEXT: ${{ runner.temp }}/image-context
+          DIGEST: ${{ steps.build.outputs.digest }}
+          VERSION: ${{ steps.resolve.outputs.version }}
+        run: packaging/image/build.sh verify
+
+      # After verify, so a digest that failed it is never attested.
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+
+      - name: Summary
+        if: success()
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          TAGS: ${{ steps.resolve.outputs.tags }}
+        run: |
+          {
+            echo "### ${IMAGE} for ${TAG}"
+            echo
+            echo "Digest \`${DIGEST}\`, tags: \`${TAGS}\`"
+            echo
+            echo '```'
+            echo "docker pull ${IMAGE}@${DIGEST}"
+            echo "gh attestation verify oci://${IMAGE}@${DIGEST} --owner gsoultan"
+            echo '```'
+            echo
+            echo "A new GHCR package can start private; its visibility is set in the"
+            echo "package's settings and is the repository owner's decision."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # The dry run of the job above: the same script, on the dry run's snapshot
+  # tarballs, pushed to a registry that exists only inside this job (no
+  # credentials, nothing leaves the runner), then pulled back by digest and run
+  # on both platforms. What differs from a tag is the tarballs' origin and the
+  # registry's name -- not one build, attestation or verify step.
+  image-dry-run:
+    needs: goreleaser
+    if: github.event_name == 'workflow_dispatch' && inputs.publish_tag == ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    services:
+      registry:
+        image: registry:2
+        ports:
+          - 5000:5000
+    env:
+      IMAGE: localhost:5000/gateon
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Self-test the image script and check the runtime stages agree
+        run: |
+          packaging/image/build.sh selftest
+          packaging/image/build.sh parity
+
+      - name: Download the dry run's tarballs and checksums
+        uses: actions/download-artifact@v4
+        with:
+          name: goreleaser-dry-run
+          path: archives
+
+      - name: Stage the build context from the tarballs
+        id: stage
+        env:
+          ARCHIVES: archives
+          CONTEXT: ${{ runner.temp }}/image-context
+          REVISION: ${{ github.sha }}
+        run: packaging/image/build.sh stage | tee -a "$GITHUB_OUTPUT"
+
+      - name: Set up QEMU (to run the arm64 image in verify)
+        uses: docker/setup-qemu-action@v4
+        with:
+          platforms: arm64
+
+      # network=host lets the BuildKit container reach the job's registry on
+      # localhost:5000, which it treats as plain HTTP.
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v4
+        with:
+          driver-opts: network=host
+
+      - name: Build and push linux/amd64 + linux/arm64 (job-local registry)
+        id: build
+        env:
+          CONTEXT: ${{ runner.temp }}/image-context
+          # A snapshot version can carry a branch name; these are always valid.
+          TAGS: dry-run latest
+          VERSION: ${{ steps.stage.outputs.version }}
+          REVISION: ${{ github.sha }}
+        run: |
+          CREATED="$(git log -1 --format=%ct HEAD)" packaging/image/build.sh build | tee -a "$GITHUB_OUTPUT"
+
+      - name: Pull back by digest and run each platform
+        env:
+          CONTEXT: ${{ runner.temp }}/image-context
+          DIGEST: ${{ steps.build.outputs.digest }}
+          VERSION: ${{ steps.stage.outputs.version }}
+        run: packaging/image/build.sh verify

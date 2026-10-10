@@ -50,6 +50,20 @@ jobs:
             *) echo "::error::image runs as '${user}', expected nonroot"; exit 1 ;;
           esac
 
+      # The builder stage made the directory 0700 and COPY dropped the mode:
+      # the image shipped /var/lib/gateon 0755 until ADR 0065's check read it
+      # back. Read it from the image's filesystem, not from the Dockerfile.
+      - name: Data directory is 0700 and owned by nonroot
+        run: |
+          docker create --name gateon-fs gateon:ci >/dev/null
+          entry="$(docker export gateon-fs | tar -tvf - | grep -E ' var/lib/gateon/?$' || true)"
+          docker rm gateon-fs >/dev/null
+          echo "image: ${entry}"
+          case "$entry" in
+            drwx------*65532*) echo "ok: 0700 nonroot" ;;
+            *) echo "::error::/var/lib/gateon is not mode 0700 owned by 65532"; exit 1 ;;
+          esac
+
       - name: Container starts, serves health, and does not crash-loop
         run: |
           docker run -d --name gateon-ci -p 8080:8080 gateon:ci

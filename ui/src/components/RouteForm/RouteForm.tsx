@@ -99,6 +99,7 @@ export default function RouteForm({
         optionId: "",
       },
       disabled: false,
+      streamMode: 0,
     } as Route,
     onSubmit: async ({ value }) => {
       mutation.mutate(formValuesToRoute(value));
@@ -118,6 +119,7 @@ export default function RouteForm({
       form.setFieldValue("serviceId", v.serviceId);
       form.setFieldValue("tls", v.tls);
       form.setFieldValue("disabled", v.disabled);
+      form.setFieldValue("streamMode", v.streamMode);
     }
   }, [initialData, form]);
 

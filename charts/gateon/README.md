@@ -5,17 +5,6 @@ SPDX-License-Identifier: MIT
 
 # Gateon Helm chart
 
-> **Prerequisite: there is no published image yet.** Nothing in this repository
-> pushes one — `make docker` builds locally, and CI's `docker-smoke` builds and
-> inspects without pushing. Until a release publishes to a registry, build and
-> push it yourself and point `image.repository` at it:
->
-> ```bash
-> docker build --build-arg VERSION=1.1.0 -t your-registry/gateon:1.1.0 .
-> docker push your-registry/gateon:1.1.0
-> helm install gateon ./charts/gateon --set image.repository=your-registry/gateon --set image.tag=1.1.0
-> ```
-
 ```bash
 helm install gateon ./charts/gateon
 kubectl port-forward svc/gateon-management 8080:8080
@@ -23,6 +12,57 @@ kubectl port-forward svc/gateon-management 8080:8080
 
 Then open <http://localhost:8080> and complete setup. Until an administrator
 exists the management API answers `503` for everything but setup and the probes.
+
+## The image
+
+By default the chart runs `ghcr.io/gsoultan/gateon:<appVersion>` (`image.tag`
+empty means the chart's `appVersion`, `1.1.0`). The release workflow publishes
+it for every release tag, for `linux/amd64` and `linux/arm64`: the binary is
+copied out of the release's own tarball, checked against the release's
+`checksums.txt`, onto `distroless/static:nonroot`, so it is byte-for-byte the
+binary in `gateon_<version>_linux_<arch>.tar.gz` (CGO-free, PGO, uid 65532).
+Each image carries an SBOM and a provenance attestation
+([ADR 0065](../../doc/adr/0065-the-published-image-is-the-release-tarballs-binary.md)).
+
+Tags: `X.Y.Z` always; `X.Y` for the newest patch of that line; `latest` for
+the release GitHub marks Latest. A prerelease gets only its exact version. For
+production, pin the digest the release's workflow summary prints:
+
+```bash
+helm install gateon ./charts/gateon --set image.tag=1.1.0@sha256:<digest>
+gh attestation verify oci://ghcr.io/gsoultan/gateon:1.1.0 --owner gsoultan
+```
+
+**Pulling it may need credentials.** Whether the GHCR package is public is the
+repository owner's decision, made in the package's settings; GHCR can create
+a new package private. While it is private, a cluster needs a pull secret for
+a GitHub account that can read the package (a token with `read:packages`):
+
+```bash
+kubectl create secret docker-registry ghcr-pull \
+  --docker-server=ghcr.io --docker-username=<github-user> --docker-password=<token>
+helm install gateon ./charts/gateon --set 'imagePullSecrets[0].name=ghcr-pull'
+```
+
+Without it the pod sits in `ImagePullBackOff` with `denied` or `unauthorized`
+in its events. A `manifest unknown` instead means that release's image was
+never published: v1.1.0 predates the publishing workflow and gets its image
+when the owner runs it for that tag.
+
+**Building your own** is still supported, for a private registry, a patched
+build or an air-gapped cluster. The repository's `Dockerfile` builds from
+source (UI, proto, eBPF, PGO, `-trimpath`, CGO off) for whichever platforms
+you name:
+
+```bash
+docker buildx build --platform linux/amd64,linux/arm64 --build-arg VERSION=1.1.0 \
+  -t your-registry/gateon:1.1.0 --push .
+helm install gateon ./charts/gateon --set image.repository=your-registry/gateon --set image.tag=1.1.0
+```
+
+It is the same runtime image -- the release workflow fails if the two
+Dockerfiles' runtime stages differ -- but not the same binary as the release
+tarball's unless you build it from the tag with the release's Go toolchain.
 
 ## Four things worth knowing before you rely on it
 

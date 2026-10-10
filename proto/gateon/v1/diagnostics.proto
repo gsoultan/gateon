@@ -193,12 +193,8 @@ message TraceRouteResponse {
   repeated TraceHop hops = 1;
 }
 
-message TriggerWafUpdateRequest {}
-
-message TriggerWafUpdateResponse {
-  bool success = 1;
-  string message = 2;
-}
+// TriggerWafUpdateRequest and TriggerWafUpdateResponse were removed with the
+// TriggerWafUpdate RPC (ADR 0064). Retired names: do not reuse them.
 
 message ValidateCORSRequest {
   string url = 1;

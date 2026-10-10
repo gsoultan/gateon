@@ -18,7 +18,7 @@ import (
 // every route unprotected.
 func TestCreateGlobalWAFPassesTheFactorysStoreThrough(t *testing.T) {
 	store := &mockGlobalConfigStore{config: &gateonv1.GlobalConfig{
-		Waf: &gateonv1.WafConfig{Enabled: true, UseCrs: true, ParanoiaLevel: 1},
+		Waf: &gateonv1.WafConfig{Enabled: true, ParanoiaLevel: 1},
 	}}
 	f := NewFactory(nil, store, nil, nil, ".")
 

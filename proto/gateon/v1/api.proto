@@ -71,7 +71,9 @@ service ApiService {
   rpc ListAuditArchives(ListAuditArchivesRequest) returns (ListAuditArchivesResponse);
   rpc GetAuditArchive(GetAuditArchiveRequest) returns (GetAuditArchiveResponse);
   rpc ApplyRecommendation(ApplyRecommendationRequest) returns (ApplyRecommendationResponse);
-  rpc TriggerWafUpdate(TriggerWafUpdateRequest) returns (TriggerWafUpdateResponse);
+  // TriggerWafUpdate (POST /v1/waf/update) was removed (ADR 0064): there is no
+  // rule source to update from since ADR 0004, so it could only fail. The
+  // name and its two messages are retired; do not reuse them.
   rpc TraceRoute(TraceRouteRequest) returns (TraceRouteResponse);
   rpc ValidateCORS(ValidateCORSRequest) returns (ValidateCORSResponse);
   rpc InstallClamav(InstallClamavRequest) returns (InstallClamavResponse);
