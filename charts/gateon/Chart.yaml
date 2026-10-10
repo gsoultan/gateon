@@ -3,7 +3,7 @@ name: gateon
 description: Gateon — API gateway, reverse proxy and security gateway with a semantic WAF
 type: application
 version: 0.3.1
-appVersion: "1.1.0"
+appVersion: "1.2.0"
 home: https://github.com/gsoultan/gateon
 sources:
   - https://github.com/gsoultan/gateon

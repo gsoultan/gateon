@@ -16,7 +16,7 @@ exists the management API answers `503` for everything but setup and the probes.
 ## The image
 
 By default the chart runs `ghcr.io/gsoultan/gateon:<appVersion>` (`image.tag`
-empty means the chart's `appVersion`, `1.1.0`). The release workflow publishes
+empty means the chart's `appVersion`, `1.2.0`). The release workflow publishes
 it for every release tag, for `linux/amd64` and `linux/arm64`: the binary is
 copied out of the release's own tarball, checked against the release's
 `checksums.txt`, onto `distroless/static:nonroot`, so it is byte-for-byte the
@@ -29,8 +29,8 @@ the release GitHub marks Latest. A prerelease gets only its exact version. For
 production, pin the digest the release's workflow summary prints:
 
 ```bash
-helm install gateon ./charts/gateon --set image.tag=1.1.0@sha256:<digest>
-gh attestation verify oci://ghcr.io/gsoultan/gateon:1.1.0 --owner gsoultan
+helm install gateon ./charts/gateon --set image.tag=1.2.0@sha256:<digest>
+gh attestation verify oci://ghcr.io/gsoultan/gateon:1.2.0 --owner gsoultan
 ```
 
 **Pulling it may need credentials.** Whether the GHCR package is public is the
@@ -55,9 +55,9 @@ source (UI, proto, eBPF, PGO, `-trimpath`, CGO off) for whichever platforms
 you name:
 
 ```bash
-docker buildx build --platform linux/amd64,linux/arm64 --build-arg VERSION=1.1.0 \
-  -t your-registry/gateon:1.1.0 --push .
-helm install gateon ./charts/gateon --set image.repository=your-registry/gateon --set image.tag=1.1.0
+docker buildx build --platform linux/amd64,linux/arm64 --build-arg VERSION=1.2.0 \
+  -t your-registry/gateon:1.2.0 --push .
+helm install gateon ./charts/gateon --set image.repository=your-registry/gateon --set image.tag=1.2.0
 ```
 
 It is the same runtime image -- the release workflow fails if the two
