@@ -4,7 +4,7 @@
 image:
   repository: ghcr.io/gsoultan/gateon
   # Defaults to .Chart.AppVersion. Pin a digest for production:
-  # tag: "1.1.0@sha256:<digest from the release workflow's summary>"
+  # tag: "1.2.0@sha256:<digest from the release workflow's summary>"
   tag: ""
   pullPolicy: IfNotPresent
 # Needed while the GHCR package is private (the owner's choice); see README.
