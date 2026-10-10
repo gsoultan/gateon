@@ -19,7 +19,6 @@ import (
 	"time"
 
 	"github.com/quic-go/quic-go/http3"
-	"golang.org/x/net/http2"
 
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/httputil"
@@ -52,21 +51,61 @@ var backendDialer = &net.Dialer{
 	Control:   mgmtaddr.Control,
 }
 
-// dialH2TLS is the HTTP/2-over-TLS transport's dial: backendDialer, then the
-// TLS handshake, then the check http2.Transport makes when it dials for
-// itself -- that the server agreed to speak HTTP/2.
-func dialH2TLS(ctx context.Context, network, addr string, cfg *tls.Config) (net.Conn, error) {
-	d := tls.Dialer{NetDialer: backendDialer, Config: cfg}
-	c, err := d.DialContext(ctx, network, addr)
-	if err != nil {
-		return nil, err
+// h2NextProto is the ALPN name of HTTP/2 over TLS.
+const h2NextProto = "h2"
+
+// Ping settings for the HTTP/2 backend transports: a connection that has read
+// nothing for h2SendPingTimeout is pinged, and closed if the ping is not
+// answered within h2PingTimeout, so a backend that vanished without a FIN
+// does not hold requests until the kernel gives up on it.
+const (
+	h2SendPingTimeout = 30 * time.Second
+	h2PingTimeout     = 15 * time.Second
+)
+
+// h2DialTLS returns the HTTP/2-over-TLS transport's dial: backendDialer, then
+// the TLS handshake offering only h2, then the check that the server agreed
+// to speak HTTP/2. A backend configured as h2 that answers in HTTP/1 is an
+// error rather than a silent downgrade.
+func h2DialTLS(cfg *tls.Config) func(ctx context.Context, network, addr string) (net.Conn, error) {
+	cfg = cfg.Clone()
+	if cfg == nil {
+		cfg = &tls.Config{}
 	}
-	tc, ok := c.(*tls.Conn)
-	if !ok || tc.ConnectionState().NegotiatedProtocol != http2.NextProtoTLS {
-		_ = c.Close()
-		return nil, fmt.Errorf("http2: backend %s did not negotiate %s", addr, http2.NextProtoTLS)
+	cfg.NextProtos = []string{h2NextProto}
+	return func(ctx context.Context, network, addr string) (net.Conn, error) {
+		d := tls.Dialer{NetDialer: backendDialer, Config: cfg}
+		c, err := d.DialContext(ctx, network, addr)
+		if err != nil {
+			return nil, err
+		}
+		tc, ok := c.(*tls.Conn)
+		if !ok || tc.ConnectionState().NegotiatedProtocol != h2NextProto {
+			_ = c.Close()
+			return nil, fmt.Errorf("http2: backend %s did not negotiate %s", addr, h2NextProto)
+		}
+		return c, nil
 	}
-	return c, nil
+}
+
+// newH2Transport is the transport for an h2 or h2c backend: net/http's own
+// HTTP/2 client, speaking only HTTP/2. h2c uses prior knowledge over plain
+// TCP; h2 dials through h2DialTLS.
+func newH2Transport(tlsCfg *tls.Config, cleartext bool) *http.Transport {
+	protocols := new(http.Protocols)
+	t := &http.Transport{
+		Protocols: protocols,
+		HTTP2:     &http.HTTP2Config{SendPingTimeout: h2SendPingTimeout, PingTimeout: h2PingTimeout},
+	}
+	if cleartext {
+		protocols.SetUnencryptedHTTP2(true)
+		t.DialContext = backendDialer.DialContext
+		return t
+	}
+	protocols.SetHTTP2(true)
+	t.TLSClientConfig = tlsCfg
+	t.DialTLSContext = h2DialTLS(tlsCfg)
+	return t
 }
 
 type backendTransportFactory struct {
@@ -222,21 +261,9 @@ func (f *backendTransportFactory) buildTransport(state *targetState, selectedIde
 	case "h3":
 		return &http3.Transport{TLSClientConfig: tlsCfg}
 	case "h2c":
-		return &http2.Transport{
-			AllowHTTP:       true,
-			ReadIdleTimeout: 30 * time.Second,
-			PingTimeout:     15 * time.Second,
-			DialTLSContext: func(ctx context.Context, network, addr string, _ *tls.Config) (net.Conn, error) {
-				return backendDialer.DialContext(ctx, network, addr)
-			},
-		}
+		return newH2Transport(nil, true)
 	case "h2":
-		return &http2.Transport{
-			TLSClientConfig: tlsCfg,
-			ReadIdleTimeout: 30 * time.Second,
-			PingTimeout:     15 * time.Second,
-			DialTLSContext:  dialH2TLS,
-		}
+		return newH2Transport(tlsCfg, false)
 	default:
 		t := http.DefaultTransport.(*http.Transport).Clone()
 		tc := f.transportConfig
@@ -283,7 +310,7 @@ type targetBoundRoundTripper struct {
 
 func (t *targetBoundRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 	// Normalize schemes for the underlying transport.
-	// http2.Transport doesn't understand "h2c" or "h2", it expects "http" or "https".
+	// The HTTP/2 transports don't understand "h2c" or "h2"; they expect "http" or "https".
 	// http3.Transport expects "https".
 	originalScheme := req.URL.Scheme
 	switch originalScheme {

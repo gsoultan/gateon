@@ -26,7 +26,6 @@ import (
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 	"github.com/quic-go/quic-go"
 	"github.com/quic-go/quic-go/http3"
-	"golang.org/x/net/http2"
 )
 
 const (
@@ -41,7 +40,6 @@ const (
 	// "Rapid Reset" class). The internal gRPC server caps streams separately.
 	h2MaxConcurrentStreams = 250
 	h2MaxReadFrameSize     = 1 << 18 // 256 KiB
-	h2IdleTimeout          = 1 * time.Minute
 
 	// defaultEntryPointTimeout is used when an entrypoint has no explicit
 	// read/write timeout configured.
@@ -211,9 +209,8 @@ func (e *httpEntrypoint) startHTTP3(h http.Handler) http.Handler {
 	// listener still waiting for its port would send every client to a QUIC
 	// endpoint that is not there.
 	var serving atomic.Bool
-	// Derived now, not in the retry: newServer hands e.tlsConfig to
-	// http2.ConfigureServer, which writes to it, and a retry runs later on its
-	// own goroutine.
+	// Derived now, not in the retry, which runs later on its own goroutine
+	// while the TCP server may be reading e.tlsConfig.
 	tlsConf, quicConf := http3.ConfigureTLSConfig(e.tlsConfig), h3Server.QUICConfig.Clone()
 	// Listened on here rather than by ListenAndServe, so that the listener
 	// the server accepts from is the one that holds the entrypoint's limit.
@@ -269,6 +266,10 @@ func (e *httpEntrypoint) newServer(h http.Handler) *http.Server {
 		Addr:      ep.Address,
 		Handler:   h,
 		TLSConfig: e.tlsConfig,
+		// net/http's own HTTP/2 server serves h2 and h2c alike, under these
+		// caps. h2 over TLS used to be handed to x/net's server through
+		// http2.ConfigureServer, which x/net 0.60.0 deprecates in favour of
+		// this field; one server now means one set of limits to keep right.
 		HTTP2: &http.HTTP2Config{
 			MaxConcurrentStreams: h2MaxConcurrentStreams,
 			MaxReadFrameSize:     h2MaxReadFrameSize,
@@ -295,18 +296,6 @@ func (e *httpEntrypoint) newServer(h http.Handler) *http.Server {
 				identity.RemoveFingerprints(conn)
 			}
 		},
-	}
-	// Explicitly bound HTTP/2 on the public TLS server (h2 is negotiated via ALPN
-	// over TLS). This caps concurrent streams and frame size instead of relying on
-	// Go's defaults, hardening against HTTP/2 stream-flood DoS.
-	if e.tlsConfig != nil {
-		if err := http2.ConfigureServer(server, &http2.Server{
-			MaxConcurrentStreams: h2MaxConcurrentStreams,
-			MaxReadFrameSize:     h2MaxReadFrameSize,
-			IdleTimeout:          h2IdleTimeout,
-		}); err != nil {
-			logger.L.LogError("failed to configure HTTP/2 limits", "error", err, "addr", ep.Address)
-		}
 	}
 	return server
 }
