@@ -363,8 +363,8 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 	close(metricsStop)
 	wg.Wait()
 	// Last, once no listener is serving: a request still in a WASM middleware
-	// would find its guest closed.
-	transform.CloseWasmModules(shutdownCtx)
+	// would find its guest closed. The drain's context, for the reason above.
+	transform.CloseWasmModules(shutdownCtx) //nolint:contextcheck // ctx has already fired; see shutdownCtx.
 	logger.L.LogInfo("shutdown complete")
 }
 
