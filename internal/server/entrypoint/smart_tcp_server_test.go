@@ -6,7 +6,6 @@ package entrypoint
 import (
 	"bufio"
 	"context"
-	"crypto/tls"
 	"fmt"
 	"io"
 	"net"
@@ -14,8 +13,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"golang.org/x/net/http2"
 
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
@@ -72,13 +69,9 @@ func TestATCPEntrypointServesCleartextHTTP2(t *testing.T) {
 	ep := &gateonv1.EntryPoint{Id: "tcp-h2c", Name: "tcp-h2c", Type: gateonv1.EntryPoint_TCP}
 	addr := serveAsSharedHTTP(t, ep, deps)
 
-	client := &http.Client{Timeout: 5 * time.Second, Transport: &http2.Transport{
-		AllowHTTP: true,
-		DialTLSContext: func(ctx context.Context, network, addr string, _ *tls.Config) (net.Conn, error) {
-			var d net.Dialer
-			return d.DialContext(ctx, network, addr)
-		},
-	}}
+	h2c := new(http.Protocols)
+	h2c.SetUnencryptedHTTP2(true)
+	client := &http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{Protocols: h2c}}
 	resp, err := client.Get("http://" + addr + "/")
 	if err != nil {
 		t.Fatalf("a prior-knowledge HTTP/2 request to a TCP entrypoint failed: %v", err)

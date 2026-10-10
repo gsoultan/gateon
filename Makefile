@@ -197,6 +197,13 @@ vuln:
 ##              `make ebpf` (or `make ebpf-docker` off Linux) first, or the
 ##              GOOS=linux pass fails on the bpf2go symbols rather than on
 ##              anything you wrote. CI generates both before it runs this.
+##
+##              Pinned to a commit, not @latest: the newest release (2026.2.1)
+##              is built against an x/tools that cannot read Go 1.27.2's export
+##              data ("export data version 5 is greater than maximum supported
+##              version 4") and fails on every package. Move to a tagged release
+##              once one supports 1.27.2. security.yml pins the same version.
+STATICCHECK_VERSION ?= v0.7.0-0.dev.0.20261009230814-452d5bb86b45
 staticcheck:
 	@if [ ! -f internal/ebpf/gateon_ebpf_bpf.o ]; then \
 		echo "staticcheck: internal/ebpf/gateon_ebpf_bpf.o is missing, so the"; \
@@ -209,7 +216,7 @@ staticcheck:
 		exit 1; \
 	fi
 	@dir="$$(mktemp -d)"; \
-	GOBIN="$$dir" go install honnef.co/go/tools/cmd/staticcheck@latest || exit 1; \
+	GOBIN="$$dir" go install honnef.co/go/tools/cmd/staticcheck@$(STATICCHECK_VERSION) || exit 1; \
 	for goos in linux darwin; do \
 		echo "==> staticcheck GOOS=$$goos"; \
 		GOOS=$$goos "$$dir/staticcheck" ./... || exit 1; \
@@ -223,8 +230,12 @@ staticcheck:
 ##        bun cache and node_modules under ui/. They name those directories, not
 ##        ui: an exclude matches a directory name at any depth, and "ui" also
 ##        hid internal/ui, the Go code that serves the dashboard.
+## Pinned to a commit for the reason staticcheck is: gosec v2.29.0 cannot read
+## Go 1.27.2's export data, so every package fails to type-check and the SSA
+## taint rules (G703, G704, G710) silently skip. security.yml pins the same.
+GOSEC_VERSION ?= v2.29.1-0.20261009120814-7b1b5cebe007
 gosec:
-	go run github.com/securego/gosec/v2/cmd/gosec@latest \
+	go run github.com/securego/gosec/v2/cmd/gosec@$(GOSEC_VERSION) \
 		-exclude=G115 \
 		-exclude-dir=proto -exclude-dir=tests -exclude-dir=node_modules -exclude-dir=.bun-cache \
 		-exclude-generated \
