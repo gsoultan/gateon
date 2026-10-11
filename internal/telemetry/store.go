@@ -345,6 +345,13 @@ func (b *Broadcaster[T]) Unsubscribe(ch chan T) {
 	}
 }
 
+// Len is how many subscribers are listening.
+func (b *Broadcaster[T]) Len() int {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	return len(b.subscribers)
+}
+
 func (b *Broadcaster[T]) Broadcast(data T) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
