@@ -195,7 +195,8 @@ cmd_stage() {
 		check_binary "$CONTEXT/$plat/gateon" "$arch"
 		echo "staged $plat: $(sha256 "$CONTEXT/$plat/gateon" | cut -d' ' -f1) from $(basename "$tarball")" >&2
 	done
-	mkdir -m 0700 "$CONTEXT/var-lib-gateon"
+	mkdir -p "$CONTEXT/var-lib"
+	mkdir -m 0700 "$CONTEXT/var-lib/gateon"
 	cp "$ROOT/packaging/image/Dockerfile" "$CONTEXT/Dockerfile"
 	echo "version=$VERSION"
 }
