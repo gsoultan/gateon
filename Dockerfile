@@ -89,9 +89,9 @@ ARG TARGETOS TARGETARCH VERSION
 RUN GOOS=$TARGETOS GOARCH=$TARGETARCH \
     go build -trimpath -ldflags="-s -w -X main.Version=${VERSION}" -o /out/gateon ./cmd/gateon
 # The data directory the runtime stage hands to the nonroot user. distroless
-# has no shell to mkdir and chown with, so it is made here and copied over;
-# its owner and mode are set by that COPY, not here (see the runtime stage).
-RUN mkdir -p /out/var-lib-gateon
+# has no shell to mkdir and chown with, so it is made here, already 0700, inside
+# a parent the runtime stage copies the contents of (see there for why).
+RUN mkdir -p -m 0700 /out/var-lib/gateon
 
 # ---- Stage 3: runtime -------------------------------------------------------
 FROM gcr.io/distroless/static-debian12:nonroot
@@ -140,11 +140,15 @@ ENV GATEON_DATA_DIR=/var/lib/gateon \
 #   docker run -v gateon-data:/var/lib/gateon -p 8080:8080 gateon
 # or the state, global.json included, goes with the container.
 #
-# --chmod is what sets the mode. COPY of a directory copies its contents into a
-# destination it creates 0755, so the `chmod 0700` the builder stage used to do
-# never reached the image: it shipped /var/lib/gateon 0755 until ADR 0065's
-# image check read the mode back. packaging/image/Dockerfile does the same.
-COPY --from=builder --chown=65532:65532 --chmod=0700 /out/var-lib-gateon /var/lib/gateon
+# gateon is copied as an entry of its parent, not as the COPY's destination.
+# COPY of a directory to a path creates that path itself, and whether --chmod
+# reaches it depends on the BuildKit doing the build: Docker 29.8's does, the
+# one `docker build` used on GitHub's ubuntu-latest runners did not, and the
+# image came out 0755 there with --chmod=0700 on the line. A copied entry keeps its source mode under every
+# BuildKit, and the builder made it 0700. /var/lib already exists in distroless
+# and is not copied, so its owner and mode are untouched.
+# packaging/image/Dockerfile does the same.
+COPY --from=builder --chown=65532:65532 --chmod=0700 /out/var-lib/ /var/lib/
 WORKDIR /var/lib/gateon
 COPY --from=builder /out/gateon /usr/local/bin/gateon
 EXPOSE 8080
