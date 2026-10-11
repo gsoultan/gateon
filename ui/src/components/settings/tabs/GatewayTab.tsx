@@ -6,6 +6,7 @@ import { PresetsCard } from "../PresetsCard";
 import { GatewayConfigCard } from "../gateway/GatewayConfigCard";
 import { PerformanceEnvCard } from "../gateway/PerformanceEnvCard";
 import { TraceArchiveSettingsCard } from "../../Traces/TraceArchiveSettingsCard";
+import { ThreatArchiveSettingsCard } from "../ThreatArchiveSettingsCard";
 import type { SettingsTabProps } from "./settingsState";
 
 // Server-wide settings: TLS, Redis, transport, telemetry, the management API,
@@ -28,6 +29,8 @@ export default function GatewayTab({ settings }: SettingsTabProps) {
       <PerformanceEnvCard />
 
       <TraceArchiveSettingsCard config={config} onChange={setConfig} disabled={formDisabled} />
+
+      <ThreatArchiveSettingsCard config={config} onChange={setConfig} disabled={formDisabled} />
     </Stack>
   );
 }

@@ -1781,11 +1781,113 @@ func (s *pathStatsStore) pruneSecurityThreats(ctx context.Context) {
 	if days <= 0 {
 		return
 	}
-	cutoffTime := time.Now().AddDate(0, 0, -days)
-	q := s.dialect.Rebind("DELETE FROM security_threats WHERE timestamp < ?")
-	if _, err := s.db.ExecContext(ctx, q, cutoffTime); err != nil {
-		logger.Default().LogError("security_threats: prune failed", "error", err)
+	cutoff := time.Now().AddDate(0, 0, -days)
+	archiver := currentThreatArchiver()
+	for range maxThreatPruneChunks {
+		n, err := s.retireThreatChunk(ctx, cutoff, archiver)
+		if err != nil {
+			// Nothing in the failed chunk was deleted; the next prune retries it.
+			logger.Default().LogError("security_threats: prune stopped", "error", err)
+			return
+		}
+		if n < threatPruneChunk {
+			return
+		}
 	}
+}
+
+// threatPruneChunk is how many expired threats one prune step reads, archives
+// and deletes. A threat row carries request and response bodies, so the chunk
+// bounds the memory an archiving step holds and how long one DELETE keeps
+// SQLite's write lock; the single unbounded DELETE it replaces held it for
+// the whole backlog.
+const threatPruneChunk = 1000
+
+// maxThreatPruneChunks bounds one prune at 500,000 threats; a larger backlog
+// drains over the following hours.
+const maxThreatPruneChunks = 500
+
+// ThreatArchiver keeps the security threats retention is about to delete.
+// Archive must report success only once the threats are durably stored:
+// the rows are deleted as soon as it returns nil.
+type ThreatArchiver interface {
+	Enabled() bool
+	Archive(ctx context.Context, threats []*SecurityThreat) error
+}
+
+type threatArchiverBox struct{ a ThreatArchiver }
+
+var threatArchiver atomic.Pointer[threatArchiverBox]
+
+// SetThreatArchiver installs the archiver the security threat prune hands
+// expired threats to. Nil removes it, and the prune then only deletes.
+func SetThreatArchiver(a ThreatArchiver) { threatArchiver.Store(&threatArchiverBox{a: a}) }
+
+// currentThreatArchiver is the installed archiver when it is enabled, else nil.
+func currentThreatArchiver() ThreatArchiver {
+	box := threatArchiver.Load()
+	if box == nil || box.a == nil || !box.a.Enabled() {
+		return nil
+	}
+	return box.a
+}
+
+// retireThreatChunk deletes the oldest threats stamped before cutoff, at most
+// one chunk, after handing them to archiver when there is one, and reports how
+// many it deleted. It deletes exactly the rows it read, by id, so no row is
+// removed unless it is in the archive written just before.
+func (s *pathStatsStore) retireThreatChunk(ctx context.Context, cutoff time.Time, archiver ThreatArchiver) (int, error) {
+	ids, threats, err := s.readExpiredThreats(ctx, cutoff, archiver != nil)
+	if err != nil || len(ids) == 0 {
+		return 0, err
+	}
+	if archiver != nil {
+		if err := archiver.Archive(ctx, threats); err != nil {
+			return 0, fmt.Errorf("archive failed, nothing deleted: %w", err)
+		}
+	}
+	marks := strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")
+	q := s.dialect.Rebind("DELETE FROM security_threats WHERE id IN (" + marks + ")")
+	if _, err := s.db.ExecContext(ctx, q, ids...); err != nil {
+		return 0, fmt.Errorf("delete failed: %w", err)
+	}
+	return len(ids), nil
+}
+
+// readExpiredThreats returns the ids of up to one chunk of the oldest threats
+// stamped before cutoff, and the full threats too when full is set.
+func (s *pathStatsStore) readExpiredThreats(ctx context.Context, cutoff time.Time, full bool) ([]any, []*SecurityThreat, error) {
+	cols := "id"
+	if full {
+		cols = threatFullColumns
+	}
+	q := s.dialect.Rebind("SELECT " + cols + " FROM security_threats t WHERE timestamp < ? ORDER BY timestamp ASC, id ASC LIMIT ?")
+	rows, err := s.db.QueryContext(ctx, q, cutoff, threatPruneChunk)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+	var ids []any
+	var threats []*SecurityThreat
+	for rows.Next() {
+		if !full {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				return nil, nil, err
+			}
+			ids = append(ids, id)
+			continue
+		}
+		th, err := scanFullThreat(rows)
+		if err != nil {
+			// Abort rather than skip: a skipped row would be deleted unarchived
+			// by a later chunk, or never archived at all.
+			return nil, nil, fmt.Errorf("a row could not be read: %w", err)
+		}
+		ids = append(ids, th.ID)
+		threats = append(threats, th)
+	}
+	return ids, threats, rows.Err()
 }
 
 // reclaimSQLDisk returns the space freed by the SQLite deletes back to the OS.
@@ -4535,17 +4637,30 @@ func GetSecurityThreatByID(ctx context.Context, id string) (*SecurityThreat, err
 		return nil, errors.New("threat ID is required")
 	}
 
-	query := s.dialect.Rebind("SELECT id, type, source_ip, fingerprint, score, details, timestamp, ja4, ja4h, route_id, request_uri, category, severity, asn, action_taken, country_code, COALESCE(request_headers, ''), COALESCE(request_body, ''), COALESCE(response_headers, ''), COALESCE(response_body, ''), COALESCE(t.user_agent, ''), COALESCE(t.method, ''), confidence, entropy, cluster_size, COALESCE(recommendation, ''), COALESCE(triggered_rules, ''), reputation, source_ips, observed, unattributed FROM security_threats t WHERE id = ?")
+	query := s.dialect.Rebind("SELECT " + threatFullColumns + " FROM security_threats t WHERE id = ?")
 	ex, cleanup := s.getExecutor(ctx)
 	defer cleanup()
 
-	th := &SecurityThreat{}
-	var sourceIPs string
-	err := ex.QueryRowContext(ctx, query, id).Scan(&th.ID, &th.Type, &th.SourceIP, &th.Fingerprint, &th.Score, &th.Details, &th.Time, &th.JA4, &th.JA4H, &th.RouteID, &th.RequestURI, &th.Category, &th.Severity, &th.ASN, &th.ActionTaken, &th.CountryCode, &th.RequestHeaders, &th.RequestBody, &th.ResponseHeaders, &th.ResponseBody, &th.UserAgent, &th.Method, &th.Confidence, &th.Entropy, &th.ClusterSize, &th.Recommendation, &th.TriggeredRules, &th.Reputation, &sourceIPs, &th.Observed, &th.Unattributed)
+	th, err := scanFullThreat(ex.QueryRowContext(ctx, query, id))
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, fmt.Errorf("threat with ID %s not found", id)
 		}
+		return nil, err
+	}
+	return th, nil
+}
+
+// threatFullColumns is every stored column of a threat, bodies included, in the
+// order scanFullThreat reads them.
+const threatFullColumns = "id, type, source_ip, fingerprint, score, details, timestamp, ja4, ja4h, route_id, request_uri, category, severity, asn, action_taken, country_code, COALESCE(request_headers, ''), COALESCE(request_body, ''), COALESCE(response_headers, ''), COALESCE(response_body, ''), COALESCE(t.user_agent, ''), COALESCE(t.method, ''), confidence, entropy, cluster_size, COALESCE(recommendation, ''), COALESCE(triggered_rules, ''), reputation, source_ips, observed, unattributed"
+
+// scanFullThreat reads one row selected with threatFullColumns.
+func scanFullThreat(row interface{ Scan(dest ...any) error }) (*SecurityThreat, error) {
+	th := &SecurityThreat{}
+	var sourceIPs string
+	err := row.Scan(&th.ID, &th.Type, &th.SourceIP, &th.Fingerprint, &th.Score, &th.Details, &th.Time, &th.JA4, &th.JA4H, &th.RouteID, &th.RequestURI, &th.Category, &th.Severity, &th.ASN, &th.ActionTaken, &th.CountryCode, &th.RequestHeaders, &th.RequestBody, &th.ResponseHeaders, &th.ResponseBody, &th.UserAgent, &th.Method, &th.Confidence, &th.Entropy, &th.ClusterSize, &th.Recommendation, &th.TriggeredRules, &th.Reputation, &sourceIPs, &th.Observed, &th.Unattributed)
+	if err != nil {
 		return nil, err
 	}
 	if sourceIPs != "" {

@@ -13,7 +13,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file gateon/v1/diagnostics.proto.
  */
 export const file_gateon_v1_diagnostics: GenFile = /*@__PURE__*/
-  fileDesc("ChtnYXRlb24vdjEvZGlhZ25vc3RpY3MucHJvdG8SCWdhdGVvbi52MSIXChVHZXREaWFnbm9zdGljc1JlcXVlc3QioAIKFkdldERpYWdub3N0aWNzUmVzcG9uc2USNAoLZW50cnlwb2ludHMYASADKAsyHy5nYXRlb24udjEuRW50cnlQb2ludERpYWdub3N0aWMSNAoRcmVjZW50X3Rsc19lcnJvcnMYAiADKAsyGS5nYXRlb24udjEuSGFuZHNoYWtlRXJyb3ISJQoGc3lzdGVtGAMgASgLMhUuZ2F0ZW9uLnYxLlN5c3RlbUluZm8SJQoJYW5vbWFsaWVzGAQgAygLMhIuZ2F0ZW9uLnYxLkFub21hbHkSMQoMZGVwZW5kZW5jaWVzGAUgAygLMhsuZ2F0ZW9uLnYxLkRlcGVuZGVuY3lIZWFsdGgSGQoRdG90YWxfbWl0aWdhdGlvbnMYBiABKAUiywUKB0Fub21hbHkSDAoEdHlwZRgBIAEoCRIQCghzZXZlcml0eRgCIAEoCRITCgtkZXNjcmlwdGlvbhgDIAEoCRIRCgl0aW1lc3RhbXAYBCABKAkSDgoGc291cmNlGAUgASgJEhYKDnJlY29tbWVuZGF0aW9uGAYgASgJEhAKCGxhdGl0dWRlGAcgASgBEhEKCWxvbmdpdHVkZRgIIAEoARIUCgxjb3VudHJ5X2NvZGUYCSABKAkSDQoFc2NvcmUYCiABKAESCwoDamE0GCEgASgJEgwKBGphNGgYIyABKAkSEAoIcm91dGVfaWQYDCABKAkSEwoLcmVxdWVzdF91cmkYDSABKAkSEQoJbWl0aWdhdGVkGA4gASgIEhAKCGNhdGVnb3J5GA8gASgJEhQKDGFjdGlvbl90YWtlbhgQIAEoCRIWCg5jbHVzdGVyX3N5bmNlZBgRIAEoCBIXCg9yZXF1ZXN0X2hlYWRlcnMYEiABKAkSFAoMcmVxdWVzdF9ib2R5GBMgASgJEhgKEHJlc3BvbnNlX2hlYWRlcnMYFCABKAkSFQoNcmVzcG9uc2VfYm9keRgVIAEoCRISCgp1c2VyX2FnZW50GBYgASgJEhMKC2h0dHBfbWV0aG9kGBcgASgJEhIKCmNvbmZpZGVuY2UYGCABKAESDwoHZW50cm9weRgZIAEoARIUCgxjbHVzdGVyX3NpemUYGiABKAUSFwoPdHJpZ2dlcmVkX3J1bGVzGBsgASgJEgoKAmlkGBwgASgJEg8KB2phNHBsdXMYJCABKAkSEgoKcmVwdXRhdGlvbhgiIAEoARISCgpzb3VyY2VfaXBzGCUgAygJEhIKCmVudHJ5cG9pbnQYJiABKAkSDAoEaG9zdBgnIAEoCRITCgtvY2N1cnJlbmNlcxgoIAEoBRISCgpleHBpcmVzX2F0GCkgASgJSgQICxAMIn4KDEdvc3NpcFN0YXR1cxIPCgdlbmFibGVkGAEgASgIEhUKDW1lbWJlcnNfY291bnQYAiABKAUSFAoMbWVtYmVyX25hbWVzGAMgAygJEhUKDW1lc3NhZ2VzX3NlbnQYBCABKAMSGQoRbWVzc2FnZXNfcmVjZWl2ZWQYBSABKAMiZQoVUmVwdXRhdGlvblN5bmNQYXlsb2FkEhMKC2ZpbmdlcnByaW50GAEgASgJEg0KBXNjb3JlGAIgASgBEhcKD3Zpb2xhdGlvbl9jb3VudBgDIAEoBRIPCgdoaXN0b3J5GAQgAygJIl4KFEdyYXBoRWRnZVN5bmNQYXlsb2FkEhMKC3NvdXJjZV9ub2RlGAEgASgJEhMKC3RhcmdldF9ub2RlGAIgASgJEg4KBndlaWdodBgDIAEoARIMCgR0eXBlGAQgASgJIm0KGkxpc3RTZWN1cml0eVRocmVhdHNSZXF1ZXN0Eg0KBWxpbWl0GAEgASgFEg4KBm9mZnNldBgCIAEoBRIOCgZzZWFyY2gYAyABKAkSEAoIY2F0ZWdvcnkYBCABKAkSDgoGc3RhdHVzGAUgASgJIlcKG0xpc3RTZWN1cml0eVRocmVhdHNSZXNwb25zZRIjCgd0aHJlYXRzGAEgAygLMhIuZ2F0ZW9uLnYxLkFub21hbHkSEwoLdG90YWxfY291bnQYAiABKAUiJgoYR2V0U2VjdXJpdHlUaHJlYXRSZXF1ZXN0EgoKAmlkGAEgASgJIj8KGUdldFNlY3VyaXR5VGhyZWF0UmVzcG9uc2USIgoGdGhyZWF0GAEgASgLMhIuZ2F0ZW9uLnYxLkFub21hbHkiJwoWTGlzdFJlcHV0YXRpb25zUmVxdWVzdBINCgVsaW1pdBgBIAEoBSJFChdMaXN0UmVwdXRhdGlvbnNSZXNwb25zZRIqCgtyZXB1dGF0aW9ucxgBIAMoCzIVLmdhdGVvbi52MS5SZXB1dGF0aW9uIm4KClJlcHV0YXRpb24SEwoLZmluZ2VycHJpbnQYASABKAkSDQoFc2NvcmUYAiABKAESEgoKbGFzdF9ldmVudBgDIAEoCRIXCg92aW9sYXRpb25fY291bnQYBCABKAUSDwoHaGlzdG9yeRgFIAMoCSJUChBEZXBlbmRlbmN5SGVhbHRoEgwKBG5hbWUYASABKAkSDwoHaGVhbHRoeRgCIAEoCBINCgVlcnJvchgDIAEoCRISCgpsYXRlbmN5X21zGAQgASgJIowBChpBcHBseVJlY29tbWVuZGF0aW9uUmVxdWVzdBIUCgxhbm9tYWx5X3R5cGUYASABKAkSDgoGc291cmNlGAIgASgJEhEKCXRocmVhdF9pZBgDIAEoCRITCgtyZXF1ZXN0X3VyaRgEIAEoCRISCgplbnRyeXBvaW50GAUgASgJEgwKBGhvc3QYBiABKAkiPwobQXBwbHlSZWNvbW1lbmRhdGlvblJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSDwoHbWVzc2FnZRgCIAEoCSJNChxSZW1vdmVNaXRpZ2F0ZWRUaHJlYXRSZXF1ZXN0Eg4KBnNvdXJjZRgBIAEoCRIMCgRqYTRoGAIgASgJEg8KB2phNHBsdXMYAyABKAkiQQodUmVtb3ZlTWl0aWdhdGVkVGhyZWF0UmVzcG9uc2USDwoHc3VjY2VzcxgBIAEoCBIPCgdtZXNzYWdlGAIgASgJInEKFU1pdGlnYXRlVGhyZWF0UmVxdWVzdBIOCgZzb3VyY2UYASABKAkSDAoEdHlwZRgCIAEoCRIOCgZyZWFzb24YAyABKAkSEAoIY2F0ZWdvcnkYBCABKAkSGAoQZHVyYXRpb25fc2Vjb25kcxgFIAEoBSI6ChZNaXRpZ2F0ZVRocmVhdFJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSDwoHbWVzc2FnZRgCIAEoCSIfChFUcmFjZVJvdXRlUmVxdWVzdBIKCgJpcBgBIAEoCSI3ChJUcmFjZVJvdXRlUmVzcG9uc2USIQoEaG9wcxgBIAMoCzITLmdhdGVvbi52MS5UcmFjZUhvcCLLAQoTVmFsaWRhdGVDT1JTUmVxdWVzdBILCgN1cmwYASABKAkSDgoGb3JpZ2luGAIgASgJEg4KBm1ldGhvZBgDIAEoCRI8CgdoZWFkZXJzGAQgAygLMisuZ2F0ZW9uLnYxLlZhbGlkYXRlQ09SU1JlcXVlc3QuSGVhZGVyc0VudHJ5EhkKEWF1dGhfYmVhcmVyX3Rva2VuGAUgASgJGi4KDEhlYWRlcnNFbnRyeRILCgNrZXkYASABKAkSDQoFdmFsdWUYAiABKAk6AjgBIq8DChRWYWxpZGF0ZUNPUlNSZXNwb25zZRISCgppc19hbGxvd2VkGAEgASgIEg8KB21lc3NhZ2UYAiABKAkSTgoQcmVzcG9uc2VfaGVhZGVycxgDIAMoCzI0LmdhdGVvbi52MS5WYWxpZGF0ZUNPUlNSZXNwb25zZS5SZXNwb25zZUhlYWRlcnNFbnRyeRIOCgZjaGVja3MYBCADKAkSFAoMaXNfcHJlZmxpZ2h0GAUgASgIElAKEW1pZGRsZXdhcmVfY29uZmlnGAYgAygLMjUuZ2F0ZW9uLnYxLlZhbGlkYXRlQ09SU1Jlc3BvbnNlLk1pZGRsZXdhcmVDb25maWdFbnRyeRISCgpyb3V0ZV9uYW1lGAcgASgJEhMKC3N1Z2dlc3Rpb25zGAggAygJEhAKCHJvdXRlX2lkGAkgASgJGjYKFFJlc3BvbnNlSGVhZGVyc0VudHJ5EgsKA2tleRgBIAEoCRINCgV2YWx1ZRgCIAEoCToCOAEaNwoVTWlkZGxld2FyZUNvbmZpZ0VudHJ5EgsKA2tleRgBIAEoCRINCgV2YWx1ZRgCIAEoCToCOAEifAoIVHJhY2VIb3ASCwoDaG9wGAEgASgFEgoKAmlwGAIgASgJEhAKCGxhdGl0dWRlGAMgASgBEhEKCWxvbmdpdHVkZRgEIAEoARIUCgxjb3VudHJ5X2NvZGUYBSABKAkSDAoEY2l0eRgGIAEoCRIOCgZydHRfbXMYByABKAMijQIKFEVudHJ5UG9pbnREaWFnbm9zdGljEgoKAmlkGAEgASgJEg8KB2FkZHJlc3MYAiABKAkSDAoEdHlwZRgDIAEoCRIRCglsaXN0ZW5pbmcYBCABKAgSGQoRdG90YWxfY29ubmVjdGlvbnMYBSABKAMSGgoSYWN0aXZlX2Nvbm5lY3Rpb25zGAYgASgDEhIKCmxhc3RfZXJyb3IYByABKAkSMgoMY2VydGlmaWNhdGVzGAggAygLMhwuZ2F0ZW9uLnYxLkNlcnRpZmljYXRlU3RhdHVzEgwKBG5hbWUYCSABKAkSKgoGcm91dGVzGAogAygLMhouZ2F0ZW9uLnYxLlJvdXRlRGlhZ25vc3RpYyLSAQoPUm91dGVEaWFnbm9zdGljEgoKAmlkGAEgASgJEgwKBG5hbWUYAiABKAkSDAoEcnVsZRgDIAEoCRISCgpzZXJ2aWNlX2lkGAQgASgJEhQKDHNlcnZpY2VfbmFtZRgFIAEoCRIXCg9zZXJ2aWNlX2hlYWx0aHkYBiABKAgSNAoLbWlkZGxld2FyZXMYByADKAsyHy5nYXRlb24udjEuTWlkZGxld2FyZURpYWdub3N0aWMSDwoHaGVhbHRoeRgIIAEoCBINCgVlcnJvchgJIAEoCSJeChRNaWRkbGV3YXJlRGlhZ25vc3RpYxIKCgJpZBgBIAEoCRIMCgRuYW1lGAIgASgJEgwKBHR5cGUYAyABKAkSDwoHaGVhbHRoeRgEIAEoCBINCgVlcnJvchgFIAEoCSJhChFDZXJ0aWZpY2F0ZVN0YXR1cxIOCgZkb21haW4YASABKAkSDgoGZXhwaXJ5GAIgASgJEg0KBXZhbGlkGAMgASgIEg0KBWVycm9yGAQgASgJEg4KBmlzc3VlchgFIAEoCSJ3Cg5IYW5kc2hha2VFcnJvchIRCgl0aW1lc3RhbXAYASABKAkSEwoLcmVtb3RlX2FkZHIYAiABKAkSDQoFZXJyb3IYAyABKAkSFQoNZW50cnlwb2ludF9pZBgEIAEoCRIXCg9lbnRyeXBvaW50X25hbWUYBSABKAkijgIKClN5c3RlbUluZm8SEQoJcHVibGljX2lwGAEgASgJEhwKFGNsb3VkZmxhcmVfcmVhY2hhYmxlGAIgASgIEg4KBnVwdGltZRgDIAEoCRISCgpnb3JvdXRpbmVzGAQgASgDEhQKDG1lbW9yeV91c2FnZRgFIAEoCRIRCgljcHVfdXNhZ2UYBiABKAkSDwoHdmVyc2lvbhgHIAEoCRInCgZnb3NzaXAYCCABKAsyFy5nYXRlb24udjEuR29zc2lwU3RhdHVzEiIKBGVicGYYCSABKAsyFC5nYXRlb24udjEuRWJwZlN0YXRzEiQKBXRpdGFuGAogASgLMhUuZ2F0ZW9uLnYxLlRpdGFuU3RhdHMikgIKClRpdGFuU3RhdHMSFwoPcGhhbnRvbV9lbmFibGVkGAEgASgIEhYKDnBoYW50b21fZW5naW5lGAIgASgJEhwKFGFjdGl2ZV9waGFudG9tX3BvcnRzGAMgASgFEhwKFGFpX3ByZWRpY3Rvcl9lbmFibGVkGAQgASgIEhcKD2FpX21vZGVsX3N0YXR1cxgFIAEoCRIYChBzaHVubmVkX2lwX2NvdW50GAkgASgFEhMKC3BxY19lbmFibGVkGAcgASgIEjIKCGdvdmVybm9yGAggASgLMiAuZ2F0ZW9uLnYxLlJlc291cmNlR292ZXJub3JTdGF0c0oECAYQB1IVY3Vja29vX2ZpbHRlcl9lbnRyaWVzIpsBChVSZXNvdXJjZUdvdmVybm9yU3RhdHMSDgoGYWN0aXZlGAEgASgIEhoKEm1lbW9yeV9ob29rc19jb3VudBgCIAEoBRIXCg9jcHVfaG9va3NfY291bnQYAyABKAUSHwoXbWVtb3J5X3ByZXNzdXJlX3BlcmNlbnQYBCABKAESHAoUY3B1X3ByZXNzdXJlX3BlcmNlbnQYBSABKAEisQEKCUVicGZTdGF0cxIPCgdlbmFibGVkGAEgASgIEhkKEXNodW5uZWRfaXBzX2NvdW50GAIgASgFEkEKD2Ryb3BwZWRfcGFja2V0cxgDIAMoCzIoLmdhdGVvbi52MS5FYnBmU3RhdHMuRHJvcHBlZFBhY2tldHNFbnRyeRo1ChNEcm9wcGVkUGFja2V0c0VudHJ5EgsKA2tleRgBIAEoCRINCgV2YWx1ZRgCIAEoBDoCOAEimQEKB1dhZlJ1bGUSCgoCaWQYASABKAkSDAoEbmFtZRgCIAEoCRIRCglkaXJlY3RpdmUYAyABKAkSDwoHZW5hYmxlZBgEIAEoCBIWCg5wYXJhbm9pYV9sZXZlbBgFIAEoBRIQCghjYXRlZ29yeRgGIAEoCRISCgpjcmVhdGVkX2F0GAcgASgJEhIKCnVwZGF0ZWRfYXQYCCABKAkiVgoTTGlzdFdhZlJ1bGVzUmVxdWVzdBINCgVsaW1pdBgBIAEoBRIOCgZvZmZzZXQYAiABKAUSDgoGc2VhcmNoGAMgASgJEhAKCGNhdGVnb3J5GAQgASgJIkgKFExpc3RXYWZSdWxlc1Jlc3BvbnNlEiEKBXJ1bGVzGAEgAygLMhIuZ2F0ZW9uLnYxLldhZlJ1bGUSDQoFdG90YWwYAiABKAUiOAoUQ3JlYXRlV2FmUnVsZVJlcXVlc3QSIAoEcnVsZRgBIAEoCzISLmdhdGVvbi52MS5XYWZSdWxlIkoKFUNyZWF0ZVdhZlJ1bGVSZXNwb25zZRIPCgdzdWNjZXNzGAEgASgIEiAKBHJ1bGUYAiABKAsyEi5nYXRlb24udjEuV2FmUnVsZSI4ChRVcGRhdGVXYWZSdWxlUmVxdWVzdBIgCgRydWxlGAEgASgLMhIuZ2F0ZW9uLnYxLldhZlJ1bGUiKAoVVXBkYXRlV2FmUnVsZVJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgiIgoURGVsZXRlV2FmUnVsZVJlcXVlc3QSCgoCaWQYASABKAkiKAoVRGVsZXRlV2FmUnVsZVJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAhCmwEKDWNvbS5nYXRlb24udjFCEERpYWdub3N0aWNzUHJvdG9QAVozZ2l0aHViLmNvbS9nc291bHRhbi9nYXRlb24vcHJvdG8vZ2F0ZW9uL3YxO2dhdGVvbnYxogIDR1hYqgIJR2F0ZW9uLlYxygIJR2F0ZW9uXFYx4gIVR2F0ZW9uXFYxXEdQQk1ldGFkYXRh6gIKR2F0ZW9uOjpWMWIGcHJvdG8z");
+  fileDesc("ChtnYXRlb24vdjEvZGlhZ25vc3RpY3MucHJvdG8SCWdhdGVvbi52MSIXChVHZXREaWFnbm9zdGljc1JlcXVlc3QioAIKFkdldERpYWdub3N0aWNzUmVzcG9uc2USNAoLZW50cnlwb2ludHMYASADKAsyHy5nYXRlb24udjEuRW50cnlQb2ludERpYWdub3N0aWMSNAoRcmVjZW50X3Rsc19lcnJvcnMYAiADKAsyGS5nYXRlb24udjEuSGFuZHNoYWtlRXJyb3ISJQoGc3lzdGVtGAMgASgLMhUuZ2F0ZW9uLnYxLlN5c3RlbUluZm8SJQoJYW5vbWFsaWVzGAQgAygLMhIuZ2F0ZW9uLnYxLkFub21hbHkSMQoMZGVwZW5kZW5jaWVzGAUgAygLMhsuZ2F0ZW9uLnYxLkRlcGVuZGVuY3lIZWFsdGgSGQoRdG90YWxfbWl0aWdhdGlvbnMYBiABKAUiywUKB0Fub21hbHkSDAoEdHlwZRgBIAEoCRIQCghzZXZlcml0eRgCIAEoCRITCgtkZXNjcmlwdGlvbhgDIAEoCRIRCgl0aW1lc3RhbXAYBCABKAkSDgoGc291cmNlGAUgASgJEhYKDnJlY29tbWVuZGF0aW9uGAYgASgJEhAKCGxhdGl0dWRlGAcgASgBEhEKCWxvbmdpdHVkZRgIIAEoARIUCgxjb3VudHJ5X2NvZGUYCSABKAkSDQoFc2NvcmUYCiABKAESCwoDamE0GCEgASgJEgwKBGphNGgYIyABKAkSEAoIcm91dGVfaWQYDCABKAkSEwoLcmVxdWVzdF91cmkYDSABKAkSEQoJbWl0aWdhdGVkGA4gASgIEhAKCGNhdGVnb3J5GA8gASgJEhQKDGFjdGlvbl90YWtlbhgQIAEoCRIWCg5jbHVzdGVyX3N5bmNlZBgRIAEoCBIXCg9yZXF1ZXN0X2hlYWRlcnMYEiABKAkSFAoMcmVxdWVzdF9ib2R5GBMgASgJEhgKEHJlc3BvbnNlX2hlYWRlcnMYFCABKAkSFQoNcmVzcG9uc2VfYm9keRgVIAEoCRISCgp1c2VyX2FnZW50GBYgASgJEhMKC2h0dHBfbWV0aG9kGBcgASgJEhIKCmNvbmZpZGVuY2UYGCABKAESDwoHZW50cm9weRgZIAEoARIUCgxjbHVzdGVyX3NpemUYGiABKAUSFwoPdHJpZ2dlcmVkX3J1bGVzGBsgASgJEgoKAmlkGBwgASgJEg8KB2phNHBsdXMYJCABKAkSEgoKcmVwdXRhdGlvbhgiIAEoARISCgpzb3VyY2VfaXBzGCUgAygJEhIKCmVudHJ5cG9pbnQYJiABKAkSDAoEaG9zdBgnIAEoCRITCgtvY2N1cnJlbmNlcxgoIAEoBRISCgpleHBpcmVzX2F0GCkgASgJSgQICxAMIn4KDEdvc3NpcFN0YXR1cxIPCgdlbmFibGVkGAEgASgIEhUKDW1lbWJlcnNfY291bnQYAiABKAUSFAoMbWVtYmVyX25hbWVzGAMgAygJEhUKDW1lc3NhZ2VzX3NlbnQYBCABKAMSGQoRbWVzc2FnZXNfcmVjZWl2ZWQYBSABKAMiZQoVUmVwdXRhdGlvblN5bmNQYXlsb2FkEhMKC2ZpbmdlcnByaW50GAEgASgJEg0KBXNjb3JlGAIgASgBEhcKD3Zpb2xhdGlvbl9jb3VudBgDIAEoBRIPCgdoaXN0b3J5GAQgAygJIl4KFEdyYXBoRWRnZVN5bmNQYXlsb2FkEhMKC3NvdXJjZV9ub2RlGAEgASgJEhMKC3RhcmdldF9ub2RlGAIgASgJEg4KBndlaWdodBgDIAEoARIMCgR0eXBlGAQgASgJIm0KGkxpc3RTZWN1cml0eVRocmVhdHNSZXF1ZXN0Eg0KBWxpbWl0GAEgASgFEg4KBm9mZnNldBgCIAEoBRIOCgZzZWFyY2gYAyABKAkSEAoIY2F0ZWdvcnkYBCABKAkSDgoGc3RhdHVzGAUgASgJIlcKG0xpc3RTZWN1cml0eVRocmVhdHNSZXNwb25zZRIjCgd0aHJlYXRzGAEgAygLMhIuZ2F0ZW9uLnYxLkFub21hbHkSEwoLdG90YWxfY291bnQYAiABKAUiJgoYR2V0U2VjdXJpdHlUaHJlYXRSZXF1ZXN0EgoKAmlkGAEgASgJIj8KGUdldFNlY3VyaXR5VGhyZWF0UmVzcG9uc2USIgoGdGhyZWF0GAEgASgLMhIuZ2F0ZW9uLnYxLkFub21hbHkiQgohTGlzdFNlY3VyaXR5VGhyZWF0QXJjaGl2ZXNSZXF1ZXN0Eg0KBWxpbWl0GAEgASgFEg4KBm9mZnNldBgCIAEoBSJtCiJMaXN0U2VjdXJpdHlUaHJlYXRBcmNoaXZlc1Jlc3BvbnNlEjIKCGFyY2hpdmVzGAEgAygLMiAuZ2F0ZW9uLnYxLlNlY3VyaXR5VGhyZWF0QXJjaGl2ZRITCgt0b3RhbF9jb3VudBgCIAEoBSJuChVTZWN1cml0eVRocmVhdEFyY2hpdmUSEAoIZmlsZW5hbWUYASABKAkSDAoEc2l6ZRgCIAEoAxISCgpjcmVhdGVkX2F0GAMgASgJEhAKCGZpcnN0X2F0GAQgASgJEg8KB2xhc3RfYXQYBSABKAkiYgofR2V0U2VjdXJpdHlUaHJlYXRBcmNoaXZlUmVxdWVzdBIQCghmaWxlbmFtZRgBIAEoCRINCgVsaW1pdBgCIAEoBRIOCgZvZmZzZXQYAyABKAUSDgoGc2VhcmNoGAQgASgJIlwKIEdldFNlY3VyaXR5VGhyZWF0QXJjaGl2ZVJlc3BvbnNlEiMKB3RocmVhdHMYASADKAsyEi5nYXRlb24udjEuQW5vbWFseRITCgt0b3RhbF9jb3VudBgCIAEoBSInChZMaXN0UmVwdXRhdGlvbnNSZXF1ZXN0Eg0KBWxpbWl0GAEgASgFIkUKF0xpc3RSZXB1dGF0aW9uc1Jlc3BvbnNlEioKC3JlcHV0YXRpb25zGAEgAygLMhUuZ2F0ZW9uLnYxLlJlcHV0YXRpb24ibgoKUmVwdXRhdGlvbhITCgtmaW5nZXJwcmludBgBIAEoCRINCgVzY29yZRgCIAEoARISCgpsYXN0X2V2ZW50GAMgASgJEhcKD3Zpb2xhdGlvbl9jb3VudBgEIAEoBRIPCgdoaXN0b3J5GAUgAygJIlQKEERlcGVuZGVuY3lIZWFsdGgSDAoEbmFtZRgBIAEoCRIPCgdoZWFsdGh5GAIgASgIEg0KBWVycm9yGAMgASgJEhIKCmxhdGVuY3lfbXMYBCABKAkijAEKGkFwcGx5UmVjb21tZW5kYXRpb25SZXF1ZXN0EhQKDGFub21hbHlfdHlwZRgBIAEoCRIOCgZzb3VyY2UYAiABKAkSEQoJdGhyZWF0X2lkGAMgASgJEhMKC3JlcXVlc3RfdXJpGAQgASgJEhIKCmVudHJ5cG9pbnQYBSABKAkSDAoEaG9zdBgGIAEoCSI/ChtBcHBseVJlY29tbWVuZGF0aW9uUmVzcG9uc2USDwoHc3VjY2VzcxgBIAEoCBIPCgdtZXNzYWdlGAIgASgJIk0KHFJlbW92ZU1pdGlnYXRlZFRocmVhdFJlcXVlc3QSDgoGc291cmNlGAEgASgJEgwKBGphNGgYAiABKAkSDwoHamE0cGx1cxgDIAEoCSJBCh1SZW1vdmVNaXRpZ2F0ZWRUaHJlYXRSZXNwb25zZRIPCgdzdWNjZXNzGAEgASgIEg8KB21lc3NhZ2UYAiABKAkicQoVTWl0aWdhdGVUaHJlYXRSZXF1ZXN0Eg4KBnNvdXJjZRgBIAEoCRIMCgR0eXBlGAIgASgJEg4KBnJlYXNvbhgDIAEoCRIQCghjYXRlZ29yeRgEIAEoCRIYChBkdXJhdGlvbl9zZWNvbmRzGAUgASgFIjoKFk1pdGlnYXRlVGhyZWF0UmVzcG9uc2USDwoHc3VjY2VzcxgBIAEoCBIPCgdtZXNzYWdlGAIgASgJIh8KEVRyYWNlUm91dGVSZXF1ZXN0EgoKAmlwGAEgASgJIjcKElRyYWNlUm91dGVSZXNwb25zZRIhCgRob3BzGAEgAygLMhMuZ2F0ZW9uLnYxLlRyYWNlSG9wIssBChNWYWxpZGF0ZUNPUlNSZXF1ZXN0EgsKA3VybBgBIAEoCRIOCgZvcmlnaW4YAiABKAkSDgoGbWV0aG9kGAMgASgJEjwKB2hlYWRlcnMYBCADKAsyKy5nYXRlb24udjEuVmFsaWRhdGVDT1JTUmVxdWVzdC5IZWFkZXJzRW50cnkSGQoRYXV0aF9iZWFyZXJfdG9rZW4YBSABKAkaLgoMSGVhZGVyc0VudHJ5EgsKA2tleRgBIAEoCRINCgV2YWx1ZRgCIAEoCToCOAEirwMKFFZhbGlkYXRlQ09SU1Jlc3BvbnNlEhIKCmlzX2FsbG93ZWQYASABKAgSDwoHbWVzc2FnZRgCIAEoCRJOChByZXNwb25zZV9oZWFkZXJzGAMgAygLMjQuZ2F0ZW9uLnYxLlZhbGlkYXRlQ09SU1Jlc3BvbnNlLlJlc3BvbnNlSGVhZGVyc0VudHJ5Eg4KBmNoZWNrcxgEIAMoCRIUCgxpc19wcmVmbGlnaHQYBSABKAgSUAoRbWlkZGxld2FyZV9jb25maWcYBiADKAsyNS5nYXRlb24udjEuVmFsaWRhdGVDT1JTUmVzcG9uc2UuTWlkZGxld2FyZUNvbmZpZ0VudHJ5EhIKCnJvdXRlX25hbWUYByABKAkSEwoLc3VnZ2VzdGlvbnMYCCADKAkSEAoIcm91dGVfaWQYCSABKAkaNgoUUmVzcG9uc2VIZWFkZXJzRW50cnkSCwoDa2V5GAEgASgJEg0KBXZhbHVlGAIgASgJOgI4ARo3ChVNaWRkbGV3YXJlQ29uZmlnRW50cnkSCwoDa2V5GAEgASgJEg0KBXZhbHVlGAIgASgJOgI4ASJ8CghUcmFjZUhvcBILCgNob3AYASABKAUSCgoCaXAYAiABKAkSEAoIbGF0aXR1ZGUYAyABKAESEQoJbG9uZ2l0dWRlGAQgASgBEhQKDGNvdW50cnlfY29kZRgFIAEoCRIMCgRjaXR5GAYgASgJEg4KBnJ0dF9tcxgHIAEoAyKNAgoURW50cnlQb2ludERpYWdub3N0aWMSCgoCaWQYASABKAkSDwoHYWRkcmVzcxgCIAEoCRIMCgR0eXBlGAMgASgJEhEKCWxpc3RlbmluZxgEIAEoCBIZChF0b3RhbF9jb25uZWN0aW9ucxgFIAEoAxIaChJhY3RpdmVfY29ubmVjdGlvbnMYBiABKAMSEgoKbGFzdF9lcnJvchgHIAEoCRIyCgxjZXJ0aWZpY2F0ZXMYCCADKAsyHC5nYXRlb24udjEuQ2VydGlmaWNhdGVTdGF0dXMSDAoEbmFtZRgJIAEoCRIqCgZyb3V0ZXMYCiADKAsyGi5nYXRlb24udjEuUm91dGVEaWFnbm9zdGljItIBCg9Sb3V0ZURpYWdub3N0aWMSCgoCaWQYASABKAkSDAoEbmFtZRgCIAEoCRIMCgRydWxlGAMgASgJEhIKCnNlcnZpY2VfaWQYBCABKAkSFAoMc2VydmljZV9uYW1lGAUgASgJEhcKD3NlcnZpY2VfaGVhbHRoeRgGIAEoCBI0CgttaWRkbGV3YXJlcxgHIAMoCzIfLmdhdGVvbi52MS5NaWRkbGV3YXJlRGlhZ25vc3RpYxIPCgdoZWFsdGh5GAggASgIEg0KBWVycm9yGAkgASgJIl4KFE1pZGRsZXdhcmVEaWFnbm9zdGljEgoKAmlkGAEgASgJEgwKBG5hbWUYAiABKAkSDAoEdHlwZRgDIAEoCRIPCgdoZWFsdGh5GAQgASgIEg0KBWVycm9yGAUgASgJImEKEUNlcnRpZmljYXRlU3RhdHVzEg4KBmRvbWFpbhgBIAEoCRIOCgZleHBpcnkYAiABKAkSDQoFdmFsaWQYAyABKAgSDQoFZXJyb3IYBCABKAkSDgoGaXNzdWVyGAUgASgJIncKDkhhbmRzaGFrZUVycm9yEhEKCXRpbWVzdGFtcBgBIAEoCRITCgtyZW1vdGVfYWRkchgCIAEoCRINCgVlcnJvchgDIAEoCRIVCg1lbnRyeXBvaW50X2lkGAQgASgJEhcKD2VudHJ5cG9pbnRfbmFtZRgFIAEoCSKOAgoKU3lzdGVtSW5mbxIRCglwdWJsaWNfaXAYASABKAkSHAoUY2xvdWRmbGFyZV9yZWFjaGFibGUYAiABKAgSDgoGdXB0aW1lGAMgASgJEhIKCmdvcm91dGluZXMYBCABKAMSFAoMbWVtb3J5X3VzYWdlGAUgASgJEhEKCWNwdV91c2FnZRgGIAEoCRIPCgd2ZXJzaW9uGAcgASgJEicKBmdvc3NpcBgIIAEoCzIXLmdhdGVvbi52MS5Hb3NzaXBTdGF0dXMSIgoEZWJwZhgJIAEoCzIULmdhdGVvbi52MS5FYnBmU3RhdHMSJAoFdGl0YW4YCiABKAsyFS5nYXRlb24udjEuVGl0YW5TdGF0cyKSAgoKVGl0YW5TdGF0cxIXCg9waGFudG9tX2VuYWJsZWQYASABKAgSFgoOcGhhbnRvbV9lbmdpbmUYAiABKAkSHAoUYWN0aXZlX3BoYW50b21fcG9ydHMYAyABKAUSHAoUYWlfcHJlZGljdG9yX2VuYWJsZWQYBCABKAgSFwoPYWlfbW9kZWxfc3RhdHVzGAUgASgJEhgKEHNodW5uZWRfaXBfY291bnQYCSABKAUSEwoLcHFjX2VuYWJsZWQYByABKAgSMgoIZ292ZXJub3IYCCABKAsyIC5nYXRlb24udjEuUmVzb3VyY2VHb3Zlcm5vclN0YXRzSgQIBhAHUhVjdWNrb29fZmlsdGVyX2VudHJpZXMimwEKFVJlc291cmNlR292ZXJub3JTdGF0cxIOCgZhY3RpdmUYASABKAgSGgoSbWVtb3J5X2hvb2tzX2NvdW50GAIgASgFEhcKD2NwdV9ob29rc19jb3VudBgDIAEoBRIfChdtZW1vcnlfcHJlc3N1cmVfcGVyY2VudBgEIAEoARIcChRjcHVfcHJlc3N1cmVfcGVyY2VudBgFIAEoASKxAQoJRWJwZlN0YXRzEg8KB2VuYWJsZWQYASABKAgSGQoRc2h1bm5lZF9pcHNfY291bnQYAiABKAUSQQoPZHJvcHBlZF9wYWNrZXRzGAMgAygLMiguZ2F0ZW9uLnYxLkVicGZTdGF0cy5Ecm9wcGVkUGFja2V0c0VudHJ5GjUKE0Ryb3BwZWRQYWNrZXRzRW50cnkSCwoDa2V5GAEgASgJEg0KBXZhbHVlGAIgASgEOgI4ASKZAQoHV2FmUnVsZRIKCgJpZBgBIAEoCRIMCgRuYW1lGAIgASgJEhEKCWRpcmVjdGl2ZRgDIAEoCRIPCgdlbmFibGVkGAQgASgIEhYKDnBhcmFub2lhX2xldmVsGAUgASgFEhAKCGNhdGVnb3J5GAYgASgJEhIKCmNyZWF0ZWRfYXQYByABKAkSEgoKdXBkYXRlZF9hdBgIIAEoCSJWChNMaXN0V2FmUnVsZXNSZXF1ZXN0Eg0KBWxpbWl0GAEgASgFEg4KBm9mZnNldBgCIAEoBRIOCgZzZWFyY2gYAyABKAkSEAoIY2F0ZWdvcnkYBCABKAkiSAoUTGlzdFdhZlJ1bGVzUmVzcG9uc2USIQoFcnVsZXMYASADKAsyEi5nYXRlb24udjEuV2FmUnVsZRINCgV0b3RhbBgCIAEoBSI4ChRDcmVhdGVXYWZSdWxlUmVxdWVzdBIgCgRydWxlGAEgASgLMhIuZ2F0ZW9uLnYxLldhZlJ1bGUiSgoVQ3JlYXRlV2FmUnVsZVJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSIAoEcnVsZRgCIAEoCzISLmdhdGVvbi52MS5XYWZSdWxlIjgKFFVwZGF0ZVdhZlJ1bGVSZXF1ZXN0EiAKBHJ1bGUYASABKAsyEi5nYXRlb24udjEuV2FmUnVsZSIoChVVcGRhdGVXYWZSdWxlUmVzcG9uc2USDwoHc3VjY2VzcxgBIAEoCCIiChREZWxldGVXYWZSdWxlUmVxdWVzdBIKCgJpZBgBIAEoCSIoChVEZWxldGVXYWZSdWxlUmVzcG9uc2USDwoHc3VjY2VzcxgBIAEoCEKbAQoNY29tLmdhdGVvbi52MUIQRGlhZ25vc3RpY3NQcm90b1ABWjNnaXRodWIuY29tL2dzb3VsdGFuL2dhdGVvbi9wcm90by9nYXRlb24vdjE7Z2F0ZW9udjGiAgNHWFiqAglHYXRlb24uVjHKAglHYXRlb25cVjHiAhVHYXRlb25cVjFcR1BCTWV0YWRhdGHqAgpHYXRlb246OlYxYgZwcm90bzM");
 
 /**
  * @generated from message gateon.v1.GetDiagnosticsRequest
@@ -479,6 +479,158 @@ export const GetSecurityThreatResponseSchema: GenMessage<GetSecurityThreatRespon
   messageDesc(file_gateon_v1_diagnostics, 9);
 
 /**
+ * ListSecurityThreatArchivesRequest pages through the archive files, newest
+ * first. A limit of 0 means 50; the server caps it at 500.
+ *
+ * @generated from message gateon.v1.ListSecurityThreatArchivesRequest
+ */
+export type ListSecurityThreatArchivesRequest = Message<"gateon.v1.ListSecurityThreatArchivesRequest"> & {
+  /**
+   * @generated from field: int32 limit = 1;
+   */
+  limit: number;
+
+  /**
+   * @generated from field: int32 offset = 2;
+   */
+  offset: number;
+};
+
+/**
+ * Describes the message gateon.v1.ListSecurityThreatArchivesRequest.
+ * Use `create(ListSecurityThreatArchivesRequestSchema)` to create a new message.
+ */
+export const ListSecurityThreatArchivesRequestSchema: GenMessage<ListSecurityThreatArchivesRequest> = /*@__PURE__*/
+  messageDesc(file_gateon_v1_diagnostics, 10);
+
+/**
+ * @generated from message gateon.v1.ListSecurityThreatArchivesResponse
+ */
+export type ListSecurityThreatArchivesResponse = Message<"gateon.v1.ListSecurityThreatArchivesResponse"> & {
+  /**
+   * @generated from field: repeated gateon.v1.SecurityThreatArchive archives = 1;
+   */
+  archives: SecurityThreatArchive[];
+
+  /**
+   * @generated from field: int32 total_count = 2;
+   */
+  totalCount: number;
+};
+
+/**
+ * Describes the message gateon.v1.ListSecurityThreatArchivesResponse.
+ * Use `create(ListSecurityThreatArchivesResponseSchema)` to create a new message.
+ */
+export const ListSecurityThreatArchivesResponseSchema: GenMessage<ListSecurityThreatArchivesResponse> = /*@__PURE__*/
+  messageDesc(file_gateon_v1_diagnostics, 11);
+
+/**
+ * SecurityThreatArchive is one archive file: the threats one retention step
+ * moved out of the database, oldest first.
+ *
+ * @generated from message gateon.v1.SecurityThreatArchive
+ */
+export type SecurityThreatArchive = Message<"gateon.v1.SecurityThreatArchive"> & {
+  /**
+   * @generated from field: string filename = 1;
+   */
+  filename: string;
+
+  /**
+   * @generated from field: int64 size = 2;
+   */
+  size: bigint;
+
+  /**
+   * RFC 3339
+   *
+   * @generated from field: string created_at = 3;
+   */
+  createdAt: string;
+
+  /**
+   * RFC 3339, the oldest threat in the file
+   *
+   * @generated from field: string first_at = 4;
+   */
+  firstAt: string;
+
+  /**
+   * RFC 3339, the newest threat in the file
+   *
+   * @generated from field: string last_at = 5;
+   */
+  lastAt: string;
+};
+
+/**
+ * Describes the message gateon.v1.SecurityThreatArchive.
+ * Use `create(SecurityThreatArchiveSchema)` to create a new message.
+ */
+export const SecurityThreatArchiveSchema: GenMessage<SecurityThreatArchive> = /*@__PURE__*/
+  messageDesc(file_gateon_v1_diagnostics, 12);
+
+/**
+ * GetSecurityThreatArchiveRequest reads one page of one archive file,
+ * optionally keeping only threats whose address, fingerprint, type, category,
+ * request URI or details contain search (case-insensitive). A limit of 0
+ * means 50; the server caps it at 500.
+ *
+ * @generated from message gateon.v1.GetSecurityThreatArchiveRequest
+ */
+export type GetSecurityThreatArchiveRequest = Message<"gateon.v1.GetSecurityThreatArchiveRequest"> & {
+  /**
+   * @generated from field: string filename = 1;
+   */
+  filename: string;
+
+  /**
+   * @generated from field: int32 limit = 2;
+   */
+  limit: number;
+
+  /**
+   * @generated from field: int32 offset = 3;
+   */
+  offset: number;
+
+  /**
+   * @generated from field: string search = 4;
+   */
+  search: string;
+};
+
+/**
+ * Describes the message gateon.v1.GetSecurityThreatArchiveRequest.
+ * Use `create(GetSecurityThreatArchiveRequestSchema)` to create a new message.
+ */
+export const GetSecurityThreatArchiveRequestSchema: GenMessage<GetSecurityThreatArchiveRequest> = /*@__PURE__*/
+  messageDesc(file_gateon_v1_diagnostics, 13);
+
+/**
+ * @generated from message gateon.v1.GetSecurityThreatArchiveResponse
+ */
+export type GetSecurityThreatArchiveResponse = Message<"gateon.v1.GetSecurityThreatArchiveResponse"> & {
+  /**
+   * @generated from field: repeated gateon.v1.Anomaly threats = 1;
+   */
+  threats: Anomaly[];
+
+  /**
+   * @generated from field: int32 total_count = 2;
+   */
+  totalCount: number;
+};
+
+/**
+ * Describes the message gateon.v1.GetSecurityThreatArchiveResponse.
+ * Use `create(GetSecurityThreatArchiveResponseSchema)` to create a new message.
+ */
+export const GetSecurityThreatArchiveResponseSchema: GenMessage<GetSecurityThreatArchiveResponse> = /*@__PURE__*/
+  messageDesc(file_gateon_v1_diagnostics, 14);
+
+/**
  * @generated from message gateon.v1.ListReputationsRequest
  */
 export type ListReputationsRequest = Message<"gateon.v1.ListReputationsRequest"> & {
@@ -493,7 +645,7 @@ export type ListReputationsRequest = Message<"gateon.v1.ListReputationsRequest">
  * Use `create(ListReputationsRequestSchema)` to create a new message.
  */
 export const ListReputationsRequestSchema: GenMessage<ListReputationsRequest> = /*@__PURE__*/
-  messageDesc(file_gateon_v1_diagnostics, 10);
+  messageDesc(file_gateon_v1_diagnostics, 15);
 
 /**
  * @generated from message gateon.v1.ListReputationsResponse
@@ -510,7 +662,7 @@ export type ListReputationsResponse = Message<"gateon.v1.ListReputationsResponse
  * Use `create(ListReputationsResponseSchema)` to create a new message.
  */
 export const ListReputationsResponseSchema: GenMessage<ListReputationsResponse> = /*@__PURE__*/
-  messageDesc(file_gateon_v1_diagnostics, 11);
+  messageDesc(file_gateon_v1_diagnostics, 16);
 
 /**
  * @generated from message gateon.v1.Reputation
@@ -547,7 +699,7 @@ export type Reputation = Message<"gateon.v1.Reputation"> & {
  * Use `create(ReputationSchema)` to create a new message.
  */
 export const ReputationSchema: GenMessage<Reputation> = /*@__PURE__*/
-  messageDesc(file_gateon_v1_diagnostics, 12);
+  messageDesc(file_gateon_v1_diagnostics, 17);
 
 /**
  * @generated from message gateon.v1.DependencyHealth
@@ -579,7 +731,7 @@ export type DependencyHealth = Message<"gateon.v1.DependencyHealth"> & {
  * Use `create(DependencyHealthSchema)` to create a new message.
  */
 export const DependencyHealthSchema: GenMessage<DependencyHealth> = /*@__PURE__*/
-  messageDesc(file_gateon_v1_diagnostics, 13);
+  messageDesc(file_gateon_v1_diagnostics, 18);
 
 /**
  * @generated from message gateon.v1.ApplyRecommendationRequest
@@ -626,7 +778,7 @@ export type ApplyRecommendationRequest = Message<"gateon.v1.ApplyRecommendationR
  * Use `create(ApplyRecommendationRequestSchema)` to create a new message.
  */
 export const ApplyRecommendationRequestSchema: GenMessage<ApplyRecommendationRequest> = /*@__PURE__*/
-  messageDesc(file_gateon_v1_diagnostics, 14);
+  messageDesc(file_gateon_v1_diagnostics, 19);
 
 /**
  * @generated from message gateon.v1.ApplyRecommendationResponse
@@ -648,7 +800,7 @@ export type ApplyRecommendationResponse = Message<"gateon.v1.ApplyRecommendation
  * Use `create(ApplyRecommendationResponseSchema)` to create a new message.
  */
 export const ApplyRecommendationResponseSchema: GenMessage<ApplyRecommendationResponse> = /*@__PURE__*/
-  messageDesc(file_gateon_v1_diagnostics, 15);
+  messageDesc(file_gateon_v1_diagnostics, 20);
 
 /**
  * @generated from message gateon.v1.RemoveMitigatedThreatRequest
@@ -677,7 +829,7 @@ export type RemoveMitigatedThreatRequest = Message<"gateon.v1.RemoveMitigatedThr
  * Use `create(RemoveMitigatedThreatRequestSchema)` to create a new message.
  */
 export const RemoveMitigatedThreatRequestSchema: GenMessage<RemoveMitigatedThreatRequest> = /*@__PURE__*/
-  messageDesc(file_gateon_v1_diagnostics, 16);
+  messageDesc(file_gateon_v1_diagnostics, 21);
 
 /**
  * @generated from message gateon.v1.RemoveMitigatedThreatResponse
@@ -699,7 +851,7 @@ export type RemoveMitigatedThreatResponse = Message<"gateon.v1.RemoveMitigatedTh
  * Use `create(RemoveMitigatedThreatResponseSchema)` to create a new message.
  */
 export const RemoveMitigatedThreatResponseSchema: GenMessage<RemoveMitigatedThreatResponse> = /*@__PURE__*/
-  messageDesc(file_gateon_v1_diagnostics, 17);
+  messageDesc(file_gateon_v1_diagnostics, 22);
 
 /**
  * @generated from message gateon.v1.MitigateThreatRequest
@@ -746,7 +898,7 @@ export type MitigateThreatRequest = Message<"gateon.v1.MitigateThreatRequest"> &
  * Use `create(MitigateThreatRequestSchema)` to create a new message.
  */
 export const MitigateThreatRequestSchema: GenMessage<MitigateThreatRequest> = /*@__PURE__*/
-  messageDesc(file_gateon_v1_diagnostics, 18);
+  messageDesc(file_gateon_v1_diagnostics, 23);
 
 /**
  * @generated from message gateon.v1.MitigateThreatResponse
@@ -768,7 +920,7 @@ export type MitigateThreatResponse = Message<"gateon.v1.MitigateThreatResponse">
  * Use `create(MitigateThreatResponseSchema)` to create a new message.
  */
 export const MitigateThreatResponseSchema: GenMessage<MitigateThreatResponse> = /*@__PURE__*/
-  messageDesc(file_gateon_v1_diagnostics, 19);
+  messageDesc(file_gateon_v1_diagnostics, 24);
 
 /**
  * @generated from message gateon.v1.TraceRouteRequest
@@ -785,7 +937,7 @@ export type TraceRouteRequest = Message<"gateon.v1.TraceRouteRequest"> & {
  * Use `create(TraceRouteRequestSchema)` to create a new message.
  */
 export const TraceRouteRequestSchema: GenMessage<TraceRouteRequest> = /*@__PURE__*/
-  messageDesc(file_gateon_v1_diagnostics, 20);
+  messageDesc(file_gateon_v1_diagnostics, 25);
 
 /**
  * @generated from message gateon.v1.TraceRouteResponse
@@ -802,7 +954,7 @@ export type TraceRouteResponse = Message<"gateon.v1.TraceRouteResponse"> & {
  * Use `create(TraceRouteResponseSchema)` to create a new message.
  */
 export const TraceRouteResponseSchema: GenMessage<TraceRouteResponse> = /*@__PURE__*/
-  messageDesc(file_gateon_v1_diagnostics, 21);
+  messageDesc(file_gateon_v1_diagnostics, 26);
 
 /**
  * @generated from message gateon.v1.ValidateCORSRequest
@@ -839,7 +991,7 @@ export type ValidateCORSRequest = Message<"gateon.v1.ValidateCORSRequest"> & {
  * Use `create(ValidateCORSRequestSchema)` to create a new message.
  */
 export const ValidateCORSRequestSchema: GenMessage<ValidateCORSRequest> = /*@__PURE__*/
-  messageDesc(file_gateon_v1_diagnostics, 22);
+  messageDesc(file_gateon_v1_diagnostics, 27);
 
 /**
  * @generated from message gateon.v1.ValidateCORSResponse
@@ -896,7 +1048,7 @@ export type ValidateCORSResponse = Message<"gateon.v1.ValidateCORSResponse"> & {
  * Use `create(ValidateCORSResponseSchema)` to create a new message.
  */
 export const ValidateCORSResponseSchema: GenMessage<ValidateCORSResponse> = /*@__PURE__*/
-  messageDesc(file_gateon_v1_diagnostics, 23);
+  messageDesc(file_gateon_v1_diagnostics, 28);
 
 /**
  * @generated from message gateon.v1.TraceHop
@@ -943,7 +1095,7 @@ export type TraceHop = Message<"gateon.v1.TraceHop"> & {
  * Use `create(TraceHopSchema)` to create a new message.
  */
 export const TraceHopSchema: GenMessage<TraceHop> = /*@__PURE__*/
-  messageDesc(file_gateon_v1_diagnostics, 24);
+  messageDesc(file_gateon_v1_diagnostics, 29);
 
 /**
  * @generated from message gateon.v1.EntryPointDiagnostic
@@ -1005,7 +1157,7 @@ export type EntryPointDiagnostic = Message<"gateon.v1.EntryPointDiagnostic"> & {
  * Use `create(EntryPointDiagnosticSchema)` to create a new message.
  */
 export const EntryPointDiagnosticSchema: GenMessage<EntryPointDiagnostic> = /*@__PURE__*/
-  messageDesc(file_gateon_v1_diagnostics, 25);
+  messageDesc(file_gateon_v1_diagnostics, 30);
 
 /**
  * @generated from message gateon.v1.RouteDiagnostic
@@ -1062,7 +1214,7 @@ export type RouteDiagnostic = Message<"gateon.v1.RouteDiagnostic"> & {
  * Use `create(RouteDiagnosticSchema)` to create a new message.
  */
 export const RouteDiagnosticSchema: GenMessage<RouteDiagnostic> = /*@__PURE__*/
-  messageDesc(file_gateon_v1_diagnostics, 26);
+  messageDesc(file_gateon_v1_diagnostics, 31);
 
 /**
  * @generated from message gateon.v1.MiddlewareDiagnostic
@@ -1099,7 +1251,7 @@ export type MiddlewareDiagnostic = Message<"gateon.v1.MiddlewareDiagnostic"> & {
  * Use `create(MiddlewareDiagnosticSchema)` to create a new message.
  */
 export const MiddlewareDiagnosticSchema: GenMessage<MiddlewareDiagnostic> = /*@__PURE__*/
-  messageDesc(file_gateon_v1_diagnostics, 27);
+  messageDesc(file_gateon_v1_diagnostics, 32);
 
 /**
  * @generated from message gateon.v1.CertificateStatus
@@ -1136,7 +1288,7 @@ export type CertificateStatus = Message<"gateon.v1.CertificateStatus"> & {
  * Use `create(CertificateStatusSchema)` to create a new message.
  */
 export const CertificateStatusSchema: GenMessage<CertificateStatus> = /*@__PURE__*/
-  messageDesc(file_gateon_v1_diagnostics, 28);
+  messageDesc(file_gateon_v1_diagnostics, 33);
 
 /**
  * @generated from message gateon.v1.HandshakeError
@@ -1173,7 +1325,7 @@ export type HandshakeError = Message<"gateon.v1.HandshakeError"> & {
  * Use `create(HandshakeErrorSchema)` to create a new message.
  */
 export const HandshakeErrorSchema: GenMessage<HandshakeError> = /*@__PURE__*/
-  messageDesc(file_gateon_v1_diagnostics, 29);
+  messageDesc(file_gateon_v1_diagnostics, 34);
 
 /**
  * @generated from message gateon.v1.SystemInfo
@@ -1235,7 +1387,7 @@ export type SystemInfo = Message<"gateon.v1.SystemInfo"> & {
  * Use `create(SystemInfoSchema)` to create a new message.
  */
 export const SystemInfoSchema: GenMessage<SystemInfo> = /*@__PURE__*/
-  messageDesc(file_gateon_v1_diagnostics, 30);
+  messageDesc(file_gateon_v1_diagnostics, 35);
 
 /**
  * @generated from message gateon.v1.TitanStats
@@ -1289,7 +1441,7 @@ export type TitanStats = Message<"gateon.v1.TitanStats"> & {
  * Use `create(TitanStatsSchema)` to create a new message.
  */
 export const TitanStatsSchema: GenMessage<TitanStats> = /*@__PURE__*/
-  messageDesc(file_gateon_v1_diagnostics, 31);
+  messageDesc(file_gateon_v1_diagnostics, 36);
 
 /**
  * @generated from message gateon.v1.ResourceGovernorStats
@@ -1326,7 +1478,7 @@ export type ResourceGovernorStats = Message<"gateon.v1.ResourceGovernorStats"> &
  * Use `create(ResourceGovernorStatsSchema)` to create a new message.
  */
 export const ResourceGovernorStatsSchema: GenMessage<ResourceGovernorStats> = /*@__PURE__*/
-  messageDesc(file_gateon_v1_diagnostics, 32);
+  messageDesc(file_gateon_v1_diagnostics, 37);
 
 /**
  * @generated from message gateon.v1.EbpfStats
@@ -1353,7 +1505,7 @@ export type EbpfStats = Message<"gateon.v1.EbpfStats"> & {
  * Use `create(EbpfStatsSchema)` to create a new message.
  */
 export const EbpfStatsSchema: GenMessage<EbpfStats> = /*@__PURE__*/
-  messageDesc(file_gateon_v1_diagnostics, 33);
+  messageDesc(file_gateon_v1_diagnostics, 38);
 
 /**
  * @generated from message gateon.v1.WafRule
@@ -1405,7 +1557,7 @@ export type WafRule = Message<"gateon.v1.WafRule"> & {
  * Use `create(WafRuleSchema)` to create a new message.
  */
 export const WafRuleSchema: GenMessage<WafRule> = /*@__PURE__*/
-  messageDesc(file_gateon_v1_diagnostics, 34);
+  messageDesc(file_gateon_v1_diagnostics, 39);
 
 /**
  * @generated from message gateon.v1.ListWafRulesRequest
@@ -1437,7 +1589,7 @@ export type ListWafRulesRequest = Message<"gateon.v1.ListWafRulesRequest"> & {
  * Use `create(ListWafRulesRequestSchema)` to create a new message.
  */
 export const ListWafRulesRequestSchema: GenMessage<ListWafRulesRequest> = /*@__PURE__*/
-  messageDesc(file_gateon_v1_diagnostics, 35);
+  messageDesc(file_gateon_v1_diagnostics, 40);
 
 /**
  * @generated from message gateon.v1.ListWafRulesResponse
@@ -1459,7 +1611,7 @@ export type ListWafRulesResponse = Message<"gateon.v1.ListWafRulesResponse"> & {
  * Use `create(ListWafRulesResponseSchema)` to create a new message.
  */
 export const ListWafRulesResponseSchema: GenMessage<ListWafRulesResponse> = /*@__PURE__*/
-  messageDesc(file_gateon_v1_diagnostics, 36);
+  messageDesc(file_gateon_v1_diagnostics, 41);
 
 /**
  * @generated from message gateon.v1.CreateWafRuleRequest
@@ -1476,7 +1628,7 @@ export type CreateWafRuleRequest = Message<"gateon.v1.CreateWafRuleRequest"> & {
  * Use `create(CreateWafRuleRequestSchema)` to create a new message.
  */
 export const CreateWafRuleRequestSchema: GenMessage<CreateWafRuleRequest> = /*@__PURE__*/
-  messageDesc(file_gateon_v1_diagnostics, 37);
+  messageDesc(file_gateon_v1_diagnostics, 42);
 
 /**
  * @generated from message gateon.v1.CreateWafRuleResponse
@@ -1498,7 +1650,7 @@ export type CreateWafRuleResponse = Message<"gateon.v1.CreateWafRuleResponse"> &
  * Use `create(CreateWafRuleResponseSchema)` to create a new message.
  */
 export const CreateWafRuleResponseSchema: GenMessage<CreateWafRuleResponse> = /*@__PURE__*/
-  messageDesc(file_gateon_v1_diagnostics, 38);
+  messageDesc(file_gateon_v1_diagnostics, 43);
 
 /**
  * @generated from message gateon.v1.UpdateWafRuleRequest
@@ -1515,7 +1667,7 @@ export type UpdateWafRuleRequest = Message<"gateon.v1.UpdateWafRuleRequest"> & {
  * Use `create(UpdateWafRuleRequestSchema)` to create a new message.
  */
 export const UpdateWafRuleRequestSchema: GenMessage<UpdateWafRuleRequest> = /*@__PURE__*/
-  messageDesc(file_gateon_v1_diagnostics, 39);
+  messageDesc(file_gateon_v1_diagnostics, 44);
 
 /**
  * @generated from message gateon.v1.UpdateWafRuleResponse
@@ -1532,7 +1684,7 @@ export type UpdateWafRuleResponse = Message<"gateon.v1.UpdateWafRuleResponse"> &
  * Use `create(UpdateWafRuleResponseSchema)` to create a new message.
  */
 export const UpdateWafRuleResponseSchema: GenMessage<UpdateWafRuleResponse> = /*@__PURE__*/
-  messageDesc(file_gateon_v1_diagnostics, 40);
+  messageDesc(file_gateon_v1_diagnostics, 45);
 
 /**
  * @generated from message gateon.v1.DeleteWafRuleRequest
@@ -1549,7 +1701,7 @@ export type DeleteWafRuleRequest = Message<"gateon.v1.DeleteWafRuleRequest"> & {
  * Use `create(DeleteWafRuleRequestSchema)` to create a new message.
  */
 export const DeleteWafRuleRequestSchema: GenMessage<DeleteWafRuleRequest> = /*@__PURE__*/
-  messageDesc(file_gateon_v1_diagnostics, 41);
+  messageDesc(file_gateon_v1_diagnostics, 46);
 
 /**
  * @generated from message gateon.v1.DeleteWafRuleResponse
@@ -1566,5 +1718,5 @@ export type DeleteWafRuleResponse = Message<"gateon.v1.DeleteWafRuleResponse"> &
  * Use `create(DeleteWafRuleResponseSchema)` to create a new message.
  */
 export const DeleteWafRuleResponseSchema: GenMessage<DeleteWafRuleResponse> = /*@__PURE__*/
-  messageDesc(file_gateon_v1_diagnostics, 42);
+  messageDesc(file_gateon_v1_diagnostics, 47);
 

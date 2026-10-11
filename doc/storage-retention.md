@@ -33,7 +33,13 @@ and can be set globally or per data category:
 Categories left at `0` fall back to the global default. The prune loop:
 
 1. Deletes SQL rows older than the cutoff (`path_stats`, `domain_stats`,
-   `security_threats`, `audit_logs`).
+   `security_threats`). Security threats go a thousand at a time, oldest
+   first, and are handed to the [security threat archive](#security-threat-archive)
+   first when it is on; a chunk whose archive fails is not deleted. Audit
+   entries are not deleted here: the audit manager owns them, applies the
+   shorter of `audit.retention_days` and `log.audit_log_retention_days`, and
+   archives each chunk of 5,000 first when `audit.archive_on_retention` is on
+   (ADR 0066).
 2. `DeleteRange`s expired Pebble trace keys, then **compacts the pruned key
    range** so the space is physically reclaimed instead of left as tombstones.
 3. Reclaims SQLite disk via `PRAGMA incremental_vacuum` (enabled by
@@ -291,6 +297,29 @@ Metrics: `gateon_trace_archive_segments_written_total`,
 `gateon_trace_archive_traces_written_total`, `gateon_trace_archive_bytes`,
 `gateon_trace_archive_errors_total{stage="export|verify|retention"}` and
 `gateon_trace_archive_unverified_prunes_total`.
+
+## Security threat archive
+
+Off by default. When it is on, threats past their retention are written to
+`<data dir>/security/archives` before their rows are deleted: one
+gzip-compressed NDJSON file per prune step of up to a thousand threats, named
+for the oldest and newest threat in it
+(`threats_20261011T000000Z_20261011T013000Z_9f2c11ab.ndjson.gz`). Each line is
+one threat with every field it had in the database, request and response
+bodies included. Security Hub, Archive lists the files and opens one with
+search and paging; that view reads the files and never queries the database.
+
+| Setting | Environment variable | minimal | standard | enterprise |
+|---------|----------------------|---------|----------|------------|
+| Archive on | `GATEON_THREAT_ARCHIVE_ENABLED` | off | off | off |
+| Size limit | `GATEON_THREAT_ARCHIVE_MAX_MB` | 256 MB | 1 GB | 10 GB |
+| Directory | `GATEON_THREAT_ARCHIVE_DIR` | `<data dir>/security/archives` | same | same |
+
+An environment variable beats the global config
+(`log.security_threat_archive_*`), which beats the profile. Past the size limit
+the oldest files go first; the file just written is always kept. Gateways that
+share one database each run the prune, so two of them can archive the same
+chunk and a threat can then appear in two files; none is lost. See ADR 0066.
 
 ## In-memory cache bounds
 

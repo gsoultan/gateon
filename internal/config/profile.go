@@ -90,6 +90,13 @@ type TierDefaults struct {
 	TraceArchiveRetentionDays int
 	TraceArchiveMaxBytes      int64
 
+	// Security threat archive (internal/telemetry/threatarchive): the most disk
+	// archived threats may take; past it the oldest files go first. Off on
+	// every tier until log.security_threat_archive_enabled or
+	// GATEON_THREAT_ARCHIVE_ENABLED turns it on, for the same reason as the
+	// trace archive. GATEON_THREAT_ARCHIVE_MAX_MB overrides it.
+	ThreatArchiveMaxBytes int64
+
 	// WAF default tier when WafConfig.Tier is empty.
 	WAFTier Tier
 
@@ -247,6 +254,7 @@ func DefaultsFor(tier Tier) TierDefaults {
 			AccessLogMaxPerSecond:     50,
 			TraceArchiveRetentionDays: 7,
 			TraceArchiveMaxBytes:      256 << 20, // 256 MiB
+			ThreatArchiveMaxBytes:     256 << 20, // 256 MiB
 			DBMaxOpenConns:            5,
 			DBMaxIdleConns:            5,
 			TelemetryIntervalSeconds:  30,
@@ -285,6 +293,7 @@ func DefaultsFor(tier Tier) TierDefaults {
 			AccessLogMaxPerSecond:     200,
 			TraceArchiveRetentionDays: 365,
 			TraceArchiveMaxBytes:      20 << 30, // 20 GiB
+			ThreatArchiveMaxBytes:     10 << 30, // 10 GiB
 			DBMaxOpenConns:            100,
 			DBMaxIdleConns:            50,
 			TelemetryIntervalSeconds:  2,
@@ -323,6 +332,7 @@ func DefaultsFor(tier Tier) TierDefaults {
 			AccessLogMaxPerSecond:     100,
 			TraceArchiveRetentionDays: 90,
 			TraceArchiveMaxBytes:      2 << 30, // 2 GiB
+			ThreatArchiveMaxBytes:     1 << 30, // 1 GiB
 			DBMaxOpenConns:            25,
 			DBMaxIdleConns:            25,
 			TelemetryIntervalSeconds:  5,

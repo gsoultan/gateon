@@ -115,6 +115,44 @@ message GetSecurityThreatResponse {
   Anomaly threat = 1;
 }
 
+// ListSecurityThreatArchivesRequest pages through the archive files, newest
+// first. A limit of 0 means 50; the server caps it at 500.
+message ListSecurityThreatArchivesRequest {
+  int32 limit = 1;
+  int32 offset = 2;
+}
+
+message ListSecurityThreatArchivesResponse {
+  repeated SecurityThreatArchive archives = 1;
+  int32 total_count = 2;
+}
+
+// SecurityThreatArchive is one archive file: the threats one retention step
+// moved out of the database, oldest first.
+message SecurityThreatArchive {
+  string filename = 1;
+  int64 size = 2;
+  string created_at = 3;  // RFC 3339
+  string first_at = 4;    // RFC 3339, the oldest threat in the file
+  string last_at = 5;     // RFC 3339, the newest threat in the file
+}
+
+// GetSecurityThreatArchiveRequest reads one page of one archive file,
+// optionally keeping only threats whose address, fingerprint, type, category,
+// request URI or details contain search (case-insensitive). A limit of 0
+// means 50; the server caps it at 500.
+message GetSecurityThreatArchiveRequest {
+  string filename = 1;
+  int32 limit = 2;
+  int32 offset = 3;
+  string search = 4;
+}
+
+message GetSecurityThreatArchiveResponse {
+  repeated Anomaly threats = 1;
+  int32 total_count = 2;
+}
+
 message ListReputationsRequest {
   int32 limit = 1;
 }

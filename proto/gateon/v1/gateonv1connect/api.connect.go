@@ -130,6 +130,12 @@ const (
 	// ApiServiceGetSecurityThreatProcedure is the fully-qualified name of the ApiService's
 	// GetSecurityThreat RPC.
 	ApiServiceGetSecurityThreatProcedure = "/gateon.v1.ApiService/GetSecurityThreat"
+	// ApiServiceListSecurityThreatArchivesProcedure is the fully-qualified name of the ApiService's
+	// ListSecurityThreatArchives RPC.
+	ApiServiceListSecurityThreatArchivesProcedure = "/gateon.v1.ApiService/ListSecurityThreatArchives"
+	// ApiServiceGetSecurityThreatArchiveProcedure is the fully-qualified name of the ApiService's
+	// GetSecurityThreatArchive RPC.
+	ApiServiceGetSecurityThreatArchiveProcedure = "/gateon.v1.ApiService/GetSecurityThreatArchive"
 	// ApiServiceMitigateThreatProcedure is the fully-qualified name of the ApiService's MitigateThreat
 	// RPC.
 	ApiServiceMitigateThreatProcedure = "/gateon.v1.ApiService/MitigateThreat"
@@ -231,6 +237,11 @@ type ApiServiceClient interface {
 	GetDiagnostics(context.Context, *connect.Request[v1.GetDiagnosticsRequest]) (*connect.Response[v1.GetDiagnosticsResponse], error)
 	ListSecurityThreats(context.Context, *connect.Request[v1.ListSecurityThreatsRequest]) (*connect.Response[v1.ListSecurityThreatsResponse], error)
 	GetSecurityThreat(context.Context, *connect.Request[v1.GetSecurityThreatRequest]) (*connect.Response[v1.GetSecurityThreatResponse], error)
+	// Security threats that retention moved out of the database into archive
+	// files (log.security_threat_archive_enabled). Both are paged; neither
+	// touches the database.
+	ListSecurityThreatArchives(context.Context, *connect.Request[v1.ListSecurityThreatArchivesRequest]) (*connect.Response[v1.ListSecurityThreatArchivesResponse], error)
+	GetSecurityThreatArchive(context.Context, *connect.Request[v1.GetSecurityThreatArchiveRequest]) (*connect.Response[v1.GetSecurityThreatArchiveResponse], error)
 	MitigateThreat(context.Context, *connect.Request[v1.MitigateThreatRequest]) (*connect.Response[v1.MitigateThreatResponse], error)
 	RemoveMitigatedThreat(context.Context, *connect.Request[v1.RemoveMitigatedThreatRequest]) (*connect.Response[v1.RemoveMitigatedThreatResponse], error)
 	ListReputations(context.Context, *connect.Request[v1.ListReputationsRequest]) (*connect.Response[v1.ListReputationsResponse], error)
@@ -489,6 +500,18 @@ func NewApiServiceClient(httpClient connect.HTTPClient, baseURL string, opts ...
 			connect.WithSchema(apiServiceMethods.ByName("GetSecurityThreat")),
 			connect.WithClientOptions(opts...),
 		),
+		listSecurityThreatArchives: connect.NewClient[v1.ListSecurityThreatArchivesRequest, v1.ListSecurityThreatArchivesResponse](
+			httpClient,
+			baseURL+ApiServiceListSecurityThreatArchivesProcedure,
+			connect.WithSchema(apiServiceMethods.ByName("ListSecurityThreatArchives")),
+			connect.WithClientOptions(opts...),
+		),
+		getSecurityThreatArchive: connect.NewClient[v1.GetSecurityThreatArchiveRequest, v1.GetSecurityThreatArchiveResponse](
+			httpClient,
+			baseURL+ApiServiceGetSecurityThreatArchiveProcedure,
+			connect.WithSchema(apiServiceMethods.ByName("GetSecurityThreatArchive")),
+			connect.WithClientOptions(opts...),
+		),
 		mitigateThreat: connect.NewClient[v1.MitigateThreatRequest, v1.MitigateThreatResponse](
 			httpClient,
 			baseURL+ApiServiceMitigateThreatProcedure,
@@ -620,63 +643,65 @@ func NewApiServiceClient(httpClient connect.HTTPClient, baseURL string, opts ...
 
 // apiServiceClient implements ApiServiceClient.
 type apiServiceClient struct {
-	getStatus             *connect.Client[v1.GetStatusRequest, v1.GetStatusResponse]
-	listTraces            *connect.Client[v1.ListTracesRequest, v1.ListTracesResponse]
-	getTrace              *connect.Client[v1.GetTraceRequest, v1.GetTraceResponse]
-	queryTraces           *connect.Client[v1.QueryTracesRequest, v1.QueryTracesResponse]
-	listTraceArchives     *connect.Client[v1.ListTraceArchivesRequest, v1.ListTraceArchivesResponse]
-	listRoutes            *connect.Client[v1.ListRoutesRequest, v1.ListRoutesResponse]
-	updateRoute           *connect.Client[v1.UpdateRouteRequest, v1.UpdateRouteResponse]
-	deleteRoute           *connect.Client[v1.DeleteRouteRequest, v1.DeleteRouteResponse]
-	listServices          *connect.Client[v1.ListServicesRequest, v1.ListServicesResponse]
-	updateService         *connect.Client[v1.UpdateServiceRequest, v1.UpdateServiceResponse]
-	deleteService         *connect.Client[v1.DeleteServiceRequest, v1.DeleteServiceResponse]
-	discoverGrpcServices  *connect.Client[v1.DiscoverGrpcServicesRequest, v1.DiscoverGrpcServicesResponse]
-	discoverTech          *connect.Client[v1.DiscoverTechRequest, v1.DiscoverTechResponse]
-	getGlobalConfig       *connect.Client[v1.GetGlobalConfigRequest, v1.GetGlobalConfigResponse]
-	updateGlobalConfig    *connect.Client[v1.UpdateGlobalConfigRequest, v1.UpdateGlobalConfigResponse]
-	listEntryPoints       *connect.Client[v1.ListEntryPointsRequest, v1.ListEntryPointsResponse]
-	updateEntryPoint      *connect.Client[v1.UpdateEntryPointRequest, v1.UpdateEntryPointResponse]
-	deleteEntryPoint      *connect.Client[v1.DeleteEntryPointRequest, v1.DeleteEntryPointResponse]
-	listMiddlewares       *connect.Client[v1.ListMiddlewaresRequest, v1.ListMiddlewaresResponse]
-	updateMiddleware      *connect.Client[v1.UpdateMiddlewareRequest, v1.UpdateMiddlewareResponse]
-	deleteMiddleware      *connect.Client[v1.DeleteMiddlewareRequest, v1.DeleteMiddlewareResponse]
-	getCloudflareIPs      *connect.Client[v1.GetCloudflareIPsRequest, v1.GetCloudflareIPsResponse]
-	listTLSOptions        *connect.Client[v1.ListTLSOptionsRequest, v1.ListTLSOptionsResponse]
-	updateTLSOption       *connect.Client[v1.UpdateTLSOptionRequest, v1.UpdateTLSOptionResponse]
-	deleteTLSOption       *connect.Client[v1.DeleteTLSOptionRequest, v1.DeleteTLSOptionResponse]
-	login                 *connect.Client[v1.LoginRequest, v1.LoginResponse]
-	isSetupRequired       *connect.Client[v1.IsSetupRequiredRequest, v1.IsSetupRequiredResponse]
-	setup                 *connect.Client[v1.SetupRequest, v1.SetupResponse]
-	changePassword        *connect.Client[v1.ChangePasswordRequest, v1.ChangePasswordResponse]
-	listUsers             *connect.Client[v1.ListUsersRequest, v1.ListUsersResponse]
-	updateUser            *connect.Client[v1.UpdateUserRequest, v1.UpdateUserResponse]
-	deleteUser            *connect.Client[v1.DeleteUserRequest, v1.DeleteUserResponse]
-	resetUserTwoFactor    *connect.Client[v1.ResetUserTwoFactorRequest, v1.ResetUserTwoFactorResponse]
-	getDiagnostics        *connect.Client[v1.GetDiagnosticsRequest, v1.GetDiagnosticsResponse]
-	listSecurityThreats   *connect.Client[v1.ListSecurityThreatsRequest, v1.ListSecurityThreatsResponse]
-	getSecurityThreat     *connect.Client[v1.GetSecurityThreatRequest, v1.GetSecurityThreatResponse]
-	mitigateThreat        *connect.Client[v1.MitigateThreatRequest, v1.MitigateThreatResponse]
-	removeMitigatedThreat *connect.Client[v1.RemoveMitigatedThreatRequest, v1.RemoveMitigatedThreatResponse]
-	listReputations       *connect.Client[v1.ListReputationsRequest, v1.ListReputationsResponse]
-	listAuditLogs         *connect.Client[v1.ListAuditLogsRequest, v1.ListAuditLogsResponse]
-	listAuditArchives     *connect.Client[v1.ListAuditArchivesRequest, v1.ListAuditArchivesResponse]
-	getAuditArchive       *connect.Client[v1.GetAuditArchiveRequest, v1.GetAuditArchiveResponse]
-	applyRecommendation   *connect.Client[v1.ApplyRecommendationRequest, v1.ApplyRecommendationResponse]
-	traceRoute            *connect.Client[v1.TraceRouteRequest, v1.TraceRouteResponse]
-	validateCORS          *connect.Client[v1.ValidateCORSRequest, v1.ValidateCORSResponse]
-	installClamav         *connect.Client[v1.InstallClamavRequest, v1.InstallClamavResponse]
-	uninstallClamav       *connect.Client[v1.UninstallClamavRequest, v1.UninstallClamavResponse]
-	runDeepScan           *connect.Client[v1.RunDeepScanRequest, v1.RunDeepScanResponse]
-	getClamavScanStatus   *connect.Client[v1.GetClamavScanStatusRequest, v1.GetClamavScanStatusResponse]
-	listWafRules          *connect.Client[v1.ListWafRulesRequest, v1.ListWafRulesResponse]
-	createWafRule         *connect.Client[v1.CreateWafRuleRequest, v1.CreateWafRuleResponse]
-	updateWafRule         *connect.Client[v1.UpdateWafRuleRequest, v1.UpdateWafRuleResponse]
-	deleteWafRule         *connect.Client[v1.DeleteWafRuleRequest, v1.DeleteWafRuleResponse]
-	listApiTokens         *connect.Client[v1.ListApiTokensRequest, v1.ListApiTokensResponse]
-	createApiToken        *connect.Client[v1.CreateApiTokenRequest, v1.CreateApiTokenResponse]
-	revokeApiToken        *connect.Client[v1.RevokeApiTokenRequest, v1.RevokeApiTokenResponse]
-	verifyAuditChain      *connect.Client[v1.VerifyAuditChainRequest, v1.VerifyAuditChainResponse]
+	getStatus                  *connect.Client[v1.GetStatusRequest, v1.GetStatusResponse]
+	listTraces                 *connect.Client[v1.ListTracesRequest, v1.ListTracesResponse]
+	getTrace                   *connect.Client[v1.GetTraceRequest, v1.GetTraceResponse]
+	queryTraces                *connect.Client[v1.QueryTracesRequest, v1.QueryTracesResponse]
+	listTraceArchives          *connect.Client[v1.ListTraceArchivesRequest, v1.ListTraceArchivesResponse]
+	listRoutes                 *connect.Client[v1.ListRoutesRequest, v1.ListRoutesResponse]
+	updateRoute                *connect.Client[v1.UpdateRouteRequest, v1.UpdateRouteResponse]
+	deleteRoute                *connect.Client[v1.DeleteRouteRequest, v1.DeleteRouteResponse]
+	listServices               *connect.Client[v1.ListServicesRequest, v1.ListServicesResponse]
+	updateService              *connect.Client[v1.UpdateServiceRequest, v1.UpdateServiceResponse]
+	deleteService              *connect.Client[v1.DeleteServiceRequest, v1.DeleteServiceResponse]
+	discoverGrpcServices       *connect.Client[v1.DiscoverGrpcServicesRequest, v1.DiscoverGrpcServicesResponse]
+	discoverTech               *connect.Client[v1.DiscoverTechRequest, v1.DiscoverTechResponse]
+	getGlobalConfig            *connect.Client[v1.GetGlobalConfigRequest, v1.GetGlobalConfigResponse]
+	updateGlobalConfig         *connect.Client[v1.UpdateGlobalConfigRequest, v1.UpdateGlobalConfigResponse]
+	listEntryPoints            *connect.Client[v1.ListEntryPointsRequest, v1.ListEntryPointsResponse]
+	updateEntryPoint           *connect.Client[v1.UpdateEntryPointRequest, v1.UpdateEntryPointResponse]
+	deleteEntryPoint           *connect.Client[v1.DeleteEntryPointRequest, v1.DeleteEntryPointResponse]
+	listMiddlewares            *connect.Client[v1.ListMiddlewaresRequest, v1.ListMiddlewaresResponse]
+	updateMiddleware           *connect.Client[v1.UpdateMiddlewareRequest, v1.UpdateMiddlewareResponse]
+	deleteMiddleware           *connect.Client[v1.DeleteMiddlewareRequest, v1.DeleteMiddlewareResponse]
+	getCloudflareIPs           *connect.Client[v1.GetCloudflareIPsRequest, v1.GetCloudflareIPsResponse]
+	listTLSOptions             *connect.Client[v1.ListTLSOptionsRequest, v1.ListTLSOptionsResponse]
+	updateTLSOption            *connect.Client[v1.UpdateTLSOptionRequest, v1.UpdateTLSOptionResponse]
+	deleteTLSOption            *connect.Client[v1.DeleteTLSOptionRequest, v1.DeleteTLSOptionResponse]
+	login                      *connect.Client[v1.LoginRequest, v1.LoginResponse]
+	isSetupRequired            *connect.Client[v1.IsSetupRequiredRequest, v1.IsSetupRequiredResponse]
+	setup                      *connect.Client[v1.SetupRequest, v1.SetupResponse]
+	changePassword             *connect.Client[v1.ChangePasswordRequest, v1.ChangePasswordResponse]
+	listUsers                  *connect.Client[v1.ListUsersRequest, v1.ListUsersResponse]
+	updateUser                 *connect.Client[v1.UpdateUserRequest, v1.UpdateUserResponse]
+	deleteUser                 *connect.Client[v1.DeleteUserRequest, v1.DeleteUserResponse]
+	resetUserTwoFactor         *connect.Client[v1.ResetUserTwoFactorRequest, v1.ResetUserTwoFactorResponse]
+	getDiagnostics             *connect.Client[v1.GetDiagnosticsRequest, v1.GetDiagnosticsResponse]
+	listSecurityThreats        *connect.Client[v1.ListSecurityThreatsRequest, v1.ListSecurityThreatsResponse]
+	getSecurityThreat          *connect.Client[v1.GetSecurityThreatRequest, v1.GetSecurityThreatResponse]
+	listSecurityThreatArchives *connect.Client[v1.ListSecurityThreatArchivesRequest, v1.ListSecurityThreatArchivesResponse]
+	getSecurityThreatArchive   *connect.Client[v1.GetSecurityThreatArchiveRequest, v1.GetSecurityThreatArchiveResponse]
+	mitigateThreat             *connect.Client[v1.MitigateThreatRequest, v1.MitigateThreatResponse]
+	removeMitigatedThreat      *connect.Client[v1.RemoveMitigatedThreatRequest, v1.RemoveMitigatedThreatResponse]
+	listReputations            *connect.Client[v1.ListReputationsRequest, v1.ListReputationsResponse]
+	listAuditLogs              *connect.Client[v1.ListAuditLogsRequest, v1.ListAuditLogsResponse]
+	listAuditArchives          *connect.Client[v1.ListAuditArchivesRequest, v1.ListAuditArchivesResponse]
+	getAuditArchive            *connect.Client[v1.GetAuditArchiveRequest, v1.GetAuditArchiveResponse]
+	applyRecommendation        *connect.Client[v1.ApplyRecommendationRequest, v1.ApplyRecommendationResponse]
+	traceRoute                 *connect.Client[v1.TraceRouteRequest, v1.TraceRouteResponse]
+	validateCORS               *connect.Client[v1.ValidateCORSRequest, v1.ValidateCORSResponse]
+	installClamav              *connect.Client[v1.InstallClamavRequest, v1.InstallClamavResponse]
+	uninstallClamav            *connect.Client[v1.UninstallClamavRequest, v1.UninstallClamavResponse]
+	runDeepScan                *connect.Client[v1.RunDeepScanRequest, v1.RunDeepScanResponse]
+	getClamavScanStatus        *connect.Client[v1.GetClamavScanStatusRequest, v1.GetClamavScanStatusResponse]
+	listWafRules               *connect.Client[v1.ListWafRulesRequest, v1.ListWafRulesResponse]
+	createWafRule              *connect.Client[v1.CreateWafRuleRequest, v1.CreateWafRuleResponse]
+	updateWafRule              *connect.Client[v1.UpdateWafRuleRequest, v1.UpdateWafRuleResponse]
+	deleteWafRule              *connect.Client[v1.DeleteWafRuleRequest, v1.DeleteWafRuleResponse]
+	listApiTokens              *connect.Client[v1.ListApiTokensRequest, v1.ListApiTokensResponse]
+	createApiToken             *connect.Client[v1.CreateApiTokenRequest, v1.CreateApiTokenResponse]
+	revokeApiToken             *connect.Client[v1.RevokeApiTokenRequest, v1.RevokeApiTokenResponse]
+	verifyAuditChain           *connect.Client[v1.VerifyAuditChainRequest, v1.VerifyAuditChainResponse]
 }
 
 // GetStatus calls gateon.v1.ApiService.GetStatus.
@@ -859,6 +884,16 @@ func (c *apiServiceClient) GetSecurityThreat(ctx context.Context, req *connect.R
 	return c.getSecurityThreat.CallUnary(ctx, req)
 }
 
+// ListSecurityThreatArchives calls gateon.v1.ApiService.ListSecurityThreatArchives.
+func (c *apiServiceClient) ListSecurityThreatArchives(ctx context.Context, req *connect.Request[v1.ListSecurityThreatArchivesRequest]) (*connect.Response[v1.ListSecurityThreatArchivesResponse], error) {
+	return c.listSecurityThreatArchives.CallUnary(ctx, req)
+}
+
+// GetSecurityThreatArchive calls gateon.v1.ApiService.GetSecurityThreatArchive.
+func (c *apiServiceClient) GetSecurityThreatArchive(ctx context.Context, req *connect.Request[v1.GetSecurityThreatArchiveRequest]) (*connect.Response[v1.GetSecurityThreatArchiveResponse], error) {
+	return c.getSecurityThreatArchive.CallUnary(ctx, req)
+}
+
 // MitigateThreat calls gateon.v1.ApiService.MitigateThreat.
 func (c *apiServiceClient) MitigateThreat(ctx context.Context, req *connect.Request[v1.MitigateThreatRequest]) (*connect.Response[v1.MitigateThreatResponse], error) {
 	return c.mitigateThreat.CallUnary(ctx, req)
@@ -1004,6 +1039,11 @@ type ApiServiceHandler interface {
 	GetDiagnostics(context.Context, *connect.Request[v1.GetDiagnosticsRequest]) (*connect.Response[v1.GetDiagnosticsResponse], error)
 	ListSecurityThreats(context.Context, *connect.Request[v1.ListSecurityThreatsRequest]) (*connect.Response[v1.ListSecurityThreatsResponse], error)
 	GetSecurityThreat(context.Context, *connect.Request[v1.GetSecurityThreatRequest]) (*connect.Response[v1.GetSecurityThreatResponse], error)
+	// Security threats that retention moved out of the database into archive
+	// files (log.security_threat_archive_enabled). Both are paged; neither
+	// touches the database.
+	ListSecurityThreatArchives(context.Context, *connect.Request[v1.ListSecurityThreatArchivesRequest]) (*connect.Response[v1.ListSecurityThreatArchivesResponse], error)
+	GetSecurityThreatArchive(context.Context, *connect.Request[v1.GetSecurityThreatArchiveRequest]) (*connect.Response[v1.GetSecurityThreatArchiveResponse], error)
 	MitigateThreat(context.Context, *connect.Request[v1.MitigateThreatRequest]) (*connect.Response[v1.MitigateThreatResponse], error)
 	RemoveMitigatedThreat(context.Context, *connect.Request[v1.RemoveMitigatedThreatRequest]) (*connect.Response[v1.RemoveMitigatedThreatResponse], error)
 	ListReputations(context.Context, *connect.Request[v1.ListReputationsRequest]) (*connect.Response[v1.ListReputationsResponse], error)
@@ -1258,6 +1298,18 @@ func NewApiServiceHandler(svc ApiServiceHandler, opts ...connect.HandlerOption) 
 		connect.WithSchema(apiServiceMethods.ByName("GetSecurityThreat")),
 		connect.WithHandlerOptions(opts...),
 	)
+	apiServiceListSecurityThreatArchivesHandler := connect.NewUnaryHandler(
+		ApiServiceListSecurityThreatArchivesProcedure,
+		svc.ListSecurityThreatArchives,
+		connect.WithSchema(apiServiceMethods.ByName("ListSecurityThreatArchives")),
+		connect.WithHandlerOptions(opts...),
+	)
+	apiServiceGetSecurityThreatArchiveHandler := connect.NewUnaryHandler(
+		ApiServiceGetSecurityThreatArchiveProcedure,
+		svc.GetSecurityThreatArchive,
+		connect.WithSchema(apiServiceMethods.ByName("GetSecurityThreatArchive")),
+		connect.WithHandlerOptions(opts...),
+	)
 	apiServiceMitigateThreatHandler := connect.NewUnaryHandler(
 		ApiServiceMitigateThreatProcedure,
 		svc.MitigateThreat,
@@ -1458,6 +1510,10 @@ func NewApiServiceHandler(svc ApiServiceHandler, opts ...connect.HandlerOption) 
 			apiServiceListSecurityThreatsHandler.ServeHTTP(w, r)
 		case ApiServiceGetSecurityThreatProcedure:
 			apiServiceGetSecurityThreatHandler.ServeHTTP(w, r)
+		case ApiServiceListSecurityThreatArchivesProcedure:
+			apiServiceListSecurityThreatArchivesHandler.ServeHTTP(w, r)
+		case ApiServiceGetSecurityThreatArchiveProcedure:
+			apiServiceGetSecurityThreatArchiveHandler.ServeHTTP(w, r)
 		case ApiServiceMitigateThreatProcedure:
 			apiServiceMitigateThreatHandler.ServeHTTP(w, r)
 		case ApiServiceRemoveMitigatedThreatProcedure:
@@ -1651,6 +1707,14 @@ func (UnimplementedApiServiceHandler) ListSecurityThreats(context.Context, *conn
 
 func (UnimplementedApiServiceHandler) GetSecurityThreat(context.Context, *connect.Request[v1.GetSecurityThreatRequest]) (*connect.Response[v1.GetSecurityThreatResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gateon.v1.ApiService.GetSecurityThreat is not implemented"))
+}
+
+func (UnimplementedApiServiceHandler) ListSecurityThreatArchives(context.Context, *connect.Request[v1.ListSecurityThreatArchivesRequest]) (*connect.Response[v1.ListSecurityThreatArchivesResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gateon.v1.ApiService.ListSecurityThreatArchives is not implemented"))
+}
+
+func (UnimplementedApiServiceHandler) GetSecurityThreatArchive(context.Context, *connect.Request[v1.GetSecurityThreatArchiveRequest]) (*connect.Response[v1.GetSecurityThreatArchiveResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gateon.v1.ApiService.GetSecurityThreatArchive is not implemented"))
 }
 
 func (UnimplementedApiServiceHandler) MitigateThreat(context.Context, *connect.Request[v1.MitigateThreatRequest]) (*connect.Response[v1.MitigateThreatResponse], error) {
