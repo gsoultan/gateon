@@ -593,13 +593,10 @@ type SystemMetrics struct {
 func CollectMetricsSnapshot(ctx context.Context, limit, offset int) (*MetricsSnapshot, error) {
 	NoteDashboardViewer()
 	snap, err := currentSnapshot(ctx)
-	if err != nil {
-		return nil, err
+	if err != nil || (limit == 50 && offset == 0) {
+		return snap, err
 	}
-	if limit == 50 && offset == 0 {
-		return snap, nil
-	}
-	return withRecentPage(ctx, snap, limit, offset), nil
+	return recentPage(ctx, limit, offset)
 }
 
 // currentSnapshot is the published snapshot, unless its aggregates are more
@@ -633,15 +630,12 @@ func currentSnapshot(ctx context.Context) (*MetricsSnapshot, error) {
 	return snap, nil
 }
 
-// withRecentPage is snap with one other page of recent threats in it. Only
-// that page is read; everything else is shared with the published snapshot,
-// which is never modified once published. It used to collect a whole new
-// snapshot, all of its aggregate reads included, for every page the Security
-// Hub asked for.
-func withRecentPage(ctx context.Context, snap *MetricsSnapshot, limit, offset int) *MetricsSnapshot {
-	page := *snap
-	page.Security.RecentAnomalies = GetSecurityThreatsLite(ctx, limit, offset, nil)
-	return &page
+// recentPage is a snapshot built now with another page of recent threats. It
+// reads that page from the database and carries the aggregates over from the
+// published snapshot; it used to read all of them again for every page the
+// Security Hub asked for. It is not published: the page is the caller's.
+func recentPage(ctx context.Context, limit, offset int) (*MetricsSnapshot, error) {
+	return collectMetricsSnapshot(ctx, limit, offset, snapshotReads{recent: true})
 }
 
 func collectMetricsSnapshot(ctx context.Context, limit, offset int, reads snapshotReads) (*MetricsSnapshot, error) {

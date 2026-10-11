@@ -50,8 +50,9 @@ the status card read it.
   synchronously and publishes the result. Concurrent requests share that one
   read.
 
-**Another page of threats reads that page only.** The rest of the response is
-the published snapshot, which is never modified once published.
+**Another page of threats reads that page only.** The aggregates in the
+response come from the published snapshot. Everything else is built fresh from
+memory, as before.
 
 `gateon_dashboard_aggregate_reads_total` counts aggregate reads, so the effect
 is visible in production.
