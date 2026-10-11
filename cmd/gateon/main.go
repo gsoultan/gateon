@@ -39,6 +39,7 @@ import (
 	"github.com/gsoultan/gateon/internal/security/waf"
 	"github.com/gsoultan/gateon/internal/server"
 	"github.com/gsoultan/gateon/internal/telemetry"
+	"github.com/gsoultan/gateon/internal/telemetry/threatarchive"
 	"github.com/gsoultan/gateon/internal/telemetry/tracearchive"
 	"github.com/gsoultan/gateon/internal/tui"
 	"github.com/gsoultan/gateon/internal/ui"
@@ -430,6 +431,10 @@ func initTelemetry(globalReg *config.GlobalRegistry, ctx context.Context) {
 	if err := telemetry.InitPathStatsStore(databaseURL, retention); err != nil {
 		logger.L.LogError("failed to init path stats store", "error", err, "database_url", storedsecret.MaskURL(databaseURL))
 	}
+
+	// Security threats past their retention go to archive files before their
+	// rows are deleted, when log.security_threat_archive_enabled is on.
+	telemetry.SetThreatArchiver(threatarchive.New())
 
 	// Copies each closed hour of traces to the trace archive when archiving is
 	// enabled, and holds the store's pruning back until the archive has them.

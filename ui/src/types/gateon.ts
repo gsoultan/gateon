@@ -299,6 +299,8 @@ export type LogConfig = {
   traceArchiveEnabled?: boolean;
   traceArchiveRetentionDays?: number;
   traceArchiveMaxSizeMb?: number;
+  securityThreatArchiveEnabled?: boolean;
+  securityThreatArchiveMaxSizeMb?: number;
 };
 
 export type TransportConfig = {

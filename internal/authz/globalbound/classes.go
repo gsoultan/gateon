@@ -107,16 +107,18 @@ var classes = map[protoreflect.FullName]Class{
 	"gateon.v1.OtelConfig.service_name": Operational,
 
 	// --- log ---
-	"gateon.v1.LogConfig.level":                          Operational,
-	"gateon.v1.LogConfig.development":                    Operational,
-	"gateon.v1.LogConfig.format":                         Operational,
-	"gateon.v1.LogConfig.path_stats_retention_days":      Operational,
-	"gateon.v1.LogConfig.access_log_retention_days":      Operational,
-	"gateon.v1.LogConfig.security_threat_retention_days": Operational,
-	"gateon.v1.LogConfig.audit_log_retention_days":       Boundary, // a short window deletes the audit trail
-	"gateon.v1.LogConfig.trace_archive_enabled":          Operational,
-	"gateon.v1.LogConfig.trace_archive_retention_days":   Operational,
-	"gateon.v1.LogConfig.trace_archive_max_size_mb":      Operational,
+	"gateon.v1.LogConfig.level":                               Operational,
+	"gateon.v1.LogConfig.development":                         Operational,
+	"gateon.v1.LogConfig.format":                              Operational,
+	"gateon.v1.LogConfig.path_stats_retention_days":           Operational,
+	"gateon.v1.LogConfig.access_log_retention_days":           Operational,
+	"gateon.v1.LogConfig.security_threat_retention_days":      Operational,
+	"gateon.v1.LogConfig.audit_log_retention_days":            Boundary, // a short window deletes the audit trail
+	"gateon.v1.LogConfig.trace_archive_enabled":               Operational,
+	"gateon.v1.LogConfig.trace_archive_retention_days":        Operational,
+	"gateon.v1.LogConfig.trace_archive_max_size_mb":           Operational,
+	"gateon.v1.LogConfig.security_threat_archive_enabled":     Operational,
+	"gateon.v1.LogConfig.security_threat_archive_max_size_mb": Operational,
 
 	// --- transport ---
 	"gateon.v1.TransportConfig.max_idle_conns":            Operational,

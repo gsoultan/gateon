@@ -6,6 +6,7 @@ package api
 import (
 	"context"
 	"errors"
+	"io/fs"
 	"math"
 	"os"
 	"runtime"
@@ -14,6 +15,7 @@ import (
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/telemetry"
+	"github.com/gsoultan/gateon/internal/telemetry/threatarchive"
 	"github.com/gsoultan/gateon/internal/telemetry/tracearchive"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 	"google.golang.org/grpc/codes"
@@ -301,4 +303,62 @@ func (s *ApiService) TraceRoute(ctx context.Context, req *gateonv1.TraceRouteReq
 	return &gateonv1.TraceRouteResponse{
 		Hops: hops,
 	}, nil
+}
+
+// ListSecurityThreatArchives pages through the files the security threat
+// prune wrote before deleting expired threats, newest first. It reads the
+// archive directory only, never the database.
+func (s *ApiService) ListSecurityThreatArchives(_ context.Context, req *gateonv1.ListSecurityThreatArchivesRequest) (*gateonv1.ListSecurityThreatArchivesResponse, error) {
+	files, total, err := threatarchive.List(threatarchive.CurrentSettings().Dir, int(req.GetLimit()), int(req.GetOffset()))
+	if err != nil {
+		return nil, threatArchiveError("list", err)
+	}
+	out := &gateonv1.ListSecurityThreatArchivesResponse{
+		Archives:   make([]*gateonv1.SecurityThreatArchive, 0, len(files)),
+		TotalCount: int32(min(total, math.MaxInt32)), //nosec G115 -- clamped above
+	}
+	for _, f := range files {
+		out.Archives = append(out.Archives, &gateonv1.SecurityThreatArchive{
+			Filename:  f.Name,
+			Size:      f.Size,
+			CreatedAt: formatTime(f.CreatedAt),
+			FirstAt:   formatTime(f.FirstAt),
+			LastAt:    formatTime(f.LastAt),
+		})
+	}
+	return out, nil
+}
+
+// GetSecurityThreatArchive reads one page of one archive file, in the same
+// shape the live threat list uses, without its geo lookup: an archived threat
+// keeps the location it was recorded with.
+func (s *ApiService) GetSecurityThreatArchive(ctx context.Context, req *gateonv1.GetSecurityThreatArchiveRequest) (*gateonv1.GetSecurityThreatArchiveResponse, error) {
+	dir := threatarchive.CurrentSettings().Dir
+	threats, total, err := threatarchive.Read(ctx, dir, req.GetFilename(), req.GetSearch(), int(req.GetLimit()), int(req.GetOffset()))
+	if err != nil {
+		return nil, threatArchiveError("read", err)
+	}
+	out := &gateonv1.GetSecurityThreatArchiveResponse{
+		Threats:    make([]*gateonv1.Anomaly, 0, len(threats)),
+		TotalCount: int32(min(total, math.MaxInt32)), //nosec G115 -- clamped above
+	}
+	for _, t := range threats {
+		out.Threats = append(out.Threats, ThreatToAnomaly(t))
+	}
+	return out, nil
+}
+
+// threatArchiveError keeps file system detail out of the dashboard: the
+// operator gets a sentence, the log gets the cause.
+func threatArchiveError(op string, err error) error {
+	switch {
+	case errors.Is(err, threatarchive.ErrNotAnArchive):
+		return status.Error(codes.InvalidArgument, "that is not a security threat archive file")
+	case errors.Is(err, fs.ErrNotExist):
+		return status.Error(codes.NotFound, "that archive file no longer exists")
+	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+		return status.FromContextError(err).Err()
+	}
+	logger.L.LogError("threat archive: request failed", "op", op, "error", err)
+	return status.Error(codes.Internal, "could not read the security threat archive")
 }

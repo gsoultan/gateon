@@ -35,7 +35,8 @@ import {
   IconBrain,
   IconAlertTriangle,
   IconCode,
-  IconRobot
+  IconRobot,
+  IconArchive
 } from '@tabler/icons-react';
 import { useGateonStatus, apiFetch, useMetricsSnapshot, installClamav, uninstallClamav } from '../hooks/useGateon';
 import { notifications } from '@mantine/notifications';
@@ -53,6 +54,8 @@ import { AnomalyEngineTab } from '../components/SecurityCenter/AnomalyEngineTab'
 import { AnalyticsTab } from '../components/SecurityCenter/AnalyticsTab';
 import { AIAdvisoryTab } from '../components/SecurityCenter/AIAdvisoryTab';
 import { WAFRulesTab } from '../components/SecurityCenter/WAFRulesTab';
+// The archive reads files most visits never open, so it loads with its tab.
+const ThreatArchiveTab = React.lazy(() => import('../components/SecurityCenter/ThreatArchiveTab'));
 import { TimeDisplay } from '../components/TimeDisplay';
 import { getThreatColor } from '../utils/security';
 import { resolveTrafficRangeBounds, DAY_MS } from '../utils/dashboard';
@@ -413,6 +416,7 @@ export default function SecurityCommandCenter() {
             <Tabs.Tab value="analytics" leftSection={<IconActivity size={16} />}>Analytics & Trends</Tabs.Tab>
             <Tabs.Tab value="advisory" leftSection={<IconBrain size={16} />}>AI Advisory</Tabs.Tab>
             <Tabs.Tab value="waf-rules" leftSection={<IconCode size={16} />}>WAF Rules</Tabs.Tab>
+            <Tabs.Tab value="archive" leftSection={<IconArchive size={16} />}>Archive</Tabs.Tab>
           </Tabs.List>
 
           <Tabs.Panel value="overview">
@@ -462,6 +466,12 @@ export default function SecurityCommandCenter() {
 
           <Tabs.Panel value="waf-rules">
             <WAFRulesTab />
+          </Tabs.Panel>
+
+          <Tabs.Panel value="archive">
+            <React.Suspense fallback={<Loader m="xl" />}>
+              <ThreatArchiveTab />
+            </React.Suspense>
           </Tabs.Panel>
         </Tabs>
       </Stack>

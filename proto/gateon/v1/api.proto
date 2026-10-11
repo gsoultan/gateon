@@ -64,6 +64,11 @@ service ApiService {
   rpc GetDiagnostics(GetDiagnosticsRequest) returns (GetDiagnosticsResponse);
   rpc ListSecurityThreats(ListSecurityThreatsRequest) returns (ListSecurityThreatsResponse);
   rpc GetSecurityThreat(GetSecurityThreatRequest) returns (GetSecurityThreatResponse);
+  // Security threats that retention moved out of the database into archive
+  // files (log.security_threat_archive_enabled). Both are paged; neither
+  // touches the database.
+  rpc ListSecurityThreatArchives(ListSecurityThreatArchivesRequest) returns (ListSecurityThreatArchivesResponse);
+  rpc GetSecurityThreatArchive(GetSecurityThreatArchiveRequest) returns (GetSecurityThreatArchiveResponse);
   rpc MitigateThreat(MitigateThreatRequest) returns (MitigateThreatResponse);
   rpc RemoveMitigatedThreat(RemoveMitigatedThreatRequest) returns (RemoveMitigatedThreatResponse);
   rpc ListReputations(ListReputationsRequest) returns (ListReputationsResponse);

@@ -159,18 +159,20 @@ var apiPermissions = map[string]apiPermission{
 
 	// Diagnostics reads. GET /v1/status, /v1/diagnostics, /v1/audit/*,
 	// /v1/diag/security-threats, /v1/security/reputations, /v1/traces.
-	gateonv1connect.ApiServiceGetStatusProcedure:           readOn(auth.ResourceDiagnostics),
-	gateonv1connect.ApiServiceGetDiagnosticsProcedure:      readOn(auth.ResourceDiagnostics),
-	gateonv1connect.ApiServiceListSecurityThreatsProcedure: readOn(auth.ResourceDiagnostics),
-	gateonv1connect.ApiServiceGetSecurityThreatProcedure:   readOn(auth.ResourceDiagnostics),
-	gateonv1connect.ApiServiceListReputationsProcedure:     readOn(auth.ResourceDiagnostics),
-	gateonv1connect.ApiServiceListAuditLogsProcedure:       readOn(auth.ResourceDiagnostics),
-	gateonv1connect.ApiServiceListAuditArchivesProcedure:   readOn(auth.ResourceDiagnostics),
-	gateonv1connect.ApiServiceGetAuditArchiveProcedure:     readOn(auth.ResourceDiagnostics),
-	gateonv1connect.ApiServiceListTracesProcedure:          readOn(auth.ResourceDiagnostics),
-	gateonv1connect.ApiServiceGetTraceProcedure:            readOn(auth.ResourceDiagnostics),
-	gateonv1connect.ApiServiceQueryTracesProcedure:         readOn(auth.ResourceDiagnostics),
-	gateonv1connect.ApiServiceListTraceArchivesProcedure:   readOn(auth.ResourceDiagnostics),
+	gateonv1connect.ApiServiceGetStatusProcedure:                  readOn(auth.ResourceDiagnostics),
+	gateonv1connect.ApiServiceGetDiagnosticsProcedure:             readOn(auth.ResourceDiagnostics),
+	gateonv1connect.ApiServiceListSecurityThreatsProcedure:        readOn(auth.ResourceDiagnostics),
+	gateonv1connect.ApiServiceGetSecurityThreatProcedure:          readOn(auth.ResourceDiagnostics),
+	gateonv1connect.ApiServiceListSecurityThreatArchivesProcedure: readOn(auth.ResourceDiagnostics),
+	gateonv1connect.ApiServiceGetSecurityThreatArchiveProcedure:   readOn(auth.ResourceDiagnostics),
+	gateonv1connect.ApiServiceListReputationsProcedure:            readOn(auth.ResourceDiagnostics),
+	gateonv1connect.ApiServiceListAuditLogsProcedure:              readOn(auth.ResourceDiagnostics),
+	gateonv1connect.ApiServiceListAuditArchivesProcedure:          readOn(auth.ResourceDiagnostics),
+	gateonv1connect.ApiServiceGetAuditArchiveProcedure:            readOn(auth.ResourceDiagnostics),
+	gateonv1connect.ApiServiceListTracesProcedure:                 readOn(auth.ResourceDiagnostics),
+	gateonv1connect.ApiServiceGetTraceProcedure:                   readOn(auth.ResourceDiagnostics),
+	gateonv1connect.ApiServiceQueryTracesProcedure:                readOn(auth.ResourceDiagnostics),
+	gateonv1connect.ApiServiceListTraceArchivesProcedure:          readOn(auth.ResourceDiagnostics),
 
 	// TraceRoute and ValidateCORS reach outward but are mapped read, matching
 	// POST /v1/diagnostics/traceroute and /v1/diagnostics/cors-validator.

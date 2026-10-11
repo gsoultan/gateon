@@ -121,6 +121,12 @@ message LogConfig {
   bool trace_archive_enabled = 8;
   int32 trace_archive_retention_days = 9;
   int32 trace_archive_max_size_mb = 10;
+  // Security threat archive: threats past security_threat_retention_days are
+  // written to compressed files before they are deleted, instead of only
+  // being deleted. Off unless enabled. A zero size takes the resource
+  // profile's default.
+  bool security_threat_archive_enabled = 11;
+  int32 security_threat_archive_max_size_mb = 12;
 }
 
 message TlsClientConfig {
