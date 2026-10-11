@@ -8,7 +8,7 @@
 # .tar.gz -- same commit, same Go toolchain, same PGO profile, same -trimpath,
 # same main.Version stamp. packaging/image/build.sh lays the context out:
 #
-#   linux/amd64/gateon   linux/arm64/gateon   var-lib-gateon/   Dockerfile
+#   linux/amd64/gateon   linux/arm64/gateon   var-lib/gateon/   Dockerfile
 #
 # and is the only supported way to build it (ADR 0065). The source build that
 # `make docker` and CI's docker-smoke use is the repository-root Dockerfile;
@@ -43,9 +43,11 @@ ENV GATEON_DATA_DIR=/var/lib/gateon \
     TLS_OPTIONS_FILE=/etc/gateon/tls_options.json
 # Owned by nonroot (65532), mode 0700, so a named volume mounted here -- which
 # starts as a copy of this directory -- is writable by the gateway and nobody
-# else. --chmod, not the source directory's mode, is what makes it 0700: COPY
-# of a directory creates the destination 0755 and copies only the contents.
-COPY --chown=65532:65532 --chmod=0700 var-lib-gateon /var/lib/gateon
+# else. gateon is copied as an entry of var-lib/, which build.sh made 0700,
+# rather than as the COPY's destination: a destination's mode depends on the
+# BuildKit doing the build, an entry's does not. See the repository-root
+# Dockerfile, where the difference shipped a 0755 directory.
+COPY --chown=65532:65532 --chmod=0700 var-lib/ /var/lib/
 WORKDIR /var/lib/gateon
 # TARGETPLATFORM is linux/amd64 or linux/arm64, which is where build.sh put the
 # binary extracted from that architecture's tarball.

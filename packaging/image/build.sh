@@ -195,7 +195,8 @@ cmd_stage() {
 		check_binary "$CONTEXT/$plat/gateon" "$arch"
 		echo "staged $plat: $(sha256 "$CONTEXT/$plat/gateon" | cut -d' ' -f1) from $(basename "$tarball")" >&2
 	done
-	mkdir -m 0700 "$CONTEXT/var-lib-gateon"
+	mkdir -p "$CONTEXT/var-lib"
+	mkdir -m 0700 "$CONTEXT/var-lib/gateon"
 	cp "$ROOT/packaging/image/Dockerfile" "$CONTEXT/Dockerfile"
 	echo "version=$VERSION"
 }
@@ -275,6 +276,12 @@ verify_platform() {
 	echo "verify $plat ($ref)"
 	# PULL_OPTS is for checking a local plain-HTTP registry with podman
 	# (--tls-verify=false); docker already trusts localhost.
+	# Drop the previous platform's pull first. Docker's classic image store --
+	# the one on GitHub's runners -- files a by-digest pull under the index
+	# digest, so pulling the second platform of the same index fails with
+	# "cannot overwrite digest". Docker's containerd store and podman keep
+	# both, and removing a reference that is not there is not an error here.
+	$ENGINE image rm -f "$ref" >/dev/null 2>&1 || true
 	# shellcheck disable=SC2086
 	$ENGINE pull -q ${PULL_OPTS:-} --platform "$plat" "$ref" >/dev/null
 	$ENGINE create --platform "$plat" --name "$name" -p 127.0.0.1::8080 "$ref" >/dev/null
