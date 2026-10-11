@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -223,8 +224,8 @@ func TestArchiveLogs_LeavesNoFileWhenTheWriteFails(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chmod(archiveDir, 0o750) })
 
-	if err := m.archiveLogs(time.Now()); err == nil {
-		t.Fatal("archiveLogs must fail when it cannot create the file")
+	if _, err := m.retireChunk(time.Now(), true); err == nil {
+		t.Fatal("retireChunk must fail when it cannot create the archive file")
 	}
 
 	files, _ := filepath.Glob(filepath.Join(archiveDir, "*"))
@@ -235,4 +236,100 @@ func TestArchiveLogs_LeavesNoFileWhenTheWriteFails(t *testing.T) {
 	if n := countRows(t, m); n != 1 {
 		t.Fatalf("got %d rows, want the row preserved", n)
 	}
+}
+
+// log.audit_log_retention_days used to be enforced by the telemetry pruner with
+// a DELETE that never archived. The UI saves it as 90 by default, so with
+// audit.retention_days at 365 and archiving on, entries between 90 and 365 days
+// old were deleted without ever reaching an archive. Now this manager enforces
+// both settings, the shorter one winning, and archives first.
+func TestCheckRetention_LogRetentionIsArchivedToo(t *testing.T) {
+	m := newTestManager(t, &gateonv1.AuditConfig{
+		Enabled: true, RetentionDays: 365, ArchiveOnRetention: true,
+	})
+	SetLogRetentionDays(90)
+	t.Cleanup(func() { SetLogRetentionDays(0) })
+	insertAt(t, m, "four-months", time.Now().AddDate(0, 0, -120))
+	insertAt(t, m, "last-week", time.Now().AddDate(0, 0, -7))
+
+	dataDir := t.TempDir()
+	t.Setenv("GATEON_DATA_DIR", dataDir)
+
+	m.checkRetention()
+
+	if n := countRows(t, m); n != 1 {
+		t.Fatalf("got %d rows, want 1: the 120-day-old entry is past the 90-day log retention", n)
+	}
+	if got := archivedIDs(t, dataDir); len(got) != 1 || got[0] != "four-months" {
+		t.Fatalf("archived %v, want [four-months]: an entry deleted for retention must be archived first", got)
+	}
+}
+
+// A backlog is retired a chunk at a time: every expired entry still ends up
+// archived exactly once and deleted, and no single step holds more than one
+// chunk in memory or in one archive file.
+func TestCheckRetention_RetiresABacklogInChunks(t *testing.T) {
+	m := newTestManager(t, &gateonv1.AuditConfig{
+		Enabled: true, RetentionDays: 30, ArchiveOnRetention: true,
+	})
+	m.retentionChunk = 2
+	for i := range 5 {
+		insertAt(t, m, fmt.Sprintf("old-%d", i), time.Now().AddDate(0, 0, -60-i))
+	}
+	insertAt(t, m, "fresh", time.Now())
+
+	dataDir := t.TempDir()
+	t.Setenv("GATEON_DATA_DIR", dataDir)
+
+	m.checkRetention()
+
+	if n := countRows(t, m); n != 1 {
+		t.Fatalf("got %d rows, want only the fresh entry left", n)
+	}
+	files, _ := filepath.Glob(filepath.Join(dataDir, "audit", "archives", "*.json.br"))
+	if len(files) != 3 {
+		t.Fatalf("got %d archive files, want 3 (chunks of 2, 2 and 1)", len(files))
+	}
+	if got := archivedIDs(t, dataDir); len(got) != 5 {
+		t.Fatalf("archived %d entries, want all 5 expired ones exactly once: %v", len(got), got)
+	}
+}
+
+func TestEffectiveRetentionDays(t *testing.T) {
+	cases := []struct{ audit, log, want int32 }{
+		{0, 0, 0}, {30, 0, 30}, {0, 90, 90}, {365, 90, 90}, {30, 90, 30}, {-1, -1, 0},
+	}
+	for _, c := range cases {
+		if got := effectiveRetentionDays(c.audit, c.log); got != c.want {
+			t.Errorf("effectiveRetentionDays(%d, %d) = %d, want %d", c.audit, c.log, got, c.want)
+		}
+	}
+}
+
+// archivedIDs reads every archive under dataDir and returns the ids it holds.
+func archivedIDs(t *testing.T, dataDir string) []string {
+	t.Helper()
+	files, err := filepath.Glob(filepath.Join(dataDir, "audit", "archives", "*.json.br"))
+	if err != nil {
+		t.Fatalf("glob: %v", err)
+	}
+	seen := map[string]int{}
+	var ids []string
+	for _, f := range files {
+		raw, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatalf("read archive: %v", err)
+		}
+		var entries []AuditEntry
+		if err := json.NewDecoder(brotli.NewReader(bytes.NewReader(raw))).Decode(&entries); err != nil {
+			t.Fatalf("decode archive: %v", err)
+		}
+		for _, e := range entries {
+			if seen[e.ID]++; seen[e.ID] > 1 {
+				t.Fatalf("entry %q archived twice", e.ID)
+			}
+			ids = append(ids, e.ID)
+		}
+	}
+	return ids
 }

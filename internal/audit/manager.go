@@ -18,6 +18,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/andybalholm/brotli"
@@ -55,6 +56,8 @@ type AuditManager struct {
 	stop       chan struct{}
 	stmtInsert *sql.Stmt
 	stmtMu     sync.RWMutex
+	// retentionChunk overrides DefaultRetentionChunk; zero uses the default.
+	retentionChunk int
 }
 
 // GenerateSignatureKey returns a cryptographically-random 256-bit key as a hex
@@ -464,41 +467,68 @@ func (m *AuditManager) checkRetention() {
 	cfg := m.config
 	m.mu.RUnlock()
 
-	retentionDays := cfg.GetRetentionDays()
-	archiveOnRetention := cfg.GetArchiveOnRetention()
-
+	retentionDays := effectiveRetentionDays(cfg.GetRetentionDays(), logRetentionDays.Load())
 	if retentionDays <= 0 {
 		return
 	}
-
 	cutoff := time.Now().AddDate(0, 0, -int(retentionDays))
 
-	if archiveOnRetention {
-		if err := m.archiveLogs(cutoff); err != nil {
-			logger.L.LogError("audit: failed to archive logs", "error", err)
-			// Continue to deletion anyway? Maybe safer not to if archive failed.
+	deleted := 0
+	for range maxRetentionChunks {
+		n, err := m.retireChunk(cutoff, cfg.GetArchiveOnRetention())
+		deleted += n
+		if err != nil {
+			// Nothing in the failed chunk was deleted; the next run retries it.
+			logger.L.LogError("audit: retention stopped", "error", err, "deleted_rows", deleted)
 			return
 		}
-	}
-
-	query := m.dialect.Rebind("DELETE FROM audit_logs WHERE timestamp < ?")
-	result, err := m.db.Exec(query, cutoff)
-	if err != nil {
-		logger.L.LogError("audit: failed to delete old logs", "error", err)
-	} else {
-		rows, _ := result.RowsAffected()
-		if rows > 0 {
-			logger.L.LogInfo("audit: retention task completed", "deleted_rows", rows)
+		if n < m.chunkSize() {
+			break
 		}
+	}
+	if deleted > 0 {
+		logger.L.LogInfo("audit: retention task completed", "deleted_rows", deleted)
 	}
 }
 
-func (m *AuditManager) archiveLogs(cutoff time.Time) error {
-	// Query logs to archive
-	query := m.dialect.Rebind("SELECT id, user_id, action, resource, details, timestamp, ip_address, signature, previous_hash FROM audit_logs WHERE timestamp < ? ORDER BY timestamp ASC")
-	rows, err := m.db.Query(query, cutoff)
+// retireChunk archives (when asked) and then deletes the oldest expired
+// entries, at most one chunk of them, and reports how many it deleted. It
+// deletes exactly the rows it read, by id, so a row is never removed unless it
+// is in the archive written just before.
+func (m *AuditManager) retireChunk(cutoff time.Time, archive bool) (int, error) {
+	logs, err := m.readExpired(cutoff, m.chunkSize())
+	if err != nil || len(logs) == 0 {
+		return 0, err
+	}
+	if archive {
+		if err := m.archiveEntries(logs); err != nil {
+			return 0, fmt.Errorf("audit: archive failed, nothing deleted: %w", err)
+		}
+	}
+	if err := m.deleteEntries(logs); err != nil {
+		return 0, fmt.Errorf("audit: delete failed: %w", err)
+	}
+	return len(logs), nil
+}
+
+// deleteEntries removes the given entries by id in one statement.
+func (m *AuditManager) deleteEntries(logs []AuditEntry) error {
+	ids := make([]any, len(logs))
+	for i := range logs {
+		ids[i] = logs[i].ID
+	}
+	marks := strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")
+	query := m.dialect.Rebind("DELETE FROM audit_logs WHERE id IN (" + marks + ")")
+	_, err := m.db.Exec(query, ids...)
+	return err
+}
+
+// readExpired returns up to limit of the oldest entries stamped before cutoff.
+func (m *AuditManager) readExpired(cutoff time.Time, limit int) ([]AuditEntry, error) {
+	query := m.dialect.Rebind("SELECT id, user_id, action, resource, details, timestamp, ip_address, signature, previous_hash FROM audit_logs WHERE timestamp < ? ORDER BY timestamp ASC, id ASC LIMIT ?")
+	rows, err := m.db.Query(query, cutoff, limit)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer rows.Close()
 
@@ -510,18 +540,19 @@ func (m *AuditManager) archiveLogs(cutoff time.Time) error {
 			// about to DELETE. Skipping archived everything except the
 			// unreadable entry and then destroyed the original, losing exactly
 			// the record something had already gone wrong with.
-			return fmt.Errorf("audit: archive aborted, a row could not be read: %w", err)
+			return nil, fmt.Errorf("audit: retention aborted, a row could not be read: %w", err)
 		}
 		logs = append(logs, e)
 	}
 	if err := rows.Err(); err != nil {
-		return fmt.Errorf("audit: archive aborted, reading rows failed: %w", err)
+		return nil, fmt.Errorf("audit: retention aborted, reading rows failed: %w", err)
 	}
+	return logs, nil
+}
 
-	if len(logs) == 0 {
-		return nil
-	}
-
+// archiveEntries writes logs to a new brotli-compressed archive file, and
+// reports success only once the file is complete on disk.
+func (m *AuditManager) archiveEntries(logs []AuditEntry) error {
 	// Create archive directory
 	archiveDir := filepath.Join(config.DataDir(), "audit", "archives")
 	if err := os.MkdirAll(archiveDir, 0o750); err != nil {
@@ -688,4 +719,44 @@ func GetLogsPaginated(ctx context.Context, page, pageSize int, search string) ([
 		return nil, 0, fmt.Errorf("audit: reading logs failed: %w", err)
 	}
 	return logs, total, nil
+}
+
+// DefaultRetentionChunk is how many expired entries one retention step reads,
+// archives and deletes. It bounds the memory a backlog can take (the step holds
+// one chunk, never the whole backlog), the size of each archive file, and how
+// long any one DELETE holds SQLite's write lock.
+const DefaultRetentionChunk = 5000
+
+// maxRetentionChunks bounds one retention run at a million entries; a larger
+// backlog drains over the following runs instead of in one long pass.
+const maxRetentionChunks = 200
+
+func (m *AuditManager) chunkSize() int {
+	if m.retentionChunk > 0 {
+		return m.retentionChunk
+	}
+	return DefaultRetentionChunk
+}
+
+// logRetentionDays is log.audit_log_retention_days from the global config. It
+// used to be enforced by the telemetry pruner, with its own DELETE that never
+// archived, so a row could be deleted under it before audit.retention_days
+// archived it. The telemetry store now hands the value here instead, and this
+// manager is the only thing that deletes audit entries.
+var logRetentionDays atomic.Int32
+
+// SetLogRetentionDays records log.audit_log_retention_days. Zero or less unsets it.
+func SetLogRetentionDays(days int) { logRetentionDays.Store(int32(max(days, 0))) }
+
+// effectiveRetentionDays is the shorter of the two retention settings that are
+// set, so moving enforcement here deletes nothing later than it used to.
+func effectiveRetentionDays(auditDays, logDays int32) int32 {
+	switch {
+	case auditDays <= 0:
+		return max(logDays, 0)
+	case logDays <= 0:
+		return auditDays
+	default:
+		return min(auditDays, logDays)
+	}
 }

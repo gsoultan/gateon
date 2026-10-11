@@ -642,7 +642,6 @@ type pathStatsStore struct {
 	pathStatsRetentionDays      atomic.Int32
 	accessLogRetentionDays      atomic.Int32
 	securityThreatRetentionDays atomic.Int32
-	auditLogRetentionDays       atomic.Int32
 	pruning                     atomic.Bool
 	scoreCache                  *lru.ARCCache
 	unmitigatedCache            *lru.ARCCache
@@ -881,7 +880,7 @@ func (s *pathStatsStore) syncTierSettings() {
 	pathRetention := int32(0)
 	accessRetention := int32(0)
 	threatRetention := int32(0)
-	auditRetention := int32(0)
+	auditRetention := 0
 
 	if gc != nil && gc.Log != nil {
 		if gc.Log.AccessLogRetentionDays > 0 {
@@ -892,13 +891,13 @@ func (s *pathStatsStore) syncTierSettings() {
 		pathRetention = gc.Log.PathStatsRetentionDays
 		accessRetention = gc.Log.AccessLogRetentionDays
 		threatRetention = gc.Log.SecurityThreatRetentionDays
-		auditRetention = gc.Log.AuditLogRetentionDays
+		auditRetention = int(gc.Log.AuditLogRetentionDays)
 	}
 	s.retentionDays.Store(int32(max(retention, 1)))
 	s.pathStatsRetentionDays.Store(pathRetention)
 	s.accessLogRetentionDays.Store(accessRetention)
 	s.securityThreatRetentionDays.Store(threatRetention)
-	s.auditLogRetentionDays.Store(auditRetention)
+	audit.SetLogRetentionDays(auditRetention)
 }
 
 func (s *pathStatsStore) migrateTracesToPebble() {
@@ -1522,7 +1521,6 @@ func (s *pathStatsStore) prune() {
 	s.pruneTraces()
 	s.holdTraceBudget()
 	s.pruneSecurityThreats(ctx)
-	s.pruneAuditLogs(ctx)
 	s.pruneUserMitigations(ctx)
 
 	// Reclaim the disk space freed by the deletes above. Deleting rows/keys
@@ -1790,18 +1788,6 @@ func (s *pathStatsStore) pruneSecurityThreats(ctx context.Context) {
 	}
 }
 
-// pruneAuditLogs removes audit rows older than the configured window when audit
-// retention is explicitly enabled.
-func (s *pathStatsStore) pruneAuditLogs(ctx context.Context) {
-	days := int(s.auditLogRetentionDays.Load())
-	if days <= 0 {
-		return
-	}
-	cutoffTime := time.Now().AddDate(0, 0, -days)
-	q := s.dialect.Rebind("DELETE FROM audit_logs WHERE timestamp < ?")
-	_, _ = s.db.ExecContext(ctx, q, cutoffTime)
-}
-
 // reclaimSQLDisk returns the space freed by the SQLite deletes back to the OS.
 // It is a no-op for server databases (Postgres) which manage their own
 // vacuuming. incremental_vacuum needs auto_vacuum=INCREMENTAL (set in
@@ -1869,7 +1855,7 @@ func ConfigureGranularRetention(pathStats, accessLog, securityThreat, auditLog i
 	s.pathStatsRetentionDays.Store(int32(pathStats))
 	s.accessLogRetentionDays.Store(int32(accessLog))
 	s.securityThreatRetentionDays.Store(int32(securityThreat))
-	s.auditLogRetentionDays.Store(int32(auditLog))
+	audit.SetLogRetentionDays(auditLog)
 }
 
 // recordToStore attempts to enqueue an increment; if the store is not initialized or channel is full, it drops silently to avoid impacting the hot path.
