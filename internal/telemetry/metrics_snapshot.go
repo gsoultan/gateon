@@ -6,6 +6,7 @@ package telemetry
 import (
 	"cmp"
 	"context"
+	"errors"
 	"runtime"
 	"slices"
 	"strings"
@@ -16,9 +17,11 @@ import (
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/ebpf"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/shirou/gopsutil/v3/mem"
 	"golang.org/x/sync/errgroup"
+	"golang.org/x/sync/singleflight"
 )
 
 // internalRoutePrefix marks Gateon's own management routes. They are excluded
@@ -164,40 +167,128 @@ func GetLastSnapshot() *MetricsSnapshot {
 	return lastSnapshot.Load()
 }
 
-// StartSnapshotLoop starts a background goroutine to periodically refresh the
-// global metrics snapshot, ensuring the UI remains fast even under load.
+// snapshotReads says which database reads one snapshot refresh makes. Neither
+// is needed to build the rest of the snapshot, which comes from Prometheus and
+// in-memory counters.
+type snapshotReads struct {
+	// recent is the newest page of threats: one indexed read.
+	recent bool
+	// aggregates are the reads that cover the whole retention window -- the
+	// threat total, the top sources, types and countries, the attack trend,
+	// traffic history and domain stats. Each scans the table it reads.
+	aggregates bool
+}
+
+// allReads is a refresh that reads everything.
+var allReads = snapshotReads{recent: true, aggregates: true}
+
+// dashboardDemandWindow is how long one request for the snapshot counts as
+// someone watching the dashboard.
+const dashboardDemandWindow = time.Minute
+
+// envDashboardAggregateInterval overrides the tier's
+// TierDefaults.DashboardAggregateInterval, as a Go duration: "90s".
+const envDashboardAggregateInterval = "GATEON_DASHBOARD_AGGREGATE_INTERVAL"
+
+var (
+	// dashboardDemandAt is when the snapshot was last asked for, in Unix
+	// nanoseconds.
+	dashboardDemandAt atomic.Int64
+	// snapshotWake asks the loop for a refresh now instead of at its next tick.
+	snapshotWake = make(chan struct{}, 1)
+	// snapshotFlight collapses concurrent synchronous refreshes into one.
+	snapshotFlight singleflight.Group
+)
+
+// DashboardAggregateReadsTotal counts the refreshes that read the dashboard's
+// whole-table aggregates. Each one is about eight queries that scan
+// security_threats, domain_stats and the traffic history.
+var DashboardAggregateReadsTotal = promauto.NewCounter(prometheus.CounterOpts{
+	Name: "gateon_dashboard_aggregate_reads_total",
+	Help: "Snapshot refreshes that read the dashboard's whole-table aggregates from the database.",
+})
+
+// NoteDashboardViewer records that someone is looking at the dashboard. If
+// the loop has not been reading the aggregates -- nobody was watching -- it
+// asks for a refresh now, so the viewer is not shown numbers from before the
+// quiet period. Only then: a viewer polling the snapshot must not turn every
+// request into a refresh.
+func NoteDashboardViewer() {
+	now := time.Now()
+	dashboardDemandAt.Store(now.UnixNano())
+	every := dashboardAggregateInterval(config.CurrentTierDefaults())
+	if !lastSnapshot.Load().aggregatesStale(now, every) {
+		return
+	}
+	select {
+	case snapshotWake <- struct{}{}:
+	default:
+	}
+}
+
+// dashboardWatched reports whether anyone is watching: a live subscriber, or a
+// request for the snapshot within dashboardDemandWindow.
+func dashboardWatched(now time.Time) bool {
+	if MetricsBroadcaster.Len() > 0 {
+		return true
+	}
+	return now.Sub(time.Unix(0, dashboardDemandAt.Load())) < dashboardDemandWindow
+}
+
+// dashboardAggregateInterval is how stale the whole-table aggregates may get
+// while someone is watching.
+func dashboardAggregateInterval(td config.TierDefaults) time.Duration {
+	return envDuration(envDashboardAggregateInterval, max(td.DashboardAggregateInterval, time.Second))
+}
+
+// planSnapshotReads decides what one refresh of the loop reads from the
+// database, given the snapshot it replaces.
+//
+// Nobody watching means no reads at all. The snapshot used to read
+// everything on every tick -- every 5 s on standard, 2 s on enterprise --
+// whether or not a browser was open, and four of those reads scan all of
+// security_threats with no time filter. The rest of the snapshot, which the
+// anomaly aggregator and the status card use, comes from memory and keeps
+// refreshing.
+//
+// While someone watches, the newest threats are read on every tick and the
+// aggregates at most once per interval. They span the whole retention window,
+// so a few seconds' traffic barely moves them.
+func planSnapshotReads(prev *MetricsSnapshot, now time.Time, watched bool, every time.Duration) snapshotReads {
+	if !watched {
+		return snapshotReads{}
+	}
+	return snapshotReads{recent: true, aggregates: prev.aggregatesStale(now, every)}
+}
+
+// aggregatesStale reports whether the snapshot's aggregates are older than
+// every, or were never read.
+func (s *MetricsSnapshot) aggregatesStale(now time.Time, every time.Duration) bool {
+	return s == nil || s.aggregatesAt.IsZero() || now.Sub(s.aggregatesAt) >= every
+}
+
+// StartSnapshotLoop refreshes the published snapshot on the tier's telemetry
+// interval, or at once when NoteDashboardViewer asks, until ctx ends.
 func StartSnapshotLoop(ctx context.Context) {
 	timer := time.NewTimer(100 * time.Millisecond) // Start soon
 	defer timer.Stop()
-
-	heavyCounter := 0
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-timer.C:
-			td := config.CurrentTierDefaults()
-
-			heavyThreshold := 1 // By default, every refresh is heavy for standard/enterprise
-			if td.Tier == config.TierMinimal {
-				heavyThreshold = 4 // For minimal, 1 heavy every 4 cycles (e.g. 30s * 4 = 2 min)
-			}
-
-			heavyCounter++
-			isHeavy := heavyCounter >= heavyThreshold
-			if isHeavy {
-				heavyCounter = 0
-			}
-
-			refreshSnapshot(ctx, isHeavy)
-
-			interval := time.Duration(td.TelemetryIntervalSeconds) * time.Second
-			if interval <= 0 {
-				interval = 5 * time.Second
-			}
-			timer.Reset(interval)
+		case <-snapshotWake:
 		}
+		td := config.CurrentTierDefaults()
+		now := time.Now()
+		refreshSnapshot(ctx, planSnapshotReads(lastSnapshot.Load(), now, dashboardWatched(now), dashboardAggregateInterval(td)))
+
+		interval := time.Duration(td.TelemetryIntervalSeconds) * time.Second
+		if interval <= 0 {
+			interval = 5 * time.Second
+		}
+		timer.Reset(interval)
 	}
 }
 
@@ -214,8 +305,8 @@ func StartSnapshotLoop(ctx context.Context) {
 // minimal tier the live snapshot's traffic history and security insights were
 // zeroed in place. One allocation per telemetry interval is the price of a
 // snapshot that is immutable once published.
-func refreshSnapshot(ctx context.Context, heavy bool) {
-	snap, err := collectMetricsSnapshot(ctx, 50, 0, heavy)
+func refreshSnapshot(ctx context.Context, reads snapshotReads) {
+	snap, err := collectMetricsSnapshot(ctx, 50, 0, reads)
 	if err != nil {
 		return
 	}
@@ -275,6 +366,10 @@ type MetricsSnapshot struct {
 
 	// Reconciled mitigation funnel (single-unit, server-computed).
 	MitigationFunnel MitigationFunnel `json:"mitigationFunnel,omitzero"`
+
+	// aggregatesAt is when the whole-table aggregates in this snapshot were
+	// read from the database; zero if they never were.
+	aggregatesAt time.Time
 }
 
 // MitigationFunnel is what became of the HTTP requests the gateway received,
@@ -492,20 +587,58 @@ type SystemMetrics struct {
 	ResourceGovernorEnabled  bool    `json:"resourceGovernorEnabled"`
 }
 
-// CollectMetricsSnapshot gathers all registered Prometheus metrics into a structured snapshot.
-// It returns a cached snapshot if available and the request matches default parameters.
+// CollectMetricsSnapshot is the snapshot for someone viewing the dashboard:
+// the published one with the requested page of recent threats. Calling it
+// counts as someone watching (NoteDashboardViewer).
 func CollectMetricsSnapshot(ctx context.Context, limit, offset int) (*MetricsSnapshot, error) {
-	if limit == 50 && offset == 0 {
-		if snap := lastSnapshot.Load(); snap != nil {
-			return snap, nil
-		}
+	NoteDashboardViewer()
+	snap, err := currentSnapshot(ctx)
+	if err != nil || (limit == 50 && offset == 0) {
+		return snap, err
 	}
-
-	// Fallback to synchronous collection if no cache or non-default parameters
-	return collectMetricsSnapshot(ctx, limit, offset, true)
+	return recentPage(ctx, limit, offset)
 }
 
-func collectMetricsSnapshot(ctx context.Context, limit, offset int, heavy bool) (*MetricsSnapshot, error) {
+// currentSnapshot is the published snapshot, unless its aggregates are more
+// than two intervals old -- nobody was watching, so the loop stopped reading
+// them -- in which case it reads everything once, publishes that and returns
+// it. Concurrent callers share the one read.
+func currentSnapshot(ctx context.Context) (*MetricsSnapshot, error) {
+	every := dashboardAggregateInterval(config.CurrentTierDefaults())
+	if snap := lastSnapshot.Load(); !snap.aggregatesStale(time.Now(), 2*every) {
+		return snap, nil
+	}
+	v, err, _ := snapshotFlight.Do("snapshot", func() (any, error) {
+		// Detached from the first caller: its cancellation would otherwise
+		// publish a snapshot of empty sections to every caller sharing it.
+		readCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		defer cancel()
+		snap, err := collectMetricsSnapshot(readCtx, 50, 0, allReads)
+		if err != nil {
+			return nil, err
+		}
+		lastSnapshot.Store(snap)
+		return snap, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	snap, ok := v.(*MetricsSnapshot)
+	if !ok {
+		return nil, errors.New("metrics snapshot: unexpected shared result")
+	}
+	return snap, nil
+}
+
+// recentPage is a snapshot built now with another page of recent threats. It
+// reads that page from the database and carries the aggregates over from the
+// published snapshot; it used to read all of them again for every page the
+// Security Hub asked for. It is not published: the page is the caller's.
+func recentPage(ctx context.Context, limit, offset int) (*MetricsSnapshot, error) {
+	return collectMetricsSnapshot(ctx, limit, offset, snapshotReads{recent: true})
+}
+
+func collectMetricsSnapshot(ctx context.Context, limit, offset int, reads snapshotReads) (*MetricsSnapshot, error) {
 	families, err := prometheus.DefaultGatherer.Gather()
 	if err != nil {
 		return nil, err
@@ -518,8 +651,11 @@ func collectMetricsSnapshot(ctx context.Context, limit, offset int, heavy bool) 
 
 	snap := &MetricsSnapshot{}
 
-	// Capture previous snapshot to preserve heavy data during light refreshes
+	// What this refresh does not read is carried over from the previous one.
 	prev := lastSnapshot.Load()
+	if prev == nil {
+		prev = &MetricsSnapshot{}
+	}
 
 	snap.GoldenSignals = buildGoldenSignals(ctx, idx)
 	snap.RouteMetrics = buildRouteMetrics(idx)
@@ -530,42 +666,14 @@ func collectMetricsSnapshot(ctx context.Context, limit, offset int, heavy bool) 
 	snap.CountryMetrics = buildCountryMetrics(idx)
 	snap.ProtocolMetrics = collectLabeledCounts(idx, "gateon_requests_by_protocol_total", "protocol")
 	snap.DomainMetrics = buildDomainMetrics(idx)
+	snap.Security = buildSecurityInsights(ctx, limit, offset, reads, prev.Security)
 
-	if heavy {
-		snap.HourlyDomainMetrics = GetDomainStatsWindow(ctx, 1)
-		snap.DomainStatsRolling24h = GetDomainStatsRolling24h(ctx)
-		snap.TrafficHistory = GetSystemTrafficHistory(ctx, dashboardTrendWindowDays())
-		snap.Security = buildSecurityInsights(ctx, idx, limit, offset, true)
-	} else if prev != nil {
-		snap.HourlyDomainMetrics = prev.HourlyDomainMetrics
-		snap.DomainStatsRolling24h = prev.DomainStatsRolling24h
-		snap.TrafficHistory = prev.TrafficHistory
-		snap.Security = buildSecurityInsights(ctx, idx, limit, offset, false)
-		// Merge recent anomalies and total from prev if available
-		snap.Security.RecentAnomalies = prev.Security.RecentAnomalies
-		snap.Security.TotalAnomalies = prev.Security.TotalAnomalies
-		snap.Security.TopThreatSources = prev.Security.TopThreatSources
-		snap.Security.TopThreatTypes = prev.Security.TopThreatTypes
-		snap.Security.ThreatsByCountry = prev.Security.ThreatsByCountry
-		snap.Security.AttackTrend = prev.Security.AttackTrend
-	}
+	readTrafficAggregates(ctx, snap, prev, reads.aggregates)
 
 	snap.System = buildSystemMetrics(idx)
-
-	if heavy {
-		if val := globalEbpfManager.Load(); val != nil {
-			if container, ok := val.(*ebpfProviderContainer); ok && container.p != nil {
-				if ips, err := container.p.GetTopIPs(5); err == nil {
-					converted := make([]IPStat, len(ips))
-					for i, ip := range ips {
-						converted[i] = IPStat{IP: ip.IP, Count: ip.Count}
-					}
-					snap.Security.EbpfTopIPs = converted
-				}
-			}
-		}
-	} else if prev != nil {
-		snap.Security.EbpfTopIPs = prev.Security.EbpfTopIPs
+	snap.Security.EbpfTopIPs = prev.Security.EbpfTopIPs
+	if reads.recent {
+		snap.Security.EbpfTopIPs = ebpfTopIPs()
 	}
 
 	snap.MitigationFunnel = buildMitigationFunnel(idx)
@@ -582,6 +690,44 @@ func collectMetricsSnapshot(ctx context.Context, limit, offset int, heavy bool) 
 	}
 
 	return snap, nil
+}
+
+// readTrafficAggregates fills snap's domain and traffic history, read from the
+// database when read is set and carried over from prev otherwise.
+func readTrafficAggregates(ctx context.Context, snap, prev *MetricsSnapshot, read bool) {
+	if !read {
+		snap.aggregatesAt = prev.aggregatesAt
+		snap.HourlyDomainMetrics = prev.HourlyDomainMetrics
+		snap.DomainStatsRolling24h = prev.DomainStatsRolling24h
+		snap.TrafficHistory = prev.TrafficHistory
+		return
+	}
+	DashboardAggregateReadsTotal.Inc()
+	snap.aggregatesAt = time.Now()
+	snap.HourlyDomainMetrics = GetDomainStatsWindow(ctx, 1)
+	snap.DomainStatsRolling24h = GetDomainStatsRolling24h(ctx)
+	snap.TrafficHistory = GetSystemTrafficHistory(ctx, dashboardTrendWindowDays())
+}
+
+// ebpfTopIPs is the eBPF provider's busiest addresses, or nil without one.
+func ebpfTopIPs() []IPStat {
+	val := globalEbpfManager.Load()
+	if val == nil {
+		return nil
+	}
+	container, ok := val.(*ebpfProviderContainer)
+	if !ok || container.p == nil {
+		return nil
+	}
+	ips, err := container.p.GetTopIPs(5)
+	if err != nil {
+		return nil
+	}
+	converted := make([]IPStat, len(ips))
+	for i, ip := range ips {
+		converted[i] = IPStat{IP: ip.IP, Count: ip.Count}
+	}
+	return converted
 }
 
 func buildGoldenSignals(ctx context.Context, idx map[string]*dto.MetricFamily) GoldenSignals {
@@ -1215,73 +1361,54 @@ func buildSystemMetrics(idx map[string]*dto.MetricFamily) SystemMetrics {
 	return sm
 }
 
-func buildSecurityInsights(ctx context.Context, idx map[string]*dto.MetricFamily, limit, offset int, heavy bool) SecurityInsights {
-	// Parallelize database queries to minimize latency on the metrics path.
-	var (
-		threats     []*SecurityThreat
-		total       int64
-		activeCount int
-		mitigated   int
-		sources     []LabeledCount
-		types       []LabeledCount
-		byCountry   []LabeledCount
-		trend       []TrafficSample
-	)
-
-	g, ctx := errgroup.WithContext(ctx)
-
-	if heavy {
-		g.Go(func() error {
-			threats = GetSecurityThreatsLite(ctx, limit, offset, nil)
-			return nil
-		})
-		g.Go(func() error {
-			total = CountSecurityThreats(ctx, nil)
-			return nil
-		})
-		g.Go(func() error {
-			sources = GetTopThreatSources(ctx, 5)
-			return nil
-		})
-		g.Go(func() error {
-			types = GetTopThreatTypes(ctx, 5)
-			return nil
-		})
-		g.Go(func() error {
-			byCountry = GetThreatsByCountry(ctx, 10)
-			return nil
-		})
-		g.Go(func() error {
-			trend = GetAttackTrend(ctx, dashboardTrendWindowDays())
-			return nil
-		})
-	}
-
-	// Always refresh atomic counters (low cost)
-	g.Go(func() error {
-		activeCount = GetActiveThreatsRolling24h(ctx)
-		return nil
-	})
-	g.Go(func() error {
-		mitigated = GetMitigatedRolling24h(ctx)
-		return nil
-	})
-
-	_ = g.Wait()
-
-	return SecurityInsights{
-		TopThreatSources:  sources,
-		TopThreatTypes:    types,
-		ThreatsByCountry:  byCountry,
-		AttackTrend:       trend,
-		RecentAnomalies:   threats,
-		TotalAnomalies:    total,
-		ActiveThreats:     activeCount,
-		MitigatedToday:    mitigated,
+// buildSecurityInsights reads what reads asks for and carries the rest over
+// from prev.
+func buildSecurityInsights(ctx context.Context, limit, offset int, reads snapshotReads, prev SecurityInsights) SecurityInsights {
+	out := SecurityInsights{
+		TopThreatSources:  prev.TopThreatSources,
+		TopThreatTypes:    prev.TopThreatTypes,
+		ThreatsByCountry:  prev.ThreatsByCountry,
+		AttackTrend:       prev.AttackTrend,
+		RecentAnomalies:   prev.RecentAnomalies,
+		TotalAnomalies:    prev.TotalAnomalies,
+		ActiveThreats:     GetActiveThreatsRolling24h(ctx),
+		MitigatedToday:    GetMitigatedRolling24h(ctx),
 		HeavyHitters:      GlobalHHH.GetHeavyHitters(10), // Threshold of 10 threat events
 		GlobalThreatScore: float64(GlobalCMS.Estimate("global")),
-		EbpfTopIPs:        nil, // Filled by caller
 	}
+
+	// The reads are independent, so they run at once.
+	g, ctx := errgroup.WithContext(ctx)
+	if reads.recent {
+		g.Go(func() error {
+			out.RecentAnomalies = GetSecurityThreatsLite(ctx, limit, offset, nil)
+			return nil
+		})
+	}
+	if reads.aggregates {
+		g.Go(func() error {
+			out.TotalAnomalies = CountSecurityThreats(ctx, nil)
+			return nil
+		})
+		g.Go(func() error {
+			out.TopThreatSources = GetTopThreatSources(ctx, 5)
+			return nil
+		})
+		g.Go(func() error {
+			out.TopThreatTypes = GetTopThreatTypes(ctx, 5)
+			return nil
+		})
+		g.Go(func() error {
+			out.ThreatsByCountry = GetThreatsByCountry(ctx, 10)
+			return nil
+		})
+		g.Go(func() error {
+			out.AttackTrend = GetAttackTrend(ctx, dashboardTrendWindowDays())
+			return nil
+		})
+	}
+	_ = g.Wait()
+	return out
 }
 
 // --- helpers ---

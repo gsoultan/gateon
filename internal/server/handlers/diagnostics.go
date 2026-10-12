@@ -660,6 +660,7 @@ func registerDiagnosticHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Dep
 
 		ch := telemetry.MetricsBroadcaster.Subscribe()
 		defer telemetry.MetricsBroadcaster.Unsubscribe(ch)
+		telemetry.NoteDashboardViewer()
 
 		flusher, ok := w.(http.Flusher)
 		if !ok {

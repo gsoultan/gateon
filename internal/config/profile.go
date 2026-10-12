@@ -41,8 +41,15 @@ type TierDefaults struct {
 
 	// Telemetry.
 	TelemetryIntervalSeconds int
-	FlushIntervalSeconds     int
-	TraceStoreEnabled        bool // open the Pebble trace store at all
+	// DashboardAggregateInterval is how often, while someone has the
+	// dashboard open, the metrics snapshot re-reads the aggregates that span
+	// the whole retention window: the threat total, top sources, types and
+	// countries, the attack trend and traffic history (ADR 0067). With nobody
+	// watching they are not read at all. GATEON_DASHBOARD_AGGREGATE_INTERVAL
+	// overrides it.
+	DashboardAggregateInterval time.Duration
+	FlushIntervalSeconds       int
+	TraceStoreEnabled          bool // open the Pebble trace store at all
 	// TraceSampleRate is 1 = every request, N = 1-in-N, 0 = none.
 	//
 	// Minimal is 0 because its trace store is closed: the header maps were being
@@ -237,120 +244,123 @@ func DefaultsFor(tier Tier) TierDefaults {
 	switch tier {
 	case TierMinimal:
 		return TierDefaults{
-			Tier:                      TierMinimal,
-			CorrelationEnabled:        false,
-			CorrelationMaxSources:     500,
-			CorrelationMaxPerSource:   32,
-			TraceStoreEnabled:         false,
-			TraceSampleRate:           0,
-			CMSWidth:                  512,
-			CMSDepth:                  3,
-			EbpfPollSeconds:           10,
-			RetentionDays:             1,
-			PebbleCacheBytes:          4 << 20, // 4 MiB
-			PebbleMemTableBytes:       1 << 20, // 1 MiB
-			PebbleMaxOpenFiles:        50,
-			TraceStoreMaxBytes:        256 << 20, // 256 MiB
-			AccessLogMaxPerSecond:     50,
-			TraceArchiveRetentionDays: 7,
-			TraceArchiveMaxBytes:      256 << 20, // 256 MiB
-			ThreatArchiveMaxBytes:     256 << 20, // 256 MiB
-			DBMaxOpenConns:            5,
-			DBMaxIdleConns:            5,
-			TelemetryIntervalSeconds:  30,
-			FlushIntervalSeconds:      10,
-			WAFTier:                   TierMinimal,
-			RLLimiterStates:           2000,
-			AuthAttemptsPerMinute:     10,
-			AuthHashConcurrency:       1,
-			EntryPointMaxConnections:  1000,
-			EntryPointMaxConnPerAddr:  128,
-			MaxHeaderBytes:            32 << 10, // 32 KiB
-			StreamIdleTimeout:         2 * time.Minute,
-			StreamMaxLifetime:         time.Hour,
-			BlockLookupTimeout:        200 * time.Millisecond,
-			IPFeedMaxEntries:          250_000,
-			IPFeedMaxBytes:            8 << 20, // 8 MiB
-			IPFeedCoverageV4Prefix:    4,
-			IPFeedCoverageV6Prefix:    32,
+			Tier:                       TierMinimal,
+			CorrelationEnabled:         false,
+			CorrelationMaxSources:      500,
+			CorrelationMaxPerSource:    32,
+			TraceStoreEnabled:          false,
+			TraceSampleRate:            0,
+			CMSWidth:                   512,
+			CMSDepth:                   3,
+			EbpfPollSeconds:            10,
+			RetentionDays:              1,
+			PebbleCacheBytes:           4 << 20, // 4 MiB
+			PebbleMemTableBytes:        1 << 20, // 1 MiB
+			PebbleMaxOpenFiles:         50,
+			TraceStoreMaxBytes:         256 << 20, // 256 MiB
+			AccessLogMaxPerSecond:      50,
+			TraceArchiveRetentionDays:  7,
+			TraceArchiveMaxBytes:       256 << 20, // 256 MiB
+			ThreatArchiveMaxBytes:      256 << 20, // 256 MiB
+			DBMaxOpenConns:             5,
+			DBMaxIdleConns:             5,
+			TelemetryIntervalSeconds:   30,
+			DashboardAggregateInterval: 2 * time.Minute,
+			FlushIntervalSeconds:       10,
+			WAFTier:                    TierMinimal,
+			RLLimiterStates:            2000,
+			AuthAttemptsPerMinute:      10,
+			AuthHashConcurrency:        1,
+			EntryPointMaxConnections:   1000,
+			EntryPointMaxConnPerAddr:   128,
+			MaxHeaderBytes:             32 << 10, // 32 KiB
+			StreamIdleTimeout:          2 * time.Minute,
+			StreamMaxLifetime:          time.Hour,
+			BlockLookupTimeout:         200 * time.Millisecond,
+			IPFeedMaxEntries:           250_000,
+			IPFeedMaxBytes:             8 << 20, // 8 MiB
+			IPFeedCoverageV4Prefix:     4,
+			IPFeedCoverageV6Prefix:     32,
 		}
 	case TierEnterprise:
 		return TierDefaults{
-			Tier:                      TierEnterprise,
-			CorrelationEnabled:        true,
-			CorrelationMaxSources:     10000,
-			CorrelationMaxPerSource:   256,
-			TraceStoreEnabled:         true,
-			TraceSampleRate:           1,
-			CMSWidth:                  4096,
-			CMSDepth:                  4,
-			EbpfPollSeconds:           2,
-			RetentionDays:             30,
-			PebbleCacheBytes:          32 << 20, // 32 MiB
-			PebbleMemTableBytes:       8 << 20,  // 8 MiB
-			PebbleMaxOpenFiles:        500,
-			TraceStoreMaxBytes:        20 << 30, // 20 GiB
-			AccessLogMaxPerSecond:     200,
-			TraceArchiveRetentionDays: 365,
-			TraceArchiveMaxBytes:      20 << 30, // 20 GiB
-			ThreatArchiveMaxBytes:     10 << 30, // 10 GiB
-			DBMaxOpenConns:            100,
-			DBMaxIdleConns:            50,
-			TelemetryIntervalSeconds:  2,
-			FlushIntervalSeconds:      1,
-			WAFTier:                   TierEnterprise,
-			RLLimiterStates:           100000,
-			AuthAttemptsPerMinute:     10,
-			AuthHashConcurrency:       4,
-			EntryPointMaxConnections:  50000,
-			EntryPointMaxConnPerAddr:  1024,
-			MaxHeaderBytes:            64 << 10, // 64 KiB
-			StreamIdleTimeout:         10 * time.Minute,
-			StreamMaxLifetime:         12 * time.Hour,
-			BlockLookupTimeout:        50 * time.Millisecond,
-			IPFeedMaxEntries:          4_000_000,
-			IPFeedMaxBytes:            128 << 20, // 128 MiB
-			IPFeedCoverageV4Prefix:    4,
-			IPFeedCoverageV6Prefix:    32,
+			Tier:                       TierEnterprise,
+			CorrelationEnabled:         true,
+			CorrelationMaxSources:      10000,
+			CorrelationMaxPerSource:    256,
+			TraceStoreEnabled:          true,
+			TraceSampleRate:            1,
+			CMSWidth:                   4096,
+			CMSDepth:                   4,
+			EbpfPollSeconds:            2,
+			RetentionDays:              30,
+			PebbleCacheBytes:           32 << 20, // 32 MiB
+			PebbleMemTableBytes:        8 << 20,  // 8 MiB
+			PebbleMaxOpenFiles:         500,
+			TraceStoreMaxBytes:         20 << 30, // 20 GiB
+			AccessLogMaxPerSecond:      200,
+			TraceArchiveRetentionDays:  365,
+			TraceArchiveMaxBytes:       20 << 30, // 20 GiB
+			ThreatArchiveMaxBytes:      10 << 30, // 10 GiB
+			DBMaxOpenConns:             100,
+			DBMaxIdleConns:             50,
+			TelemetryIntervalSeconds:   2,
+			DashboardAggregateInterval: 30 * time.Second,
+			FlushIntervalSeconds:       1,
+			WAFTier:                    TierEnterprise,
+			RLLimiterStates:            100000,
+			AuthAttemptsPerMinute:      10,
+			AuthHashConcurrency:        4,
+			EntryPointMaxConnections:   50000,
+			EntryPointMaxConnPerAddr:   1024,
+			MaxHeaderBytes:             64 << 10, // 64 KiB
+			StreamIdleTimeout:          10 * time.Minute,
+			StreamMaxLifetime:          12 * time.Hour,
+			BlockLookupTimeout:         50 * time.Millisecond,
+			IPFeedMaxEntries:           4_000_000,
+			IPFeedMaxBytes:             128 << 20, // 128 MiB
+			IPFeedCoverageV4Prefix:     4,
+			IPFeedCoverageV6Prefix:     32,
 		}
 	default: // TierStandard
 		return TierDefaults{
-			Tier:                      TierStandard,
-			CorrelationEnabled:        true,
-			CorrelationMaxSources:     2000,
-			CorrelationMaxPerSource:   64,
-			TraceStoreEnabled:         true,
-			TraceSampleRate:           1,
-			CMSWidth:                  2048,
-			CMSDepth:                  4,
-			EbpfPollSeconds:           2,
-			RetentionDays:             7,
-			PebbleCacheBytes:          8 << 20, // 8 MiB
-			PebbleMemTableBytes:       4 << 20, // 4 MiB
-			PebbleMaxOpenFiles:        200,
-			TraceStoreMaxBytes:        2 << 30, // 2 GiB
-			AccessLogMaxPerSecond:     100,
-			TraceArchiveRetentionDays: 90,
-			TraceArchiveMaxBytes:      2 << 30, // 2 GiB
-			ThreatArchiveMaxBytes:     1 << 30, // 1 GiB
-			DBMaxOpenConns:            25,
-			DBMaxIdleConns:            25,
-			TelemetryIntervalSeconds:  5,
-			FlushIntervalSeconds:      2,
-			WAFTier:                   TierStandard,
-			RLLimiterStates:           20000,
-			AuthAttemptsPerMinute:     10,
-			AuthHashConcurrency:       2,
-			EntryPointMaxConnections:  10000,
-			EntryPointMaxConnPerAddr:  256,
-			MaxHeaderBytes:            32 << 10, // 32 KiB
-			StreamIdleTimeout:         5 * time.Minute,
-			StreamMaxLifetime:         4 * time.Hour,
-			BlockLookupTimeout:        100 * time.Millisecond,
-			IPFeedMaxEntries:          1_000_000,
-			IPFeedMaxBytes:            32 << 20, // 32 MiB
-			IPFeedCoverageV4Prefix:    4,
-			IPFeedCoverageV6Prefix:    32,
+			Tier:                       TierStandard,
+			CorrelationEnabled:         true,
+			CorrelationMaxSources:      2000,
+			CorrelationMaxPerSource:    64,
+			TraceStoreEnabled:          true,
+			TraceSampleRate:            1,
+			CMSWidth:                   2048,
+			CMSDepth:                   4,
+			EbpfPollSeconds:            2,
+			RetentionDays:              7,
+			PebbleCacheBytes:           8 << 20, // 8 MiB
+			PebbleMemTableBytes:        4 << 20, // 4 MiB
+			PebbleMaxOpenFiles:         200,
+			TraceStoreMaxBytes:         2 << 30, // 2 GiB
+			AccessLogMaxPerSecond:      100,
+			TraceArchiveRetentionDays:  90,
+			TraceArchiveMaxBytes:       2 << 30, // 2 GiB
+			ThreatArchiveMaxBytes:      1 << 30, // 1 GiB
+			DBMaxOpenConns:             25,
+			DBMaxIdleConns:             25,
+			TelemetryIntervalSeconds:   5,
+			DashboardAggregateInterval: time.Minute,
+			FlushIntervalSeconds:       2,
+			WAFTier:                    TierStandard,
+			RLLimiterStates:            20000,
+			AuthAttemptsPerMinute:      10,
+			AuthHashConcurrency:        2,
+			EntryPointMaxConnections:   10000,
+			EntryPointMaxConnPerAddr:   256,
+			MaxHeaderBytes:             32 << 10, // 32 KiB
+			StreamIdleTimeout:          5 * time.Minute,
+			StreamMaxLifetime:          4 * time.Hour,
+			BlockLookupTimeout:         100 * time.Millisecond,
+			IPFeedMaxEntries:           1_000_000,
+			IPFeedMaxBytes:             32 << 20, // 32 MiB
+			IPFeedCoverageV4Prefix:     4,
+			IPFeedCoverageV6Prefix:     32,
 		}
 	}
 }

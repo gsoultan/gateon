@@ -198,7 +198,7 @@ func TestPublishedSnapshotSurvivesLaterRefreshes(t *testing.T) {
 	counter.Add(7)
 
 	for round := range 5 {
-		refreshSnapshot(t.Context(), true)
+		refreshSnapshot(t.Context(), allReads)
 		held := GetLastSnapshot()
 		want := routeRequests(held, route)
 		if want < 0 {
@@ -208,8 +208,8 @@ func TestPublishedSnapshotSurvivesLaterRefreshes(t *testing.T) {
 		// The metrics move on and the loop refreshes twice more, as it does
 		// every few seconds in production while a reader still holds `held`.
 		counter.Add(1000)
-		refreshSnapshot(t.Context(), true)
-		refreshSnapshot(t.Context(), true)
+		refreshSnapshot(t.Context(), allReads)
+		refreshSnapshot(t.Context(), allReads)
 
 		if got := routeRequests(held, route); got != want {
 			t.Fatalf("round %d: a snapshot handed to a reader was rewritten by later refreshes: route %q read %v when handed out and reads %v now",

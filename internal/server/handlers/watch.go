@@ -113,6 +113,7 @@ func RegisterWatchHandler(mux *http.ServeMux, d *Deps) {
 
 		metricsCh := telemetry.MetricsBroadcaster.Subscribe()
 		defer telemetry.MetricsBroadcaster.Unsubscribe(metricsCh)
+		telemetry.NoteDashboardViewer()
 
 		// Create a common channel for all events
 		eventCh := make(chan WatchEvent, 20)

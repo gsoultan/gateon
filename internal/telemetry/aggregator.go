@@ -136,11 +136,17 @@ func (a *LocalMetricsAggregator) Start(ctx context.Context) {
 }
 
 func (a *LocalMetricsAggregator) takeSnapshot(ctx context.Context) {
-	// Use limit=50 to hit the background-refreshed snapshot cache.
-	snap, err := CollectMetricsSnapshot(ctx, 50, 0)
-	if err != nil {
-		logger.L.LogError("failed to collect metrics snapshot for aggregator", "error", err)
-		return
+	// The published snapshot, not CollectMetricsSnapshot: that counts as
+	// someone watching the dashboard, and this runs every minute whether or
+	// not anyone is. Golden signals come from memory, so the loop keeps them
+	// fresh either way.
+	snap := lastSnapshot.Load()
+	if snap == nil {
+		var err error
+		if snap, err = collectMetricsSnapshot(ctx, 50, 0, snapshotReads{}); err != nil {
+			logger.L.LogError("failed to collect metrics snapshot for aggregator", "error", err)
+			return
+		}
 	}
 
 	a.mu.Lock()
