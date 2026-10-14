@@ -5,80 +5,87 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/gsoultan/gateon/internal/auth"
+	"github.com/gsoultan/gateon/internal/middleware"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
-func TestAnalyzeConfigNilUsesSmartEngineSummary(t *testing.T) {
-	resp := analyzeConfig(context.Background(), nil, wafCoverage{})
-	if !strings.Contains(resp.Summary, "Smart Engine") {
-		t.Fatalf("summary should mention Smart Engine for Local Mode, got %q", resp.Summary)
+// advisoryRPCs answers the three advisory RPCs and counts the calls that
+// reach it. The analysis itself is tested in internal/ai/advisory and
+// internal/api; these tests hold the REST transport to the RPCs.
+type advisoryRPCs struct {
+	GlobalAndAuthAPI
+	calls int
+	logs  []string
+}
+
+func (a *advisoryRPCs) AnalyzeConfig(context.Context, *gateonv1.AnalyzeConfigRequest) (*gateonv1.AnalyzeConfigResponse, error) {
+	a.calls++
+	return &gateonv1.AnalyzeConfigResponse{Summary: "s", Engine: "local",
+		Insights: []*gateonv1.AIInsight{{Title: "t", SuggestedConfig: "waf: {}"}}}, nil
+}
+
+func (a *advisoryRPCs) AnalyzeLogs(_ context.Context, req *gateonv1.AnalyzeLogsRequest) (*gateonv1.AnalyzeLogsResponse, error) {
+	a.calls++
+	a.logs = req.GetLogs()
+	return &gateonv1.AnalyzeLogsResponse{Analysis: "a", Local: "l", Engine: "local"}, nil
+}
+
+func (a *advisoryRPCs) TestAIProvider(context.Context, *gateonv1.TestAIProviderRequest) (*gateonv1.TestAIProviderResponse, error) {
+	a.calls++
+	return &gateonv1.TestAIProviderResponse{Ok: true, Engine: "anthropic:m", Message: "The provider answered."}, nil
+}
+
+func postAs(t *testing.T, svc GlobalAndAuthAPI, role, path, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	mux := http.NewServeMux()
+	registerAIAdvisoryHandlers(mux, svc)
+	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+	req = req.WithContext(context.WithValue(req.Context(), middleware.UserContextKey,
+		&auth.Claims{ID: "u-" + role, Username: role, Role: role}))
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	return rr
+}
+
+// TestAdvisoryRESTServesTheRPCs: the REST endpoints return what the RPCs
+// return, under the field names the dashboard reads.
+func TestAdvisoryRESTServesTheRPCs(t *testing.T) {
+	svc := &advisoryRPCs{}
+	rr := postAs(t, svc, auth.RoleViewer, "/v1/AnalyzeConfig", `{"focus":"security"}`)
+	var cfg map[string]any
+	if err := json.Unmarshal(rr.Body.Bytes(), &cfg); err != nil || rr.Code != http.StatusOK {
+		t.Fatalf("AnalyzeConfig: %d %s", rr.Code, rr.Body)
+	}
+	insights, _ := cfg["insights"].([]any)
+	first, _ := insights[0].(map[string]any)
+	if cfg["summary"] != "s" || cfg["engine"] != "local" || first["suggestedConfig"] != "waf: {}" {
+		t.Errorf("AnalyzeConfig body = %s", rr.Body)
+	}
+
+	rr = postAs(t, svc, auth.RoleViewer, "/v1/AnalyzeLogs", `{"logs":["a line"]}`)
+	if !strings.Contains(rr.Body.String(), `"local":"l"`) || len(svc.logs) != 1 || svc.logs[0] != "a line" {
+		t.Errorf("AnalyzeLogs: body %s, lines passed %q", rr.Body, svc.logs)
 	}
 }
 
-func TestAnalyzeConfigFlagsWeakPosture(t *testing.T) {
-	// A bare config: WAF nil/off, no audit, etc. should surface critical findings.
-	cfg := &gateonv1.GlobalConfig{
-		Tls: &gateonv1.TlsConfig{Enabled: true, MinTlsVersion: "TLS1.0"},
+// TestProviderTestNeedsTheRightToChangeSettings: the test spends a call on
+// the stored key, which a viewer may not do.
+func TestProviderTestNeedsTheRightToChangeSettings(t *testing.T) {
+	svc := &advisoryRPCs{}
+	if rr := postAs(t, svc, auth.RoleViewer, "/v1/ai-advisory/test", ""); rr.Code != http.StatusForbidden {
+		t.Errorf("viewer: status %d, want 403", rr.Code)
 	}
-	resp := analyzeConfig(context.Background(), cfg, wafCoverage{})
-	if !strings.Contains(resp.Summary, "Smart Engine") {
-		t.Fatalf("summary should mention Smart Engine, got %q", resp.Summary)
+	if svc.calls != 0 {
+		t.Fatalf("a refused test still reached the provider")
 	}
-	if len(resp.Insights) == 0 {
-		t.Fatal("expected insights for a weak configuration")
-	}
-
-	var sawWeakTLS, sawWAFDisabled bool
-	for _, in := range resp.Insights {
-		if strings.Contains(in.Title, "Weak minimum TLS") {
-			sawWeakTLS = true
-			if in.Severity != "critical" {
-				t.Errorf("weak TLS should be critical, got %q", in.Severity)
-			}
-		}
-		if strings.Contains(in.Title, "Web Application Firewall is disabled") {
-			sawWAFDisabled = true
-		}
-	}
-	if !sawWeakTLS {
-		t.Error("expected a weak-TLS finding")
-	}
-	if !sawWAFDisabled {
-		t.Error("expected a WAF-disabled finding")
-	}
-
-	// Critical findings must be ordered before info findings.
-	rank := map[string]int{"critical": 0, "warning": 1, "info": 2}
-	for i := 1; i < len(resp.Insights); i++ {
-		if rank[resp.Insights[i-1].Severity] > rank[resp.Insights[i].Severity] {
-			t.Fatalf("insights not ordered by severity: %q before %q",
-				resp.Insights[i-1].Severity, resp.Insights[i].Severity)
-		}
-	}
-}
-
-func TestAnalyzeLogsCountsLevels(t *testing.T) {
-	logs := []string{
-		`time=2026-06-27T13:05:11Z level=ERROR msg="threats: scan failed" error="context deadline exceeded"`,
-		`time=2026-06-27T13:05:12Z level=ERROR msg="threats: scan failed" error="context deadline exceeded"`,
-		`time=2026-06-27T13:05:13Z level=WARN msg="slow query"`,
-		`time=2026-06-27T13:05:14Z level=INFO msg="started"`,
-	}
-	out := analyzeLogs(logs)
-	if !strings.Contains(out, "2 error") {
-		t.Errorf("expected 2 errors in summary, got %q", out)
-	}
-	if !strings.Contains(out, "threats: scan failed") {
-		t.Errorf("expected the most frequent message to be surfaced, got %q", out)
-	}
-	if !strings.Contains(out, "Local Mode") {
-		t.Errorf("expected Local Mode marker, got %q", out)
-	}
-
-	if empty := analyzeLogs(nil); !strings.Contains(empty, "No logs") {
-		t.Errorf("expected empty-logs message, got %q", empty)
+	if rr := postAs(t, svc, auth.RoleAdmin, "/v1/ai-advisory/test", ""); !strings.Contains(rr.Body.String(), `"ok":true`) {
+		t.Errorf("admin: %d %s", rr.Code, rr.Body)
 	}
 }

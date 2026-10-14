@@ -20,6 +20,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/gsoultan/gateon/internal/ai"
+	"github.com/gsoultan/gateon/internal/ai/advisory"
 	"github.com/gsoultan/gateon/internal/ebpf"
 	"github.com/gsoultan/gateon/internal/httputil"
 	"github.com/gsoultan/gateon/internal/logger"
@@ -27,6 +28,7 @@ import (
 	"github.com/gsoultan/gateon/internal/middleware/security"
 	"github.com/gsoultan/gateon/internal/middleware/security/identity"
 	wafmw "github.com/gsoultan/gateon/internal/middleware/security/waf"
+	"github.com/gsoultan/gateon/internal/security/posture"
 	"github.com/gsoultan/gateon/internal/security/waf"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	"github.com/gsoultan/gateon/internal/telemetry/repid"
@@ -1775,4 +1777,54 @@ func tlsOffersPostQuantumKeyExchange() bool {
 		}
 	}
 	return true
+}
+
+// AnalyzeConfig runs the AI Advisory over the live configuration and routes
+// (ADR 0069).
+func (s *ApiService) AnalyzeConfig(ctx context.Context, _ *gateonv1.AnalyzeConfigRequest) (*gateonv1.AnalyzeConfigResponse, error) {
+	cfg := s.liveGlobalConfig(ctx)
+	a := s.advisory().AnalyzeConfig(ctx, advisory.Gateway{Config: cfg, Routes: s.routeCoverage(ctx, cfg),
+		ManagementWorldOpen: s.ManagementWorldOpen != nil && s.ManagementWorldOpen(cfg.GetManagement())})
+	insights := make([]*gateonv1.AIInsight, 0, len(a.Insights))
+	for _, in := range a.Insights {
+		insights = append(insights, &gateonv1.AIInsight{Title: in.Title, Description: in.Description,
+			Severity: in.Severity, Category: in.Category, Recommendation: in.Recommendation,
+			SuggestedConfig: in.SuggestedConfig})
+	}
+	return &gateonv1.AnalyzeConfigResponse{Summary: a.Summary, Insights: insights, Engine: a.Engine, Notice: a.Notice}, nil
+}
+
+// AnalyzeLogs runs the Log Assistant over req's lines (ADR 0069).
+func (s *ApiService) AnalyzeLogs(ctx context.Context, req *gateonv1.AnalyzeLogsRequest) (*gateonv1.AnalyzeLogsResponse, error) {
+	a := s.advisory().AnalyzeLogs(ctx, s.liveGlobalConfig(ctx).GetAi(), req.GetLogs())
+	return &gateonv1.AnalyzeLogsResponse{Analysis: a.Analysis, Local: a.Local, Engine: a.Engine, Notice: a.Notice}, nil
+}
+
+// TestAIProvider makes one call with the saved AI provider settings.
+func (s *ApiService) TestAIProvider(ctx context.Context, _ *gateonv1.TestAIProviderRequest) (*gateonv1.TestAIProviderResponse, error) {
+	r := s.advisory().Test(ctx, s.liveGlobalConfig(ctx).GetAi())
+	return &gateonv1.TestAIProviderResponse{Ok: r.OK, Engine: r.Engine, Message: r.Message}, nil
+}
+
+func (s *ApiService) advisory() *advisory.Service {
+	s.advisoryOnce.Do(func() { s.advisorySvc = advisory.New() })
+	return s.advisorySvc
+}
+
+func (s *ApiService) liveGlobalConfig(ctx context.Context) *gateonv1.GlobalConfig {
+	if s.Globals == nil {
+		return nil
+	}
+	return s.Globals.Get(ctx)
+}
+
+// routeCoverage counts the enabled routes by what inspects them. A route that
+// attaches a "waf" middleware runs that WAF instead of the gateway-wide one,
+// in that middleware's mode -- so a route-level audit-only WAF on a gateway
+// whose global WAF enforces is a route nothing blocks for.
+func (s *ApiService) routeCoverage(ctx context.Context, global *gateonv1.GlobalConfig) advisory.Coverage {
+	if s.Routes == nil || s.Middlewares == nil {
+		return advisory.Coverage{}
+	}
+	return posture.Coverage(posture.Config{Global: global, Routes: s.Routes.List(ctx), Middlewares: s.Middlewares.All(ctx)})
 }

@@ -1,0 +1,63 @@
+// Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
+// SPDX-License-Identifier: MIT
+
+syntax = "proto3";
+
+package gateon.v1;
+
+option go_package = "github.com/gsoultan/gateon/proto/gateon/v1;gateonv1";
+
+// The AI Advisory and Log Assistant (ADR 0069). The analysis is Gateon's own
+// and deterministic; a configured language model may only narrate it.
+
+// AIInsight is one finding of the configuration analysis. Its severity is
+// critical, warning or info, and its category security, performance or
+// availability. Both are output only.
+message AIInsight {
+  string title = 1;
+  string description = 2;
+  string severity = 3;
+  string category = 4;
+  string recommendation = 5;
+  // A configuration snippet that addresses the finding; may be empty.
+  string suggested_config = 6;
+}
+
+message AnalyzeConfigRequest {
+  // Reserved for a future narrowing of the analysis; ignored today.
+  string focus = 1;
+}
+
+message AnalyzeConfigResponse {
+  // The executive summary: the provider's, or the local one.
+  string summary = 1;
+  // Always the local analysis. A model cannot add, drop or reword one.
+  repeated AIInsight insights = 2;
+  // "local", or "provider:model" when a provider wrote the summary.
+  string engine = 3;
+  // Set when a provider is configured and did not answer, saying why.
+  string notice = 4;
+}
+
+message AnalyzeLogsRequest {
+  // The log lines to analyze. Lines past the analysis bounds are not read.
+  repeated string logs = 1;
+}
+
+message AnalyzeLogsResponse {
+  // The provider's analysis, or the local one.
+  string analysis = 1;
+  // The deterministic tally of the same lines, always returned.
+  string local = 2;
+  string engine = 3;
+  string notice = 4;
+}
+
+message TestAIProviderRequest {}
+
+message TestAIProviderResponse {
+  bool ok = 1;
+  string engine = 2;
+  // Why the test failed, in words that carry no key, prompt or reply.
+  string message = 3;
+}

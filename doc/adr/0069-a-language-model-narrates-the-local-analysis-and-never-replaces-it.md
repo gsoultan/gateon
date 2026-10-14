@@ -110,5 +110,13 @@ blocking decision reads it.
   4096 default.
 - Anthropic `refusal` stop reasons and OpenAI `refusal` fields count as no
   answer and fall back.
-- The AI endpoints remain REST-only, as before. The setting itself is
-  reachable on every transport through `GlobalConfig`.
+- **Every transport serves the analysis.** It lives in `internal/ai/advisory`
+  and is exposed as three `ApiService` RPCs: `AnalyzeConfig`, `AnalyzeLogs`
+  and `TestAIProvider`. REST (`POST /v1/AnalyzeConfig`, `/v1/AnalyzeLogs`,
+  `/v1/ai-advisory/test`), Connect and gRPC all call them, and `apiPermissions`
+  maps them like their REST twins: read on diagnostics for the two analyses,
+  write on global for the test. One `advisory.Service` per `ApiService`, so the
+  concurrency bound and summary cache hold across transports.
+- The package reads no listener code. Whether the management listener is open
+  to the world is asked of `internal/server/entrypoint` by the server and
+  handed in, as `posture.Config.ManagementWorldOpen` already is.

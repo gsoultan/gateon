@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
 // SPDX-License-Identifier: MIT
 
-package handlers
+package api
 
 import (
 	"context"
@@ -16,7 +16,6 @@ import (
 
 	"github.com/gsoultan/gateon/internal/auth"
 	"github.com/gsoultan/gateon/internal/config"
-	"github.com/gsoultan/gateon/internal/middleware"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
@@ -43,23 +42,13 @@ func newFakeClaude(t *testing.T, status int, text string) *fakeClaude {
 	return f
 }
 
-func aiMux(t *testing.T, ai *gateonv1.AIConfig) *http.ServeMux {
+// advisoryService is an ApiService whose global settings carry ai. The
+// analysis RPCs read nothing else it holds.
+func advisoryService(t *testing.T, ai *gateonv1.AIConfig) *ApiService {
 	t.Helper()
 	globals := config.NewGlobalRegistry(filepath.Join(t.TempDir(), "global.json"))
 	must(t, globals.Update(context.Background(), &gateonv1.GlobalConfig{Ai: ai}))
-	mux := http.NewServeMux()
-	registerAIAdvisoryHandlers(mux, advisoryAPI{globals: globals}, &Deps{})
-	return mux
-}
-
-func postAs(t *testing.T, mux *http.ServeMux, role, path, body string) *httptest.ResponseRecorder {
-	t.Helper()
-	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
-	req = req.WithContext(context.WithValue(req.Context(), middleware.UserContextKey,
-		&auth.Claims{ID: "u-" + role, Username: role, Role: role}))
-	rr := httptest.NewRecorder()
-	mux.ServeHTTP(rr, req)
-	return rr
+	return &ApiService{Globals: globals}
 }
 
 func claudeConfig(url string) *gateonv1.AIConfig {
@@ -71,13 +60,13 @@ func claudeConfig(url string) *gateonv1.AIConfig {
 // findings stay the local ones -- and they are what the provider was shown.
 func TestAnalyzeConfigIsNarratedByTheConfiguredProvider(t *testing.T) {
 	claude := newFakeClaude(t, http.StatusOK, "Turn on the WAF first.")
-	rr := postAs(t, aiMux(t, claudeConfig(claude.srv.URL)), auth.RoleViewer, "/v1/AnalyzeConfig", `{}`)
-	var resp aiAnalysisResponse
-	must(t, json.Unmarshal(rr.Body.Bytes(), &resp))
-	if resp.Summary != "Turn on the WAF first." || resp.Engine != "anthropic:claude-test" || resp.Notice != "" {
+	resp, err := advisoryService(t, claudeConfig(claude.srv.URL)).
+		AnalyzeConfig(withRole(auth.RoleViewer), &gateonv1.AnalyzeConfigRequest{})
+	must(t, err)
+	if resp.GetSummary() != "Turn on the WAF first." || resp.GetEngine() != "anthropic:claude-test" || resp.GetNotice() != "" {
 		t.Fatalf("response = %+v", resp)
 	}
-	if len(resp.Insights) == 0 || !strings.Contains(claude.body.Load().(string), resp.Insights[0].Title) {
+	if len(resp.GetInsights()) == 0 || !strings.Contains(claude.body.Load().(string), resp.GetInsights()[0].GetTitle()) {
 		t.Errorf("the provider was not shown the local findings: %s", claude.body.Load())
 	}
 }
@@ -87,17 +76,16 @@ func TestAnalyzeConfigIsNarratedByTheConfiguredProvider(t *testing.T) {
 // nor the address it was sent to.
 func TestAnalyzeConfigFallsBackWhenTheProviderFails(t *testing.T) {
 	claude := newFakeClaude(t, http.StatusUnauthorized, "")
-	rr := postAs(t, aiMux(t, claudeConfig(claude.srv.URL)), auth.RoleViewer, "/v1/AnalyzeConfig", `{}`)
-	var resp aiAnalysisResponse
-	must(t, json.Unmarshal(rr.Body.Bytes(), &resp))
-	if rr.Code != http.StatusOK || resp.Engine != engineLocal || !strings.Contains(resp.Summary, "Smart Engine") {
-		t.Fatalf("status %d, response %+v; want the local analysis", rr.Code, resp)
+	resp, err := advisoryService(t, claudeConfig(claude.srv.URL)).
+		AnalyzeConfig(withRole(auth.RoleViewer), &gateonv1.AnalyzeConfigRequest{})
+	if err != nil || resp.GetEngine() != "local" || !strings.Contains(resp.GetSummary(), "Smart Engine") {
+		t.Fatalf("err %v, response %+v; want the local analysis", err, resp)
 	}
-	if !strings.Contains(resp.Notice, "refused the API key") {
-		t.Errorf("notice = %q, want the reason", resp.Notice)
+	if !strings.Contains(resp.GetNotice(), "refused the API key") {
+		t.Errorf("notice = %q, want the reason", resp.GetNotice())
 	}
-	if strings.Contains(rr.Body.String(), "sk-ant-secret") || strings.Contains(rr.Body.String(), claude.srv.URL) {
-		t.Errorf("response leaks the key or the provider address: %s", rr.Body)
+	if text := resp.String(); strings.Contains(text, "sk-ant-secret") || strings.Contains(text, claude.srv.URL) {
+		t.Errorf("response leaks the key or the provider address: %s", text)
 	}
 }
 
@@ -105,10 +93,9 @@ func TestAnalyzeConfigMakesNoCallWhenAIIsOff(t *testing.T) {
 	claude := newFakeClaude(t, http.StatusOK, "x")
 	off := claudeConfig(claude.srv.URL)
 	off.Enabled = false
-	rr := postAs(t, aiMux(t, off), auth.RoleViewer, "/v1/AnalyzeConfig", `{}`)
-	var resp aiAnalysisResponse
-	must(t, json.Unmarshal(rr.Body.Bytes(), &resp))
-	if claude.calls.Load() != 0 || resp.Engine != engineLocal || resp.Notice != "" {
+	resp, err := advisoryService(t, off).AnalyzeConfig(withRole(auth.RoleViewer), &gateonv1.AnalyzeConfigRequest{})
+	must(t, err)
+	if claude.calls.Load() != 0 || resp.GetEngine() != "local" || resp.GetNotice() != "" {
 		t.Errorf("calls %d, response %+v; want no call and the local analysis", claude.calls.Load(), resp)
 	}
 }
@@ -117,15 +104,13 @@ func TestAnalyzeConfigMakesNoCallWhenAIIsOff(t *testing.T) {
 // provider gets the local tally and not one log line.
 func TestAnalyzeLogsSendsLinesOnlyWhenShared(t *testing.T) {
 	line := `time=2026-10-04T10:00:00Z level=INFO msg="access log" method=GET path=/secret-customer-path status=200`
-	body := `{"logs":[` + strconvQuote(line) + `]}`
 	for _, share := range []bool{false, true} {
 		claude := newFakeClaude(t, http.StatusOK, "Looks fine.")
 		cfg := claudeConfig(claude.srv.URL)
 		cfg.ShareLogLines = share
-		rr := postAs(t, aiMux(t, cfg), auth.RoleViewer, "/v1/AnalyzeLogs", body)
-		var resp aiLogAnalysisResponse
-		must(t, json.Unmarshal(rr.Body.Bytes(), &resp))
-		if resp.Analysis != "Looks fine." || !strings.Contains(resp.Local, "Analyzed 1 log lines") {
+		resp, err := advisoryService(t, cfg).AnalyzeLogs(withRole(auth.RoleViewer), &gateonv1.AnalyzeLogsRequest{Logs: []string{line}})
+		must(t, err)
+		if resp.GetAnalysis() != "Looks fine." || !strings.Contains(resp.GetLocal(), "Analyzed 1 log lines") {
 			t.Fatalf("share=%v: response %+v", share, resp)
 		}
 		if sent := strings.Contains(claude.body.Load().(string), "secret-customer-path"); sent != share {
@@ -134,26 +119,12 @@ func TestAnalyzeLogsSendsLinesOnlyWhenShared(t *testing.T) {
 	}
 }
 
-// TestProviderTestNeedsTheRightToChangeSettings: the test spends a call on
-// the stored key, which a viewer may not do.
-func TestProviderTestNeedsTheRightToChangeSettings(t *testing.T) {
+func TestTestAIProviderNamesTheEngineThatAnswered(t *testing.T) {
 	claude := newFakeClaude(t, http.StatusOK, "OK")
-	mux := aiMux(t, claudeConfig(claude.srv.URL))
-	if rr := postAs(t, mux, auth.RoleViewer, "/v1/ai-advisory/test", ""); rr.Code != http.StatusForbidden {
-		t.Errorf("viewer: status %d, want 403", rr.Code)
+	resp, err := advisoryService(t, claudeConfig(claude.srv.URL)).
+		TestAIProvider(withRole(auth.RoleAdmin), &gateonv1.TestAIProviderRequest{})
+	must(t, err)
+	if !resp.GetOk() || resp.GetEngine() != "anthropic:claude-test" {
+		t.Errorf("response %+v", resp)
 	}
-	if claude.calls.Load() != 0 {
-		t.Fatalf("a refused test still called the provider")
-	}
-	rr := postAs(t, mux, auth.RoleAdmin, "/v1/ai-advisory/test", "")
-	var resp aiTestResponse
-	must(t, json.Unmarshal(rr.Body.Bytes(), &resp))
-	if !resp.OK || resp.Engine != "anthropic:claude-test" {
-		t.Errorf("admin: response %+v", resp)
-	}
-}
-
-func strconvQuote(s string) string {
-	b, _ := json.Marshal(s)
-	return string(b)
 }

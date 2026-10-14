@@ -156,6 +156,7 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 		MiddlewareValidator: mwFactory,
 		SetupToken:          setupToken,
 		Throttles:           findingLimiter(rlLimiter),
+		ManagementWorldOpen: entrypoint.ManagementListenerWorldOpen,
 	})
 	announceSetupToken(ctx, apiService, setupToken)
 	if gov != nil {

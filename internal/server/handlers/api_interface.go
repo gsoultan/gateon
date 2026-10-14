@@ -47,4 +47,7 @@ type GlobalAndAuthAPI interface {
 	Setup2FA(ctx context.Context, req *gateonv1.Setup2FARequest) (*gateonv1.Setup2FAResponse, error)
 	Verify2FA(ctx context.Context, req *gateonv1.Verify2FARequest) (*gateonv1.Verify2FAResponse, error)
 	GetSecurityThreat(ctx context.Context, req *gateonv1.GetSecurityThreatRequest) (*gateonv1.GetSecurityThreatResponse, error)
+	AnalyzeConfig(ctx context.Context, req *gateonv1.AnalyzeConfigRequest) (*gateonv1.AnalyzeConfigResponse, error)
+	AnalyzeLogs(ctx context.Context, req *gateonv1.AnalyzeLogsRequest) (*gateonv1.AnalyzeLogsResponse, error)
+	TestAIProvider(ctx context.Context, req *gateonv1.TestAIProviderRequest) (*gateonv1.TestAIProviderResponse, error)
 }
