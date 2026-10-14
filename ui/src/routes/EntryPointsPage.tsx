@@ -4,7 +4,6 @@
 import { useMemo, useState } from "react";
 import {
   Card,
-  Title,
   Text,
   Stack,
   Group,
@@ -48,6 +47,7 @@ import { EntryPointForm } from "../components/EntryPointForm";
 import type { EntryPoint } from "../types/gateon";
 import { QueryError } from "../components/QueryError";
 import { ConfirmDeleteModal } from "../components/ConfirmDelete";
+import { PageHeader } from "../components/layout";
 
 export default function EntryPointsPage() {
   const { canWrite } = usePermissions();
@@ -121,29 +121,23 @@ export default function EntryPointsPage() {
 
   return (
     <Stack gap="lg">
-      <Group justify="space-between" align="center" wrap="wrap" gap="md">
-        <div>
-          <Title order={2} fw={800} style={{ letterSpacing: -1 }}>
-            EntryPoints
-          </Title>
-          <Text c="dimmed" size="sm" fw={500}>
-            Configure network entryPoints and listening addresses.
-          </Text>
-        </div>
-        {canWrite && (
-          <Button
-            leftSection={<IconPlus size={18} />}
-            onClick={handleCreate}
-            size="md"
-            radius="md"
-            variant="gradient"
-            gradient={{ from: "blue", to: "cyan" }}
-            fullWidth={isMobile}
-          >
-            Create EntryPoint
-          </Button>
-        )}
-      </Group>
+      <PageHeader
+        title="EntryPoints"
+        description="Configure network entryPoints and listening addresses."
+        actions={
+          canWrite && (
+            <Button
+              leftSection={<IconPlus size={18} />}
+              onClick={handleCreate}
+              variant="gradient"
+              gradient={{ from: "blue", to: "cyan" }}
+              fullWidth={isMobile}
+            >
+              Create EntryPoint
+            </Button>
+          )
+        }
+      />
 
       <SimpleGrid cols={{ base: 1, sm: 3 }} spacing="md">
         <Paper p="md" radius="lg" withBorder shadow="xs">

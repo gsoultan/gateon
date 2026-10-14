@@ -151,7 +151,7 @@ export default function ClamAVPage() {
             <ThemeIcon variant="light" color={installed ? "teal" : "gray"} size="lg" radius="md">
               <IconVirus size={20} />
             </ThemeIcon>
-            <Title order={2} fw={800} style={{ letterSpacing: -0.5 }}>
+            <Title order={2} style={{ letterSpacing: "-0.02em" }}>
               Antivirus
             </Title>
             <Badge color={installed ? "teal" : "gray"} variant="light">

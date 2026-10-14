@@ -71,6 +71,7 @@ import { SecurityAnomalyModal } from "../components/SecurityAnomalyModal";
 import { useDisclosure } from "@mantine/hooks";
 import { usePermissions } from "../hooks/usePermissions";
 import { dependencySummary } from "../components/Diagnostics/dependencySummary";
+import { PageHeader } from "../components/layout";
 
 const MiddlewareBadge: React.FC<{ mw: MiddlewareDiagnostic }> = ({ mw }) => (
   <Tooltip label={mw.error || `Type: ${mw.type}`}>
@@ -360,25 +361,22 @@ const DiagnosticsPage: React.FC = () => {
       <LoadingOverlay visible={loading && !data} overlayProps={{ blur: 2 }} />
 
       <Stack gap="xl">
-        <Group justify="space-between" align="flex-end">
-          <Stack gap={4}>
-            <Title order={2} fw={800} style={{ letterSpacing: -0.5 }}>
-              Diagnostics & Connectivity
-            </Title>
-            <Text c="dimmed" size="sm" fw={500}>
-              Monitor real-time system health, TLS status, and entrypoint performance.
-            </Text>
-          </Stack>
-          <ActionIcon
-            variant="default"
-            size="lg"
-            radius="md"
-            onClick={() => fetchData()}
-            loading={loading}
-          >
-            <IconRefresh size={18} />
-          </ActionIcon>
-        </Group>
+        <PageHeader
+          title="Diagnostics & Connectivity"
+          description="Monitor real-time system health, TLS status, and entrypoint performance."
+          actions={
+            <>
+              <ActionIcon
+                variant="default"
+                size="lg"
+                onClick={() => fetchData()}
+                loading={loading}
+              >
+                <IconRefresh size={18} />
+              </ActionIcon>
+            </>
+          }
+        />
 
         {/* System Health Dashboard */}
         <Stack gap="sm">

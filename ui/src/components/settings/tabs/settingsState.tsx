@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
 // SPDX-License-Identifier: MIT
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { notifications } from "@mantine/notifications";
 import { IconShieldCheck, IconX } from "@tabler/icons-react";
 import { usePermissions } from "../../../hooks/usePermissions";
@@ -9,6 +9,7 @@ import { useGateonStatus } from "../../../hooks/useGateonStatus";
 import { useApiConfigStore } from "../../../store/useApiConfigStore";
 import { apiFetch, getApiErrorMessage } from "../../../hooks/useGateon";
 import type { GlobalConfig, StatusResponse } from "../../../types/gateon";
+import { hasUnsavedChanges } from "./configChanges";
 
 export type ConfigLoad = "loading" | "loaded" | "failed";
 export type SettingsPreset = "development" | "production" | "high-throughput";
@@ -32,6 +33,10 @@ export interface SettingsState {
   canExportConfig: boolean;
   status: StatusResponse | undefined;
 
+  /** The configuration differs from what the gateway last confirmed. */
+  hasChanges: boolean;
+  /** Put every unsaved edit back to what the gateway last confirmed. */
+  discardChanges: () => void;
   saving: boolean;
   error: string | null;
   savedOk: boolean;
@@ -202,6 +207,9 @@ export function useSettingsState(): SettingsState {
     log: { level: "info", development: true, format: "text" },
     management: { bind: "0.0.0.0", port: "8080", allowedIps: ["0.0.0.0/0", "::/0"] },
   });
+  // What the gateway last confirmed: set by a load and by a successful save,
+  // and what "unsaved changes" is measured against.
+  const [savedConfig, setSavedConfig] = useState<GlobalConfig | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [savedOk, setSavedOk] = useState(false);
@@ -221,6 +229,7 @@ export function useSettingsState(): SettingsState {
       })
       .then((cfg: GlobalConfig) => {
         setConfig(cfg || ({} as GlobalConfig));
+        setSavedConfig(cfg || ({} as GlobalConfig));
         setConfigLoad("loaded");
         setConfigLoadError(null);
       })
@@ -258,6 +267,7 @@ export function useSettingsState(): SettingsState {
       // or WAF setting explains itself, and the raw body buried that in
       // escapes and a request id.
       if (!res.ok) throw new Error(getApiErrorMessage(new Error(await res.text())) || `HTTP ${res.status}`);
+      setSavedConfig(config);
       setSavedOk(true);
     } catch (e: unknown) {
       setError(errorMessage(e) || "Failed to save configuration");
@@ -265,6 +275,19 @@ export function useSettingsState(): SettingsState {
       setSaving(false);
     }
   };
+
+  // "All changes saved" is a confirmation, not a state: it goes after a few
+  // seconds rather than sitting over the page.
+  useEffect(() => {
+    if (!savedOk) return;
+    const timer = window.setTimeout(() => setSavedOk(false), 4000);
+    return () => window.clearTimeout(timer);
+  }, [savedOk]);
+
+  const hasChanges = useMemo(
+    () => savedConfig !== null && hasUnsavedChanges(config, savedConfig),
+    [config, savedConfig],
+  );
 
   return {
     config,
@@ -277,6 +300,11 @@ export function useSettingsState(): SettingsState {
     canImportConfig,
     canExportConfig,
     status,
+    hasChanges,
+    discardChanges: () => {
+      if (savedConfig) setConfig(savedConfig);
+      setError(null);
+    },
     saving,
     error,
     savedOk,

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 import { Fragment, useState } from 'react'
-import { Card, Title, Text, Stack, Group, Button, Drawer, Table, ActionIcon, Badge, TextInput, Center, Box, Menu, Tooltip, Paper, SimpleGrid, Pagination, Skeleton } from '@mantine/core'
+import { Card, Text, Stack, Group, Button, Drawer, Table, ActionIcon, Badge, TextInput, Center, Box, Menu, Tooltip, Paper, SimpleGrid, Pagination, Skeleton } from '@mantine/core'
 import { useDisclosure } from '@mantine/hooks'
 import { IconPlus, IconServer, IconSearch, IconDotsVertical, IconEdit, IconTrash, IconExternalLink, IconActivity, IconChevronDown, IconChevronRight, IconRocket } from '@tabler/icons-react'
 import { useServices, apiFetch, getApiErrorMessage } from '../hooks/useGateon'
@@ -14,6 +14,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { notifications } from '@mantine/notifications'
 import { QueryError } from "../components/QueryError";
 import { ConfirmDeleteModal } from "../components/ConfirmDelete";
+import { PageHeader } from "../components/layout";
 
 export default function ServicesPage() {
   const { canWrite } = usePermissions()
@@ -92,17 +93,15 @@ export default function ServicesPage() {
 
   return (
     <Stack gap="lg">
-      <Group justify="space-between" align="center">
-        <div>
-          <Title order={2} fw={800} style={{ letterSpacing: -1 }}>Services</Title>
-          <Text c="dimmed" size="sm" fw={500}>
-            Define HTTP & gRPC backend targets and load balancing policies.
-          </Text>
-        </div>
-        {canWrite && (
-          <Button leftSection={<IconPlus size={18} />} onClick={handleCreate} size="md" radius="md">Create Service</Button>
-        )}
-      </Group>
+      <PageHeader
+        title="Services"
+        description="Define HTTP & gRPC backend targets and load balancing policies."
+        actions={
+          canWrite && (
+            <Button leftSection={<IconPlus size={18} />} onClick={handleCreate}>Create Service</Button>
+          )
+        }
+      />
 
       <SimpleGrid cols={{ base: 1, sm: 3 }} spacing="md">
         <Paper p="md" radius="lg" withBorder>

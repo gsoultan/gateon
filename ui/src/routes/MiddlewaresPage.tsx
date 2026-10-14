@@ -4,7 +4,6 @@
 import { useState } from "react";
 import {
   Card,
-  Title,
   Text,
   Stack,
   TextInput,
@@ -53,6 +52,7 @@ import {
   withoutRetiredKeys,
 } from "../components/MiddlewareConfig/middlewareConfigProblems";
 import { QueryError } from "../components/QueryError";
+import { PageHeader } from "../components/layout";
 
 export default function MiddlewaresPage() {
   const { canWrite } = usePermissions();
@@ -158,40 +158,35 @@ export default function MiddlewaresPage() {
 
   return (
     <Stack gap="xl">
-      <Group justify="space-between" wrap="wrap" gap="md">
-        <div>
-          <Title order={2} fw={800} style={{ letterSpacing: -1 }}>
-            Middlewares ({totalCount})
-          </Title>
-          <Text c="dimmed" size="sm">
-            Define reusable middleware policies for your routes.
-          </Text>
-        </div>
-        <Group wrap={isMobile ? "wrap" : "nowrap"} style={{ flex: isMobile ? "1 1 100%" : "none" }}>
-          <TextInput
-            placeholder="Search middlewares..."
-            leftSection={<IconSearch size={16} />}
-            size="xs"
-            w={isMobile ? "100%" : 250}
-            style={{ flex: isMobile ? "1 1 100%" : "none" }}
-            value={search}
-            onChange={(e) => {
-              setSearch(e.currentTarget.value);
-              setPage(1);
-            }}
-          />
-          {canWrite && (
-            <Button
-              leftSection={<IconPlus size={16} />}
-              onClick={startAdd}
-              radius="md"
-              fullWidth={isMobile}
-            >
-              Add Middleware
-            </Button>
-          )}
-        </Group>
-      </Group>
+      <PageHeader
+        title={<>Middlewares ({totalCount})</>}
+        description="Define reusable middleware policies for your routes."
+        actions={
+          <Group wrap={isMobile ? "wrap" : "nowrap"} style={{ flex: isMobile ? "1 1 100%" : "none" }}>
+            <TextInput
+              placeholder="Search middlewares..."
+              leftSection={<IconSearch size={16} />}
+              size="xs"
+              w={isMobile ? "100%" : 250}
+              style={{ flex: isMobile ? "1 1 100%" : "none" }}
+              value={search}
+              onChange={(e) => {
+                setSearch(e.currentTarget.value);
+                setPage(1);
+              }}
+            />
+            {canWrite && (
+              <Button
+                leftSection={<IconPlus size={16} />}
+                onClick={startAdd}
+                fullWidth={isMobile}
+              >
+                Add Middleware
+              </Button>
+            )}
+          </Group>
+        }
+      />
 
       <Card withBorder padding={isMobile ? "sm" : 0} radius="lg" shadow="xs">
         {isMobile ? (

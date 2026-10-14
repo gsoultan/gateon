@@ -60,6 +60,7 @@ import {
   twoFactorActionLabel,
 } from "../components/twoFactorReset";
 import { api } from "../services/client";
+import { PageHeader } from "../components/layout";
 
 export default function UsersPage() {
   const [search, setSearch] = useState("");
@@ -390,40 +391,34 @@ export default function UsersPage() {
 
   return (
     <Stack gap="xl">
-      <Group justify="space-between" wrap="wrap" gap="md">
-        <div>
-          <Title order={2} fw={800} style={{ letterSpacing: -1 }}>
-            User Management ({totalCount})
-          </Title>
-          <Text c="dimmed" size="sm">
-            Manage system administrators and operators using Role Based Access
-            Control.
-          </Text>
-        </div>
-        <Group wrap={isMobile ? "wrap" : "nowrap"} style={{ flex: isMobile ? "1 1 100%" : "none" }}>
-          <TextInput
-            placeholder="Search users..."
-            leftSection={<IconSearch size={16} />}
-            size="xs"
-            w={isMobile ? "100%" : 250}
-            style={{ flex: isMobile ? "1 1 100%" : "none" }}
-            value={search}
-            onChange={(e) => {
-              setSearch(e.currentTarget.value);
-              setPage(1);
-            }}
-          />
-          <Button
-            leftSection={<IconUserPlus size={18} />}
-            onClick={handleCreate}
-            disabled={currentUser?.role !== "admin"}
-            radius="md"
-            fullWidth={isMobile}
-          >
-            Add User
-          </Button>
-        </Group>
-      </Group>
+      <PageHeader
+        title={<>User Management ({totalCount})</>}
+        description="Manage system administrators and operators using Role Based Access Control."
+        actions={
+          <Group wrap={isMobile ? "wrap" : "nowrap"} style={{ flex: isMobile ? "1 1 100%" : "none" }}>
+            <TextInput
+              placeholder="Search users..."
+              leftSection={<IconSearch size={16} />}
+              size="xs"
+              w={isMobile ? "100%" : 250}
+              style={{ flex: isMobile ? "1 1 100%" : "none" }}
+              value={search}
+              onChange={(e) => {
+                setSearch(e.currentTarget.value);
+                setPage(1);
+              }}
+            />
+            <Button
+              leftSection={<IconUserPlus size={18} />}
+              onClick={handleCreate}
+              disabled={currentUser?.role !== "admin"}
+              fullWidth={isMobile}
+            >
+              Add User
+            </Button>
+          </Group>
+        }
+      />
 
       <Card withBorder padding={isMobile ? "sm" : "xl"} radius="lg" shadow="xs">
         {isMobile ? (

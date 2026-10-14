@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 import { Suspense, lazy, useState } from "react";
-import { Card, Title, Text, Stack, Group, Button, Drawer, Skeleton, Box } from "@mantine/core";
+import { Card, Text, Stack, Group, Button, Drawer, Skeleton, Box } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import { IconPlus } from "@tabler/icons-react";
 import { apiFetch, getApiErrorMessage } from "../hooks/useGateon";
@@ -11,6 +11,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { notifications } from "@mantine/notifications";
 import type { ListRoutesResponse, Route } from "../types/gateon";
 import { withRouteDisabled } from "../utils/routeCache";
+import { PageHeader } from "../components/layout";
 
 const RouteForm = lazy(() => import("../components/RouteForm"));
 const RouteList = lazy(() => import("../components/RouteList"));
@@ -152,26 +153,20 @@ export default function RoutesPage() {
 
   return (
     <Stack gap="lg">
-      <Group justify="space-between" align="center">
-        <div>
-          <Title order={2} fw={800} style={{ letterSpacing: -1 }}>
-            Routes
-          </Title>
-          <Text c="dimmed" size="sm" fw={500}>
-            Manage your API gateway routes and their policies.
-          </Text>
-        </div>
-        {canWrite && (
-          <Button
-            leftSection={<IconPlus size={18} />}
-            onClick={handleCreate}
-            size="md"
-            radius="md"
-          >
-            Create Route
-          </Button>
-        )}
-      </Group>
+      <PageHeader
+        title="Routes"
+        description="Manage your API gateway routes and their policies."
+        actions={
+          canWrite && (
+            <Button
+              leftSection={<IconPlus size={18} />}
+              onClick={handleCreate}
+            >
+              Create Route
+            </Button>
+          )
+        }
+      />
 
       <Suspense fallback={ROUTE_LIST_FALLBACK}>
         <RouteList
