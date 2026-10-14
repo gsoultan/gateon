@@ -11,9 +11,10 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"sync"
 	"sync/atomic"
+	"time"
 
+	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
 	"github.com/tetratelabs/wazero/imports/wasi_snapshot_preview1"
@@ -30,12 +31,47 @@ type TrafficPredictor interface {
 
 // WasmTransformerPredictor implements TrafficPredictor using a WASM-based Transformer model.
 // Designed for memory efficiency within a 2GB limit.
+//
+// The balancer asks it about a backend on every response it records, so a
+// prediction is bounded: it waits for and runs the model for at most
+// predictBudget in all, and a model still running then is stopped. A model
+// stopped that way answers nothing for restartCooldown, then is started
+// again from the compiled module.
 type WasmTransformerPredictor struct {
-	runtime  wazero.Runtime
-	module   wazero.CompiledModule
-	instance api.Module
-	mu       sync.Mutex
+	runtime wazero.Runtime
+	module  wazero.CompiledModule
+	slot    chan struct{} // one prediction at a time; held while the instance is used
+
+	// Owned by whoever holds slot.
+	instance  api.Module
+	predict   api.Function
+	inputPtr  api.Function
+	stoppedAt time.Time
+
+	restarting atomic.Bool // a background restart is in flight
+
+	budget time.Duration    // predictBudget; a field so tests can shorten it
+	now    func() time.Time // injectable for tests
 }
+
+// predictBudget is the longest one prediction may take, waiting included. The
+// built-in forecast answers in well under a microsecond; a custom model that
+// needs longer than this on every response is too slow to sit on the
+// response path, and is refused at load by the probe.
+const predictBudget = 10 * time.Millisecond
+
+// restartCooldown is how long a model stopped for overrunning its budget
+// stays stopped. A model that hangs every time costs one stalled prediction
+// per cooldown rather than one per response.
+const restartCooldown = 30 * time.Second
+
+// startBudget bounds a background restart, _initialize included.
+const startBudget = 5 * time.Second
+
+// ErrModelUnavailable is returned while a custom model is busy past the
+// budget, or stopped and waiting out restartCooldown. The balancer prices
+// the backend without the model's weight.
+var ErrModelUnavailable = errors.New("the traffic model did not answer within its budget")
 
 // NewWasmTransformerPredictor loads a WASM traffic model and asks it for one
 // prediction, so a model that cannot answer is refused here rather than
@@ -53,7 +89,9 @@ func NewWasmTransformerPredictor(ctx context.Context, wasmBytes []byte) (*WasmTr
 		return nil, errors.New("wasm bytes are empty")
 	}
 
-	r := wazero.NewRuntime(ctx)
+	// CloseOnContextDone lets a prediction's deadline stop a model that
+	// never returns; without it the guest ignores the context.
+	r := wazero.NewRuntimeWithConfig(ctx, wazero.NewRuntimeConfig().WithCloseOnContextDone(true))
 	wasi_snapshot_preview1.MustInstantiate(ctx, r)
 
 	m, err := r.CompileModule(ctx, wasmBytes)
@@ -62,16 +100,16 @@ func NewWasmTransformerPredictor(ctx context.Context, wasmBytes []byte) (*WasmTr
 		return nil, fmt.Errorf("failed to compile wasm module: %w", err)
 	}
 
-	mod, err := r.InstantiateModule(ctx, m, wazero.NewModuleConfig().WithStartFunctions("_initialize", "_start"))
-	if err != nil {
-		_ = r.Close(ctx)
-		return nil, fmt.Errorf("failed to instantiate module: %w", err)
-	}
-
 	p := &WasmTransformerPredictor{
-		runtime:  r,
-		module:   m,
-		instance: mod,
+		runtime: r,
+		module:  m,
+		slot:    make(chan struct{}, 1),
+		budget:  predictBudget,
+		now:     time.Now,
+	}
+	if err := p.start(ctx); err != nil {
+		_ = r.Close(ctx)
+		return nil, err
 	}
 	if err := p.probe(ctx); err != nil {
 		_ = r.Close(ctx)
@@ -130,30 +168,111 @@ func (p *NativePredictor) Close(ctx context.Context) error {
 	return nil
 }
 
+// start instantiates the compiled module and installs it. The caller owns p
+// exclusively.
+func (p *WasmTransformerPredictor) start(ctx context.Context) error {
+	mod, err := p.instantiate(ctx)
+	if err != nil {
+		return err
+	}
+	p.install(mod)
+	return nil
+}
+
+func (p *WasmTransformerPredictor) instantiate(ctx context.Context) (api.Module, error) {
+	mod, err := p.runtime.InstantiateModule(ctx, p.module,
+		wazero.NewModuleConfig().WithStartFunctions("_initialize", "_start"))
+	if err != nil {
+		return nil, fmt.Errorf("failed to instantiate module: %w", err)
+	}
+	return mod, nil
+}
+
+// install makes mod the instance predictions use. The caller holds slot, or
+// owns p exclusively.
+func (p *WasmTransformerPredictor) install(mod api.Module) {
+	p.instance = mod
+	p.predict = mod.ExportedFunction("predict")
+	p.inputPtr = mod.ExportedFunction("get_input_ptr")
+}
+
+// Predict asks the model for a spike score. It returns ErrModelUnavailable,
+// rather than waiting, once predictBudget has passed.
 func (p *WasmTransformerPredictor) Predict(ctx context.Context, input []float64) (float64, error) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
+	ctx, cancel := context.WithTimeout(ctx, p.budget)
+	defer cancel()
+	select {
+	case p.slot <- struct{}{}:
+	case <-ctx.Done():
+		return 0, ErrModelUnavailable
+	}
+	defer func() { <-p.slot }()
 
-	mod := p.instance
+	if err := p.ready(ctx); err != nil {
+		return 0, err
+	}
+	v, err := p.call(ctx, input)
+	if err != nil && ctx.Err() != nil {
+		// The deadline closed the instance mid-call.
+		p.stoppedAt = p.now()
+		logger.L.LogWarn("custom AI traffic model overran its budget and was stopped",
+			"budget", p.budget, "restart_after", restartCooldown)
+		return 0, ErrModelUnavailable
+	}
+	return v, err
+}
 
-	predict := mod.ExportedFunction("predict")
-	if predict == nil {
+// ready reports whether the instance can answer. One the deadline closed is
+// restarted once restartCooldown has passed -- in the background, because a
+// Go model's _initialize sets up a whole runtime and must not be paid for on
+// a response. A model that exited on its own is never restarted: probe
+// refuses one at load, and stoppedAt is zero until the first overrun.
+func (p *WasmTransformerPredictor) ready(ctx context.Context) error {
+	if !p.instance.IsClosed() {
+		return nil
+	}
+	if !p.stoppedAt.IsZero() && p.now().Sub(p.stoppedAt) >= restartCooldown &&
+		p.restarting.CompareAndSwap(false, true) {
+		p.stoppedAt = p.now() // a restart that fails waits out another cooldown
+		// Detached from the prediction's deadline, which is about to fire.
+		go p.restart(context.WithoutCancel(ctx))
+	}
+	return ErrModelUnavailable
+}
+
+// restart starts a fresh instance and installs it. It runs outside slot, so
+// predictions keep being refused quickly rather than waiting on it, and it
+// ends within startBudget, or as soon as Close closes the runtime.
+func (p *WasmTransformerPredictor) restart(ctx context.Context) {
+	defer p.restarting.Store(false)
+	ctx, cancel := context.WithTimeout(ctx, startBudget)
+	defer cancel()
+	mod, err := p.instantiate(ctx)
+	if err != nil {
+		logger.L.LogWarn("custom AI traffic model could not be restarted", "error", err)
+		return
+	}
+	p.slot <- struct{}{}
+	p.install(mod)
+	<-p.slot
+}
+
+func (p *WasmTransformerPredictor) call(ctx context.Context, input []float64) (float64, error) {
+	if p.predict == nil {
 		return 0, errors.New("wasm module does not export 'predict' function")
 	}
-
-	getInputPtr := mod.ExportedFunction("get_input_ptr")
-	if getInputPtr == nil {
+	if p.inputPtr == nil {
 		return 0, errors.New("wasm module does not export 'get_input_ptr'")
 	}
 
 	// Get pointer to input buffer
-	res, err := getInputPtr.Call(ctx)
+	res, err := p.inputPtr.Call(ctx)
 	if err != nil || len(res) == 0 {
 		return 0, fmt.Errorf("failed to get input pointer: %w", err)
 	}
 	ptr := uint32(res[0]) //nosec G115
 
-	mem := mod.Memory()
+	mem := p.instance.Memory()
 	// Limit input to buffer size
 	if len(input) > 1024 {
 		input = input[:1024]
@@ -169,7 +288,7 @@ func (p *WasmTransformerPredictor) Predict(ctx context.Context, input []float64)
 	}
 
 	// Call prediction: predict(length) -> predicted_value
-	results, err := predict.Call(ctx, uint64(len(input)))
+	results, err := p.predict.Call(ctx, uint64(len(input)))
 	if err != nil || len(results) == 0 {
 		return 0, fmt.Errorf("prediction call failed: %w", err)
 	}

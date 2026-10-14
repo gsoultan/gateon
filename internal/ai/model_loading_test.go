@@ -19,6 +19,7 @@ type modelSpec struct {
 	initSets  float64 // value start stores in the global predict answers
 	traps     bool    // predict executes unreachable
 	noPredict bool    // leave the predict export out
+	hangs     bool    // predict loops forever when asked about more than two samples
 }
 
 // wasmModel assembles spec into a module. predict answers a global that
@@ -62,6 +63,11 @@ func wasmModel(spec modelSpec) []byte {
 	predict := []byte{0x00, 0x23, 0, 0x0b} // global.get 0
 	if spec.traps {
 		predict = []byte{0x00, 0x00, 0x0b}
+	}
+	if spec.hangs {
+		// if len > 2 { loop { br 0 } }; global.get 0. The load-time probe
+		// asks about two samples, so the model loads and hangs later.
+		predict = []byte{0x00, 0x20, 0, 0x41, 2, 0x4b, 0x04, 0x40, 0x03, 0x40, 0x0c, 0, 0x0b, 0x0b, 0x23, 0, 0x0b}
 	}
 	ptr := []byte{0x00, 0x41, 0, 0x0b}
 	code := []byte{3}
