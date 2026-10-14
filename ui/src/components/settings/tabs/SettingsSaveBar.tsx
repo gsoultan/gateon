@@ -16,22 +16,25 @@ interface SettingsSaveBarProps {
 }
 
 /**
- * The bar at the foot of Settings. It is there only when there is something
- * to save, or a save to report: it used to say "You have modified the global
- * configuration" the moment the page opened, edited or not, and sat over the
- * last fields of every tab.
+ * The bar at the foot of Settings. It used to say "You have modified the
+ * global configuration" the moment the page opened, edited or not, floating
+ * over the last fields of every tab. Now it floats, with Discard, only while
+ * there are edits; otherwise it is a quiet row at the end of the page.
+ *
+ * The save button is always present once the page can save, so an operator
+ * can re-apply the stored configuration unchanged, and it is the signal the
+ * end-to-end tests wait on for "the settings have loaded".
  */
 export function SettingsSaveBar({ hasChanges, saving, canSave, error, savedOk, onSave, onDiscard }: SettingsSaveBarProps) {
-  if (!hasChanges && !error && !savedOk) return null;
   return (
     <Paper
       withBorder
       p="md"
       radius="lg"
-      shadow="lg"
+      shadow={hasChanges ? "lg" : undefined}
       role="region"
-      aria-label="Unsaved changes"
-      style={{ position: "sticky", bottom: 20, zIndex: 10 }}
+      aria-label={hasChanges ? "Unsaved changes" : "Save configuration"}
+      style={hasChanges ? { position: "sticky", bottom: 20, zIndex: 10 } : undefined}
     >
       <Group justify="space-between" gap="md" wrap="wrap">
         <div>
@@ -43,8 +46,8 @@ export function SettingsSaveBar({ hasChanges, saving, canSave, error, savedOk, o
               </Text>
             </>
           ) : (
-            <Text fw={600} c={error ? undefined : "teal"}>
-              {error ? "Not saved" : "All changes saved"}
+            <Text fw={500} c={error ? undefined : savedOk ? "teal" : "dimmed"}>
+              {error ? "Not saved" : savedOk ? "All changes saved" : "No unsaved changes"}
             </Text>
           )}
           {error && (
@@ -53,16 +56,22 @@ export function SettingsSaveBar({ hasChanges, saving, canSave, error, savedOk, o
             </Text>
           )}
         </div>
-        {hasChanges && (
-          <Group gap="sm">
+        <Group gap="sm">
+          {hasChanges && (
             <Button variant="default" onClick={onDiscard} disabled={saving}>
               Discard
             </Button>
-            <Button onClick={onSave} loading={saving} disabled={!canSave} leftSection={<IconCheck size={16} />}>
-              Save changes
-            </Button>
-          </Group>
-        )}
+          )}
+          <Button
+            variant={hasChanges ? "filled" : "default"}
+            onClick={onSave}
+            loading={saving}
+            disabled={!canSave}
+            leftSection={<IconCheck size={16} />}
+          >
+            Save Global Configuration
+          </Button>
+        </Group>
       </Group>
     </Paper>
   );

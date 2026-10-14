@@ -96,8 +96,8 @@ export default function SettingsPage() {
       </Tabs>
 
       {/* Outside the tabs, so every tab can save and every save reports here,
-          whichever tab's button made it. It appears only when there is
-          something to save, or a save to report. */}
+          whichever tab's button made it. It floats only while there are
+          unsaved edits. */}
       {canEditGlobal && (
         <SettingsSaveBar
           hasChanges={hasChanges}
