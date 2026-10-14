@@ -276,7 +276,7 @@ export function useSettingsState(): SettingsState {
     }
   };
 
-  // "All changes saved" is a confirmation, not a state: it goes after a few
+  // "Configuration successfully updated!" is a confirmation, not a state: it goes after a few
   // seconds rather than sitting over the page.
   useEffect(() => {
     if (!savedOk) return;

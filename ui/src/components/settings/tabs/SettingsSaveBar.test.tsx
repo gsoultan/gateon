@@ -47,7 +47,7 @@ describe("the Settings save bar", () => {
 
   test("confirms a save without offering to discard", () => {
     const html = render({ savedOk: true });
-    expect(html).toContain("All changes saved");
+    expect(html).toContain("Configuration successfully updated!");
     expect(html).not.toContain("Discard");
   });
 

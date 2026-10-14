@@ -47,7 +47,7 @@ export function SettingsSaveBar({ hasChanges, saving, canSave, error, savedOk, o
             </>
           ) : (
             <Text fw={500} c={error ? undefined : savedOk ? "teal" : "dimmed"}>
-              {error ? "Not saved" : savedOk ? "All changes saved" : "No unsaved changes"}
+              {error ? "Not saved" : savedOk ? "Configuration successfully updated!" : "No unsaved changes"}
             </Text>
           )}
           {error && (
