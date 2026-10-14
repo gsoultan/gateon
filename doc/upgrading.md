@@ -11,6 +11,17 @@ here after the fact.
 
 ## Unreleased
 
+### Large request bodies can get 503 while the WAF is saturated
+
+A request body over 64 KiB is now inspected only when one of a fixed number of
+large-body slots is free: 4 on minimal, 16 on standard, 64 on enterprise
+(ADR 0068). A body that waits 2 s without a slot is answered `503` with
+`Retry-After: 2` and never reaches the origin. Before this, a flood of large
+uploads from many addresses could exhaust memory and time out every request,
+small ones included. If `gateon_middleware_waf_shed_large_bodies_total` rises
+on legitimate traffic, raise `GATEON_WAF_MAX_LARGE_BODY_INSPECTIONS`. Budget
+about 8 MiB of memory per slot for 1 MiB bodies.
+
 ### A rate limit, a geofence or a bot policy no longer refuses a client on every route
 
 A rate-limit rejection, a geofence block and a bot-management block each

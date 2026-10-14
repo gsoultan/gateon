@@ -177,7 +177,10 @@ the longest test history:
 1. **Entrypoints, routes, services, TLS.** Set every timeout explicitly. Leave
    `max_connections` and the per-address cap at their tier defaults unless you
    have measured otherwise (ADRs 0032, 0036). Clients behind one large NAT may
-   need `GATEON_ENTRYPOINT_MAX_CONN_PER_ADDR` raised.
+   need `GATEON_ENTRYPOINT_MAX_CONN_PER_ADDR` raised. Sites that take many
+   concurrent uploads over 64 KiB may need
+   `GATEON_WAF_MAX_LARGE_BODY_INSPECTIONS` raised; watch
+   `gateon_middleware_waf_shed_large_bodies_total` (ADR 0068).
 2. **Health checks** with an explicit path and both a failure and a recovery
    threshold, so one bad probe does not drain a pool.
 3. **Rate limiting** per route, sized from real traffic, not guessed.

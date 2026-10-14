@@ -5,13 +5,18 @@ package waf
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"io"
 	"net"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
+	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/request"
 	secwaf "github.com/gsoultan/gateon/internal/security/waf"
@@ -240,8 +245,13 @@ func wafLimits(cfg WAFConfig) gwaf.Limits {
 // query arguments and headers are still evaluated, and the body phase still
 // runs over the arguments. It exists for git's packfiles (see the middleware)
 // and must stay the narrowest exemption there is.
-func (e *wafEngine) inspectRequest(r *http.Request, reputation float64, inspectBody bool) (*gwaf.Transaction, *gwaf.Decision, error) {
+//
+// release gives back the large-body slot the inspection may hold; the caller
+// calls it once, after tx.Close, because the transaction keeps what it
+// built for the body until then. It is never nil.
+func (e *wafEngine) inspectRequest(r *http.Request, reputation float64, inspectBody bool) (*gwaf.Transaction, *gwaf.Decision, func(), error) {
 	tx := e.waf.NewTransaction()
+	release := func() {}
 
 	e.addResolvers(tx, r, reputation)
 
@@ -255,7 +265,7 @@ func (e *wafEngine) inspectRequest(r *http.Request, reputation float64, inspectB
 	}
 
 	if d := tx.ProcessRequestHeaders(); d.Blocked() {
-		return tx, &d, nil
+		return tx, &d, release, nil
 	}
 
 	// The request-body phase runs whether or not there is a body. Query
@@ -263,14 +273,15 @@ func (e *wafEngine) inspectRequest(r *http.Request, reputation float64, inspectB
 	// most of the corpus inspects arguments, so skipping this phase on a GET
 	// would silently disable those rules.
 	if inspectBody {
-		if err := e.readRequestBody(tx, r); err != nil {
-			return tx, nil, err
+		var err error
+		if release, err = e.readRequestBody(tx, r); err != nil {
+			return tx, nil, release, err
 		}
 	}
 	if d := tx.ProcessRequestBody(); d.Blocked() {
-		return tx, &d, nil
+		return tx, &d, release, nil
 	}
-	return tx, nil, nil
+	return tx, nil, release, nil
 }
 
 // addResolvers supplies the signals gateon owns and gwaf never will.
@@ -304,9 +315,13 @@ func (e *wafEngine) addResolvers(tx *gwaf.Transaction, r *http.Request, reputati
 // from the buffer followed by whatever is left on the wire. Reading it twice
 // would be wrong for a streaming upload and reading all of it would be an
 // unbounded allocation keyed on request data.
-func (e *wafEngine) readRequestBody(tx *gwaf.Transaction, r *http.Request) error {
+//
+// A body past largeBodyThreshold is handed to the engine only once it holds a
+// large-body slot, and the returned release gives the slot back.
+func (e *wafEngine) readRequestBody(tx *gwaf.Transaction, r *http.Request) (func(), error) {
+	release := func() {}
 	if r.Body == nil || r.Body == http.NoBody {
-		return nil
+		return release, nil
 	}
 	limit := int64(e.policy.Limits.MaxBodySize)
 	if limit <= 0 {
@@ -343,11 +358,17 @@ func (e *wafEngine) readRequestBody(tx *gwaf.Transaction, r *http.Request) error
 	}{Reader: io.MultiReader(bytes.NewReader(inspected), original), Closer: original}
 
 	if err != nil {
-		return err
+		return release, err
 	}
 
+	if len(inspected) > largeBodyThreshold {
+		var ok bool
+		if release, ok = largeBodies.acquire(r.Context()); !ok {
+			return release, errInspectionsSaturated
+		}
+	}
 	tx.SetRequestBody(inspected)
-	return nil
+	return release, nil
 }
 
 // defaultBodyReadHint sizes the buffer when the client did not declare a length.
@@ -401,4 +422,79 @@ func readBodyForInspection(r io.Reader, limit, contentLength int64) ([]byte, err
 			return buf, err
 		}
 	}
+}
+
+// largeBodyThreshold is the body length past which an inspection needs a
+// large-body slot.
+//
+// Inspecting a body costs a multiple of its length, not its length: the
+// engine keeps a buffer per transform depth and a set of readings per value,
+// sized to the value, and holds them until the transaction closes, which is
+// after the request has been proxied. A 1 MiB form held about 7.75 MiB live
+// and took ~52 ms of one core. On the 2 core / 2 GB target, 600 clients from
+// 600 addresses posting one each pushed the process to 1.73 GB and timed out
+// unrelated small requests, and no per-address or per-connection cap sees
+// that, because each client stayed inside every one of them. 64 KiB leaves
+// ordinary API, form and GraphQL bodies untouched: they never queue.
+const largeBodyThreshold = 64 << 10
+
+// largeBodyWait is how long an inspection waits for a slot before the request
+// is refused with 503. A burst of legitimate uploads queues briefly; a flood
+// is shed instead of being paid for in memory the host does not have.
+const largeBodyWait = 2 * time.Second
+
+// largeBodyRetryAfter is the Retry-After a refused upload is answered with.
+const largeBodyRetryAfter = "2"
+
+// largeBodyInspectionsEnv overrides the tier's large-body slot count.
+const largeBodyInspectionsEnv = "GATEON_WAF_MAX_LARGE_BODY_INSPECTIONS"
+
+// errInspectionsSaturated reports that every large-body slot stayed taken
+// for largeBodyWait. It is refused whatever FailOpen says: forwarding it would
+// let a flood buy an uninspected body by being a flood.
+var errInspectionsSaturated = errors.New("waf: every large-body inspection slot is in use")
+
+// largeBodyGate bounds how many large bodies are inspected at once in the whole
+// process. One gate for every route, because the memory it protects is the
+// process's: a cap per route multiplies by the number of routes.
+type largeBodyGate struct {
+	once  sync.Once
+	slots chan struct{}
+}
+
+var largeBodies largeBodyGate
+
+// maxLargeBodyInspections is the slot count: largeBodyInspectionsEnv when it
+// is a positive integer, else the resource profile's default. The bound
+// cannot be switched off; a value that is not a positive integer is ignored.
+func maxLargeBodyInspections() int {
+	if v := strings.TrimSpace(os.Getenv(largeBodyInspectionsEnv)); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+		logger.L.LogWarn("ignoring an invalid WAF large-body bound; using the profile default",
+			"env", largeBodyInspectionsEnv, "value", v)
+	}
+	return config.CurrentTierDefaults().WAFMaxLargeBodyInspections
+}
+
+// acquire takes a slot, waiting at most largeBodyWait or until ctx ends. The
+// release it returns is safe to call once and never nil.
+func (g *largeBodyGate) acquire(ctx context.Context) (func(), bool) {
+	g.once.Do(func() { g.slots = make(chan struct{}, max(1, maxLargeBodyInspections())) })
+	release := func() { <-g.slots }
+	select {
+	case g.slots <- struct{}{}:
+		return release, true
+	default:
+	}
+	timer := time.NewTimer(largeBodyWait)
+	defer timer.Stop()
+	select {
+	case g.slots <- struct{}{}:
+		return release, true
+	case <-timer.C:
+	case <-ctx.Done():
+	}
+	return func() {}, false
 }
