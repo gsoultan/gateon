@@ -70,20 +70,24 @@ func recordedRateLimitSource(t *testing.T, ch <-chan telemetry.SecurityThreat, m
 	}
 }
 
-// TestRateLimitThreatsAreScoredWhereTheBlockerReads is the regression test for
-// rate-limit penalties recorded against something that is not an address.
+// TestRateLimitThreatsNameTheClientAndMoveNoReputation is the regression test
+// for rate-limit threats recorded against something that is not an address.
 //
 // A refused request is recorded as a threat whose source was the limiter's key.
 // Under the default "ip" strategy that is the client's address, but under
 // "tenant" it is a tenant id or "ip:<address>", and under "ja4h" and
-// "fingerprint" it is already a fingerprint scoped to a network. The store
-// scopes a threat's reputation penalty to the network of its source address, so
-// those penalties landed under keys like "<ja4+>|<ja4h>|203.0.113" that the
-// reputation blocker -- and the adaptive limit itself -- never read: a client
-// could be refused all day under those strategies without its reputation
-// moving. The same source is what the dashboard shows, what the correlation
-// engine groups by and what an operator's release looks up.
-func TestRateLimitThreatsAreScoredWhereTheBlockerReads(t *testing.T) {
+// "fingerprint" it is already a fingerprint scoped to a network. The source is
+// what the dashboard shows, what the correlation engine groups by and what an
+// operator's release looks up, so it has to be the client's address under
+// every strategy.
+//
+// This test used to assert the opposite half too: that the rejection lowered
+// the reputation the blocker reads. It no longer may. That score refuses every
+// client of the build on the network on every route, and a rate limit is a
+// route's answer to how much a client sends, not evidence that it attacked
+// anything (refusesPolicyNotConduct): eight 429s took a busy office's score to
+// zero and got it 403 everywhere.
+func TestRateLimitThreatsNameTheClientAndMoveNoReputation(t *testing.T) {
 	t.Setenv("GATEON_ENABLE_TEST_REPUTATION", "1")
 	if err := telemetry.InitPathStatsStore(filepath.Join(t.TempDir(), "telemetry.db"), 1); err != nil {
 		t.Fatalf("InitPathStatsStore: %v", err)
@@ -110,9 +114,10 @@ func TestRateLimitThreatsAreScoredWhereTheBlockerReads(t *testing.T) {
 			if src := recordedRateLimitSource(t, threats, fp); src != c.ip {
 				t.Errorf("the rejection was recorded as coming from %q, want the client's address %q", src, c.ip)
 			}
-			if got := telemetry.GetReputationScore(repID); got >= 100 {
-				t.Errorf("after a %s-keyed rejection the reputation the blocker reads (%s) is still %v: "+
-					"the penalty was recorded under a key nothing reads", c.strategy, repID, got)
+			if got := telemetry.GetReputationScore(repID); got < 100 {
+				t.Errorf("a %s-keyed rejection lowered the reputation the blocker reads (%s) to %v: "+
+					"a rate limit is not evidence against the client, and that score refuses its "+
+					"whole network on every route", c.strategy, repID, got)
 			}
 		})
 	}

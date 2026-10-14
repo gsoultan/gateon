@@ -11,6 +11,27 @@ here after the fact.
 
 ## Unreleased
 
+### A rate limit, a geofence or a bot policy no longer refuses a client on every route
+
+A rate-limit rejection, a geofence block and a bot-management block each
+lowered the client's reputation, the score the reputation blocker refuses on
+for every route. That score is kept for one browser build on one /24 (ADR 0011),
+so on a busy office or carrier network eight 429s from one address on one
+rate-limited route got that address, and everybody next to it on the same
+browser, `403 Forbidden by Security Policy (Reputation Block)` on every other
+route for hours. The rate limiter also scales its limit by the same score, so
+each rejection tightened the limit that produced the next one.
+
+These refusals no longer move reputation, the way they already counted for
+nothing towards a fingerprint block or an address shun (ADR 0026, 0029). The
+route that refused still answers 429 or 403 exactly as before, and the threat
+is still recorded, listed and correlated. WAF blocks, trap hits, wrong
+challenge answers and the other evidence of what a client did still lower it.
+
+**Who is affected:** anyone with a rate limit, geofence or bot-management
+middleware on a route. Nothing to change; a client refused on other routes only
+because of these will stop being refused once its score recovers or is reset.
+
 ## v1.2.0
 
 Upgrading from v1.1.0: read this section. The database migrates on first start
