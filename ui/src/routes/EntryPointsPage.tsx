@@ -8,7 +8,7 @@ import {
   Stack,
   Group,
   Button,
-  Drawer,
+  
   Table,
   ActionIcon,
   Badge,
@@ -47,7 +47,7 @@ import { EntryPointForm } from "../components/EntryPointForm";
 import type { EntryPoint } from "../types/gateon";
 import { QueryError } from "../components/QueryError";
 import { ConfirmDeleteModal } from "../components/ConfirmDelete";
-import { PageHeader } from "../components/layout";
+import { FormDrawer, PageHeader } from "../components/layout";
 
 export default function EntryPointsPage() {
   const { canWrite } = usePermissions();
@@ -442,27 +442,14 @@ export default function EntryPointsPage() {
         onConfirm={() => pendingDelete && deleteMutation.mutate(pendingDelete.id)}
       />
 
-      <Drawer
+      <FormDrawer
         opened={opened}
         onClose={close}
-        title={
-          <Text fw={800} size="xl" style={{ letterSpacing: -0.5 }}>
-            {editingEP ? "Edit EntryPoint" : "Create New EntryPoint"}
-          </Text>
-        }
-        position="right"
-        size="40%"
-        padding="xl"
-        styles={{
-          header: {
-            borderBottom: "1px solid var(--mantine-color-default-border)",
-            marginBottom: "xl",
-          },
-          content: { boxShadow: "var(--mantine-shadow-xl)" },
-        }}
+        title={editingEP ? "Edit EntryPoint" : "Create New EntryPoint"}
+        width="narrow"
       >
         <EntryPointForm onSuccess={close} initialData={editingEP} />
-      </Drawer>
+      </FormDrawer>
     </Stack>
   );
 }

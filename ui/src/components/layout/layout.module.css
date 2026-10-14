@@ -97,3 +97,22 @@
   border-top: 1px solid var(--mantine-color-default-border);
   padding-top: var(--mantine-spacing-sm);
 }
+
+.drawerHeader {
+  border-bottom: 1px solid var(--mantine-color-default-border);
+}
+
+.drawerBody {
+  padding-top: var(--mantine-spacing-lg);
+}
+
+/* A form's closing buttons stay in reach on a long form. */
+.formActions {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  margin: 0 calc(var(--mantine-spacing-xl) * -1) calc(var(--mantine-spacing-xl) * -1);
+  padding: var(--mantine-spacing-md) var(--mantine-spacing-xl);
+  background-color: var(--mantine-color-body);
+  border-top: 1px solid var(--mantine-color-default-border);
+}

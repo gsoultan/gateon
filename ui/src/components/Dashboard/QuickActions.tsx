@@ -2,63 +2,64 @@
 // SPDX-License-Identifier: MIT
 
 import { memo } from "react";
-import { Paper, Text, SimpleGrid, UnstyledButton, Group, ThemeIcon, rem, Title } from "@mantine/core";
+import { Paper, Text, Stack, UnstyledButton, Group, ThemeIcon, rem, Title } from "@mantine/core";
 import { 
   IconRoute, 
   IconServer, 
   IconShieldLock, 
   IconSettings,
-  IconActivity
+  IconActivity,
+  IconChevronRight,
 } from "@tabler/icons-react";
 import { Link } from "@tanstack/react-router";
 import classes from "./QuickActions.module.css";
+import { usePermissions } from "../../hooks/usePermissions";
+import { CREATE_SEARCH } from "../layout";
 
+// "Add" opens the page's create form; it is offered only to a role that can
+// create, and a viewer is not shown a button that cannot do what it says.
 const actions = [
-  { title: "Add Route", icon: IconRoute, color: "blue", to: "/routes", action: "add" },
-  { title: "Add Service", icon: IconServer, color: "teal", to: "/services", action: "add" },
+  { title: "Add route", icon: IconRoute, color: "blue", to: "/routes", create: true },
+  { title: "Add service", icon: IconServer, color: "teal", to: "/services", create: true },
   { title: "Certificates", icon: IconShieldLock, color: "indigo", to: "/certificates" },
-  { title: "Real-time Metrics", icon: IconActivity, color: "orange", to: "/metrics-dashboard" },
-  { title: "System Settings", icon: IconSettings, color: "gray", to: "/settings" },
+  { title: "Real-time metrics", icon: IconActivity, color: "orange", to: "/metrics-dashboard" },
+  { title: "System settings", icon: IconSettings, color: "gray", to: "/settings" },
 ];
 
 export const QuickActions = memo(function QuickActions() {
-  const items = actions.map((item) => (
-    <UnstyledButton
-      key={item.title}
-      className={classes.item}
-      component={Link}
-      to={item.to}
-    >
-      <ThemeIcon color={item.color} variant="light" size={42} radius="md">
-        <item.icon style={{ width: rem(22), height: rem(22) }} stroke={1.5} />
-      </ThemeIcon>
-      <Text
-        size="xs"
-        mt={8}
-        fw={700}
-        c="dimmed"
-        style={{ textTransform: "uppercase", letterSpacing: 0.5 }}
-      >
-        {item.title}
-      </Text>
-    </UnstyledButton>
-  ));
-
+  const { canWrite } = usePermissions();
+  const shown = actions.filter((a) => !("create" in a) || canWrite);
   return (
-    <Paper withBorder radius="md" p="lg" shadow="xs">
-      <Group justify="space-between" mb="lg">
-        <div>
-          <Title order={5} fw={800} style={{ letterSpacing: -0.2 }}>
-            Quick Actions
-          </Title>
-          <Text size="xs" c="dimmed">
-            Common management tasks
-          </Text>
-        </div>
-      </Group>
-      <SimpleGrid cols={3} spacing="md">
-        {items}
-      </SimpleGrid>
+    <Paper withBorder radius="lg" p="lg">
+      <Title order={5} mb={2}>
+        Quick actions
+      </Title>
+      <Text size="sm" c="dimmed" mb="md">
+        Common management tasks
+      </Text>
+      <Stack gap={4}>
+        {shown.map((item) => (
+          <UnstyledButton
+            key={item.title}
+            className={classes.item}
+            component={Link}
+            to={item.to}
+            // Neither route declares a search schema, so the router types its
+            // search as never; the page reads it with useCreateFromLink.
+            search={("create" in item ? () => CREATE_SEARCH : undefined) as never}
+          >
+            <Group gap="sm" wrap="nowrap">
+              <ThemeIcon color={item.color} variant="light" size={34} radius="md">
+                <item.icon style={{ width: rem(18), height: rem(18) }} stroke={1.6} />
+              </ThemeIcon>
+              <Text size="sm" fw={500} style={{ flex: 1 }}>
+                {item.title}
+              </Text>
+              <IconChevronRight size={16} className={classes.chevron} />
+            </Group>
+          </UnstyledButton>
+        ))}
+      </Stack>
     </Paper>
   );
 });

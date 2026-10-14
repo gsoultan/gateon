@@ -1,8 +1,8 @@
 // Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
 // SPDX-License-Identifier: MIT
 
-import { Suspense, lazy, useState } from "react";
-import { Card, Text, Stack, Group, Button, Drawer, Skeleton, Box } from "@mantine/core";
+import { Suspense, lazy, useCallback, useState } from "react";
+import { Card, Text, Stack, Group, Button,  Skeleton, Box } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import { IconPlus } from "@tabler/icons-react";
 import { apiFetch, getApiErrorMessage } from "../hooks/useGateon";
@@ -11,7 +11,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { notifications } from "@mantine/notifications";
 import type { ListRoutesResponse, Route } from "../types/gateon";
 import { withRouteDisabled } from "../utils/routeCache";
-import { PageHeader } from "../components/layout";
+import { FormDrawer, PageHeader, useCreateFromLink } from "../components/layout";
 
 const RouteForm = lazy(() => import("../components/RouteForm"));
 const RouteList = lazy(() => import("../components/RouteList"));
@@ -88,10 +88,11 @@ export default function RoutesPage() {
     open();
   };
 
-  const handleCreate = () => {
+  const handleCreate = useCallback(() => {
     setEditingRoute(null);
     open();
-  };
+  }, [open]);
+  useCreateFromLink(canWrite, handleCreate);
 
   const pauseMutation = useMutation({
     mutationFn: async (route: Route) => {
@@ -178,29 +179,16 @@ export default function RoutesPage() {
         />
       </Suspense>
 
-      <Drawer
+      <FormDrawer
         opened={opened}
         onClose={close}
-        title={
-          <Text fw={800} size="xl" style={{ letterSpacing: -0.5 }}>
-            {editingRoute?.id ? "Edit Route" : editingRoute ? "Clone Route" : "Create New Route"}
-          </Text>
-        }
-        position="right"
-        size="70%"
-        padding="xl"
-        styles={{
-          header: {
-            borderBottom: "1px solid var(--mantine-color-dark-4)",
-            marginBottom: "xl",
-          },
-          content: { boxShadow: "var(--mantine-shadow-xl)" },
-        }}
+        title={editingRoute?.id ? "Edit Route" : editingRoute ? "Clone Route" : "Create New Route"}
+        width="full"
       >
         <Suspense fallback={FORM_FALLBACK}>
           <RouteForm onSuccess={close} initialData={editingRoute} />
         </Suspense>
-      </Drawer>
+      </FormDrawer>
     </Stack>
   );
 }

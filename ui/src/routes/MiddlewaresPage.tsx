@@ -52,7 +52,7 @@ import {
   withoutRetiredKeys,
 } from "../components/MiddlewareConfig/middlewareConfigProblems";
 import { QueryError } from "../components/QueryError";
-import { PageHeader } from "../components/layout";
+import { FieldGrid, PageHeader } from "../components/layout";
 
 export default function MiddlewaresPage() {
   const { canWrite } = usePermissions();
@@ -382,29 +382,28 @@ export default function MiddlewaresPage() {
         size="lg"
       >
         <Stack gap="md">
-          <TextInput
-            label="Friendly Name"
-            placeholder="Global Rate Limit"
-            value={editingMW?.name || ""}
-            onChange={(e) =>
-              editingMW &&
-              setEditingMW({ ...editingMW, name: e.currentTarget.value })
-            }
-            radius="md"
-            size="md"
-          />
+          <FieldGrid>
+            <TextInput
+              label="Friendly Name"
+              placeholder="Global Rate Limit"
+              value={editingMW?.name || ""}
+              onChange={(e) =>
+                editingMW &&
+                setEditingMW({ ...editingMW, name: e.currentTarget.value })
+              }
+            />
 
-          <Select
-            label="Type"
-            data={middlewareTypeSelectData()}
-            searchable
-            value={editingMW?.type || "ratelimit"}
-            onChange={(val) =>
-              editingMW &&
-              setEditingMW({ ...editingMW, type: val || "ratelimit" })
-            }
-            radius="md"
-          />
+            <Select
+              label="Type"
+              data={middlewareTypeSelectData()}
+              searchable
+              value={editingMW?.type || "ratelimit"}
+              onChange={(val) =>
+                editingMW &&
+                setEditingMW({ ...editingMW, type: val || "ratelimit" })
+              }
+            />
+          </FieldGrid>
 
           <Tabs defaultValue="config" variant="pills" radius="md">
             <Tabs.List mb="md" className="scrollable-tabs-list">
@@ -504,15 +503,15 @@ export default function MiddlewaresPage() {
               {configProblem}
             </Text>
           )}
-          <Button
-            onClick={handleSave}
-            radius="md"
-            mt="md"
-            loading={mutation.isPending}
-            disabled={!editingMW?.name || !!configProblem}
-          >
-            Save Middleware
-          </Button>
+          <Group justify="flex-end" mt="md">
+            <Button
+              onClick={handleSave}
+              loading={mutation.isPending}
+              disabled={!editingMW?.name || !!configProblem}
+            >
+              Save Middleware
+            </Button>
+          </Group>
         </Stack>
       </Modal>
 
