@@ -508,6 +508,12 @@ var secretFields = []secretField{
 		}
 		return &c.Geoip.MaxmindLicenseKey
 	}},
+	{"ai.api_key", "", func(c *gateonv1.GlobalConfig) *string {
+		if c.GetAi() == nil {
+			return nil
+		}
+		return &c.Ai.ApiKey
+	}},
 	{"audit.signature_key", AuditSignatureKeyEnv, func(c *gateonv1.GlobalConfig) *string {
 		if c.GetAudit() == nil {
 			return nil

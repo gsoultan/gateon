@@ -8,12 +8,17 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
+
+	"github.com/gsoultan/gateon/internal/ai/llm"
+	"github.com/gsoultan/gateon/internal/logger"
 
 	"github.com/gsoultan/gateon/internal/auth"
 	"github.com/gsoultan/gateon/internal/security/posture"
@@ -44,26 +49,51 @@ const (
 	categoryAvailability = "availability"
 )
 
+// The engines a response names. A provider's answer is named "provider:model"
+// (llm.Engine).
+const engineLocal = "local"
+
 // aiAnalysisResponse is the body returned by POST /v1/AnalyzeConfig.
+//
+// Engine says what wrote Summary: "local", or the provider and model. Notice
+// is set when a provider is configured and did not answer, saying why in
+// words that carry no key, prompt or reply; Summary is then the local one.
+// Insights are always the local analysis -- a model narrates them and cannot
+// add, drop or reword one.
 type aiAnalysisResponse struct {
 	Summary  string      `json:"summary"`
 	Insights []aiInsight `json:"insights"`
+	Engine   string      `json:"engine"`
+	Notice   string      `json:"notice,omitempty"`
 }
 
 // aiLogAnalysisResponse is the body returned by POST /v1/AnalyzeLogs.
+// Local is the deterministic tally, returned beside a provider's analysis so
+// the operator always sees what the lines actually say.
 type aiLogAnalysisResponse struct {
 	Analysis string `json:"analysis"`
+	Local    string `json:"local"`
+	Engine   string `json:"engine"`
+	Notice   string `json:"notice,omitempty"`
+}
+
+// aiTestResponse is the body returned by POST /v1/ai-advisory/test.
+type aiTestResponse struct {
+	OK      bool   `json:"ok"`
+	Engine  string `json:"engine,omitempty"`
+	Message string `json:"message"`
 }
 
 // registerAIAdvisoryHandlers wires the Security Hub "AI Advisory" endpoints.
 //
-// The UI was shipping calls to POST /v1/AnalyzeConfig and POST /v1/AnalyzeLogs
-// that had no backend, so the tab rendered Go's literal "404 page not found".
-// These handlers implement a dependency-free deterministic "Smart Engine" that
-// inspects the live gateway configuration and recent threat telemetry locally —
-// no external LLM, no API keys, works offline. The UI switches to its "Local
-// Mode" copy when the summary mentions "Smart Engine".
+// The analysis is a dependency-free deterministic "Smart Engine" that
+// inspects the live gateway configuration and recent threat telemetry
+// locally. When the administrator configures a third-party model (the "ai"
+// settings, ADR 0069), it is asked to narrate that analysis; whatever it
+// does, the local result is computed first and is what the response carries
+// when the model fails.
 func registerAIAdvisoryHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
+	advisor := llm.NewAdvisor()
 	mux.HandleFunc("POST /v1/AnalyzeConfig", func(w http.ResponseWriter, r *http.Request) {
 		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceDiagnostics) {
 			return
@@ -72,14 +102,10 @@ func registerAIAdvisoryHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Dep
 		_ = json.NewDecoder(r.Body).Decode(&struct {
 			Focus string `json:"focus"`
 		}{})
-
-		var cfg *gateonv1.GlobalConfig
-		if globals := svc.GetGlobals(); globals != nil {
-			cfg = globals.Get(r.Context())
-		}
+		cfg := liveGlobals(r.Context(), svc)
 		resp := analyzeConfig(r.Context(), cfg, routeWAFCoverage(r.Context(), d, cfg))
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(resp)
+		narrateConfig(r.Context(), advisor, cfg.GetAi(), &resp)
+		writeAIJSON(w, resp)
 	})
 
 	mux.HandleFunc("POST /v1/AnalyzeLogs", func(w http.ResponseWriter, r *http.Request) {
@@ -93,9 +119,107 @@ func registerAIAdvisoryHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Dep
 			WriteHTTPError(w, http.StatusBadRequest, "invalid json")
 			return
 		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(aiLogAnalysisResponse{Analysis: analyzeLogs(req.Logs)})
+		local := analyzeLogs(req.Logs)
+		resp := aiLogAnalysisResponse{Analysis: local, Local: local, Engine: engineLocal}
+		if len(req.Logs) > 0 {
+			narrateLogs(r.Context(), advisor, liveGlobals(r.Context(), svc).GetAi(), req.Logs, &resp)
+		}
+		writeAIJSON(w, resp)
 	})
+
+	// The test spends a call against the stored key, so it takes the right to
+	// change the settings it tests, not merely to read diagnostics.
+	mux.HandleFunc("POST /v1/ai-advisory/test", func(w http.ResponseWriter, r *http.Request) {
+		if !RequirePermission(w, r, auth.ActionWrite, auth.ResourceGlobal) {
+			return
+		}
+		writeAIJSON(w, testAIProvider(r.Context(), advisor, liveGlobals(r.Context(), svc).GetAi()))
+	})
+}
+
+func liveGlobals(ctx context.Context, svc GlobalAndAuthAPI) *gateonv1.GlobalConfig {
+	if globals := svc.GetGlobals(); globals != nil {
+		return globals.Get(ctx)
+	}
+	return nil
+}
+
+func writeAIJSON(w http.ResponseWriter, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(v)
+}
+
+// narrateConfig replaces the local summary with the provider's, when one is
+// enabled and answers.
+func narrateConfig(ctx context.Context, a *llm.Advisor, c *gateonv1.AIConfig, resp *aiAnalysisResponse) {
+	resp.Engine = engineLocal
+	if !c.GetEnabled() {
+		return
+	}
+	findings := make([]llm.Finding, 0, len(resp.Insights))
+	for _, in := range resp.Insights {
+		findings = append(findings, llm.Finding{Title: in.Title, Severity: in.Severity,
+			Description: in.Description, Recommendation: in.Recommendation})
+	}
+	text, s, err := a.Summarize(ctx, c, findings)
+	if err != nil {
+		resp.Notice = aiFallbackNotice(err)
+		return
+	}
+	resp.Summary, resp.Engine = text, llm.Engine(s)
+}
+
+// narrateLogs replaces the local analysis with the provider's, when one is
+// enabled and answers; the local tally stays in Local either way.
+func narrateLogs(ctx context.Context, a *llm.Advisor, c *gateonv1.AIConfig, lines []string, resp *aiLogAnalysisResponse) {
+	if !c.GetEnabled() {
+		return
+	}
+	text, s, err := a.AnalyzeLogs(ctx, c, resp.Local, lines)
+	if err != nil {
+		resp.Notice = aiFallbackNotice(err)
+		return
+	}
+	resp.Analysis, resp.Engine = text, llm.Engine(s)
+}
+
+func testAIProvider(ctx context.Context, a *llm.Advisor, c *gateonv1.AIConfig) aiTestResponse {
+	s, err := a.Test(ctx, c)
+	if err != nil {
+		return aiTestResponse{Message: aiFailure(err)}
+	}
+	return aiTestResponse{OK: true, Engine: llm.Engine(s), Message: "The provider answered."}
+}
+
+// aiFallbackNotice is what the dashboard shows above the local analysis when
+// the provider did not answer.
+func aiFallbackNotice(err error) string {
+	return aiFailure(err) + " Showing the local analysis."
+}
+
+// aiFailure logs why a provider call failed and returns a sentence for the
+// dashboard. Only the package's sentinels are named: their text carries no
+// key, prompt or reply, and a transport error (which can name an internal
+// address) stays in the server log.
+func aiFailure(err error) string {
+	for _, known := range []error{llm.ErrDisabled, llm.ErrConfig, llm.ErrAuth, llm.ErrRateLimited,
+		llm.ErrRejected, llm.ErrRefused, llm.ErrBusy, llm.ErrUpstream} {
+		if errors.Is(err, known) {
+			if !errors.Is(known, llm.ErrDisabled) && !errors.Is(known, llm.ErrBusy) {
+				logger.L.LogWarn("AI provider call failed; serving the local analysis", "error", err)
+			}
+			return capitalize(known.Error()) + "."
+		}
+	}
+	logger.L.LogWarn("AI provider call failed; serving the local analysis", "error", err)
+	return "The AI provider could not answer."
+}
+
+func capitalize(s string) string {
+	if s == "" {
+		return s
+	}
+	return strings.ToUpper(s[:1]) + s[1:]
 }
 
 // analyzeConfig runs the deterministic hardening ruleset over the gateway config
@@ -476,62 +600,129 @@ func analyzeLogs(logs []string) string {
 	b.WriteString(t.requestSentence())
 	b.WriteString(t.verdict())
 	writeTopMessages(&b, t.msgs)
-	b.WriteString("(Local Mode: deterministic analysis, no data left this server.)")
+	b.WriteString("(Local Mode: deterministic analysis on this server.)")
 	return b.String()
 }
 
 func (t *logTally) add(line string) {
+	fields := parseLogFields(line)
+	level := strings.ToLower(fields["level"])
 	switch {
-	case lineHasLevel(line, "error", "ERROR"):
+	case level == logLevelError || (fields == nil && lineHasBareLevel(line, logLevelError, "ERROR")):
 		t.errors++
-	case lineHasLevel(line, "warn", "WARN"):
+	case level == "warn" || level == "warning" || (fields == nil && lineHasBareLevel(line, "warn", "WARN")):
 		t.warns++
 	default:
 		t.infos++
 	}
-	if status, ok := logField(line, "status"); ok {
-		switch {
-		case status == "401" || status == "403" || status == "429":
-			t.refused++
-		case len(status) == 3 && status[0] == '5':
-			t.serverErrs++
-		}
+	switch status := fields["status"]; {
+	case status == "401" || status == "403" || status == "429":
+		t.refused++
+	case len(status) == 3 && status[0] == '5':
+		t.serverErrs++
 	}
-	if path, ok := logField(line, "path"); ok && sensitiveProbePath(path) {
+	if sensitiveProbePath(fields["path"]) {
 		t.probe++
 	}
-	if key := extractLogMessage(line); key != "" {
+	if key := extractLogMessage(line, fields); key != "" {
 		t.msgs[key]++
 	}
 }
 
-// lineHasLevel reports whether line carries the level, spelled lower or
-// upper, in slog's text or JSON form, or as a bare word.
-func lineHasLevel(line, lower, upper string) bool {
-	for _, l := range []string{lower, upper} {
-		if strings.Contains(line, "level="+l) || strings.Contains(line, `"level":"`+l+`"`) ||
-			strings.Contains(line, " "+l+" ") {
-			return true
-		}
-	}
-	return false
+// logLevelError is slog's error level as a field value, lower-cased.
+const logLevelError = "error"
+
+// lineHasBareLevel reports whether an unstructured line (log.Logger's
+// "2026/10/14 06:32:26 ERROR ...") names the level as a word. A structured
+// line is never read this way: its level is a field, and the rest of it is
+// text a client may have written.
+func lineHasBareLevel(line, lower, upper string) bool {
+	return strings.Contains(line, " "+lower+" ") || strings.Contains(line, " "+upper+" ")
 }
 
-// logField reads key's value from a slog text (key=value) or JSON
-// ("key":value or "key":"value") line.
-func logField(line, key string) (string, bool) {
-	for _, marker := range []string{" " + key + "=", `"` + key + `":`} {
-		i := strings.Index(line, marker)
-		if i < 0 {
+// maxParsedLogLine bounds the line parseLogFields reads.
+const maxParsedLogLine = 64 << 10
+
+// parseLogFields reads the top-level fields of a slog JSON or text line, or
+// returns nil for a line in neither form.
+//
+// The tally used to search the raw line for " status=" and " error ", and an
+// access line carries the client's path before its status: a 503 to
+// "/ status=200" read as served, and "/ error x" as an error. Reading fields
+// the way slog wrote them -- a JSON object, or key=value pairs with quoted
+// values unquoted -- leaves what the client wrote inside its own field.
+func parseLogFields(line string) map[string]string {
+	line = strings.TrimSpace(line)
+	if len(line) > maxParsedLogLine {
+		return nil
+	}
+	if strings.HasPrefix(line, "{") {
+		return parseJSONLogFields(line)
+	}
+	return parseTextLogFields(line)
+}
+
+func parseJSONLogFields(line string) map[string]string {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(line), &raw); err != nil {
+		return nil
+	}
+	out := make(map[string]string, len(raw))
+	for k, v := range raw {
+		var str string
+		if err := json.Unmarshal(v, &str); err == nil {
+			out[k] = str
 			continue
 		}
-		v := strings.TrimPrefix(line[i+len(marker):], `"`)
-		if end := strings.IndexAny(v, ` ",}`); end >= 0 {
-			v = v[:end]
+		if len(v) > 0 && v[0] != '{' && v[0] != '[' {
+			out[k] = string(v)
 		}
-		return v, v != ""
 	}
-	return "", false
+	return out
+}
+
+// parseTextLogFields reads slog's text form: key=value pairs separated by a
+// space, a value quoted (strconv.Quote) when it holds a space, '=' or '"'.
+// A line without a level field is not one slog wrote.
+func parseTextLogFields(line string) map[string]string {
+	out := map[string]string{}
+	for line != "" {
+		eq := strings.IndexByte(line, '=')
+		if eq <= 0 || strings.ContainsAny(line[:eq], ` "`) {
+			break
+		}
+		value, next, ok := cutLogValue(line[eq+1:])
+		if !ok {
+			break
+		}
+		out[line[:eq]] = value
+		line = strings.TrimLeft(next, " ")
+	}
+	if out["level"] == "" {
+		return nil
+	}
+	return out
+}
+
+// cutLogValue reads one value from the front of s: a quoted string, or the
+// text up to the next space.
+func cutLogValue(s string) (value, rest string, ok bool) {
+	if !strings.HasPrefix(s, `"`) {
+		if sp := strings.IndexByte(s, ' '); sp >= 0 {
+			return s[:sp], s[sp:], true
+		}
+		return s, "", true
+	}
+	for i := 1; i < len(s); i++ {
+		switch s[i] {
+		case '\\':
+			i++
+		case '"':
+			v, err := strconv.Unquote(s[:i+1])
+			return v, s[i+1:], err == nil
+		}
+	}
+	return "", "", false
 }
 
 // sensitiveProbePaths are paths only a scanner asks for: credentials,
@@ -609,39 +800,11 @@ func writeTopMessages(b *strings.Builder, msgCounts map[string]int) {
 	b.WriteString(". ")
 }
 
-// logJSONString reads a JSON log line's string field key.
-func logJSONString(line, key string) (string, bool) {
-	marker := `"` + key + `":"`
-	i := strings.Index(line, marker)
-	if i < 0 {
-		return "", false
-	}
-	rest := line[i+len(marker):]
-	end := strings.IndexByte(rest, '"')
-	if end < 0 {
-		return "", false
-	}
-	return rest[:end], true
-}
-
-// extractLogMessage pulls the msg field from a slog JSON or text line, falling
-// back to a trimmed prefix so similar lines group together.
-func extractLogMessage(line string) string {
-	if v, ok := logJSONString(line, "msg"); ok {
-		return v
-	}
-	const marker = "msg="
-	if i := strings.Index(line, marker); i >= 0 {
-		rest := line[i+len(marker):]
-		if strings.HasPrefix(rest, "\"") {
-			if end := strings.Index(rest[1:], "\""); end >= 0 {
-				return rest[1 : end+1]
-			}
-		}
-		if sp := strings.IndexByte(rest, ' '); sp >= 0 {
-			return rest[:sp]
-		}
-		return rest
+// extractLogMessage is the line's msg field, or a trimmed prefix of an
+// unstructured line, so similar lines group together.
+func extractLogMessage(line string, fields map[string]string) string {
+	if fields != nil {
+		return fields["msg"]
 	}
 	line = strings.TrimSpace(line)
 	if len(line) > 60 {

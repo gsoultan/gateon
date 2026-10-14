@@ -397,7 +397,7 @@ export default function LiveLogs({ height = 400, fill = false }: LiveLogsProps) 
         </Paper>
       </Stack>
       <LogAIAnalyst
-        logs={logs.map((e) => e.raw)}
+        logs={filteredLogs.map((e) => e.raw)}
         opened={aiOpened}
         onClose={closeAI}
       />

@@ -15,7 +15,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file gateon/v1/global.proto.
  */
 export const file_gateon_v1_global: GenFile = /*@__PURE__*/
-  fileDesc("ChZnYXRlb24vdjEvZ2xvYmFsLnByb3RvEglnYXRlb24udjEiGAoWR2V0R2xvYmFsQ29uZmlnUmVxdWVzdCJCChdHZXRHbG9iYWxDb25maWdSZXNwb25zZRInCgZjb25maWcYASABKAsyFy5nYXRlb24udjEuR2xvYmFsQ29uZmlnIkQKGVVwZGF0ZUdsb2JhbENvbmZpZ1JlcXVlc3QSJwoGY29uZmlnGAEgASgLMhcuZ2F0ZW9uLnYxLkdsb2JhbENvbmZpZyItChpVcGRhdGVHbG9iYWxDb25maWdSZXNwb25zZRIPCgdzdWNjZXNzGAEgASgIIvsFCgxHbG9iYWxDb25maWcSIQoDdGxzGAEgASgLMhQuZ2F0ZW9uLnYxLlRsc0NvbmZpZxIlCgVyZWRpcxgCIAEoCzIWLmdhdGVvbi52MS5SZWRpc0NvbmZpZxIjCgRvdGVsGAMgASgLMhUuZ2F0ZW9uLnYxLk90ZWxDb25maWcSIQoDbG9nGAQgASgLMhQuZ2F0ZW9uLnYxLkxvZ0NvbmZpZxIjCgRhdXRoGAUgASgLMhUuZ2F0ZW9uLnYxLkF1dGhDb25maWcSLQoJdHJhbnNwb3J0GAYgASgLMhouZ2F0ZW9uLnYxLlRyYW5zcG9ydENvbmZpZxIhCgN3YWYYByABKAsyFC5nYXRlb24udjEuV2FmQ29uZmlnEh8KAmhhGAggASgLMhMuZ2F0ZW9uLnYxLkhhQ29uZmlnEjwKEWFub21hbHlfZGV0ZWN0aW9uGAkgASgLMiEuZ2F0ZW9uLnYxLkFub21hbHlEZXRlY3Rpb25Db25maWcSIwoEZWJwZhgKIAEoCzIVLmdhdGVvbi52MS5FYnBmQ29uZmlnEi8KCm1hbmFnZW1lbnQYDCABKAsyGy5nYXRlb24udjEuTWFuYWdlbWVudENvbmZpZxIlCgVnZW9pcBgNIAEoCzIWLmdhdGVvbi52MS5HZW9JUENvbmZpZxIrCghkZWJ1Z2dlchgOIAEoCzIZLmdhdGVvbi52MS5EZWJ1Z2dlckNvbmZpZxI8ChFzZWN1cml0eV9hZHZhbmNlZBgPIAEoCzIhLmdhdGVvbi52MS5TZWN1cml0eUFkdmFuY2VkQ29uZmlnEisKCGFsZXJ0aW5nGBAgASgLMhkuZ2F0ZW9uLnYxLkFsZXJ0aW5nQ29uZmlnEiUKBWF1ZGl0GBEgASgLMhYuZ2F0ZW9uLnYxLkF1ZGl0Q29uZmlnEiMKBHJiYWMYEiABKAsyFS5nYXRlb24udjEuUkJBQ0NvbmZpZxIPCgdwcm9maWxlGBMgASgJSgQICxAMSgQIFBAVUgV0aXRhbiJ/Cg5BbGVydGluZ0NvbmZpZxIPCgdlbmFibGVkGAEgASgIEi8KC2Rpc3BhdGNoZXJzGAIgAygLMhouZ2F0ZW9uLnYxLkFsZXJ0RGlzcGF0Y2hlchIrCglwbGF5Ym9va3MYAyADKAsyGC5nYXRlb24udjEuQWxlcnRQbGF5Ym9vayKbAQoPQWxlcnREaXNwYXRjaGVyEgoKAmlkGAEgASgJEgwKBG5hbWUYAiABKAkSDAoEdHlwZRgDIAEoCRITCgt3ZWJob29rX3VybBgEIAEoCRIVCg1zbGFja19jaGFubmVsGAUgASgJEhoKEnRlbGVncmFtX2JvdF90b2tlbhgGIAEoCRIYChB0ZWxlZ3JhbV9jaGF0X2lkGAcgASgJIngKDUFsZXJ0UGxheWJvb2sSCgoCaWQYASABKAkSDAoEbmFtZRgCIAEoCRISCgpldmVudF90eXBlGAMgASgJEhEKCXRocmVzaG9sZBgEIAEoARIWCg5kaXNwYXRjaGVyX2lkcxgFIAMoCRIOCgZhY3Rpb24YBiABKAkiywEKC0F1ZGl0Q29uZmlnEg8KB2VuYWJsZWQYASABKAgSFAoMc2lnbl9lbnRyaWVzGAIgASgIEhUKDXNpZ25hdHVyZV9rZXkYAyABKAkSFAoMZGF0YWJhc2VfdXJsGAQgASgJEjIKD2RhdGFiYXNlX2NvbmZpZxgFIAEoCzIZLmdhdGVvbi52MS5EYXRhYmFzZUNvbmZpZxIWCg5yZXRlbnRpb25fZGF5cxgGIAEoBRIcChRhcmNoaXZlX29uX3JldGVudGlvbhgHIAEoCCLXAgoWU2VjdXJpdHlBZHZhbmNlZENvbmZpZxItCglkZWNlcHRpb24YASABKAsyGi5nYXRlb24udjEuRGVjZXB0aW9uQ29uZmlnEicKBnRhcnBpdBgCIAEoCzIXLmdhdGVvbi52MS5UYXJwaXRDb25maWcSKQoHZW50cm9weRgDIAEoCzIYLmdhdGVvbi52MS5FbnRyb3B5Q29uZmlnEi8KCmJlaGF2aW9yYWwYBCABKAsyGy5nYXRlb24udjEuQmVoYXZpb3JhbENvbmZpZxIhCgNwb3cYBSABKAsyFC5nYXRlb24udjEuUG93Q29uZmlnEjQKDWlwX3JlcHV0YXRpb24YBiABKAsyHS5nYXRlb24udjEuSVBSZXB1dGF0aW9uQ29uZmlnEjAKC3Rsc19iaW5kaW5nGAcgASgLMhsuZ2F0ZW9uLnYxLlRsc0JpbmRpbmdDb25maWciqgEKEklQUmVwdXRhdGlvbkNvbmZpZxIPCgdlbmFibGVkGAEgASgIEhEKCWZlZWRfdXJscxgCIAMoCRIdChV1cGRhdGVfaW50ZXJ2YWxfaG91cnMYAyABKAUSFwoPYmxvY2tfdGhyZXNob2xkGAQgASgBEjgKDGludGVncmF0aW9ucxgFIAMoCzIiLmdhdGVvbi52MS5JUFJlcHV0YXRpb25JbnRlZ3JhdGlvbiKBAQoXSVBSZXB1dGF0aW9uSW50ZWdyYXRpb24SCgoCaWQYASABKAkSDAoEbmFtZRgCIAEoCRIMCgR0eXBlGAMgASgJEg8KB2FwaV9rZXkYBCABKAkSDwoHZW5hYmxlZBgFIAEoCBIcChRjb25maWRlbmNlX3RocmVzaG9sZBgGIAEoBSLZAQoPRGVjZXB0aW9uQ29uZmlnEg8KB2VuYWJsZWQYASABKAgSFgoOaG9uZXlwb3RfcGF0aHMYAiADKAkSHgoWaW5qZWN0X2ludmlzaWJsZV9saW5rcxgDIAEoCBIcChRpbnZpc2libGVfbGlua19wYXRocxgEIAMoCRITCgtob25leV9mb3JtcxgFIAMoCRIVCg1jYW5hcnlfaGVhZGVyGAYgASgJEhQKDGNhbmFyeV90b2tlbhgHIAEoCRIdChVlbmFibGVfdHJvbGxfcmVzcG9uc2UYCCABKAgiOAoQVGxzQmluZGluZ0NvbmZpZxIPCgdlbmFibGVkGAEgASgIEhMKC2Nvb2tpZV9uYW1lGAIgASgJImUKDFRhcnBpdENvbmZpZxIPCgdlbmFibGVkGAEgASgIEhUKDWRlbGF5X2Jhc2VfbXMYAiABKAUSFAoMZGVsYXlfbWF4X21zGAMgASgFEhcKD3Njb3JlX3RocmVzaG9sZBgEIAEoASIzCg1FbnRyb3B5Q29uZmlnEg8KB2VuYWJsZWQYASABKAgSEQoJdGhyZXNob2xkGAIgASgBImkKEEJlaGF2aW9yYWxDb25maWcSDwoHZW5hYmxlZBgBIAEoCBIgChhlbmFibGVfaW1wb3NzaWJsZV90cmF2ZWwYAiABKAgSIgoaZW5hYmxlX3NlcXVlbmNlX3ZhbGlkYXRpb24YAyABKAgiWQoJUG93Q29uZmlnEg8KB2VuYWJsZWQYASABKAgSEgoKZGlmZmljdWx0eRgCIAEoBRIXCg9zY29yZV90aHJlc2hvbGQYAyABKAESDgoGc2VjcmV0GAQgASgJIkwKDkRlYnVnZ2VyQ29uZmlnEg8KB2VuYWJsZWQYASABKAgSFQoNbWF4X2JvZHlfc2l6ZRgDIAEoBUoECAIQA1IMbWF4X2NhcHR1cmVzIukBCgtHZW9JUENvbmZpZxIPCgdlbmFibGVkGAEgASgIEg8KB2RiX3BhdGgYAiABKAkSGwoTbWF4bWluZF9saWNlbnNlX2tleRgDIAEoCRITCgthdXRvX3VwZGF0ZRgEIAEoCBIcChR1cGRhdGVfaW50ZXJ2YWxfZGF5cxgFIAEoBRIZChFibG9ja2VkX2NvdW50cmllcxgGIAMoCRIZChFhbGxvd2VkX2NvdW50cmllcxgIIAMoCRITCgthc25fZGJfcGF0aBgJIAEoCRIXCg9jb3VudHJ5X2RiX3BhdGgYCiABKAlKBAgHEAgisgIKEE1hbmFnZW1lbnRDb25maWcSDAoEYmluZBgBIAEoCRIMCgRwb3J0GAIgASgJEhMKC2FsbG93ZWRfaXBzGAMgAygJEiMKBGNvcnMYBCABKAsyFS5nYXRlb24udjEuQ29yc0NvbmZpZxIfChdhbGxvd19wdWJsaWNfbWFuYWdlbWVudBgGIAEoCBIVCg1hbGxvd2VkX2hvc3RzGAcgAygJEicKBmdpdG9wcxgLIAEoCzIXLmdhdGVvbi52MS5HaXRPcHNDb25maWdKBAgFEAZKBAgIEAlKBAgJEApKBAgKEAtSBGhvc3RSG3hkcF9tYW5hZ2VtZW50X3doaXRlbGlzdGluZ1IUZW5hYmxlX3BvcnRfa25vY2tpbmdSFnBvcnRfa25vY2tpbmdfc2VxdWVuY2UinAEKCkNvcnNDb25maWcSFwoPYWxsb3dlZF9vcmlnaW5zGAEgAygJEhcKD2FsbG93ZWRfbWV0aG9kcxgCIAMoCRIXCg9hbGxvd2VkX2hlYWRlcnMYAyADKAkSFwoPZXhwb3NlZF9oZWFkZXJzGAQgAygJEhkKEWFsbG93X2NyZWRlbnRpYWxzGAUgASgIEg8KB21heF9hZ2UYBiABKAUinwEKDEdpdE9wc0NvbmZpZxIPCgdlbmFibGVkGAEgASgIEhYKDnJlcG9zaXRvcnlfdXJsGAIgASgJEg4KBmJyYW5jaBgDIAEoCRIMCgRwYXRoGAQgASgJEh0KFXN5bmNfaW50ZXJ2YWxfc2Vjb25kcxgFIAEoBRISCgphdXRoX3Rva2VuGAcgASgJSgQIBhAHUg9zc2hfcHJpdmF0ZV9rZXkiQwoKUkJBQ0NvbmZpZxIPCgdlbmFibGVkGAEgASgIEiQKBXJvbGVzGAIgAygLMhUuZ2F0ZW9uLnYxLlJvbGVQb2xpY3kiRgoKUm9sZVBvbGljeRIMCgRyb2xlGAEgASgJEioKC3Blcm1pc3Npb25zGAIgAygLMhUuZ2F0ZW9uLnYxLlBlcm1pc3Npb24iLgoKUGVybWlzc2lvbhIQCghyZXNvdXJjZRgBIAEoCRIOCgZhY3Rpb24YAiABKAkinQgKCVdhZkNvbmZpZxIPCgdlbmFibGVkGAEgASgIEhYKDnBhcmFub2lhX2xldmVsGAMgASgFEhkKEWN1c3RvbV9kaXJlY3RpdmVzGAQgASgJEhEKCXdvcmRwcmVzcxgPIAEoCBIVCg1pcF9yZXB1dGF0aW9uGBAgASgIEhYKDmRvc19wcm90ZWN0aW9uGBEgASgIEhkKEW1hbHdhcmVfZGV0ZWN0aW9uGBIgASgIEgsKA2RscBgVIAEoCBIZChFhbm9tYWx5X3RocmVzaG9sZBgTIAEoBRIaChJyZXF1ZXN0X2JvZHlfbGltaXQYFiABKAUSGwoTcmVzcG9uc2VfYm9keV9saW1pdBgXIAEoBRIWCg5hdWRpdF9sb2dfcGF0aBgYIAEoCRIfChdhdWRpdF9sb2dfcmVsZXZhbnRfb25seRgZIAEoCBI2Cg5ib3RfbWFuYWdlbWVudBgNIAEoCzIeLmdhdGVvbi52MS5Cb3RNYW5hZ2VtZW50Q29uZmlnEhkKEWFsbG93ZWRfYWRtaW5faXBzGBogAygJEhkKEWF1dG9fdXBkYXRlX3J1bGVzGBsgASgIEhMKC2NsYW1hdl9hZGRyGB4gASgJEicKBmNsYW1hdhgfIAEoCzIXLmdhdGVvbi52MS5DbGFtYXZDb25maWcSGQoRZW50cm9weV90aHJlc2hvbGQYICABKAESFwoPZGlzYWJsZV9lbnRyb3B5GCEgASgIEgwKBHRpZXIYIiABKAkSIAoYdHJ1c3RfY2xvdWRmbGFyZV9oZWFkZXJzGCMgASgIEhsKE2VuYWJsZV9ib2R5X2VudHJvcHkYJCABKAgSJQodZW5hYmxlX2ZpbmdlcnByaW50X3ZhbGlkYXRpb24YJSABKAgSIQoZZW5hYmxlX2NvbmZpZGVuY2Vfc2NvcmluZxgmIAEoCBISCgphdWRpdF9vbmx5GCcgASgIEhQKDGFwcF9wcm9maWxlcxgoIAMoCRIXCg9zc3JmX3Byb3RlY3Rpb24YKSABKAgSDwoHb3JpZ2lucxgqIAMoCRISCgpkbHBfYWN0aW9uGCsgASgJEiwKCmNhdGVnb3JpZXMYLCABKAsyGC5nYXRlb24udjEuV2FmQ2F0ZWdvcmllc0oECAIQA0oECAUQBkoECAYQB0oECAcQCEoECAgQCUoECAkQCkoECAoQC0oECAsQDEoECAwQDUoECA4QD0oECBQQFUoECBwQHUoECB0QHlIHdXNlX2Nyc1IEc3FsaVIDeHNzUgNsZmlSA3JjZVIDcGhwUgdzY2FubmVyUghwcm90b2NvbFIEamF2YVIGbm9kZWpzUhRyYW5zb213YXJlX2RldGVjdGlvblIVdXBkYXRlX2ludGVydmFsX2hvdXJzUglydWxlc191cmwi0QIKDVdhZkNhdGVnb3JpZXMSEQoEc3FsaRgBIAEoCEgAiAEBEhAKA3hzcxgCIAEoCEgBiAEBEhAKA2xmaRgDIAEoCEgCiAEBEhAKA3JjZRgEIAEoCEgDiAEBEhAKA3BocBgFIAEoCEgEiAEBEhEKBGphdmEYBiABKAhIBYgBARITCgZub2RlanMYByABKAhIBogBARIUCgdzY2FubmVyGAggASgISAeIAQESFQoIcHJvdG9jb2wYCSABKAhICIgBARIhChRyYW5zb213YXJlX2RldGVjdGlvbhgKIAEoCEgJiAEBQgcKBV9zcWxpQgYKBF94c3NCBgoEX2xmaUIGCgRfcmNlQgYKBF9waHBCBwoFX2phdmFCCQoHX25vZGVqc0IKCghfc2Nhbm5lckILCglfcHJvdG9jb2xCFwoVX3JhbnNvbXdhcmVfZGV0ZWN0aW9uIvwCCgxDbGFtYXZDb25maWcSQwoRaW5zdGFsbGF0aW9uX21vZGUYASABKA4yKC5nYXRlb24udjEuQ2xhbWF2Q29uZmlnLkluc3RhbGxhdGlvbk1vZGUSFAoMYXV0b19pbnN0YWxsGAIgASgIEhQKDGRvY2tlcl9pbWFnZRgDIAEoCRIaChJmdWxsX3NjYW5fc2NoZWR1bGUYBCABKAkSGQoRbG93X3Jlc291cmNlX21vZGUYBSABKAgSEwoLY2xhbWF2X2FkZHIYBiABKAkSIAoYZGF0YWJhc2VfdXBkYXRlX3NjaGVkdWxlGAcgASgJEhsKE2FwcF91cGRhdGVfc2NoZWR1bGUYCCABKAkicAoQSW5zdGFsbGF0aW9uTW9kZRIhCh1JTlNUQUxMQVRJT05fTU9ERV9VTlNQRUNJRklFRBAAEhsKF0lOU1RBTExBVElPTl9NT0RFX0xPQ0FMEAESHAoYSU5TVEFMTEFUSU9OX01PREVfRE9DS0VSEAIinAEKE0JvdE1hbmFnZW1lbnRDb25maWcSDwoHZW5hYmxlZBgBIAEoCBIbChNlbmFibGVfanNfY2hhbGxlbmdlGAIgASgIEiAKGGVuYWJsZV9icm93c2VyX2ludGVncml0eRgFIAEoCBIhChljaGFsbGVuZ2VfdGltZW91dF9zZWNvbmRzGAMgASgFEhIKCnNlY3JldF9rZXkYBCABKAki+AEKCEhhQ29uZmlnEg8KB2VuYWJsZWQYASABKAgSEQoJaW50ZXJmYWNlGAIgASgJEhkKEXZpcnR1YWxfcm91dGVyX2lkGAMgASgFEhAKCHByaW9yaXR5GAQgASgFEhMKC3ZpcnR1YWxfaXBzGAUgAygJEhIKCmFkdmVydF9pbnQYBiABKAUSEQoJYXV0aF9wYXNzGAcgASgJEhUKDWVuYWJsZV9nb3NzaXAYCCABKAgSGAoQZ29zc2lwX2JpbmRfYWRkchgJIAEoCRIYChBnb3NzaXBfYmluZF9wb3J0GAogASgFEhQKDGdvc3NpcF9wZWVycxgLIAMoCSKnAgoWQW5vbWFseURldGVjdGlvbkNvbmZpZxIPCgdlbmFibGVkGAEgASgIEh4KFmNoZWNrX2ludGVydmFsX3NlY29uZHMYAyABKAUSEwoLc2Vuc2l0aXZpdHkYBCABKAESIQoZc2VjdXJpdHlfdGhyZWF0X3RocmVzaG9sZBgFIAEoARIoCiBlbmFibGVfYmVoYXZpb3JhbF9maW5nZXJwcmludGluZxgHIAEoCBIkChxlbmFibGVfYnJ1dGVfZm9yY2VfZGV0ZWN0aW9uGAggASgIEiAKGGVuYWJsZV9leHBsb2l0X2RldGVjdGlvbhgJIAEoCEoECAIQA0oECAYQB1IOcHJvbWV0aGV1c191cmxSFmFub21hbHlfcmV0ZW50aW9uX2RheXMi+AIKCkVicGZDb25maWcSDwoHZW5hYmxlZBgBIAEoCBIWCg54ZHBfcmF0ZV9saW1pdBgCIAEoCBIUCgx0Y19maWx0ZXJpbmcYAyABKAgSEQoJaW50ZXJmYWNlGAQgASgJEhcKD3hkcF9pcF9zaHVubmluZxgFIAEoCBIaChJ4ZHBfbG9hZF9iYWxhbmNpbmcYBiABKAgSFwoPZW5hYmxlX2tub2NraW5nGAcgASgIEhEKCW1nbXRfcG9ydBgIIAEoBRIZChFrbm9ja2luZ19zZXF1ZW5jZRgJIAMoBRIZChFhbGxvd19nZW5lcmljX3hkcBgNIAEoCBIdChVlbmFibGVfbWdtdF93aGl0ZWxpc3QYDiABKAgSGgoSbWdtdF93aGl0ZWxpc3RfaXBzGA8gAygJSgQIChALSgQICxAMSgQIDBANUhF4ZHBfY3Vja29vX2ZpbHRlclIOYWZfeGRwX3BoYW50b21SEXhkcF9qYTRfYmxvY2tsaXN0Ip8BCgpBdXRoQ29uZmlnEg8KB2VuYWJsZWQYASABKAgSFQoNcGFzZXRvX3NlY3JldBgCIAEoCRITCgtzcWxpdGVfcGF0aBgDIAEoCRIUCgxkYXRhYmFzZV91cmwYBCABKAkSMgoPZGF0YWJhc2VfY29uZmlnGAUgASgLMhkuZ2F0ZW9uLnYxLkRhdGFiYXNlQ29uZmlnSgQIBhAHUgRvaWRjQpYBCg1jb20uZ2F0ZW9uLnYxQgtHbG9iYWxQcm90b1ABWjNnaXRodWIuY29tL2dzb3VsdGFuL2dhdGVvbi9wcm90by9nYXRlb24vdjE7Z2F0ZW9udjGiAgNHWFiqAglHYXRlb24uVjHKAglHYXRlb25cVjHiAhVHYXRlb25cVjFcR1BCTWV0YWRhdGHqAgpHYXRlb246OlYxYgZwcm90bzM", [file_gateon_v1_common]);
+  fileDesc("ChZnYXRlb24vdjEvZ2xvYmFsLnByb3RvEglnYXRlb24udjEiGAoWR2V0R2xvYmFsQ29uZmlnUmVxdWVzdCJCChdHZXRHbG9iYWxDb25maWdSZXNwb25zZRInCgZjb25maWcYASABKAsyFy5nYXRlb24udjEuR2xvYmFsQ29uZmlnIkQKGVVwZGF0ZUdsb2JhbENvbmZpZ1JlcXVlc3QSJwoGY29uZmlnGAEgASgLMhcuZ2F0ZW9uLnYxLkdsb2JhbENvbmZpZyItChpVcGRhdGVHbG9iYWxDb25maWdSZXNwb25zZRIPCgdzdWNjZXNzGAEgASgIIpwGCgxHbG9iYWxDb25maWcSIQoDdGxzGAEgASgLMhQuZ2F0ZW9uLnYxLlRsc0NvbmZpZxIlCgVyZWRpcxgCIAEoCzIWLmdhdGVvbi52MS5SZWRpc0NvbmZpZxIjCgRvdGVsGAMgASgLMhUuZ2F0ZW9uLnYxLk90ZWxDb25maWcSIQoDbG9nGAQgASgLMhQuZ2F0ZW9uLnYxLkxvZ0NvbmZpZxIjCgRhdXRoGAUgASgLMhUuZ2F0ZW9uLnYxLkF1dGhDb25maWcSLQoJdHJhbnNwb3J0GAYgASgLMhouZ2F0ZW9uLnYxLlRyYW5zcG9ydENvbmZpZxIhCgN3YWYYByABKAsyFC5nYXRlb24udjEuV2FmQ29uZmlnEh8KAmhhGAggASgLMhMuZ2F0ZW9uLnYxLkhhQ29uZmlnEjwKEWFub21hbHlfZGV0ZWN0aW9uGAkgASgLMiEuZ2F0ZW9uLnYxLkFub21hbHlEZXRlY3Rpb25Db25maWcSIwoEZWJwZhgKIAEoCzIVLmdhdGVvbi52MS5FYnBmQ29uZmlnEi8KCm1hbmFnZW1lbnQYDCABKAsyGy5nYXRlb24udjEuTWFuYWdlbWVudENvbmZpZxIlCgVnZW9pcBgNIAEoCzIWLmdhdGVvbi52MS5HZW9JUENvbmZpZxIrCghkZWJ1Z2dlchgOIAEoCzIZLmdhdGVvbi52MS5EZWJ1Z2dlckNvbmZpZxI8ChFzZWN1cml0eV9hZHZhbmNlZBgPIAEoCzIhLmdhdGVvbi52MS5TZWN1cml0eUFkdmFuY2VkQ29uZmlnEisKCGFsZXJ0aW5nGBAgASgLMhkuZ2F0ZW9uLnYxLkFsZXJ0aW5nQ29uZmlnEiUKBWF1ZGl0GBEgASgLMhYuZ2F0ZW9uLnYxLkF1ZGl0Q29uZmlnEiMKBHJiYWMYEiABKAsyFS5nYXRlb24udjEuUkJBQ0NvbmZpZxIPCgdwcm9maWxlGBMgASgJEh8KAmFpGBUgASgLMhMuZ2F0ZW9uLnYxLkFJQ29uZmlnSgQICxAMSgQIFBAVUgV0aXRhbiKsAQoIQUlDb25maWcSDwoHZW5hYmxlZBgBIAEoCBIQCghwcm92aWRlchgCIAEoCRINCgVtb2RlbBgDIAEoCRIQCghiYXNlX3VybBgEIAEoCRIPCgdhcGlfa2V5GAUgASgJEhcKD3RpbWVvdXRfc2Vjb25kcxgGIAEoBRIZChFtYXhfb3V0cHV0X3Rva2VucxgHIAEoBRIXCg9zaGFyZV9sb2dfbGluZXMYCCABKAgifwoOQWxlcnRpbmdDb25maWcSDwoHZW5hYmxlZBgBIAEoCBIvCgtkaXNwYXRjaGVycxgCIAMoCzIaLmdhdGVvbi52MS5BbGVydERpc3BhdGNoZXISKwoJcGxheWJvb2tzGAMgAygLMhguZ2F0ZW9uLnYxLkFsZXJ0UGxheWJvb2simwEKD0FsZXJ0RGlzcGF0Y2hlchIKCgJpZBgBIAEoCRIMCgRuYW1lGAIgASgJEgwKBHR5cGUYAyABKAkSEwoLd2ViaG9va191cmwYBCABKAkSFQoNc2xhY2tfY2hhbm5lbBgFIAEoCRIaChJ0ZWxlZ3JhbV9ib3RfdG9rZW4YBiABKAkSGAoQdGVsZWdyYW1fY2hhdF9pZBgHIAEoCSJ4Cg1BbGVydFBsYXlib29rEgoKAmlkGAEgASgJEgwKBG5hbWUYAiABKAkSEgoKZXZlbnRfdHlwZRgDIAEoCRIRCgl0aHJlc2hvbGQYBCABKAESFgoOZGlzcGF0Y2hlcl9pZHMYBSADKAkSDgoGYWN0aW9uGAYgASgJIssBCgtBdWRpdENvbmZpZxIPCgdlbmFibGVkGAEgASgIEhQKDHNpZ25fZW50cmllcxgCIAEoCBIVCg1zaWduYXR1cmVfa2V5GAMgASgJEhQKDGRhdGFiYXNlX3VybBgEIAEoCRIyCg9kYXRhYmFzZV9jb25maWcYBSABKAsyGS5nYXRlb24udjEuRGF0YWJhc2VDb25maWcSFgoOcmV0ZW50aW9uX2RheXMYBiABKAUSHAoUYXJjaGl2ZV9vbl9yZXRlbnRpb24YByABKAgi1wIKFlNlY3VyaXR5QWR2YW5jZWRDb25maWcSLQoJZGVjZXB0aW9uGAEgASgLMhouZ2F0ZW9uLnYxLkRlY2VwdGlvbkNvbmZpZxInCgZ0YXJwaXQYAiABKAsyFy5nYXRlb24udjEuVGFycGl0Q29uZmlnEikKB2VudHJvcHkYAyABKAsyGC5nYXRlb24udjEuRW50cm9weUNvbmZpZxIvCgpiZWhhdmlvcmFsGAQgASgLMhsuZ2F0ZW9uLnYxLkJlaGF2aW9yYWxDb25maWcSIQoDcG93GAUgASgLMhQuZ2F0ZW9uLnYxLlBvd0NvbmZpZxI0Cg1pcF9yZXB1dGF0aW9uGAYgASgLMh0uZ2F0ZW9uLnYxLklQUmVwdXRhdGlvbkNvbmZpZxIwCgt0bHNfYmluZGluZxgHIAEoCzIbLmdhdGVvbi52MS5UbHNCaW5kaW5nQ29uZmlnIqoBChJJUFJlcHV0YXRpb25Db25maWcSDwoHZW5hYmxlZBgBIAEoCBIRCglmZWVkX3VybHMYAiADKAkSHQoVdXBkYXRlX2ludGVydmFsX2hvdXJzGAMgASgFEhcKD2Jsb2NrX3RocmVzaG9sZBgEIAEoARI4CgxpbnRlZ3JhdGlvbnMYBSADKAsyIi5nYXRlb24udjEuSVBSZXB1dGF0aW9uSW50ZWdyYXRpb24igQEKF0lQUmVwdXRhdGlvbkludGVncmF0aW9uEgoKAmlkGAEgASgJEgwKBG5hbWUYAiABKAkSDAoEdHlwZRgDIAEoCRIPCgdhcGlfa2V5GAQgASgJEg8KB2VuYWJsZWQYBSABKAgSHAoUY29uZmlkZW5jZV90aHJlc2hvbGQYBiABKAUi2QEKD0RlY2VwdGlvbkNvbmZpZxIPCgdlbmFibGVkGAEgASgIEhYKDmhvbmV5cG90X3BhdGhzGAIgAygJEh4KFmluamVjdF9pbnZpc2libGVfbGlua3MYAyABKAgSHAoUaW52aXNpYmxlX2xpbmtfcGF0aHMYBCADKAkSEwoLaG9uZXlfZm9ybXMYBSADKAkSFQoNY2FuYXJ5X2hlYWRlchgGIAEoCRIUCgxjYW5hcnlfdG9rZW4YByABKAkSHQoVZW5hYmxlX3Ryb2xsX3Jlc3BvbnNlGAggASgIIjgKEFRsc0JpbmRpbmdDb25maWcSDwoHZW5hYmxlZBgBIAEoCBITCgtjb29raWVfbmFtZRgCIAEoCSJlCgxUYXJwaXRDb25maWcSDwoHZW5hYmxlZBgBIAEoCBIVCg1kZWxheV9iYXNlX21zGAIgASgFEhQKDGRlbGF5X21heF9tcxgDIAEoBRIXCg9zY29yZV90aHJlc2hvbGQYBCABKAEiMwoNRW50cm9weUNvbmZpZxIPCgdlbmFibGVkGAEgASgIEhEKCXRocmVzaG9sZBgCIAEoASJpChBCZWhhdmlvcmFsQ29uZmlnEg8KB2VuYWJsZWQYASABKAgSIAoYZW5hYmxlX2ltcG9zc2libGVfdHJhdmVsGAIgASgIEiIKGmVuYWJsZV9zZXF1ZW5jZV92YWxpZGF0aW9uGAMgASgIIlkKCVBvd0NvbmZpZxIPCgdlbmFibGVkGAEgASgIEhIKCmRpZmZpY3VsdHkYAiABKAUSFwoPc2NvcmVfdGhyZXNob2xkGAMgASgBEg4KBnNlY3JldBgEIAEoCSJMCg5EZWJ1Z2dlckNvbmZpZxIPCgdlbmFibGVkGAEgASgIEhUKDW1heF9ib2R5X3NpemUYAyABKAVKBAgCEANSDG1heF9jYXB0dXJlcyLpAQoLR2VvSVBDb25maWcSDwoHZW5hYmxlZBgBIAEoCBIPCgdkYl9wYXRoGAIgASgJEhsKE21heG1pbmRfbGljZW5zZV9rZXkYAyABKAkSEwoLYXV0b191cGRhdGUYBCABKAgSHAoUdXBkYXRlX2ludGVydmFsX2RheXMYBSABKAUSGQoRYmxvY2tlZF9jb3VudHJpZXMYBiADKAkSGQoRYWxsb3dlZF9jb3VudHJpZXMYCCADKAkSEwoLYXNuX2RiX3BhdGgYCSABKAkSFwoPY291bnRyeV9kYl9wYXRoGAogASgJSgQIBxAIIrICChBNYW5hZ2VtZW50Q29uZmlnEgwKBGJpbmQYASABKAkSDAoEcG9ydBgCIAEoCRITCgthbGxvd2VkX2lwcxgDIAMoCRIjCgRjb3JzGAQgASgLMhUuZ2F0ZW9uLnYxLkNvcnNDb25maWcSHwoXYWxsb3dfcHVibGljX21hbmFnZW1lbnQYBiABKAgSFQoNYWxsb3dlZF9ob3N0cxgHIAMoCRInCgZnaXRvcHMYCyABKAsyFy5nYXRlb24udjEuR2l0T3BzQ29uZmlnSgQIBRAGSgQICBAJSgQICRAKSgQIChALUgRob3N0Uht4ZHBfbWFuYWdlbWVudF93aGl0ZWxpc3RpbmdSFGVuYWJsZV9wb3J0X2tub2NraW5nUhZwb3J0X2tub2NraW5nX3NlcXVlbmNlIpwBCgpDb3JzQ29uZmlnEhcKD2FsbG93ZWRfb3JpZ2lucxgBIAMoCRIXCg9hbGxvd2VkX21ldGhvZHMYAiADKAkSFwoPYWxsb3dlZF9oZWFkZXJzGAMgAygJEhcKD2V4cG9zZWRfaGVhZGVycxgEIAMoCRIZChFhbGxvd19jcmVkZW50aWFscxgFIAEoCBIPCgdtYXhfYWdlGAYgASgFIp8BCgxHaXRPcHNDb25maWcSDwoHZW5hYmxlZBgBIAEoCBIWCg5yZXBvc2l0b3J5X3VybBgCIAEoCRIOCgZicmFuY2gYAyABKAkSDAoEcGF0aBgEIAEoCRIdChVzeW5jX2ludGVydmFsX3NlY29uZHMYBSABKAUSEgoKYXV0aF90b2tlbhgHIAEoCUoECAYQB1IPc3NoX3ByaXZhdGVfa2V5IkMKClJCQUNDb25maWcSDwoHZW5hYmxlZBgBIAEoCBIkCgVyb2xlcxgCIAMoCzIVLmdhdGVvbi52MS5Sb2xlUG9saWN5IkYKClJvbGVQb2xpY3kSDAoEcm9sZRgBIAEoCRIqCgtwZXJtaXNzaW9ucxgCIAMoCzIVLmdhdGVvbi52MS5QZXJtaXNzaW9uIi4KClBlcm1pc3Npb24SEAoIcmVzb3VyY2UYASABKAkSDgoGYWN0aW9uGAIgASgJIp0ICglXYWZDb25maWcSDwoHZW5hYmxlZBgBIAEoCBIWCg5wYXJhbm9pYV9sZXZlbBgDIAEoBRIZChFjdXN0b21fZGlyZWN0aXZlcxgEIAEoCRIRCgl3b3JkcHJlc3MYDyABKAgSFQoNaXBfcmVwdXRhdGlvbhgQIAEoCBIWCg5kb3NfcHJvdGVjdGlvbhgRIAEoCBIZChFtYWx3YXJlX2RldGVjdGlvbhgSIAEoCBILCgNkbHAYFSABKAgSGQoRYW5vbWFseV90aHJlc2hvbGQYEyABKAUSGgoScmVxdWVzdF9ib2R5X2xpbWl0GBYgASgFEhsKE3Jlc3BvbnNlX2JvZHlfbGltaXQYFyABKAUSFgoOYXVkaXRfbG9nX3BhdGgYGCABKAkSHwoXYXVkaXRfbG9nX3JlbGV2YW50X29ubHkYGSABKAgSNgoOYm90X21hbmFnZW1lbnQYDSABKAsyHi5nYXRlb24udjEuQm90TWFuYWdlbWVudENvbmZpZxIZChFhbGxvd2VkX2FkbWluX2lwcxgaIAMoCRIZChFhdXRvX3VwZGF0ZV9ydWxlcxgbIAEoCBITCgtjbGFtYXZfYWRkchgeIAEoCRInCgZjbGFtYXYYHyABKAsyFy5nYXRlb24udjEuQ2xhbWF2Q29uZmlnEhkKEWVudHJvcHlfdGhyZXNob2xkGCAgASgBEhcKD2Rpc2FibGVfZW50cm9weRghIAEoCBIMCgR0aWVyGCIgASgJEiAKGHRydXN0X2Nsb3VkZmxhcmVfaGVhZGVycxgjIAEoCBIbChNlbmFibGVfYm9keV9lbnRyb3B5GCQgASgIEiUKHWVuYWJsZV9maW5nZXJwcmludF92YWxpZGF0aW9uGCUgASgIEiEKGWVuYWJsZV9jb25maWRlbmNlX3Njb3JpbmcYJiABKAgSEgoKYXVkaXRfb25seRgnIAEoCBIUCgxhcHBfcHJvZmlsZXMYKCADKAkSFwoPc3NyZl9wcm90ZWN0aW9uGCkgASgIEg8KB29yaWdpbnMYKiADKAkSEgoKZGxwX2FjdGlvbhgrIAEoCRIsCgpjYXRlZ29yaWVzGCwgASgLMhguZ2F0ZW9uLnYxLldhZkNhdGVnb3JpZXNKBAgCEANKBAgFEAZKBAgGEAdKBAgHEAhKBAgIEAlKBAgJEApKBAgKEAtKBAgLEAxKBAgMEA1KBAgOEA9KBAgUEBVKBAgcEB1KBAgdEB5SB3VzZV9jcnNSBHNxbGlSA3hzc1IDbGZpUgNyY2VSA3BocFIHc2Nhbm5lclIIcHJvdG9jb2xSBGphdmFSBm5vZGVqc1IUcmFuc29td2FyZV9kZXRlY3Rpb25SFXVwZGF0ZV9pbnRlcnZhbF9ob3Vyc1IJcnVsZXNfdXJsItECCg1XYWZDYXRlZ29yaWVzEhEKBHNxbGkYASABKAhIAIgBARIQCgN4c3MYAiABKAhIAYgBARIQCgNsZmkYAyABKAhIAogBARIQCgNyY2UYBCABKAhIA4gBARIQCgNwaHAYBSABKAhIBIgBARIRCgRqYXZhGAYgASgISAWIAQESEwoGbm9kZWpzGAcgASgISAaIAQESFAoHc2Nhbm5lchgIIAEoCEgHiAEBEhUKCHByb3RvY29sGAkgASgISAiIAQESIQoUcmFuc29td2FyZV9kZXRlY3Rpb24YCiABKAhICYgBAUIHCgVfc3FsaUIGCgRfeHNzQgYKBF9sZmlCBgoEX3JjZUIGCgRfcGhwQgcKBV9qYXZhQgkKB19ub2RlanNCCgoIX3NjYW5uZXJCCwoJX3Byb3RvY29sQhcKFV9yYW5zb213YXJlX2RldGVjdGlvbiL8AgoMQ2xhbWF2Q29uZmlnEkMKEWluc3RhbGxhdGlvbl9tb2RlGAEgASgOMiguZ2F0ZW9uLnYxLkNsYW1hdkNvbmZpZy5JbnN0YWxsYXRpb25Nb2RlEhQKDGF1dG9faW5zdGFsbBgCIAEoCBIUCgxkb2NrZXJfaW1hZ2UYAyABKAkSGgoSZnVsbF9zY2FuX3NjaGVkdWxlGAQgASgJEhkKEWxvd19yZXNvdXJjZV9tb2RlGAUgASgIEhMKC2NsYW1hdl9hZGRyGAYgASgJEiAKGGRhdGFiYXNlX3VwZGF0ZV9zY2hlZHVsZRgHIAEoCRIbChNhcHBfdXBkYXRlX3NjaGVkdWxlGAggASgJInAKEEluc3RhbGxhdGlvbk1vZGUSIQodSU5TVEFMTEFUSU9OX01PREVfVU5TUEVDSUZJRUQQABIbChdJTlNUQUxMQVRJT05fTU9ERV9MT0NBTBABEhwKGElOU1RBTExBVElPTl9NT0RFX0RPQ0tFUhACIpwBChNCb3RNYW5hZ2VtZW50Q29uZmlnEg8KB2VuYWJsZWQYASABKAgSGwoTZW5hYmxlX2pzX2NoYWxsZW5nZRgCIAEoCBIgChhlbmFibGVfYnJvd3Nlcl9pbnRlZ3JpdHkYBSABKAgSIQoZY2hhbGxlbmdlX3RpbWVvdXRfc2Vjb25kcxgDIAEoBRISCgpzZWNyZXRfa2V5GAQgASgJIvgBCghIYUNvbmZpZxIPCgdlbmFibGVkGAEgASgIEhEKCWludGVyZmFjZRgCIAEoCRIZChF2aXJ0dWFsX3JvdXRlcl9pZBgDIAEoBRIQCghwcmlvcml0eRgEIAEoBRITCgt2aXJ0dWFsX2lwcxgFIAMoCRISCgphZHZlcnRfaW50GAYgASgFEhEKCWF1dGhfcGFzcxgHIAEoCRIVCg1lbmFibGVfZ29zc2lwGAggASgIEhgKEGdvc3NpcF9iaW5kX2FkZHIYCSABKAkSGAoQZ29zc2lwX2JpbmRfcG9ydBgKIAEoBRIUCgxnb3NzaXBfcGVlcnMYCyADKAkipwIKFkFub21hbHlEZXRlY3Rpb25Db25maWcSDwoHZW5hYmxlZBgBIAEoCBIeChZjaGVja19pbnRlcnZhbF9zZWNvbmRzGAMgASgFEhMKC3NlbnNpdGl2aXR5GAQgASgBEiEKGXNlY3VyaXR5X3RocmVhdF90aHJlc2hvbGQYBSABKAESKAogZW5hYmxlX2JlaGF2aW9yYWxfZmluZ2VycHJpbnRpbmcYByABKAgSJAocZW5hYmxlX2JydXRlX2ZvcmNlX2RldGVjdGlvbhgIIAEoCBIgChhlbmFibGVfZXhwbG9pdF9kZXRlY3Rpb24YCSABKAhKBAgCEANKBAgGEAdSDnByb21ldGhldXNfdXJsUhZhbm9tYWx5X3JldGVudGlvbl9kYXlzIvgCCgpFYnBmQ29uZmlnEg8KB2VuYWJsZWQYASABKAgSFgoOeGRwX3JhdGVfbGltaXQYAiABKAgSFAoMdGNfZmlsdGVyaW5nGAMgASgIEhEKCWludGVyZmFjZRgEIAEoCRIXCg94ZHBfaXBfc2h1bm5pbmcYBSABKAgSGgoSeGRwX2xvYWRfYmFsYW5jaW5nGAYgASgIEhcKD2VuYWJsZV9rbm9ja2luZxgHIAEoCBIRCgltZ210X3BvcnQYCCABKAUSGQoRa25vY2tpbmdfc2VxdWVuY2UYCSADKAUSGQoRYWxsb3dfZ2VuZXJpY194ZHAYDSABKAgSHQoVZW5hYmxlX21nbXRfd2hpdGVsaXN0GA4gASgIEhoKEm1nbXRfd2hpdGVsaXN0X2lwcxgPIAMoCUoECAoQC0oECAsQDEoECAwQDVIReGRwX2N1Y2tvb19maWx0ZXJSDmFmX3hkcF9waGFudG9tUhF4ZHBfamE0X2Jsb2NrbGlzdCKfAQoKQXV0aENvbmZpZxIPCgdlbmFibGVkGAEgASgIEhUKDXBhc2V0b19zZWNyZXQYAiABKAkSEwoLc3FsaXRlX3BhdGgYAyABKAkSFAoMZGF0YWJhc2VfdXJsGAQgASgJEjIKD2RhdGFiYXNlX2NvbmZpZxgFIAEoCzIZLmdhdGVvbi52MS5EYXRhYmFzZUNvbmZpZ0oECAYQB1IEb2lkY0KWAQoNY29tLmdhdGVvbi52MUILR2xvYmFsUHJvdG9QAVozZ2l0aHViLmNvbS9nc291bHRhbi9nYXRlb24vcHJvdG8vZ2F0ZW9uL3YxO2dhdGVvbnYxogIDR1hYqgIJR2F0ZW9uLlYxygIJR2F0ZW9uXFYx4gIVR2F0ZW9uXFYxXEdQQk1ldGFkYXRh6gIKR2F0ZW9uOjpWMWIGcHJvdG8z", [file_gateon_v1_common]);
 
 /**
  * @generated from message gateon.v1.GetGlobalConfigRequest
@@ -179,6 +179,15 @@ export type GlobalConfig = Message<"gateon.v1.GlobalConfig"> & {
    * @generated from field: string profile = 19;
    */
   profile: string;
+
+  /**
+   * Third-party language model that narrates the AI Advisory and Log
+   * Assistant findings (ADR 0069). Off unless enabled; the local analysis
+   * runs either way and is what the dashboard shows when the provider fails.
+   *
+   * @generated from field: gateon.v1.AIConfig ai = 21;
+   */
+  ai?: AIConfig | undefined;
 };
 
 /**
@@ -187,6 +196,83 @@ export type GlobalConfig = Message<"gateon.v1.GlobalConfig"> & {
  */
 export const GlobalConfigSchema: GenMessage<GlobalConfig> = /*@__PURE__*/
   messageDesc(file_gateon_v1_global, 4);
+
+/**
+ * AIConfig selects the language model the dashboard's AI features may ask.
+ * Administrator-only: it decides where configuration findings, and with
+ * share_log_lines the gateway's log lines, are sent.
+ *
+ * @generated from message gateon.v1.AIConfig
+ */
+export type AIConfig = Message<"gateon.v1.AIConfig"> & {
+  /**
+   * @generated from field: bool enabled = 1;
+   */
+  enabled: boolean;
+
+  /**
+   * "anthropic" | "openai" | "openai_compatible".
+   *
+   * @generated from field: string provider = 2;
+   */
+  provider: string;
+
+  /**
+   * Model id. Empty uses the provider's default ("claude-opus-5-5" for
+   * anthropic, "gpt-5" for openai); openai_compatible requires one.
+   *
+   * @generated from field: string model = 3;
+   */
+  model: string;
+
+  /**
+   * Empty uses the provider's public API. Must be https://, except for a
+   * loopback or private address (a model server on this host or network).
+   * For openai and openai_compatible it includes the version path, e.g.
+   * "http://127.0.0.1:11434/v1".
+   *
+   * @generated from field: string base_url = 4;
+   */
+  baseUrl: string;
+
+  /**
+   * Credential. Stored like every other secret: the API returns the
+   * placeholder, and $env:/$vault:/$aws-sm: references are resolved at load.
+   *
+   * @generated from field: string api_key = 5;
+   */
+  apiKey: string;
+
+  /**
+   * Per-call deadline; 0 uses 30, capped at 120.
+   *
+   * @generated from field: int32 timeout_seconds = 6;
+   */
+  timeoutSeconds: number;
+
+  /**
+   * Output budget per call; 0 uses 4096, capped at 16000.
+   *
+   * @generated from field: int32 max_output_tokens = 7;
+   */
+  maxOutputTokens: number;
+
+  /**
+   * When true the Log Assistant sends the log lines it was given, with
+   * credentials masked, to the provider. When false it sends only the local
+   * tally, so no request data leaves the gateway.
+   *
+   * @generated from field: bool share_log_lines = 8;
+   */
+  shareLogLines: boolean;
+};
+
+/**
+ * Describes the message gateon.v1.AIConfig.
+ * Use `create(AIConfigSchema)` to create a new message.
+ */
+export const AIConfigSchema: GenMessage<AIConfig> = /*@__PURE__*/
+  messageDesc(file_gateon_v1_global, 5);
 
 /**
  * @generated from message gateon.v1.AlertingConfig
@@ -213,7 +299,7 @@ export type AlertingConfig = Message<"gateon.v1.AlertingConfig"> & {
  * Use `create(AlertingConfigSchema)` to create a new message.
  */
 export const AlertingConfigSchema: GenMessage<AlertingConfig> = /*@__PURE__*/
-  messageDesc(file_gateon_v1_global, 5);
+  messageDesc(file_gateon_v1_global, 6);
 
 /**
  * @generated from message gateon.v1.AlertDispatcher
@@ -262,7 +348,7 @@ export type AlertDispatcher = Message<"gateon.v1.AlertDispatcher"> & {
  * Use `create(AlertDispatcherSchema)` to create a new message.
  */
 export const AlertDispatcherSchema: GenMessage<AlertDispatcher> = /*@__PURE__*/
-  messageDesc(file_gateon_v1_global, 6);
+  messageDesc(file_gateon_v1_global, 7);
 
 /**
  * @generated from message gateon.v1.AlertPlaybook
@@ -308,7 +394,7 @@ export type AlertPlaybook = Message<"gateon.v1.AlertPlaybook"> & {
  * Use `create(AlertPlaybookSchema)` to create a new message.
  */
 export const AlertPlaybookSchema: GenMessage<AlertPlaybook> = /*@__PURE__*/
-  messageDesc(file_gateon_v1_global, 7);
+  messageDesc(file_gateon_v1_global, 8);
 
 /**
  * @generated from message gateon.v1.AuditConfig
@@ -361,7 +447,7 @@ export type AuditConfig = Message<"gateon.v1.AuditConfig"> & {
  * Use `create(AuditConfigSchema)` to create a new message.
  */
 export const AuditConfigSchema: GenMessage<AuditConfig> = /*@__PURE__*/
-  messageDesc(file_gateon_v1_global, 8);
+  messageDesc(file_gateon_v1_global, 9);
 
 /**
  * @generated from message gateon.v1.SecurityAdvancedConfig
@@ -408,7 +494,7 @@ export type SecurityAdvancedConfig = Message<"gateon.v1.SecurityAdvancedConfig">
  * Use `create(SecurityAdvancedConfigSchema)` to create a new message.
  */
 export const SecurityAdvancedConfigSchema: GenMessage<SecurityAdvancedConfig> = /*@__PURE__*/
-  messageDesc(file_gateon_v1_global, 9);
+  messageDesc(file_gateon_v1_global, 10);
 
 /**
  * @generated from message gateon.v1.IPReputationConfig
@@ -445,7 +531,7 @@ export type IPReputationConfig = Message<"gateon.v1.IPReputationConfig"> & {
  * Use `create(IPReputationConfigSchema)` to create a new message.
  */
 export const IPReputationConfigSchema: GenMessage<IPReputationConfig> = /*@__PURE__*/
-  messageDesc(file_gateon_v1_global, 10);
+  messageDesc(file_gateon_v1_global, 11);
 
 /**
  * @generated from message gateon.v1.IPReputationIntegration
@@ -489,7 +575,7 @@ export type IPReputationIntegration = Message<"gateon.v1.IPReputationIntegration
  * Use `create(IPReputationIntegrationSchema)` to create a new message.
  */
 export const IPReputationIntegrationSchema: GenMessage<IPReputationIntegration> = /*@__PURE__*/
-  messageDesc(file_gateon_v1_global, 11);
+  messageDesc(file_gateon_v1_global, 12);
 
 /**
  * @generated from message gateon.v1.DeceptionConfig
@@ -541,7 +627,7 @@ export type DeceptionConfig = Message<"gateon.v1.DeceptionConfig"> & {
  * Use `create(DeceptionConfigSchema)` to create a new message.
  */
 export const DeceptionConfigSchema: GenMessage<DeceptionConfig> = /*@__PURE__*/
-  messageDesc(file_gateon_v1_global, 12);
+  messageDesc(file_gateon_v1_global, 13);
 
 /**
  * @generated from message gateon.v1.TlsBindingConfig
@@ -563,7 +649,7 @@ export type TlsBindingConfig = Message<"gateon.v1.TlsBindingConfig"> & {
  * Use `create(TlsBindingConfigSchema)` to create a new message.
  */
 export const TlsBindingConfigSchema: GenMessage<TlsBindingConfig> = /*@__PURE__*/
-  messageDesc(file_gateon_v1_global, 13);
+  messageDesc(file_gateon_v1_global, 14);
 
 /**
  * @generated from message gateon.v1.TarpitConfig
@@ -595,7 +681,7 @@ export type TarpitConfig = Message<"gateon.v1.TarpitConfig"> & {
  * Use `create(TarpitConfigSchema)` to create a new message.
  */
 export const TarpitConfigSchema: GenMessage<TarpitConfig> = /*@__PURE__*/
-  messageDesc(file_gateon_v1_global, 14);
+  messageDesc(file_gateon_v1_global, 15);
 
 /**
  * @generated from message gateon.v1.EntropyConfig
@@ -617,7 +703,7 @@ export type EntropyConfig = Message<"gateon.v1.EntropyConfig"> & {
  * Use `create(EntropyConfigSchema)` to create a new message.
  */
 export const EntropyConfigSchema: GenMessage<EntropyConfig> = /*@__PURE__*/
-  messageDesc(file_gateon_v1_global, 15);
+  messageDesc(file_gateon_v1_global, 16);
 
 /**
  * @generated from message gateon.v1.BehavioralConfig
@@ -644,7 +730,7 @@ export type BehavioralConfig = Message<"gateon.v1.BehavioralConfig"> & {
  * Use `create(BehavioralConfigSchema)` to create a new message.
  */
 export const BehavioralConfigSchema: GenMessage<BehavioralConfig> = /*@__PURE__*/
-  messageDesc(file_gateon_v1_global, 16);
+  messageDesc(file_gateon_v1_global, 17);
 
 /**
  * @generated from message gateon.v1.PowConfig
@@ -676,7 +762,7 @@ export type PowConfig = Message<"gateon.v1.PowConfig"> & {
  * Use `create(PowConfigSchema)` to create a new message.
  */
 export const PowConfigSchema: GenMessage<PowConfig> = /*@__PURE__*/
-  messageDesc(file_gateon_v1_global, 17);
+  messageDesc(file_gateon_v1_global, 18);
 
 /**
  * @generated from message gateon.v1.DebuggerConfig
@@ -700,7 +786,7 @@ export type DebuggerConfig = Message<"gateon.v1.DebuggerConfig"> & {
  * Use `create(DebuggerConfigSchema)` to create a new message.
  */
 export const DebuggerConfigSchema: GenMessage<DebuggerConfig> = /*@__PURE__*/
-  messageDesc(file_gateon_v1_global, 18);
+  messageDesc(file_gateon_v1_global, 19);
 
 /**
  * @generated from message gateon.v1.GeoIPConfig
@@ -768,7 +854,7 @@ export type GeoIPConfig = Message<"gateon.v1.GeoIPConfig"> & {
  * Use `create(GeoIPConfigSchema)` to create a new message.
  */
 export const GeoIPConfigSchema: GenMessage<GeoIPConfig> = /*@__PURE__*/
-  messageDesc(file_gateon_v1_global, 19);
+  messageDesc(file_gateon_v1_global, 20);
 
 /**
  * ManagementConfig holds the configuration for the Gateon management server.
@@ -836,7 +922,7 @@ export type ManagementConfig = Message<"gateon.v1.ManagementConfig"> & {
  * Use `create(ManagementConfigSchema)` to create a new message.
  */
 export const ManagementConfigSchema: GenMessage<ManagementConfig> = /*@__PURE__*/
-  messageDesc(file_gateon_v1_global, 20);
+  messageDesc(file_gateon_v1_global, 21);
 
 /**
  * @generated from message gateon.v1.CorsConfig
@@ -878,7 +964,7 @@ export type CorsConfig = Message<"gateon.v1.CorsConfig"> & {
  * Use `create(CorsConfigSchema)` to create a new message.
  */
 export const CorsConfigSchema: GenMessage<CorsConfig> = /*@__PURE__*/
-  messageDesc(file_gateon_v1_global, 21);
+  messageDesc(file_gateon_v1_global, 22);
 
 /**
  * @generated from message gateon.v1.GitOpsConfig
@@ -920,7 +1006,7 @@ export type GitOpsConfig = Message<"gateon.v1.GitOpsConfig"> & {
  * Use `create(GitOpsConfigSchema)` to create a new message.
  */
 export const GitOpsConfigSchema: GenMessage<GitOpsConfig> = /*@__PURE__*/
-  messageDesc(file_gateon_v1_global, 22);
+  messageDesc(file_gateon_v1_global, 23);
 
 /**
  * @generated from message gateon.v1.RBACConfig
@@ -942,7 +1028,7 @@ export type RBACConfig = Message<"gateon.v1.RBACConfig"> & {
  * Use `create(RBACConfigSchema)` to create a new message.
  */
 export const RBACConfigSchema: GenMessage<RBACConfig> = /*@__PURE__*/
-  messageDesc(file_gateon_v1_global, 23);
+  messageDesc(file_gateon_v1_global, 24);
 
 /**
  * @generated from message gateon.v1.RolePolicy
@@ -964,7 +1050,7 @@ export type RolePolicy = Message<"gateon.v1.RolePolicy"> & {
  * Use `create(RolePolicySchema)` to create a new message.
  */
 export const RolePolicySchema: GenMessage<RolePolicy> = /*@__PURE__*/
-  messageDesc(file_gateon_v1_global, 24);
+  messageDesc(file_gateon_v1_global, 25);
 
 /**
  * @generated from message gateon.v1.Permission
@@ -990,7 +1076,7 @@ export type Permission = Message<"gateon.v1.Permission"> & {
  * Use `create(PermissionSchema)` to create a new message.
  */
 export const PermissionSchema: GenMessage<Permission> = /*@__PURE__*/
-  messageDesc(file_gateon_v1_global, 25);
+  messageDesc(file_gateon_v1_global, 26);
 
 /**
  * @generated from message gateon.v1.WafConfig
@@ -1209,7 +1295,7 @@ export type WafConfig = Message<"gateon.v1.WafConfig"> & {
  * Use `create(WafConfigSchema)` to create a new message.
  */
 export const WafConfigSchema: GenMessage<WafConfig> = /*@__PURE__*/
-  messageDesc(file_gateon_v1_global, 26);
+  messageDesc(file_gateon_v1_global, 27);
 
 /**
  * WafCategories switches the gateway-wide WAF's attack families. Each is a
@@ -1282,7 +1368,7 @@ export type WafCategories = Message<"gateon.v1.WafCategories"> & {
  * Use `create(WafCategoriesSchema)` to create a new message.
  */
 export const WafCategoriesSchema: GenMessage<WafCategories> = /*@__PURE__*/
-  messageDesc(file_gateon_v1_global, 27);
+  messageDesc(file_gateon_v1_global, 28);
 
 /**
  * @generated from message gateon.v1.ClamavConfig
@@ -1340,7 +1426,7 @@ export type ClamavConfig = Message<"gateon.v1.ClamavConfig"> & {
  * Use `create(ClamavConfigSchema)` to create a new message.
  */
 export const ClamavConfigSchema: GenMessage<ClamavConfig> = /*@__PURE__*/
-  messageDesc(file_gateon_v1_global, 28);
+  messageDesc(file_gateon_v1_global, 29);
 
 /**
  * @generated from enum gateon.v1.ClamavConfig.InstallationMode
@@ -1366,7 +1452,7 @@ export enum ClamavConfig_InstallationMode {
  * Describes the enum gateon.v1.ClamavConfig.InstallationMode.
  */
 export const ClamavConfig_InstallationModeSchema: GenEnum<ClamavConfig_InstallationMode> = /*@__PURE__*/
-  enumDesc(file_gateon_v1_global, 28, 0);
+  enumDesc(file_gateon_v1_global, 29, 0);
 
 /**
  * @generated from message gateon.v1.BotManagementConfig
@@ -1403,7 +1489,7 @@ export type BotManagementConfig = Message<"gateon.v1.BotManagementConfig"> & {
  * Use `create(BotManagementConfigSchema)` to create a new message.
  */
 export const BotManagementConfigSchema: GenMessage<BotManagementConfig> = /*@__PURE__*/
-  messageDesc(file_gateon_v1_global, 29);
+  messageDesc(file_gateon_v1_global, 30);
 
 /**
  * @generated from message gateon.v1.HaConfig
@@ -1470,7 +1556,7 @@ export type HaConfig = Message<"gateon.v1.HaConfig"> & {
  * Use `create(HaConfigSchema)` to create a new message.
  */
 export const HaConfigSchema: GenMessage<HaConfig> = /*@__PURE__*/
-  messageDesc(file_gateon_v1_global, 30);
+  messageDesc(file_gateon_v1_global, 31);
 
 /**
  * @generated from message gateon.v1.AnomalyDetectionConfig
@@ -1517,7 +1603,7 @@ export type AnomalyDetectionConfig = Message<"gateon.v1.AnomalyDetectionConfig">
  * Use `create(AnomalyDetectionConfigSchema)` to create a new message.
  */
 export const AnomalyDetectionConfigSchema: GenMessage<AnomalyDetectionConfig> = /*@__PURE__*/
-  messageDesc(file_gateon_v1_global, 31);
+  messageDesc(file_gateon_v1_global, 32);
 
 /**
  * @generated from message gateon.v1.EbpfConfig
@@ -1617,7 +1703,7 @@ export type EbpfConfig = Message<"gateon.v1.EbpfConfig"> & {
  * Use `create(EbpfConfigSchema)` to create a new message.
  */
 export const EbpfConfigSchema: GenMessage<EbpfConfig> = /*@__PURE__*/
-  messageDesc(file_gateon_v1_global, 32);
+  messageDesc(file_gateon_v1_global, 33);
 
 /**
  * @generated from message gateon.v1.AuthConfig
@@ -1658,5 +1744,5 @@ export type AuthConfig = Message<"gateon.v1.AuthConfig"> & {
  * Use `create(AuthConfigSchema)` to create a new message.
  */
 export const AuthConfigSchema: GenMessage<AuthConfig> = /*@__PURE__*/
-  messageDesc(file_gateon_v1_global, 33);
+  messageDesc(file_gateon_v1_global, 34);
 

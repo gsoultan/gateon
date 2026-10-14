@@ -63,6 +63,7 @@ var classes = map[protoreflect.FullName]Class{
 	"gateon.v1.GlobalConfig.audit":             Boundary, // the record of management activity
 	"gateon.v1.GlobalConfig.rbac":              Boundary, // who may do what
 	"gateon.v1.GlobalConfig.profile":           Operational,
+	"gateon.v1.GlobalConfig.ai":                Boundary, // where findings and log lines are sent, and the key sent with them (ADR 0069)
 
 	// --- tls ---
 	"gateon.v1.TlsConfig.enabled":            Operational,

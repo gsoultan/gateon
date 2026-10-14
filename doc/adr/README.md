@@ -78,6 +78,7 @@ ADRs follow a lightweight [MADR](https://adr.github.io/madr/)-style format:
 | [0065](./0065-the-published-image-is-the-release-tarballs-binary.md) | The published image is the release tarball's binary | Accepted |
 | [0066](./0066-expired-security-threats-and-audit-entries-are-archived-before-they-are-deleted.md) | Expired security threats and audit entries are archived before they are deleted | Accepted |
 | [0067](./0067-the-dashboard-reads-the-database-only-while-someone-is-watching.md) | The dashboard reads the database only while someone is watching | Accepted |
+| [0069](./0069-a-language-model-narrates-the-local-analysis-and-never-replaces-it.md) | A language model narrates the local analysis and never replaces it | Accepted |
 
 ## Conventions
 

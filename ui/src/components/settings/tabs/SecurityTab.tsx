@@ -9,10 +9,12 @@ import { GeoIPSettingsCard } from "../GeoIPSettingsCard";
 import { SecurityAdvancedSettingsCard } from "../SecurityAdvancedSettingsCard";
 import { AlertingSettingsCard } from "../AlertingSettingsCard";
 import { AuditSettingsCard } from "../AuditSettingsCard";
+import { AISettingsCard } from "../AISettingsCard";
 import type { SettingsTabProps } from "./settingsState";
 
 // Access control, the global WAF, detection, GeoIP, advanced protections,
-// alerting and the forensic audit log.
+// alerting, the forensic audit log and the AI provider that narrates the
+// advisory.
 export default function SecurityTab({ settings }: SettingsTabProps) {
   const { config, setConfig, formDisabled, canEditGlobal, saving, saveGatewayConfig } = settings;
   return (
@@ -55,6 +57,8 @@ export default function SecurityTab({ settings }: SettingsTabProps) {
       <AlertingSettingsCard config={config} onChange={setConfig} disabled={formDisabled} />
 
       <AuditSettingsCard config={config} onChange={setConfig} disabled={formDisabled} />
+
+      <AISettingsCard config={config} onChange={setConfig} disabled={formDisabled} />
     </Stack>
   );
 }

@@ -4,6 +4,8 @@
 package handlers
 
 import (
+	"io"
+	"log/slog"
 	"strings"
 	"testing"
 )
@@ -42,5 +44,32 @@ func TestAnalyzeLogsDoesNotCallRefusalsAndProbesHealthy(t *testing.T) {
 	five := []string{`time=2026-10-04T10:00:00Z level=INFO msg="access log" method=GET path=/api status=502`}
 	if got := analyzeLogs(five); !strings.Contains(got, "1 server error (5xx)") {
 		t.Errorf("a 502 is not reported as a server error: %q", got)
+	}
+}
+
+// TestAnalyzeLogsReadsFieldsNotTheTextAClientWrote: the tally used to search
+// the whole line for " error " and for the first " status=", and the access
+// log writes the client's path before its status. A probe for "/ error x"
+// counted as an error, and a 503 to "/ status=200" read as a served request,
+// so whoever sent the traffic chose what the Log Assistant said about it.
+// The lines here are what slog itself writes, quoting and escaping included.
+func TestAnalyzeLogsReadsFieldsNotTheTextAClientWrote(t *testing.T) {
+	for name, newHandler := range map[string]func(io.Writer) slog.Handler{
+		"text": func(w io.Writer) slog.Handler { return slog.NewTextHandler(w, nil) },
+		"json": func(w io.Writer) slog.Handler { return slog.NewJSONHandler(w, nil) },
+	} {
+		line := func(path string, status int) string {
+			var b strings.Builder
+			slog.New(newHandler(&b)).Info("access log", "method", "GET", "path", path, "status", status)
+			return strings.TrimSpace(b.String())
+		}
+		got := analyzeLogs([]string{line("/ error x", 200)})
+		if !strings.Contains(got, "0 error") || !strings.Contains(got, "healthy") {
+			t.Errorf("%s: a served request whose path says error was counted as one: %q", name, got)
+		}
+		got = analyzeLogs([]string{line(`/ status=200 "status":200,`, 503)})
+		if !strings.Contains(got, "1 server error (5xx)") {
+			t.Errorf("%s: a 503 whose path names another status was not reported: %q", name, got)
+		}
 	}
 }
