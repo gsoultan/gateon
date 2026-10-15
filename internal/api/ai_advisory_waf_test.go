@@ -1,14 +1,10 @@
 // Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
 // SPDX-License-Identifier: MIT
 
-package handlers
+package api
 
 import (
-	"context"
-	"encoding/json"
 	"fmt"
-	"net/http"
-	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -17,10 +13,6 @@ import (
 
 	"github.com/gsoultan/gateon/internal/auth"
 	"github.com/gsoultan/gateon/internal/config"
-	dmw "github.com/gsoultan/gateon/internal/domain/middleware"
-	"github.com/gsoultan/gateon/internal/domain/route"
-	"github.com/gsoultan/gateon/internal/logger"
-	"github.com/gsoultan/gateon/internal/middleware"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
@@ -69,8 +61,8 @@ func TestAnalyzeConfigNamesAnAuditOnlyWAF(t *testing.T) {
 		setup advisorySetup
 		want  string // insight severity, "" for none
 	}{
-		{"global WAF audit-only", advisorySetup{globalWAF: true, globalAudit: true, routeWAF: []bool{false, false}}, insightCritical},
-		{"route WAF audit-only beside the enforcing global", advisorySetup{globalWAF: true, routeAudit: true, routeWAF: []bool{true, false}}, insightWarning},
+		{"global WAF audit-only", advisorySetup{globalWAF: true, globalAudit: true, routeWAF: []bool{false, false}}, "critical"},
+		{"route WAF audit-only beside the enforcing global", advisorySetup{globalWAF: true, routeAudit: true, routeWAF: []bool{true, false}}, "warning"},
 		{"enforcing everywhere", advisorySetup{globalWAF: true, routeWAF: []bool{true, false}}, ""},
 	}
 	for _, tc := range cases {
@@ -127,9 +119,9 @@ type advisorySetup struct {
 	pausedWithoutWAF       bool
 }
 
-// postAnalyzeConfig asks the real handler, wired to real route and middleware
-// services, for an analysis of a gateway whose routes do or do not attach a WAF.
-func postAnalyzeConfig(t *testing.T, s advisorySetup) aiAnalysisResponse {
+// postAnalyzeConfig asks the RPC, wired to real route and middleware stores,
+// for an analysis of a gateway whose routes do or do not attach a WAF.
+func postAnalyzeConfig(t *testing.T, s advisorySetup) *gateonv1.AnalyzeConfigResponse {
 	t.Helper()
 	ctx, dir := t.Context(), t.TempDir()
 	globals := config.NewGlobalRegistry(filepath.Join(dir, "global.json"))
@@ -163,37 +155,41 @@ func postAnalyzeConfig(t *testing.T, s advisorySetup) aiAnalysisResponse {
 		must(t, routes.Update(ctx, &gateonv1.Route{Id: "rt-paused", Name: "paused", Disabled: true,
 			Rule: "PathPrefix(`/old`)", Middlewares: []string{"gzip"}}))
 	}
-	d := &Deps{
-		RouteService: route.NewService(routes, nil, logger.Default()),
-		MwService:    dmw.NewService(mws, routes, nil, nil, nil, logger.Default()),
-	}
-	mux := http.NewServeMux()
-	registerAIAdvisoryHandlers(mux, advisoryAPI{globals: globals}, d)
-
-	req := httptest.NewRequest(http.MethodPost, "/v1/AnalyzeConfig", strings.NewReader(`{"focus":"security"}`))
-	req = req.WithContext(context.WithValue(req.Context(), middleware.UserContextKey,
-		&auth.Claims{ID: "v-1", Username: "viewer", Role: auth.RoleViewer}))
-	rr := httptest.NewRecorder()
-	mux.ServeHTTP(rr, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("POST /v1/AnalyzeConfig = %d: %s", rr.Code, rr.Body.String())
-	}
-	var resp aiAnalysisResponse
-	must(t, json.Unmarshal(rr.Body.Bytes(), &resp))
+	svc := &ApiService{Globals: globals, Routes: routes, Middlewares: mws}
+	resp, err := svc.AnalyzeConfig(withRole(auth.RoleViewer), &gateonv1.AnalyzeConfigRequest{Focus: "security"})
+	must(t, err)
 	return resp
 }
 
-// advisoryAPI serves the one GlobalAndAuthAPI method the advisory reads.
-type advisoryAPI struct {
-	GlobalAndAuthAPI
-	globals config.GlobalConfigStore
+// hasInsight reports whether any insight's title starts with prefix.
+func hasInsight(resp *gateonv1.AnalyzeConfigResponse, prefix string) bool {
+	for _, in := range resp.GetInsights() {
+		if strings.HasPrefix(in.GetTitle(), prefix) {
+			return true
+		}
+	}
+	return false
 }
-
-func (a advisoryAPI) GetGlobals() config.GlobalConfigStore { return a.globals }
 
 func must(t *testing.T, err error) {
 	t.Helper()
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestAnalyzeConfigAsksTheListenerAboutManagementExposure: the analysis does
+// not read listener code; the server hands ApiService the listener's own
+// check, and the advisory reports what that check says.
+func TestAnalyzeConfigAsksTheListenerAboutManagementExposure(t *testing.T) {
+	t.Setenv("GATEON_ALLOW_PUBLIC_MANAGEMENT", "")
+	for _, open := range []bool{false, true} {
+		svc := advisoryService(t, nil)
+		svc.ManagementWorldOpen = func(*gateonv1.ManagementConfig) bool { return open }
+		resp, err := svc.AnalyzeConfig(withRole(auth.RoleViewer), &gateonv1.AnalyzeConfigRequest{})
+		must(t, err)
+		if got := hasInsight(resp, "Management listener accepts connections from any address"); got != open {
+			t.Errorf("listener world-open %v: insight reported = %v", open, got)
+		}
 	}
 }

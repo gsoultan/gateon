@@ -36,6 +36,7 @@ var globalCredentials = []string{
 	"ABUSEIPDB-KEY",
 	"TG-TOKEN",
 	"hooks.slack.com/services/T/B/SECRET",
+	"sk-ant-AI-KEY",
 }
 
 func secretLadenGlobalConfig() *gateonv1.GlobalConfig {
@@ -47,6 +48,7 @@ func secretLadenGlobalConfig() *gateonv1.GlobalConfig {
 		},
 		Audit:      &gateonv1.AuditConfig{SignEntries: true, SignatureKey: "AUDIT-HMAC-KEY"},
 		Redis:      &gateonv1.RedisConfig{Addr: "redis:6379", Password: "redis-pass"},
+		Ai:         &gateonv1.AIConfig{Enabled: true, Provider: "anthropic", ApiKey: "sk-ant-AI-KEY"},
 		Ha:         &gateonv1.HaConfig{AuthPass: "vrrp-pass"},
 		Geoip:      &gateonv1.GeoIPConfig{MaxmindLicenseKey: "MAXMIND-KEY"},
 		Management: &gateonv1.ManagementConfig{Gitops: &gateonv1.GitOpsConfig{AuthToken: "GITOPS-TOKEN"}},

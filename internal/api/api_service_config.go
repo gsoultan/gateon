@@ -18,6 +18,7 @@ import (
 	"github.com/gsoultan/gateon/internal/security/reputation"
 	"github.com/gsoultan/gateon/internal/security/waf"
 	"github.com/gsoultan/gateon/internal/tls"
+	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
 // ApiServiceConfig holds dependencies for ApiService (Factory pattern).
@@ -61,4 +62,9 @@ type ApiServiceConfig struct {
 	// rate limits (the RL limiter, internal/ai). Nil leaves findings as
 	// findings: nothing is rate-limited automatically.
 	Throttles FindingLimiter
+
+	// ManagementWorldOpen reports whether the dedicated management listener
+	// admits any address (internal/server/entrypoint), for the AI Advisory.
+	// The listener code stays out of this package; nil reports it closed.
+	ManagementWorldOpen func(*gateonv1.ManagementConfig) bool
 }

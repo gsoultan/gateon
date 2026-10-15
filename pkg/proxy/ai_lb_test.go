@@ -197,3 +197,29 @@ func TestEveryPolicyReportsAHealthTransition(t *testing.T) {
 		})
 	}
 }
+
+// TestAIPredictiveAvoidsABackendThatFailsFast: every response's duration was
+// fed to the balancer whatever its status, so a backend answering 503 in a
+// millisecond priced as the fastest and took nearly every request until a
+// health check -- if one was configured -- marked it down. A failed response
+// is not evidence of speed.
+func TestAIPredictiveAvoidsABackendThatFailsFast(t *testing.T) {
+	installProductionPredictor(t)
+	const failing, healthy = "http://failing", "http://healthy"
+	lb := newAIBalancer(t, failing, healthy)
+	h := &ProxyHandler{lb: lb}
+	got := map[string]int{}
+	for range 1000 {
+		s := lb.NextState()
+		got[s.url]++
+		if s.url == failing {
+			h.recordMetrics(s, time.Now().Add(-time.Millisecond), 503)
+		} else {
+			h.recordMetrics(s, time.Now().Add(-50*time.Millisecond), 200)
+		}
+	}
+	if got[healthy] < 900 {
+		t.Errorf("healthy backend (50 ms) got %d of 1000 requests, failing backend (503 in 1 ms) got %d; "+
+			"want the healthy one to take at least 900", got[healthy], got[failing])
+	}
+}

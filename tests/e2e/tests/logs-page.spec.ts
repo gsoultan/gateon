@@ -191,7 +191,7 @@ test.describe('Logs page', () => {
 
     const { analysis } = (await res.json()) as { analysis: string };
     expect(analysis).toMatch(new RegExp(`^Analyzed ${sent.logs.length} log lines: `));
-    await expect(dialog.getByText('Analysis & Recommendations:')).toBeVisible();
+    await expect(dialog.getByText('Analysis & Recommendations (Local Mode)')).toBeVisible();
     await expect(dialog.getByText(analysis, { exact: true })).toBeVisible();
   });
 });

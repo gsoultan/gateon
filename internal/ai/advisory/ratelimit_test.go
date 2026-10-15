@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
 // SPDX-License-Identifier: MIT
 
-package handlers
+package advisory
 
 import (
 	"strings"
@@ -17,10 +17,10 @@ import (
 // nothing. The advisory now never names it, and the stored flag cannot change
 // what it says.
 func TestAnalyzeConfigDoesNotRecommendTheRemovedDoSSwitch(t *testing.T) {
-	cov := wafCoverage{Total: 2, Enforcing: 2}
+	cov := Coverage{Total: 2, Enforcing: 2}
 	for _, dos := range []bool{false, true} {
 		cfg := &gateonv1.GlobalConfig{Waf: &gateonv1.WafConfig{Enabled: true, DosProtection: dos}}
-		for _, in := range analyzeConfig(t.Context(), cfg, cov).Insights {
+		for _, in := range analyzeConfig(t.Context(), Gateway{Config: cfg, Routes: cov}).Insights {
 			text := strings.ToLower(in.Title + " " + in.Description + " " + in.Recommendation + " " + in.SuggestedConfig)
 			if strings.Contains(text, "dos protection") || strings.Contains(text, "dos_protection") {
 				t.Errorf("dos_protection=%v: insight %q names the removed DoS switch: %q", dos, in.Title, text)
@@ -34,8 +34,8 @@ func TestAnalyzeConfigDoesNotRecommendTheRemovedDoSSwitch(t *testing.T) {
 // advisory says so instead of staying silent as it did for a "blocking" route.
 func TestAnalyzeConfigNamesAWAFThatRunsNoCategory(t *testing.T) {
 	cfg := &gateonv1.GlobalConfig{Waf: &gateonv1.WafConfig{Enabled: true}}
-	cov := wafCoverage{Total: 2, Enforcing: 1, CategoriesOff: 1, RateLimited: 2}
-	if !hasInsight(analyzeConfig(t.Context(), cfg, cov), "A WAF with every attack category off runs on 1 of 2 routes") {
+	cov := Coverage{Total: 2, Enforcing: 1, CategoriesOff: 1, RateLimited: 2}
+	if !hasInsight(analyzeConfig(t.Context(), Gateway{Config: cfg, Routes: cov}), "A WAF with every attack category off runs on 1 of 2 routes") {
 		t.Fatal("no insight names the route whose WAF runs no attack category")
 	}
 }
@@ -55,8 +55,8 @@ func TestAnalyzeConfigRateLimitInsightCountsRoutes(t *testing.T) {
 		{2, ""},
 	}
 	for _, tc := range cases {
-		cov := wafCoverage{Total: 2, Enforcing: 2, RateLimited: tc.limited}
-		resp := analyzeConfig(t.Context(), cfg, cov)
+		cov := Coverage{Total: 2, Enforcing: 2, RateLimited: tc.limited}
+		resp := analyzeConfig(t.Context(), Gateway{Config: cfg, Routes: cov})
 		got := hasInsight(resp, "Rate limiting covers")
 		if got != (tc.want != "") {
 			t.Fatalf("%d of 2 routes limited: rate-limit insight reported = %v, want %v", tc.limited, got, tc.want != "")

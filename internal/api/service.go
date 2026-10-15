@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/gsoultan/gateon/internal/ai/advisory"
 	"github.com/gsoultan/gateon/internal/audit"
 	"github.com/gsoultan/gateon/internal/auth"
 	"github.com/gsoultan/gateon/internal/authz/routebind"
@@ -75,6 +77,9 @@ type ApiService struct {
 	// see throttleRepeatedFindings. Nil throttles nothing.
 	Throttles FindingLimiter
 
+	// ManagementWorldOpen: see ApiServiceConfig. Nil reports the listener closed.
+	ManagementWorldOpen func(*gateonv1.ManagementConfig) bool
+
 	// Performance caches for Diagnostics & Security Hub
 	publicIPCache    atomic.Pointer[string]
 	cfReachableCache atomic.Bool
@@ -84,6 +89,12 @@ type ApiService struct {
 	// coldAnomalies runs one detection pass for every Diagnostics caller that
 	// arrives before the analysis loop has published its first.
 	coldAnomalies singleflight.Group
+
+	// advisory serves AnalyzeConfig, AnalyzeLogs and TestAIProvider. One per
+	// service, so the AI provider's concurrency bound and summary cache hold
+	// across REST, Connect and gRPC (ADR 0070).
+	advisoryOnce sync.Once
+	advisorySvc  *advisory.Service
 }
 
 // mlLowPowerHold is how long one report of CPU pressure keeps the ML engine in
@@ -350,6 +361,7 @@ func NewApiService(cfg ApiServiceConfig) *ApiService {
 		MiddlewareValidator: cfg.MiddlewareValidator,
 		SetupToken:          cfg.SetupToken,
 		Throttles:           cfg.Throttles,
+		ManagementWorldOpen: cfg.ManagementWorldOpen,
 	}
 
 	if cfg.IPReputation != nil {

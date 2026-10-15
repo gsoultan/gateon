@@ -8,6 +8,8 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/gsoultan/gateon/internal/ai/llm"
+
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
@@ -294,6 +296,11 @@ func (s *ApiService) prepareGlobalUpdate(ctx context.Context, update, stored *ga
 // gateway cannot enforce. A country list with no GeoIP database to resolve
 // clients against blocked nobody and saved with success (ADR 0044).
 func validateGlobalSave(stored, proposed *gateonv1.GlobalConfig) error {
+	// A provider the advisory could never call saved with success and then
+	// fell back to the local analysis on every request (ADR 0070).
+	if err := llm.Validate(proposed.GetAi()); err != nil {
+		return status.Error(codes.InvalidArgument, err.Error())
+	}
 	if err := security.ValidateGeoIPSave(stored.GetGeoip(), proposed.GetGeoip()); err != nil {
 		return status.Error(codes.InvalidArgument, err.Error())
 	}

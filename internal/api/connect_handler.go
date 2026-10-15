@@ -61,6 +61,30 @@ func (h *ConnectHandler) GetAuditArchive(ctx context.Context, req *connect.Reque
 	return connect.NewResponse(res), nil
 }
 
+func (h *ConnectHandler) AnalyzeConfig(ctx context.Context, req *connect.Request[gateonv1.AnalyzeConfigRequest]) (*connect.Response[gateonv1.AnalyzeConfigResponse], error) {
+	res, err := h.s.AnalyzeConfig(ctx, req.Msg)
+	if err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(res), nil
+}
+
+func (h *ConnectHandler) AnalyzeLogs(ctx context.Context, req *connect.Request[gateonv1.AnalyzeLogsRequest]) (*connect.Response[gateonv1.AnalyzeLogsResponse], error) {
+	res, err := h.s.AnalyzeLogs(ctx, req.Msg)
+	if err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(res), nil
+}
+
+func (h *ConnectHandler) TestAIProvider(ctx context.Context, req *connect.Request[gateonv1.TestAIProviderRequest]) (*connect.Response[gateonv1.TestAIProviderResponse], error) {
+	res, err := h.s.TestAIProvider(ctx, req.Msg)
+	if err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(res), nil
+}
+
 func (h *ConnectHandler) VerifyAuditChain(ctx context.Context, req *connect.Request[gateonv1.VerifyAuditChainRequest]) (*connect.Response[gateonv1.VerifyAuditChainResponse], error) {
 	res, err := h.s.VerifyAuditChain(ctx, req.Msg)
 	if err != nil {

@@ -195,6 +195,14 @@ const (
 	// ApiServiceVerifyAuditChainProcedure is the fully-qualified name of the ApiService's
 	// VerifyAuditChain RPC.
 	ApiServiceVerifyAuditChainProcedure = "/gateon.v1.ApiService/VerifyAuditChain"
+	// ApiServiceAnalyzeConfigProcedure is the fully-qualified name of the ApiService's AnalyzeConfig
+	// RPC.
+	ApiServiceAnalyzeConfigProcedure = "/gateon.v1.ApiService/AnalyzeConfig"
+	// ApiServiceAnalyzeLogsProcedure is the fully-qualified name of the ApiService's AnalyzeLogs RPC.
+	ApiServiceAnalyzeLogsProcedure = "/gateon.v1.ApiService/AnalyzeLogs"
+	// ApiServiceTestAIProviderProcedure is the fully-qualified name of the ApiService's TestAIProvider
+	// RPC.
+	ApiServiceTestAIProviderProcedure = "/gateon.v1.ApiService/TestAIProvider"
 )
 
 // ApiServiceClient is a client for the gateon.v1.ApiService service.
@@ -271,6 +279,12 @@ type ApiServiceClient interface {
 	// VerifyAuditChain checks the audit log's HMAC chain over a bounded window
 	// (ADR 0050). Administrators only.
 	VerifyAuditChain(context.Context, *connect.Request[v1.VerifyAuditChainRequest]) (*connect.Response[v1.VerifyAuditChainResponse], error)
+	// The AI Advisory and Log Assistant (ADR 0070): Gateon's own analysis,
+	// narrated by the configured language model when one answers.
+	AnalyzeConfig(context.Context, *connect.Request[v1.AnalyzeConfigRequest]) (*connect.Response[v1.AnalyzeConfigResponse], error)
+	AnalyzeLogs(context.Context, *connect.Request[v1.AnalyzeLogsRequest]) (*connect.Response[v1.AnalyzeLogsResponse], error)
+	// TestAIProvider makes one call with the saved provider settings.
+	TestAIProvider(context.Context, *connect.Request[v1.TestAIProviderRequest]) (*connect.Response[v1.TestAIProviderResponse], error)
 }
 
 // NewApiServiceClient constructs a client for the gateon.v1.ApiService service. By default, it uses
@@ -638,6 +652,24 @@ func NewApiServiceClient(httpClient connect.HTTPClient, baseURL string, opts ...
 			connect.WithSchema(apiServiceMethods.ByName("VerifyAuditChain")),
 			connect.WithClientOptions(opts...),
 		),
+		analyzeConfig: connect.NewClient[v1.AnalyzeConfigRequest, v1.AnalyzeConfigResponse](
+			httpClient,
+			baseURL+ApiServiceAnalyzeConfigProcedure,
+			connect.WithSchema(apiServiceMethods.ByName("AnalyzeConfig")),
+			connect.WithClientOptions(opts...),
+		),
+		analyzeLogs: connect.NewClient[v1.AnalyzeLogsRequest, v1.AnalyzeLogsResponse](
+			httpClient,
+			baseURL+ApiServiceAnalyzeLogsProcedure,
+			connect.WithSchema(apiServiceMethods.ByName("AnalyzeLogs")),
+			connect.WithClientOptions(opts...),
+		),
+		testAIProvider: connect.NewClient[v1.TestAIProviderRequest, v1.TestAIProviderResponse](
+			httpClient,
+			baseURL+ApiServiceTestAIProviderProcedure,
+			connect.WithSchema(apiServiceMethods.ByName("TestAIProvider")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -702,6 +734,9 @@ type apiServiceClient struct {
 	createApiToken             *connect.Client[v1.CreateApiTokenRequest, v1.CreateApiTokenResponse]
 	revokeApiToken             *connect.Client[v1.RevokeApiTokenRequest, v1.RevokeApiTokenResponse]
 	verifyAuditChain           *connect.Client[v1.VerifyAuditChainRequest, v1.VerifyAuditChainResponse]
+	analyzeConfig              *connect.Client[v1.AnalyzeConfigRequest, v1.AnalyzeConfigResponse]
+	analyzeLogs                *connect.Client[v1.AnalyzeLogsRequest, v1.AnalyzeLogsResponse]
+	testAIProvider             *connect.Client[v1.TestAIProviderRequest, v1.TestAIProviderResponse]
 }
 
 // GetStatus calls gateon.v1.ApiService.GetStatus.
@@ -999,6 +1034,21 @@ func (c *apiServiceClient) VerifyAuditChain(ctx context.Context, req *connect.Re
 	return c.verifyAuditChain.CallUnary(ctx, req)
 }
 
+// AnalyzeConfig calls gateon.v1.ApiService.AnalyzeConfig.
+func (c *apiServiceClient) AnalyzeConfig(ctx context.Context, req *connect.Request[v1.AnalyzeConfigRequest]) (*connect.Response[v1.AnalyzeConfigResponse], error) {
+	return c.analyzeConfig.CallUnary(ctx, req)
+}
+
+// AnalyzeLogs calls gateon.v1.ApiService.AnalyzeLogs.
+func (c *apiServiceClient) AnalyzeLogs(ctx context.Context, req *connect.Request[v1.AnalyzeLogsRequest]) (*connect.Response[v1.AnalyzeLogsResponse], error) {
+	return c.analyzeLogs.CallUnary(ctx, req)
+}
+
+// TestAIProvider calls gateon.v1.ApiService.TestAIProvider.
+func (c *apiServiceClient) TestAIProvider(ctx context.Context, req *connect.Request[v1.TestAIProviderRequest]) (*connect.Response[v1.TestAIProviderResponse], error) {
+	return c.testAIProvider.CallUnary(ctx, req)
+}
+
 // ApiServiceHandler is an implementation of the gateon.v1.ApiService service.
 type ApiServiceHandler interface {
 	GetStatus(context.Context, *connect.Request[v1.GetStatusRequest]) (*connect.Response[v1.GetStatusResponse], error)
@@ -1073,6 +1123,12 @@ type ApiServiceHandler interface {
 	// VerifyAuditChain checks the audit log's HMAC chain over a bounded window
 	// (ADR 0050). Administrators only.
 	VerifyAuditChain(context.Context, *connect.Request[v1.VerifyAuditChainRequest]) (*connect.Response[v1.VerifyAuditChainResponse], error)
+	// The AI Advisory and Log Assistant (ADR 0070): Gateon's own analysis,
+	// narrated by the configured language model when one answers.
+	AnalyzeConfig(context.Context, *connect.Request[v1.AnalyzeConfigRequest]) (*connect.Response[v1.AnalyzeConfigResponse], error)
+	AnalyzeLogs(context.Context, *connect.Request[v1.AnalyzeLogsRequest]) (*connect.Response[v1.AnalyzeLogsResponse], error)
+	// TestAIProvider makes one call with the saved provider settings.
+	TestAIProvider(context.Context, *connect.Request[v1.TestAIProviderRequest]) (*connect.Response[v1.TestAIProviderResponse], error)
 }
 
 // NewApiServiceHandler builds an HTTP handler from the service implementation. It returns the path
@@ -1436,6 +1492,24 @@ func NewApiServiceHandler(svc ApiServiceHandler, opts ...connect.HandlerOption) 
 		connect.WithSchema(apiServiceMethods.ByName("VerifyAuditChain")),
 		connect.WithHandlerOptions(opts...),
 	)
+	apiServiceAnalyzeConfigHandler := connect.NewUnaryHandler(
+		ApiServiceAnalyzeConfigProcedure,
+		svc.AnalyzeConfig,
+		connect.WithSchema(apiServiceMethods.ByName("AnalyzeConfig")),
+		connect.WithHandlerOptions(opts...),
+	)
+	apiServiceAnalyzeLogsHandler := connect.NewUnaryHandler(
+		ApiServiceAnalyzeLogsProcedure,
+		svc.AnalyzeLogs,
+		connect.WithSchema(apiServiceMethods.ByName("AnalyzeLogs")),
+		connect.WithHandlerOptions(opts...),
+	)
+	apiServiceTestAIProviderHandler := connect.NewUnaryHandler(
+		ApiServiceTestAIProviderProcedure,
+		svc.TestAIProvider,
+		connect.WithSchema(apiServiceMethods.ByName("TestAIProvider")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/gateon.v1.ApiService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case ApiServiceGetStatusProcedure:
@@ -1556,6 +1630,12 @@ func NewApiServiceHandler(svc ApiServiceHandler, opts ...connect.HandlerOption) 
 			apiServiceRevokeApiTokenHandler.ServeHTTP(w, r)
 		case ApiServiceVerifyAuditChainProcedure:
 			apiServiceVerifyAuditChainHandler.ServeHTTP(w, r)
+		case ApiServiceAnalyzeConfigProcedure:
+			apiServiceAnalyzeConfigHandler.ServeHTTP(w, r)
+		case ApiServiceAnalyzeLogsProcedure:
+			apiServiceAnalyzeLogsHandler.ServeHTTP(w, r)
+		case ApiServiceTestAIProviderProcedure:
+			apiServiceTestAIProviderHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -1799,4 +1879,16 @@ func (UnimplementedApiServiceHandler) RevokeApiToken(context.Context, *connect.R
 
 func (UnimplementedApiServiceHandler) VerifyAuditChain(context.Context, *connect.Request[v1.VerifyAuditChainRequest]) (*connect.Response[v1.VerifyAuditChainResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gateon.v1.ApiService.VerifyAuditChain is not implemented"))
+}
+
+func (UnimplementedApiServiceHandler) AnalyzeConfig(context.Context, *connect.Request[v1.AnalyzeConfigRequest]) (*connect.Response[v1.AnalyzeConfigResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gateon.v1.ApiService.AnalyzeConfig is not implemented"))
+}
+
+func (UnimplementedApiServiceHandler) AnalyzeLogs(context.Context, *connect.Request[v1.AnalyzeLogsRequest]) (*connect.Response[v1.AnalyzeLogsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gateon.v1.ApiService.AnalyzeLogs is not implemented"))
+}
+
+func (UnimplementedApiServiceHandler) TestAIProvider(context.Context, *connect.Request[v1.TestAIProviderRequest]) (*connect.Response[v1.TestAIProviderResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gateon.v1.ApiService.TestAIProvider is not implemented"))
 }

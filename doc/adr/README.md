@@ -80,6 +80,7 @@ ADRs follow a lightweight [MADR](https://adr.github.io/madr/)-style format:
 | [0067](./0067-the-dashboard-reads-the-database-only-while-someone-is-watching.md) | The dashboard reads the database only while someone is watching | Accepted |
 | [0068](./0068-the-dashboard-takes-its-look-from-one-theme-and-one-page-header.md) | The dashboard takes its look from one theme and one page header | Accepted |
 | [0069](./0069-the-waf-inspects-a-bounded-number-of-large-bodies-at-once.md) | The WAF inspects a bounded number of large bodies at once | Accepted |
+| [0070](./0070-a-language-model-narrates-the-local-analysis-and-never-replaces-it.md) | A language model narrates the local analysis and never replaces it | Accepted |
 
 ## Conventions
 

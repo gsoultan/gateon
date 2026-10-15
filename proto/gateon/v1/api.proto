@@ -18,6 +18,7 @@ import "gateon/v1/auth.proto";
 import "gateon/v1/trace.proto";
 import "gateon/v1/diagnostics.proto";
 import "gateon/v1/audit.proto";
+import "gateon/v1/advisory.proto";
 
 service ApiService {
   rpc GetStatus(GetStatusRequest) returns (GetStatusResponse);
@@ -101,6 +102,13 @@ service ApiService {
   // VerifyAuditChain checks the audit log's HMAC chain over a bounded window
   // (ADR 0050). Administrators only.
   rpc VerifyAuditChain(VerifyAuditChainRequest) returns (VerifyAuditChainResponse);
+
+  // The AI Advisory and Log Assistant (ADR 0070): Gateon's own analysis,
+  // narrated by the configured language model when one answers.
+  rpc AnalyzeConfig(AnalyzeConfigRequest) returns (AnalyzeConfigResponse);
+  rpc AnalyzeLogs(AnalyzeLogsRequest) returns (AnalyzeLogsResponse);
+  // TestAIProvider makes one call with the saved provider settings.
+  rpc TestAIProvider(TestAIProviderRequest) returns (TestAIProviderResponse);
 }
 
 message RunDeepScanRequest {}

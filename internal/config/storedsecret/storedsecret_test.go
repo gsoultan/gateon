@@ -30,6 +30,7 @@ func fullConfig() *gateonv1.GlobalConfig {
 		Redis:      &gateonv1.RedisConfig{Enabled: true, Addr: "redis.internal:6379"},
 		Ha:         &gateonv1.HaConfig{Enabled: true},
 		Geoip:      &gateonv1.GeoIPConfig{Enabled: true},
+		Ai:         &gateonv1.AIConfig{Enabled: true, Provider: "anthropic"},
 		Management: &gateonv1.ManagementConfig{Gitops: &gateonv1.GitOpsConfig{Enabled: true}},
 		Waf:        &gateonv1.WafConfig{BotManagement: &gateonv1.BotManagementConfig{Enabled: true}},
 		SecurityAdvanced: &gateonv1.SecurityAdvancedConfig{
@@ -118,6 +119,7 @@ var notCredentials = map[string]string{
 	"tls.client_auth_type":                      "a verification mode",
 	"tls.certificates.key_file":                 "a path to the key file, not the key",
 	"security_advanced.ip_reputation.feed_urls": "public blocklist feed addresses",
+	"ai.base_url":                               "the provider's endpoint; llm.Validate refuses credentials, a query or a fragment in it",
 }
 
 // TestEveryCredentialFieldIsCovered walks every string field of GlobalConfig

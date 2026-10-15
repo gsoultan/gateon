@@ -57,6 +57,38 @@ message GlobalConfig {
   // the pretence that it was configurable.
   reserved 20;
   reserved "titan";
+  // Third-party language model that narrates the AI Advisory and Log
+  // Assistant findings (ADR 0070). Off unless enabled; the local analysis
+  // runs either way and is what the dashboard shows when the provider fails.
+  AIConfig ai = 21;
+}
+
+// AIConfig selects the language model the dashboard's AI features may ask.
+// Administrator-only: it decides where configuration findings, and with
+// share_log_lines the gateway's log lines, are sent.
+message AIConfig {
+  bool enabled = 1;
+  // "anthropic" | "openai" | "openai_compatible".
+  string provider = 2;
+  // Model id. Empty uses the provider's default ("claude-opus-5-5" for
+  // anthropic, "gpt-5" for openai); openai_compatible requires one.
+  string model = 3;
+  // Empty uses the provider's public API. Must be https://, except for a
+  // loopback or private address (a model server on this host or network).
+  // For openai and openai_compatible it includes the version path, e.g.
+  // "http://127.0.0.1:11434/v1".
+  string base_url = 4;
+  // Credential. Stored like every other secret: the API returns the
+  // placeholder, and $env:/$vault:/$aws-sm: references are resolved at load.
+  string api_key = 5;
+  // Per-call deadline; 0 uses 30, capped at 120.
+  int32 timeout_seconds = 6;
+  // Output budget per call; 0 uses 4096, capped at 16000.
+  int32 max_output_tokens = 7;
+  // When true the Log Assistant sends the log lines it was given, with
+  // credentials masked, to the provider. When false it sends only the local
+  // tally, so no request data leaves the gateway.
+  bool share_log_lines = 8;
 }
 
 message AlertingConfig {

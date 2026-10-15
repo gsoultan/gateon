@@ -41,6 +41,16 @@ interface AIInsight {
 interface AIAnalysisResponse {
   summary: string;
   insights: AIInsight[];
+  /** "local", or "provider:model" when a configured AI provider wrote the summary. */
+  engine?: string;
+  /** Why a configured provider did not answer; the summary is then the local one. */
+  notice?: string;
+}
+
+/** The provider and model named by an engine, or null for the local analysis. */
+function providerOf(engine?: string): string | null {
+  if (!engine || engine === "local") return null;
+  return engine;
 }
 
 export function AIAdvisoryTab() {
@@ -106,9 +116,9 @@ export function AIAdvisoryTab() {
         <Stack gap={0}>
           <Title order={4}>AI Security Advisory</Title>
           <Text c="dimmed" size="sm">
-            {data?.summary?.includes("Smart Engine")
-              ? "Deterministic rule-based analysis of your gateway configuration (Local Mode)."
-              : "LLM-powered analysis of your gateway configuration for security hardening."}
+            {providerOf(data?.engine)
+              ? `Rule-based analysis of your gateway configuration, summarized by ${providerOf(data?.engine)}.`
+              : "Deterministic rule-based analysis of your gateway configuration (Local Mode)."}
           </Text>
         </Stack>
         <Button
@@ -136,6 +146,12 @@ export function AIAdvisoryTab() {
         </Alert>
       )}
 
+      {data?.notice && (
+        <Alert icon={<IconAlertCircle size={16} />} title="AI provider unavailable" color="yellow">
+          {data.notice}
+        </Alert>
+      )}
+
       {data && (
         <>
           <Card withBorder shadow="sm" padding="lg" radius="md">
@@ -145,7 +161,7 @@ export function AIAdvisoryTab() {
               </ThemeIcon>
               <div>
                 <Text fw={700} size="md">Executive Summary</Text>
-                <Text size="sm" mt={4}>
+                <Text size="sm" mt={4} style={{ whiteSpace: "pre-wrap" }}>
                   {data.summary}
                 </Text>
               </div>

@@ -577,6 +577,21 @@ export type GlobalConfig = {
   alerting?: AlertingConfig;
   audit?: AuditConfig;
   profile?: string;
+  ai?: AIConfig;
+};
+
+/** The third-party model the AI Advisory and Log Assistant may ask (ADR 0070). */
+export type AIProvider = "anthropic" | "openai" | "openai_compatible";
+
+export type AIConfig = {
+  enabled?: boolean;
+  provider?: AIProvider | string;
+  model?: string;
+  baseUrl?: string;
+  apiKey?: string;
+  timeoutSeconds?: number;
+  maxOutputTokens?: number;
+  shareLogLines?: boolean;
 };
 
 export type AlertingConfig = {

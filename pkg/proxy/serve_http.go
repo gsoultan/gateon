@@ -118,6 +118,19 @@ func (h *ProxyHandler) recordMetrics(state *targetState, start time.Time, status
 		atomic.AddUint64(&state.errorCount, 1)
 	}
 
-	// Provide feedback to the load balancer (e.g. for AI-driven predictive LB)
-	h.lb.RecordLatency(state.url, duration.Seconds())
+	// Provide feedback to the load balancer (e.g. for AI-driven predictive LB).
+	// A failed response is priced at failedResponseLatency at least: a backend
+	// answering 503 in a millisecond is not fast, and fed its real duration
+	// the predictive balancer sent it nearly every request.
+	latency := duration
+	if status >= 500 {
+		latency = max(latency, failedResponseLatency)
+	}
+	h.lb.RecordLatency(state.url, latency.Seconds())
 }
+
+// failedResponseLatency is the least a 5xx response counts as to a balancer
+// that prices backends by latency. Twenty times a typical 50 ms answer, so a
+// failing backend keeps a trickle of traffic -- and so a way to show it has
+// recovered -- without taking the bulk.
+const failedResponseLatency = time.Second

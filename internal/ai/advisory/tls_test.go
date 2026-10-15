@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
 // SPDX-License-Identifier: MIT
 
-package handlers
+package advisory
 
 import (
 	"strings"
@@ -34,7 +34,7 @@ func TestAnalyzeConfigTLSInsightMatchesTheNegotiatedMinimum(t *testing.T) {
 	}
 	for _, tc := range cases {
 		cfg := &gateonv1.GlobalConfig{Tls: &gateonv1.TlsConfig{Enabled: true, MinTlsVersion: tc.min}}
-		got := hasInsight(analyzeConfig(t.Context(), cfg, wafCoverage{}), "Weak minimum TLS version")
+		got := hasInsight(analyzeConfig(t.Context(), Gateway{Config: cfg, Routes: Coverage{}}), "Weak minimum TLS version")
 		if got != tc.weak {
 			t.Errorf("min_tls_version %q: weak-TLS insight reported = %v, want %v", tc.min, got, tc.weak)
 		}
@@ -42,7 +42,7 @@ func TestAnalyzeConfigTLSInsightMatchesTheNegotiatedMinimum(t *testing.T) {
 }
 
 // hasInsight reports whether any insight's title starts with prefix.
-func hasInsight(resp aiAnalysisResponse, prefix string) bool {
+func hasInsight(resp ConfigAnalysis, prefix string) bool {
 	for _, in := range resp.Insights {
 		if strings.HasPrefix(in.Title, prefix) {
 			return true

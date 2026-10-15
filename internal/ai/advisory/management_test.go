@@ -1,11 +1,12 @@
 // Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
 // SPDX-License-Identifier: MIT
 
-package handlers
+package advisory
 
 import (
 	"testing"
 
+	"github.com/gsoultan/gateon/internal/server/entrypoint"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
@@ -44,7 +45,8 @@ func TestAnalyzeConfigReportsAManagementPlaneAnyoneCanReach(t *testing.T) {
 	}
 	for _, tc := range cases {
 		cfg := &gateonv1.GlobalConfig{Management: tc.mgmt}
-		got := hasInsight(analyzeConfig(t.Context(), cfg, wafCoverage{}), "Management")
+		got := hasInsight(analyzeConfig(t.Context(), Gateway{Config: cfg,
+			ManagementWorldOpen: entrypoint.ManagementListenerWorldOpen(tc.mgmt)}), "Management")
 		if got != tc.exposed {
 			t.Errorf("%s: management exposure insight reported = %v, want %v", tc.name, got, tc.exposed)
 		}
