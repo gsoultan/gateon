@@ -580,7 +580,7 @@ export type GlobalConfig = {
   ai?: AIConfig;
 };
 
-/** The third-party model the AI Advisory and Log Assistant may ask (ADR 0069). */
+/** The third-party model the AI Advisory and Log Assistant may ask (ADR 0070). */
 export type AIProvider = "anthropic" | "openai" | "openai_compatible";
 
 export type AIConfig = {

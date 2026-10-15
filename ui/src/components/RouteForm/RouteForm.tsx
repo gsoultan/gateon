@@ -177,9 +177,9 @@ export default function RouteForm({
       }}
     >
       <Grid>
-        <Grid.Col span={{ base: 12, lg: 7 }}>
+        <Grid.Col span={{ base: 12, lg: 8 }}>
           <Stack gap="lg">
-            <Paper withBorder p="xl" radius="lg" shadow="xs">
+            <Paper withBorder p="lg" radius="lg">
               <Stack gap="xl">
                 <Stepper
                   active={active}
@@ -299,12 +299,11 @@ export default function RouteForm({
           </Stack>
         </Grid.Col>
 
-        <Grid.Col span={{ base: 12, lg: 5 }}>
+        <Grid.Col span={{ base: 12, lg: 4 }}>
           <Paper
             withBorder
-            p="xl"
+            p="lg"
             radius="lg"
-            shadow="xs"
             h="100%"
             style={{ position: "sticky", top: "1rem" }}
           >

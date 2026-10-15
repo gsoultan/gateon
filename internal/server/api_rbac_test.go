@@ -315,7 +315,7 @@ func TestAuthorizeProcedure(t *testing.T) {
 		{"viewer allowed traces read", claims(auth.RoleViewer), procedureFor("ListTraces"), false},
 		{"viewer allowed routes read", claims(auth.RoleViewer), procedureFor("ListRoutes"), false},
 
-		// The AI Advisory (ADR 0069): a viewer reads the analysis, and only a
+		// The AI Advisory (ADR 0070): a viewer reads the analysis, and only a
 		// role that may change the settings spends a call on the stored key.
 		{"viewer allowed config analysis", claims(auth.RoleViewer), procedureFor("AnalyzeConfig"), false},
 		{"viewer allowed log analysis", claims(auth.RoleViewer), procedureFor("AnalyzeLogs"), false},

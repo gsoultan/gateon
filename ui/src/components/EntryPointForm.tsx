@@ -30,6 +30,7 @@ import { notifications } from "@mantine/notifications";
 import { Protocol } from "../types/gateon";
 import type { EntryPoint } from "../types/gateon";
 import { apiFetch, getApiErrorMessage } from "../hooks/useGateon";
+import { FieldGrid, FormActions, FormSection } from "./layout";
 
 const DEFAULT_TIMEOUT_MS = 15000;
 
@@ -169,7 +170,7 @@ export function EntryPointForm({
         form.handleSubmit();
       }}
     >
-      <Stack gap="md">
+      <Stack gap="lg">
         <Alert
           icon={<IconInfoCircle size={18} />}
           color="blue"
@@ -184,191 +185,187 @@ export function EntryPointForm({
           </Text>
         </Alert>
 
-        <form.Field
-          name="name"
-          children={(field: any) => (
-            <TextInput
-              label="EntryPoint Name"
-              description="Friendly name for this entrypoint"
-              placeholder="e.g. Public HTTP"
-              leftSection={<IconHash size={16} />}
-              value={field.state.value}
-              onBlur={field.handleBlur}
-              onChange={(e) => field.handleChange(e.target.value)}
-              size="md"
-              radius="md"
+        <FormSection title="Listener" description="Where the gateway listens, and on which protocols.">
+          <FieldGrid>
+            <form.Field
+              name="name"
+              children={(field: any) => (
+                <TextInput
+                  label="EntryPoint Name"
+                  description="Friendly name for this entrypoint"
+                  placeholder="e.g. Public HTTP"
+                  leftSection={<IconHash size={16} />}
+                  value={field.state.value}
+                  onBlur={field.handleBlur}
+                  onChange={(e) => field.handleChange(e.target.value)}
+                />
+              )}
             />
-          )}
-        />
 
-        <form.Field
-          name="address"
-          children={(field: any) => (
-            <TextInput
-              label="Listening Address"
-              description="Interface and port to bind to"
-              placeholder="e.g. :80 or 0.0.0.0:443"
-              required
-              leftSection={<IconServer size={16} />}
-              value={field.state.value}
-              onBlur={field.handleBlur}
-              onChange={(e) => field.handleChange(e.target.value)}
-              size="md"
-              radius="md"
+            <form.Field
+              name="address"
+              children={(field: any) => (
+                <TextInput
+                  label="Listening Address"
+                  description="Interface and port to bind to"
+                  placeholder="e.g. :80 or 0.0.0.0:443"
+                  required
+                  leftSection={<IconServer size={16} />}
+                  value={field.state.value}
+                  onBlur={field.handleBlur}
+                  onChange={(e) => field.handleChange(e.target.value)}
+                />
+              )}
             />
-          )}
-        />
 
-        {isL4 && (
-          <Alert
-            icon={<IconInfoCircle size={18} />}
-            color="blue"
-            variant="light"
-            radius="md"
-            title="L4 TCP/UDP proxy"
-          >
-            <Text size="sm" c="dimmed">
-              Backends are configured via <strong>Routes</strong> and <strong>Services</strong>. Create a Route with
-              type &quot;tcp&quot; or &quot;udp&quot;, select this entrypoint, and choose a Service with backend type
-              tcp/udp and host:port targets.
-            </Text>
-          </Alert>
-        )}
+          </FieldGrid>
 
-        <form.Field
-          name="protocols"
-          children={(field: any) => (
-            <Checkbox.Group
-              label="Network Protocols"
-              description="Select one or both (TCP and UDP)"
-              required
-              value={(field.state.value ?? [Protocol.TCP]).map((v: any) => v.toString())}
-              onChange={(vals) => field.handleChange(vals.map(Number))}
+          {isL4 && (
+            <Alert
+              icon={<IconInfoCircle size={18} />}
+              color="blue"
+              variant="light"
+              radius="md"
+              title="L4 TCP/UDP proxy"
             >
-              <Group mt="xs">
-                <Checkbox
-                  value={Protocol.TCP.toString()}
-                  label="TCP (Recommended for HTTP/gRPC)"
-                />
-                <Checkbox
-                  value={Protocol.UDP.toString()}
-                  label="UDP (Required for HTTP/3)"
-                />
-              </Group>
-            </Checkbox.Group>
+              <Text size="sm" c="dimmed">
+                Backends are configured via <strong>Routes</strong> and <strong>Services</strong>. Create a Route with
+                type &quot;tcp&quot; or &quot;udp&quot;, select this entrypoint, and choose a Service with backend type
+                tcp/udp and host:port targets.
+              </Text>
+            </Alert>
           )}
-        />
 
-        <Divider
-          label={
-            <Group gap="xs">
-              <IconShieldLock size={14} />
-              <span>Security & Resilience</span>
-            </Group>
-          }
-          labelPosition="center"
-        />
-
-        <form.Field
-          name="tls.enabled"
-          children={(field: any) => (
-            <Switch
-              label="Enable TLS"
-              description={
-                hasUDP && !hasTCP
-                  ? "Enable for HTTP/3 (QUIC); leave off for raw UDP L4"
-                  : "Enable secure encrypted communication"
-              }
-              checked={field.state.value}
-              thumbIcon={
-                field.state.value ? (
-                  <IconLock size={12} color="var(--mantine-color-teal-6)" />
-                ) : undefined
-              }
-              onChange={(e) => field.handleChange(e.currentTarget.checked)}
-            />
-          )}
-        />
-
-        <Group grow>
           <form.Field
-            name="readTimeoutMs"
+            name="protocols"
             children={(field: any) => (
-              <TextInput
-                label="Read Timeout"
-                description="Max time to read request"
-                placeholder="15000"
-                type="number"
-                leftSection={<IconClock size={16} />}
-                rightSection={<span style={{ fontSize: 10, marginRight: 10 }}>ms</span>}
-                value={field.state.value}
-                onChange={(e) => field.handleChange(Number(e.target.value))}
-                size="md"
-                radius="md"
+              <Checkbox.Group
+                label="Network Protocols"
+                description="Select one or both (TCP and UDP)"
+                required
+                value={(field.state.value ?? [Protocol.TCP]).map((v: any) => v.toString())}
+                onChange={(vals) => field.handleChange(vals.map(Number))}
+              >
+                <Group mt="xs">
+                  <Checkbox
+                    value={Protocol.TCP.toString()}
+                    label="TCP (Recommended for HTTP/gRPC)"
+                  />
+                  <Checkbox
+                    value={Protocol.UDP.toString()}
+                    label="UDP (Required for HTTP/3)"
+                  />
+                </Group>
+              </Checkbox.Group>
+            )}
+          />
+
+        </FormSection>
+
+        <Divider />
+
+        <FormSection
+            title="Security & limits"
+            icon={<IconShieldLock size={16} />}
+            description="Encryption, timeouts and how many connections this listener accepts."
+          >
+          <form.Field
+            name="tls.enabled"
+            children={(field: any) => (
+              <Switch
+                label="Enable TLS"
+                description={
+                  hasUDP && !hasTCP
+                    ? "Enable for HTTP/3 (QUIC); leave off for raw UDP L4"
+                    : "Enable secure encrypted communication"
+                }
+                checked={field.state.value}
+                thumbIcon={
+                  field.state.value ? (
+                    <IconLock size={12} color="var(--mantine-color-teal-6)" />
+                  ) : undefined
+                }
+                onChange={(e) => field.handleChange(e.currentTarget.checked)}
               />
             )}
           />
+
+          <FieldGrid>
+              <form.Field
+                name="readTimeoutMs"
+                children={(field: any) => (
+                  <TextInput
+                    label="Read Timeout"
+                    description="Max time to read request"
+                    placeholder="15000"
+                    type="number"
+                    leftSection={<IconClock size={16} />}
+                    rightSection={<span style={{ fontSize: 10, marginRight: 10 }}>ms</span>}
+                    value={field.state.value}
+                    onChange={(e) => field.handleChange(Number(e.target.value))}
+                  />
+                )}
+              />
+              <form.Field
+                name="writeTimeoutMs"
+                children={(field: any) => (
+                  <TextInput
+                    label="Write Timeout"
+                    description="Max time to write response"
+                    placeholder="15000"
+                    type="number"
+                    leftSection={<IconClock size={16} />}
+                    rightSection={<span style={{ fontSize: 10, marginRight: 10 }}>ms</span>}
+                    value={field.state.value}
+                    onChange={(e) => field.handleChange(Number(e.target.value))}
+                  />
+                )}
+              />
+          </FieldGrid>
+
           <form.Field
-            name="writeTimeoutMs"
+            name="maxConnections"
             children={(field: any) => (
-              <TextInput
-                label="Write Timeout"
-                description="Max time to write response"
-                placeholder="15000"
-                type="number"
-                leftSection={<IconClock size={16} />}
-                rightSection={<span style={{ fontSize: 10, marginRight: 10 }}>ms</span>}
-                value={field.state.value}
-                onChange={(e) => field.handleChange(Number(e.target.value))}
-                size="md"
-                radius="md"
+              <NumberInput
+                label="Max Connections"
+                description={maxConnectionsDescription(isL4UDP)}
+                placeholder="0"
+                min={0}
+                allowDecimal={false}
+                allowNegative={false}
+                thousandSeparator=","
+                disabled={isL4UDP}
+                leftSection={<IconPlugConnected size={16} />}
+                value={field.state.value ?? 0}
+                onBlur={field.handleBlur}
+                onChange={(v) => field.handleChange(typeof v === "number" ? v : 0)}
               />
             )}
           />
-        </Group>
 
-        <form.Field
-          name="maxConnections"
-          children={(field: any) => (
-            <NumberInput
-              label="Max Connections"
-              description={maxConnectionsDescription(isL4UDP)}
-              placeholder="0"
-              min={0}
-              allowDecimal={false}
-              allowNegative={false}
-              thousandSeparator=","
-              disabled={isL4UDP}
-              leftSection={<IconPlugConnected size={16} />}
-              value={field.state.value ?? 0}
-              onBlur={field.handleBlur}
-              onChange={(v) => field.handleChange(typeof v === "number" ? v : 0)}
-              size="md"
-              radius="md"
-            />
-          )}
-        />
+          <form.Field
+            name="accessLogEnabled"
+            children={(field: any) => (
+              <Switch
+                label="Enable Access Logs"
+                description="Record all incoming requests for this entrypoint"
+                checked={field.state.value}
+                onChange={(e) => field.handleChange(e.currentTarget.checked)}
+              />
+            )}
+          />
 
-        <form.Field
-          name="accessLogEnabled"
-          children={(field: any) => (
-            <Switch
-              label="Enable Access Logs"
-              description="Record all incoming requests for this entrypoint"
-              checked={field.state.value}
-              onChange={(e) => field.handleChange(e.currentTarget.checked)}
-            />
-          )}
-        />
+        </FormSection>
 
-        <Button
-          type="submit"
-          loading={mutation.isPending}
-          leftSection={<IconCheck size={18} />}
-          mt="md"
-        >
-          {initialData ? "Update EntryPoint" : "Create EntryPoint"}
-        </Button>
+        <FormActions>
+            <Button
+              type="submit"
+              loading={mutation.isPending}
+              leftSection={<IconCheck size={18} />}
+            >
+              {initialData ? "Update EntryPoint" : "Create EntryPoint"}
+            </Button>
+        </FormActions>
       </Stack>
     </form>
   );

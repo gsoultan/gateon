@@ -58,7 +58,7 @@ message GlobalConfig {
   reserved 20;
   reserved "titan";
   // Third-party language model that narrates the AI Advisory and Log
-  // Assistant findings (ADR 0069). Off unless enabled; the local analysis
+  // Assistant findings (ADR 0070). Off unless enabled; the local analysis
   // runs either way and is what the dashboard shows when the provider fails.
   AIConfig ai = 21;
 }

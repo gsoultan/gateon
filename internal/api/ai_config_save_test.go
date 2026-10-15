@@ -17,7 +17,7 @@ import (
 
 // The AI provider settings are saved through UpdateGlobalConfig, which REST
 // (PUT /v1/global), Connect and gRPC share, so these hold on every transport
-// (ADR 0069).
+// (ADR 0070).
 
 func saveAI(t *testing.T, role string, edit func(*gateonv1.AIConfig)) (*ApiService, error) {
 	t.Helper()

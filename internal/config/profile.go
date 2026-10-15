@@ -153,6 +153,16 @@ type TierDefaults struct {
 	// space. GATEON_ENTRYPOINT_MAX_CONN_PER_ADDR overrides it; 0 disables it.
 	EntryPointMaxConnPerAddr int
 
+	// WAFMaxLargeBodyInspections is how many request bodies over 64 KiB the
+	// WAF inspects at once in the whole process. Inspection holds several
+	// times a body's length until the request has been proxied -- about 7.75
+	// MiB for a 1 MiB form -- so concurrency, not any one body, is what
+	// exhausts memory, and no per-address cap bounds it. A body that finds
+	// every slot taken for two seconds is refused with 503 and Retry-After,
+	// never forwarded uninspected. GATEON_WAF_MAX_LARGE_BODY_INSPECTIONS
+	// overrides it; it cannot be switched off.
+	WAFMaxLargeBodyInspections int
+
 	// MaxHeaderBytes is the most request-header bytes an HTTP listener --
 	// every entrypoint and the management listener, over HTTP/1, HTTP/2 and
 	// HTTP/3 -- buffers for one request; a request past it is refused with 431
@@ -273,6 +283,7 @@ func DefaultsFor(tier Tier) TierDefaults {
 			AuthHashConcurrency:        1,
 			EntryPointMaxConnections:   1000,
 			EntryPointMaxConnPerAddr:   128,
+			WAFMaxLargeBodyInspections: 4,
 			MaxHeaderBytes:             32 << 10, // 32 KiB
 			StreamIdleTimeout:          2 * time.Minute,
 			StreamMaxLifetime:          time.Hour,
@@ -313,6 +324,7 @@ func DefaultsFor(tier Tier) TierDefaults {
 			AuthHashConcurrency:        4,
 			EntryPointMaxConnections:   50000,
 			EntryPointMaxConnPerAddr:   1024,
+			WAFMaxLargeBodyInspections: 64,
 			MaxHeaderBytes:             64 << 10, // 64 KiB
 			StreamIdleTimeout:          10 * time.Minute,
 			StreamMaxLifetime:          12 * time.Hour,
@@ -353,6 +365,7 @@ func DefaultsFor(tier Tier) TierDefaults {
 			AuthHashConcurrency:        2,
 			EntryPointMaxConnections:   10000,
 			EntryPointMaxConnPerAddr:   256,
+			WAFMaxLargeBodyInspections: 16,
 			MaxHeaderBytes:             32 << 10, // 32 KiB
 			StreamIdleTimeout:          5 * time.Minute,
 			StreamMaxLifetime:          4 * time.Hour,

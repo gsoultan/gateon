@@ -48,7 +48,7 @@ interface AISettingsCardProps {
 
 /**
  * The language model the AI Advisory and Log Assistant may ask to narrate
- * the local analysis (ADR 0069). Administrator-only: it decides where
+ * the local analysis (ADR 0070). Administrator-only: it decides where
  * findings, and with log sharing the gateway's log lines, are sent.
  */
 export function AISettingsCard({ config, onChange, disabled: formDisabled }: AISettingsCardProps) {

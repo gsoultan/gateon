@@ -297,7 +297,7 @@ func (s *ApiService) prepareGlobalUpdate(ctx context.Context, update, stored *ga
 // clients against blocked nobody and saved with success (ADR 0044).
 func validateGlobalSave(stored, proposed *gateonv1.GlobalConfig) error {
 	// A provider the advisory could never call saved with success and then
-	// fell back to the local analysis on every request (ADR 0069).
+	// fell back to the local analysis on every request (ADR 0070).
 	if err := llm.Validate(proposed.GetAi()); err != nil {
 		return status.Error(codes.InvalidArgument, err.Error())
 	}

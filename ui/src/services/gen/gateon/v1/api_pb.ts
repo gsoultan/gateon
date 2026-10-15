@@ -730,7 +730,7 @@ export const ApiService: GenService<{
     output: typeof VerifyAuditChainResponseSchema;
   },
   /**
-   * The AI Advisory and Log Assistant (ADR 0069): Gateon's own analysis,
+   * The AI Advisory and Log Assistant (ADR 0070): Gateon's own analysis,
    * narrated by the configured language model when one answers.
    *
    * @generated from rpc gateon.v1.ApiService.AnalyzeConfig

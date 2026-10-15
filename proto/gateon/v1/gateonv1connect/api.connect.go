@@ -279,7 +279,7 @@ type ApiServiceClient interface {
 	// VerifyAuditChain checks the audit log's HMAC chain over a bounded window
 	// (ADR 0050). Administrators only.
 	VerifyAuditChain(context.Context, *connect.Request[v1.VerifyAuditChainRequest]) (*connect.Response[v1.VerifyAuditChainResponse], error)
-	// The AI Advisory and Log Assistant (ADR 0069): Gateon's own analysis,
+	// The AI Advisory and Log Assistant (ADR 0070): Gateon's own analysis,
 	// narrated by the configured language model when one answers.
 	AnalyzeConfig(context.Context, *connect.Request[v1.AnalyzeConfigRequest]) (*connect.Response[v1.AnalyzeConfigResponse], error)
 	AnalyzeLogs(context.Context, *connect.Request[v1.AnalyzeLogsRequest]) (*connect.Response[v1.AnalyzeLogsResponse], error)
@@ -1123,7 +1123,7 @@ type ApiServiceHandler interface {
 	// VerifyAuditChain checks the audit log's HMAC chain over a bounded window
 	// (ADR 0050). Administrators only.
 	VerifyAuditChain(context.Context, *connect.Request[v1.VerifyAuditChainRequest]) (*connect.Response[v1.VerifyAuditChainResponse], error)
-	// The AI Advisory and Log Assistant (ADR 0069): Gateon's own analysis,
+	// The AI Advisory and Log Assistant (ADR 0070): Gateon's own analysis,
 	// narrated by the configured language model when one answers.
 	AnalyzeConfig(context.Context, *connect.Request[v1.AnalyzeConfigRequest]) (*connect.Response[v1.AnalyzeConfigResponse], error)
 	AnalyzeLogs(context.Context, *connect.Request[v1.AnalyzeLogsRequest]) (*connect.Response[v1.AnalyzeLogsResponse], error)

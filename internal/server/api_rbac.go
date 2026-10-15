@@ -157,7 +157,7 @@ var apiPermissions = map[string]apiPermission{
 	// ListAuditLogs; ApiService additionally requires admin.
 	gateonv1connect.ApiServiceVerifyAuditChainProcedure: readOn(auth.ResourceDiagnostics),
 
-	// The AI Advisory and Log Assistant (ADR 0069), POST /v1/AnalyzeConfig and
+	// The AI Advisory and Log Assistant (ADR 0070), POST /v1/AnalyzeConfig and
 	// /v1/AnalyzeLogs. TestAIProvider spends a call on the stored key, so it
 	// takes the right to change the settings it tests, as
 	// POST /v1/ai-advisory/test does.

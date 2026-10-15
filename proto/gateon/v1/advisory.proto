@@ -7,7 +7,7 @@ package gateon.v1;
 
 option go_package = "github.com/gsoultan/gateon/proto/gateon/v1;gateonv1";
 
-// The AI Advisory and Log Assistant (ADR 0069). The analysis is Gateon's own
+// The AI Advisory and Log Assistant (ADR 0070). The analysis is Gateon's own
 // and deterministic; a configured language model may only narrate it.
 
 // AIInsight is one finding of the configuration analysis. Its severity is

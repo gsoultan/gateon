@@ -1,4 +1,4 @@
-# 69. A language model narrates the local analysis and never replaces it
+# 70. A language model narrates the local analysis and never replaces it
 
 Date: 2026-10-14
 

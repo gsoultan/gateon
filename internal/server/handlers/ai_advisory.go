@@ -14,7 +14,7 @@ import (
 
 // registerAIAdvisoryHandlers wires the Security Hub "AI Advisory" and the Log
 // Assistant to the ApiService RPCs that Connect and gRPC serve too, so all
-// three transports return the same analysis (ADR 0069). The analysis lives in
+// three transports return the same analysis (ADR 0070). The analysis lives in
 // internal/ai/advisory.
 func registerAIAdvisoryHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI) {
 	mux.HandleFunc("POST /v1/AnalyzeConfig", func(w http.ResponseWriter, r *http.Request) {

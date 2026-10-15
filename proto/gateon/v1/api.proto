@@ -103,7 +103,7 @@ service ApiService {
   // (ADR 0050). Administrators only.
   rpc VerifyAuditChain(VerifyAuditChainRequest) returns (VerifyAuditChainResponse);
 
-  // The AI Advisory and Log Assistant (ADR 0069): Gateon's own analysis,
+  // The AI Advisory and Log Assistant (ADR 0070): Gateon's own analysis,
   // narrated by the configured language model when one answers.
   rpc AnalyzeConfig(AnalyzeConfigRequest) returns (AnalyzeConfigResponse);
   rpc AnalyzeLogs(AnalyzeLogsRequest) returns (AnalyzeLogsResponse);

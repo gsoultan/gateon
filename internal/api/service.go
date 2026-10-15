@@ -92,7 +92,7 @@ type ApiService struct {
 
 	// advisory serves AnalyzeConfig, AnalyzeLogs and TestAIProvider. One per
 	// service, so the AI provider's concurrency bound and summary cache hold
-	// across REST, Connect and gRPC (ADR 0069).
+	// across REST, Connect and gRPC (ADR 0070).
 	advisoryOnce sync.Once
 	advisorySvc  *advisory.Service
 }

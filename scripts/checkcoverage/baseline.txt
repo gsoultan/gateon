@@ -201,7 +201,7 @@ github.com/gsoultan/gateon/internal/security/waf/appprofile 94.2%
 github.com/gsoultan/gateon/internal/security/yara 93.8%
 github.com/gsoultan/gateon/internal/server 67.5%
 github.com/gsoultan/gateon/internal/server/entrypoint 85.5%
-# 45.8% -> 41.8% on 2026-10-14 (ADR 0069): the AI Advisory's analysis and
+# 45.8% -> 41.8% on 2026-10-14 (ADR 0070): the AI Advisory's analysis and
 # its tests left this package for internal/ai/advisory, which the REST
 # handlers now reach through ApiService. The tests moved with the code; the
 # handlers kept here are the thin transport, tested in ai_advisory_test.go.

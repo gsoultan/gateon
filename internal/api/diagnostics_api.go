@@ -1780,7 +1780,7 @@ func tlsOffersPostQuantumKeyExchange() bool {
 }
 
 // AnalyzeConfig runs the AI Advisory over the live configuration and routes
-// (ADR 0069).
+// (ADR 0070).
 func (s *ApiService) AnalyzeConfig(ctx context.Context, _ *gateonv1.AnalyzeConfigRequest) (*gateonv1.AnalyzeConfigResponse, error) {
 	cfg := s.liveGlobalConfig(ctx)
 	a := s.advisory().AnalyzeConfig(ctx, advisory.Gateway{Config: cfg, Routes: s.routeCoverage(ctx, cfg),
@@ -1794,7 +1794,7 @@ func (s *ApiService) AnalyzeConfig(ctx context.Context, _ *gateonv1.AnalyzeConfi
 	return &gateonv1.AnalyzeConfigResponse{Summary: a.Summary, Insights: insights, Engine: a.Engine, Notice: a.Notice}, nil
 }
 
-// AnalyzeLogs runs the Log Assistant over req's lines (ADR 0069).
+// AnalyzeLogs runs the Log Assistant over req's lines (ADR 0070).
 func (s *ApiService) AnalyzeLogs(ctx context.Context, req *gateonv1.AnalyzeLogsRequest) (*gateonv1.AnalyzeLogsResponse, error) {
 	a := s.advisory().AnalyzeLogs(ctx, s.liveGlobalConfig(ctx).GetAi(), req.GetLogs())
 	return &gateonv1.AnalyzeLogsResponse{Analysis: a.Analysis, Local: a.Local, Engine: a.Engine, Notice: a.Notice}, nil

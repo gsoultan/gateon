@@ -182,7 +182,7 @@ export type GlobalConfig = Message<"gateon.v1.GlobalConfig"> & {
 
   /**
    * Third-party language model that narrates the AI Advisory and Log
-   * Assistant findings (ADR 0069). Off unless enabled; the local analysis
+   * Assistant findings (ADR 0070). Off unless enabled; the local analysis
    * runs either way and is what the dashboard shows when the provider fails.
    *
    * @generated from field: gateon.v1.AIConfig ai = 21;

@@ -3,7 +3,7 @@
 
 // Package advisory is the AI Advisory and Log Assistant: Gateon's own,
 // deterministic analysis of its configuration and logs, which a configured
-// language model may narrate and never replace (ADR 0069).
+// language model may narrate and never replace (ADR 0070).
 //
 // It serves every transport. ApiService exposes it as the AnalyzeConfig,
 // AnalyzeLogs and TestAIProvider RPCs, which REST, Connect and gRPC all call.

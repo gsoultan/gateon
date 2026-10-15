@@ -185,7 +185,7 @@ var fields = []Field{
 		return nil
 	}},
 	// The AI provider's key goes where the provider and base URL say; kept
-	// only while both are unchanged (ADR 0069).
+	// only while both are unchanged (ADR 0070).
 	{Name: "ai.api_key", Destination: func(c *gateonv1.GlobalConfig) string {
 		return c.GetAi().GetProvider() + "|" + urlOrigin(c.GetAi().GetBaseUrl())
 	}, Ptr: func(c *gateonv1.GlobalConfig) *string {

@@ -4,7 +4,7 @@
 // Package llm lets the dashboard's AI Advisory and Log Assistant ask a
 // third-party language model -- Anthropic's Claude, OpenAI, or any server that
 // speaks OpenAI's chat-completions API -- to narrate what Gateon's own
-// deterministic analysis found. See ADR 0069.
+// deterministic analysis found. See ADR 0070.
 //
 // The model is never on the request path and never decides anything. It is
 // asked only from two management endpoints, its answer is shown to an

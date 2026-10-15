@@ -28,6 +28,7 @@ import {
 import { useRoutes, useAggStats, useCircuitBreakerEvents } from "../hooks/useGateon";
 import { useTableDensity } from "../hooks/useTableDensity";
 import { CircuitRow, type CircuitState } from "../components/CircuitRow";
+import { PageHeader } from "../components/layout";
 
 const PAGE_SIZE = 15;
 
@@ -61,54 +62,47 @@ export default function CircuitBreakerPage() {
 
   return (
     <Stack gap="lg">
-      <Group justify="space-between" wrap="wrap">
-        <div>
-          <Title order={2} fw={800} style={{ letterSpacing: -1 }}>
-            Circuit Breaker
-          </Title>
-          <Text c="dimmed" size="sm" fw={500}>
-            Monitor circuit states across route targets. CLOSED = receiving
-            traffic; OPEN = out of rotation, because its health check failed or
-            the route's circuit breaker is open; HALF-OPEN = the breaker is
-            testing recovery.
-          </Text>
-        </div>
-        <Group gap="md">
-          <Select
-            size="xs"
-            w={140}
-            label="Filter by state"
-            value={stateFilter}
-            onChange={(v) => setStateFilter((v as CircuitState) ?? "all")}
-            data={[
-              { value: "all", label: "All states" },
-              { value: "CLOSED", label: "Closed" },
-              { value: "OPEN", label: "Open" },
-              { value: "HALF-OPEN", label: "Half-Open" },
-            ]}
-          />
-          <Stack gap={4}>
-            <Group gap="xs">
-              <Badge
-                size="sm"
-                variant="light"
-                color="green"
-                leftSection={<IconCircuitSwitchClosed size={12} />}
-              >
-                Closed
-              </Badge>
-              <Badge
-                size="sm"
-                variant="light"
-                color="red"
-                leftSection={<IconAlertTriangle size={12} />}
-              >
-                Open / Half-Open
-              </Badge>
-            </Group>
-          </Stack>
-        </Group>
-      </Group>
+      <PageHeader
+        title="Circuit Breaker"
+        description="Monitor circuit states across route targets. CLOSED = receiving traffic; OPEN = out of rotation, because its health check failed or the route's circuit breaker is open; HALF-OPEN = the breaker is testing recovery."
+        actions={
+          <Group gap="md">
+            <Select
+              size="xs"
+              w={140}
+              label="Filter by state"
+              value={stateFilter}
+              onChange={(v) => setStateFilter((v as CircuitState) ?? "all")}
+              data={[
+                { value: "all", label: "All states" },
+                { value: "CLOSED", label: "Closed" },
+                { value: "OPEN", label: "Open" },
+                { value: "HALF-OPEN", label: "Half-Open" },
+              ]}
+            />
+            <Stack gap={4}>
+              <Group gap="xs">
+                <Badge
+                  size="sm"
+                  variant="light"
+                  color="green"
+                  leftSection={<IconCircuitSwitchClosed size={12} />}
+                >
+                  Closed
+                </Badge>
+                <Badge
+                  size="sm"
+                  variant="light"
+                  color="red"
+                  leftSection={<IconAlertTriangle size={12} />}
+                >
+                  Open / Half-Open
+                </Badge>
+              </Group>
+            </Stack>
+          </Group>
+        }
+      />
 
       <SimpleGrid cols={{ base: 1, sm: 3 }} spacing="md">
         <Paper

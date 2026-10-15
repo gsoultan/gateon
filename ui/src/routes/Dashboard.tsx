@@ -57,6 +57,7 @@ import type {
   TrafficFilterMode,
   TrafficRangePreset,
 } from "../utils/dashboard";
+import { PageHeader } from "../components/layout";
 
 const StatusCard = lazy(() => import("../components/StatusCard"));
 const ServiceOverviewCards = lazy(() =>
@@ -521,16 +522,10 @@ export default function Dashboard() {
 
   return (
     <Stack gap="xl">
-      <Group justify="space-between" align="flex-start" wrap="wrap">
-        <div>
-          <Title order={2} fw={800} style={{ letterSpacing: -0.5 }}>
-            System Overview
-          </Title>
-          <Text c="dimmed" size="sm" fw={500} mt={4}>
-            Real-time status and operational metrics
-          </Text>
-        </div>
-      </Group>
+      <PageHeader
+        title="System Overview"
+        description="Real-time status and operational metrics"
+      />
 
       <OnboardingChecklist />
 

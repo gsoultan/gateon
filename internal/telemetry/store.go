@@ -542,6 +542,14 @@ const (
 	threatReputationBlock = "reputation_block"
 )
 
+// Threat types that refuse a client for who it is or how much it sends, as
+// the rate limiters, the geofence and bot management record them.
+const (
+	threatRateLimit   = "rate_limit"
+	threatGeoIPBlock  = "geoip_block"
+	threatBotDetected = "bot_detected"
+)
+
 // ThreatWAFReputationBlock is a WAF refusal by one of its reputation rules
 // (secwaf.RepeatsEarlierDecision): a feed listing or the client's own low
 // score, refused again by the WAF. It is a WAF block in every count, and like
@@ -573,6 +581,19 @@ func (st *SecurityThreat) HeldAgainstSource() bool {
 		return false
 	}
 	return true
+}
+
+// refusesPolicyNotConduct reports whether a threat is a refusal of who a client
+// is or how much it sends -- a rate limit, a geofence, a bot policy -- rather
+// than of something it did. Each is the route's own answer, complete when it
+// is given; AttackEvidenceWeight already counts none of them, and neither may
+// the reputation score, which every route refuses on.
+func refusesPolicyNotConduct(st *SecurityThreat) bool {
+	switch st.Type {
+	case threatRateLimit, threatGeoIPBlock, threatBotDetected:
+		return true
+	}
+	return false
 }
 
 // RefusedWhenRecorded reports whether the request path refused, challenged or
@@ -2370,7 +2391,14 @@ func (s *pathStatsStore) processThreat(st *SecurityThreat) {
 	// below-threshold match, a refusal of an earlier decision, or a leak in a
 	// response the client was served (ADR 0055). The score is what the
 	// reputation blocker refuses on, on every route.
-	if st.HeldAgainstSource() {
+	//
+	// And never a refusal of who a client is or how much it sends
+	// (refusesPolicyNotConduct). Each is held against its source and none says
+	// the client attacked anything, yet each took the score of every client of
+	// the build on the network to zero: eight 429s from a busy office, and the
+	// office got 403 on every route. The rate limiter also scales its limit by
+	// this score, so each rejection tightened the limit that produced the next.
+	if st.HeldAgainstSource() && !refusesPolicyNotConduct(st) {
 		DecreaseReputationOf(st.Fingerprint, st.SourceIP, st.Score/2, st.Type) // Penalty is half the threat score
 	}
 

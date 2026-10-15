@@ -4,7 +4,6 @@
 import { useState, useEffect } from 'react';
 import {
   Container,
-  Title,
   Text,
   Card,
   Table,
@@ -52,6 +51,7 @@ import type { AuditLog, AuditArchive } from '../types/gateon';
 import { QueryError } from "../components/QueryError";
 import { AuditChainVerifier } from "../components/AuditChainVerifier";
 import { useAuthStore } from "../store/useAuthStore";
+import { PageHeader } from "../components/layout";
 
 const PAGE_SIZE = 50;
 
@@ -140,22 +140,22 @@ export default function AuditLogsPage() {
   return (
     <Container size="xl">
       <Stack gap="lg">
-        <Group justify="space-between">
-          <Stack gap={0}>
-            <Title order={2} fw={800} style={{ letterSpacing: -1 }}>Forensic Audit Trail</Title>
-            <Text c="dimmed" size="sm">Tamper-proof history of administrative actions and security blocks.</Text>
-          </Stack>
-          <Group>
-            <Button
-              variant="light"
-              leftSection={<IconRefresh size={18} />}
-              onClick={() => activeTab === 'active' ? refetch() : refetchArchives()}
-              loading={isLoading || isFetching || isLoadingArchives}
-            >
-              Refresh
-            </Button>
-          </Group>
-        </Group>
+        <PageHeader
+          title="Forensic Audit Trail"
+          description="Tamper-proof history of administrative actions and security blocks."
+          actions={
+            <Group>
+              <Button
+                variant="light"
+                leftSection={<IconRefresh size={18} />}
+                onClick={() => activeTab === 'active' ? refetch() : refetchArchives()}
+                loading={isLoading || isFetching || isLoadingArchives}
+              >
+                Refresh
+              </Button>
+            </Group>
+          }
+        />
 
         {/* The chain is signed so it can be checked; an administrator checks it (ADR 0050). */}
         {isAdmin && <AuditChainVerifier />}
