@@ -58,6 +58,7 @@ import type {
   SystemMetrics,
   LabeledCount,
 } from "../types/metrics";
+import { PageHeader } from "../components/layout";
 
 // Use the global formatters where possible, or hardened locals
 function formatBytes(bytes: number | undefined | null): string {
@@ -974,20 +975,15 @@ export default function MetricsPage() {
 
   return (
     <Stack gap="lg">
-      <Group justify="space-between" align="flex-start" wrap="wrap">
-        <div>
-          <Title order={2} fw={800} style={{ letterSpacing: -0.5 }}>
-            Metrics Dashboard
-          </Title>
-          <Text c="dimmed" size="sm" fw={500} mt={4}>
-            Real-time Prometheus metrics — golden signals, per-route breakdown,
-            middleware counters, TLS certificates, and system health.
-          </Text>
-        </div>
-        <Badge variant="dot" color={isLoading ? "yellow" : "green"} size="lg">
-          {isLoading ? "Loading..." : "Live"}
-        </Badge>
-      </Group>
+      <PageHeader
+        title="Metrics Dashboard"
+        description="Real-time Prometheus metrics — golden signals, per-route breakdown, middleware counters, TLS certificates, and system health."
+        actions={
+          <Badge variant="dot" color={isLoading ? "yellow" : "green"} size="lg">
+            {isLoading ? "Loading..." : "Live"}
+          </Badge>
+        }
+      />
 
       {error && (
         <Alert color="red" icon={<IconAlertTriangle size={16} />} radius="md">

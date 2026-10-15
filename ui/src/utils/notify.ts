@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 import { notifications } from "@mantine/notifications";
-import { getApiErrorMessage } from "../hooks/useGateon";
+import { getApiErrorMessage } from "../hooks/apiError";
 
 type NotifyOptions = {
   title?: string;

@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
 // SPDX-License-Identifier: MIT
 
-import { Stack, Text, Badge, Group, Tooltip } from "@mantine/core";
+import { Badge, Tooltip } from "@mantine/core";
 import { useNetwork } from "@mantine/hooks";
 import { useGateonStatus } from "../hooks/useGateon";
 import { useRealTimeStore } from "../store/useRealTimeStore";
@@ -38,28 +38,20 @@ export function ConnectionStatus() {
   const conn = deriveConnection(online, isFetching, isError, status?.status);
 
   return (
-    <Group gap="xs">
-      <Tooltip label={isRealTimeConnected ? "Real-time stream active" : "Real-time stream disconnected"}>
-        {isRealTimeConnected ? (
-          <IconBolt size={14} color="var(--mantine-color-green-filled)" />
-        ) : (
-          <IconBoltOff size={14} color="var(--mantine-color-red-filled)" />
-        )}
-      </Tooltip>
-      <Stack gap={0} align="flex-end">
-        <Text size="xs" fw={700} c="dimmed" lh={1}>
-          STATUS
-        </Text>
-        <Badge
-          size="sm"
-          color={conn.color}
-          variant="dot"
-          styles={{ root: { border: 0 } }}
-          aria-label={`Connection status: ${conn.label}`}
-        >
-          {conn.label}
-        </Badge>
-      </Stack>
-    </Group>
+    <Tooltip
+      label={`Gateway ${conn.label.toLowerCase()} · real-time stream ${isRealTimeConnected ? "active" : "disconnected"}`}
+    >
+      <Badge
+        size="lg"
+        radius="xl"
+        variant="light"
+        color={conn.color}
+        leftSection={isRealTimeConnected ? <IconBolt size={13} /> : <IconBoltOff size={13} />}
+        aria-label={`Connection status: ${conn.label}`}
+        styles={{ root: { textTransform: "none", fontSize: 12 } }}
+      >
+        {conn.label.charAt(0) + conn.label.slice(1).toLowerCase()}
+      </Badge>
+    </Tooltip>
   );
 }

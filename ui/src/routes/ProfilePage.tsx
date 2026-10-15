@@ -105,7 +105,7 @@ export default function ProfilePage() {
           <IconUserCircle size={22} />
         </ThemeIcon>
         <Box>
-          <Title order={2} fw={800} style={{ letterSpacing: -0.5 }}>
+          <Title order={2} style={{ letterSpacing: "-0.02em" }}>
             Profile
           </Title>
           <Text size="sm" c="dimmed">

@@ -15,7 +15,7 @@ here after the fact.
 
 A request body over 64 KiB is now inspected only when one of a fixed number of
 large-body slots is free: 4 on minimal, 16 on standard, 64 on enterprise
-(ADR 0068). A body that waits 2 s without a slot is answered `503` with
+(ADR 0069). A body that waits 2 s without a slot is answered `503` with
 `Retry-After: 2` and never reaches the origin. Before this, a flood of large
 uploads from many addresses could exhaust memory and time out every request,
 small ones included. If `gateon_middleware_waf_shed_large_bodies_total` rises

@@ -15,11 +15,11 @@ import {
 import { lazy, Suspense } from "react";
 import { QueryClient } from "@tanstack/react-query";
 import { queryClient } from "./queryClient";
-import { Shell } from "./components/Shell";
+const Shell = lazy(() => import("./components/Shell").then((m) => ({ default: m.Shell })));
 import { RouteErrorComponent, RouteFallback } from "./components/ErrorBoundary";
 import { useAuthStore } from "./store/useAuthStore";
 import { asSearchString } from "./hooks/useUrlFilters";
-import { apiFetch, restoreSessionFromCookie } from "./hooks/useGateon";
+import { apiFetch, restoreSessionFromCookie } from "./hooks/http";
 
 const Dashboard = lazy(() => import("./routes/Dashboard"));
 const RoutesPage = lazy(() => import("./routes/RoutesPage"));

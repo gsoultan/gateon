@@ -4,7 +4,6 @@
 import { useState } from "react";
 import {
   Card,
-  Title,
   Text,
   Stack,
   TextInput,
@@ -42,6 +41,7 @@ import { usePermissions } from "../hooks/usePermissions";
 import { useTableDensity } from "../hooks/useTableDensity";
 import { QueryError } from "../components/QueryError";
 import { ConfirmDeleteModal } from "../components/ConfirmDelete";
+import { PageHeader } from "../components/layout";
 
 const TLS_VERSIONS = [
   { label: "TLS 1.0 (Insecure)", value: "TLS1.0" },
@@ -177,37 +177,32 @@ export default function TLSOptionsPage() {
 
   return (
     <Stack gap="xl">
-      <Group justify="space-between" mb="md">
-        <div>
-          <Title order={2} fw={800} style={{ letterSpacing: -1 }}>
-            TLS Options ({totalCount})
-          </Title>
-          <Text c="dimmed" size="sm">
-            Configure specialized TLS parameters for your routes.
-          </Text>
-        </div>
-        <Group>
-          <TextInput
-            placeholder="Search TLS options..."
-            size="xs"
-            w={250}
-            value={search}
-            onChange={(e) => {
-              setSearch(e.currentTarget.value);
-              setPage(1);
-            }}
-          />
-          {canWrite && (
-            <Button
-              leftSection={<IconPlus size={16} />}
-              onClick={startAdd}
-              radius="md"
-            >
-              Add TLS Option
-            </Button>
-          )}
-        </Group>
-      </Group>
+      <PageHeader
+        title={<>TLS Options ({totalCount})</>}
+        description="Configure specialized TLS parameters for your routes."
+        actions={
+          <Group>
+            <TextInput
+              placeholder="Search TLS options..."
+              size="xs"
+              w={250}
+              value={search}
+              onChange={(e) => {
+                setSearch(e.currentTarget.value);
+                setPage(1);
+              }}
+            />
+            {canWrite && (
+              <Button
+                leftSection={<IconPlus size={16} />}
+                onClick={startAdd}
+              >
+                Add TLS Option
+              </Button>
+            )}
+          </Group>
+        }
+      />
 
       <Card withBorder padding={0} radius="lg" shadow="xs">
         <ScrollArea>

@@ -65,12 +65,7 @@ export const TrafficMetricsGrid = memo(function TrafficMetricsGrid({
           </Group>
 
           <Stack gap={0} mt="md">
-            <Text
-              size="xs"
-              c="dimmed"
-              fw={700}
-              style={{ textTransform: "uppercase", letterSpacing: 0.5 }}
-            >
+            <Text size="sm" c="dimmed" fw={500}>
               {metric.label}
             </Text>
             <Text fw={800} size="xl" style={{ letterSpacing: -0.5 }}>

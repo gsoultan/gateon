@@ -1,4 +1,4 @@
-# 68. The WAF inspects a bounded number of large bodies at once
+# 69. The WAF inspects a bounded number of large bodies at once
 
 Date: 2026-10-14
 

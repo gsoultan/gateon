@@ -58,7 +58,7 @@ export default function StatusCard() {
         {counts.map((c) => (
           <Paper key={c.label} p="md" radius="md" withBorder shadow="xs" style={{ transition: 'all 0.2s ease', borderLeft: `4px solid var(--mantine-color-${c.color}-6)` }} className="hover:shadow-md">
             <Stack gap={0}>
-              <Text size="xs" c="dimmed" fw={700} style={{ textTransform: 'uppercase', letterSpacing: 0.5 }}>{c.label}</Text>
+              <Text size="sm" c="dimmed" fw={500}>{c.label}</Text>
               <Text size="xl" fw={800} c={`${c.color}.6`} style={{ letterSpacing: -0.5 }}>{c.value}</Text>
             </Stack>
           </Paper>
@@ -92,21 +92,21 @@ export default function StatusCard() {
           <SimpleGrid cols={{ base: 1, sm: 3 }} spacing="lg">
             <Box>
               <Group justify="space-between" mb={6}>
-                <Text size="xs" fw={700} c="dimmed" style={{ textTransform: 'uppercase' }}>CPU Load</Text>
+                <Text size="sm" fw={500} c="dimmed">CPU Load</Text>
                 <Text size="xs" fw={700}>{safeToFixed(statusData?.cpuUsage, 1)}%</Text>
               </Group>
               <Progress value={statusData?.cpuUsage || 0} size="md" radius="xl" color="brand" animated />
             </Box>
             <Box>
               <Group justify="space-between" mb={6}>
-                <Text size="xs" fw={700} c="dimmed" style={{ textTransform: 'uppercase' }}>Memory Utilization</Text>
+                <Text size="sm" fw={500} c="dimmed">Memory Utilization</Text>
                 <Text size="xs" fw={700}>{safeToFixed(statusData?.memoryUsagePercent, 1)}%</Text>
               </Group>
               <Progress value={statusData?.memoryUsagePercent || 0} size="md" radius="xl" color="orange" animated />
             </Box>
             <Box>
               <Group justify="space-between" mb={6}>
-                <Text size="xs" fw={700} c="dimmed" style={{ textTransform: 'uppercase' }}>Storage ({safeToFixed(statusData?.storageUsageGb, 1)}GB / {safeToFixed(statusData?.storageTotalGb, 1)}GB)</Text>
+                <Text size="sm" fw={500} c="dimmed">Storage ({safeToFixed(statusData?.storageUsageGb, 1)}GB / {safeToFixed(statusData?.storageTotalGb, 1)}GB)</Text>
                 <Text size="xs" fw={700}>{safeToFixed(statusData?.storageUsagePercent, 1)}%</Text>
               </Group>
               <Progress value={statusData?.storageUsagePercent || 0} size="md" radius="xl" color="teal" animated />
@@ -123,7 +123,7 @@ export default function StatusCard() {
                     <stat.icon size={18} stroke={1.5} />
                   </ThemeIcon>
                   <div>
-                    <Text size="xs" c="dimmed" fw={700} style={{ textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                    <Text size="sm" c="dimmed" fw={500}>
                       {stat.label}
                     </Text>
                     <Text fw={700} size="sm">{stat.value}</Text>
