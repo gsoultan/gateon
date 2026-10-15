@@ -79,6 +79,7 @@ ADRs follow a lightweight [MADR](https://adr.github.io/madr/)-style format:
 | [0066](./0066-expired-security-threats-and-audit-entries-are-archived-before-they-are-deleted.md) | Expired security threats and audit entries are archived before they are deleted | Accepted |
 | [0067](./0067-the-dashboard-reads-the-database-only-while-someone-is-watching.md) | The dashboard reads the database only while someone is watching | Accepted |
 | [0068](./0068-the-dashboard-takes-its-look-from-one-theme-and-one-page-header.md) | The dashboard takes its look from one theme and one page header | Accepted |
+| [0069](./0069-the-waf-inspects-a-bounded-number-of-large-bodies-at-once.md) | The WAF inspects a bounded number of large bodies at once | Accepted |
 
 ## Conventions
 

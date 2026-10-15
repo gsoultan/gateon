@@ -641,7 +641,10 @@ func (t *wafRuntime) annotateIPReputation(r *http.Request) {
 }
 
 func (t *wafRuntime) inspectAndForward(next http.Handler, w http.ResponseWriter, r *http.Request, repScore float64, inspectBody bool) {
-	tx, decision, err := t.engine.inspectRequest(r, repScore, inspectBody)
+	tx, decision, release, err := t.engine.inspectRequest(r, repScore, inspectBody)
+	// Registered before tx.Close so it runs after it: the slot covers what
+	// the transaction holds, and it holds it until it is closed.
+	defer release()
 	// inspectRequest returns a live transaction on every path, error
 	// included, so the audit trail survives a failed inspection. Guard
 	// the nil case anyway: this defer runs on the request path, and a
@@ -663,6 +666,10 @@ func (t *wafRuntime) inspectAndForward(next http.Handler, w http.ResponseWriter,
 	}
 	observe := func(d gwaf.Decision) { observePhase(d, wafPhaseRequest, "") }
 
+	if errors.Is(err, errInspectionsSaturated) {
+		t.refuseSaturated(w)
+		return
+	}
 	if err != nil {
 		// The engine could not finish inspecting. Whether that permits
 		// the request is a policy decision, not an accident of control
@@ -700,6 +707,18 @@ func (t *wafRuntime) inspectAndForward(next http.Handler, w http.ResponseWriter,
 	}
 
 	t.inspectResponse(next, w, r, tx, observePhase)
+}
+
+// refuseSaturated answers a large body the gateway had no room to inspect.
+//
+// 503 rather than 403: nothing is known against the request, and a client
+// that retries after Retry-After is inspected like any other. It never goes
+// upstream, whatever FailOpen says (see errInspectionsSaturated).
+func (t *wafRuntime) refuseSaturated(w http.ResponseWriter) {
+	telemetry.MiddlewareWAFShedLargeBodiesTotal.WithLabelValues(t.cfg.RouteID).Inc()
+	w.Header().Set("Retry-After", largeBodyRetryAfter)
+	http.Error(w, "Service Unavailable (request body could not be inspected yet; retry)",
+		http.StatusServiceUnavailable)
 }
 
 // inspectResponse streams the upstream response through the engine.

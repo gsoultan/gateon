@@ -191,6 +191,16 @@ var MiddlewareWAFUninspectedResponsesTotal = promauto.NewCounterVec(prometheus.C
 	Help: "Responses whose body the WAF could not inspect, by route and reason.",
 }, []string{"route", "reason"})
 
+// MiddlewareWAFShedLargeBodiesTotal counts large request bodies the WAF
+// refused with 503 because every large-body inspection slot stayed taken.
+// A steady rate here on legitimate traffic means the tier's
+// WAFMaxLargeBodyInspections is too low for the host; a burst is a flood
+// being shed. The route label is operator-named and finite.
+var MiddlewareWAFShedLargeBodiesTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+	Name: "gateon_middleware_waf_shed_large_bodies_total",
+	Help: "Large request bodies refused with 503 because no inspection slot was free, by route.",
+}, []string{"route"})
+
 // MiddlewareWAFWouldBlockTotal counts requests an audit-only WAF declined to
 // refuse but would have refused if it were enforcing.
 //
