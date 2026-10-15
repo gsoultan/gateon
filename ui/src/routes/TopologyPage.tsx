@@ -3,16 +3,14 @@
 
 import { lazy, Suspense } from "react";
 import {
-  Title,
-  Text,
   Stack,
-  Group,
   LoadingOverlay,
 } from "@mantine/core";
 import { useQuery } from "@tanstack/react-query";
 import { apiFetch } from "../hooks/useGateon";
 import { QueryError } from "../components/QueryError";
 import { type Route, type Service, type EntryPoint, type Middleware } from "../types/gateon";
+import { PageHeader } from "../components/layout";
 
 // Lazy-loaded: the graph pulls in @xyflow/react + dagre (the heavy `viz-vendor`
 // chunk), which we only want to fetch once this page actually renders the graph.
@@ -54,14 +52,10 @@ export default function TopologyPage() {
   return (
     <Stack gap="xl" pos="relative" h="100%">
       <LoadingOverlay visible={isLoading} />
-      <Group justify="space-between">
-        <div>
-          <Title order={2}>Traffic Topology</Title>
-          <Text size="sm" c="dimmed">
-            Animated visual flow of traffic from entryPoints to backend services through middlewares.
-          </Text>
-        </div>
-      </Group>
+      <PageHeader
+        title="Traffic Topology"
+        description="Animated visual flow of traffic from entryPoints to backend services through middlewares."
+      />
 
       {failed && (
         <QueryError error={failed.error} what="the topology" onRetry={() => queries.forEach((q) => void q.refetch())} />

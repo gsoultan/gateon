@@ -4,12 +4,11 @@
 import { useMemo, useState } from "react";
 import {
   Card,
-  Title,
   Text,
   Stack,
   Group,
   Button,
-  Drawer,
+  
   Table,
   ActionIcon,
   Badge,
@@ -48,6 +47,7 @@ import { EntryPointForm } from "../components/EntryPointForm";
 import type { EntryPoint } from "../types/gateon";
 import { QueryError } from "../components/QueryError";
 import { ConfirmDeleteModal } from "../components/ConfirmDelete";
+import { FormDrawer, PageHeader } from "../components/layout";
 
 export default function EntryPointsPage() {
   const { canWrite } = usePermissions();
@@ -121,29 +121,23 @@ export default function EntryPointsPage() {
 
   return (
     <Stack gap="lg">
-      <Group justify="space-between" align="center" wrap="wrap" gap="md">
-        <div>
-          <Title order={2} fw={800} style={{ letterSpacing: -1 }}>
-            EntryPoints
-          </Title>
-          <Text c="dimmed" size="sm" fw={500}>
-            Configure network entryPoints and listening addresses.
-          </Text>
-        </div>
-        {canWrite && (
-          <Button
-            leftSection={<IconPlus size={18} />}
-            onClick={handleCreate}
-            size="md"
-            radius="md"
-            variant="gradient"
-            gradient={{ from: "blue", to: "cyan" }}
-            fullWidth={isMobile}
-          >
-            Create EntryPoint
-          </Button>
-        )}
-      </Group>
+      <PageHeader
+        title="EntryPoints"
+        description="Configure network entryPoints and listening addresses."
+        actions={
+          canWrite && (
+            <Button
+              leftSection={<IconPlus size={18} />}
+              onClick={handleCreate}
+              variant="gradient"
+              gradient={{ from: "blue", to: "cyan" }}
+              fullWidth={isMobile}
+            >
+              Create EntryPoint
+            </Button>
+          )
+        }
+      />
 
       <SimpleGrid cols={{ base: 1, sm: 3 }} spacing="md">
         <Paper p="md" radius="lg" withBorder shadow="xs">
@@ -448,27 +442,14 @@ export default function EntryPointsPage() {
         onConfirm={() => pendingDelete && deleteMutation.mutate(pendingDelete.id)}
       />
 
-      <Drawer
+      <FormDrawer
         opened={opened}
         onClose={close}
-        title={
-          <Text fw={800} size="xl" style={{ letterSpacing: -0.5 }}>
-            {editingEP ? "Edit EntryPoint" : "Create New EntryPoint"}
-          </Text>
-        }
-        position="right"
-        size="40%"
-        padding="xl"
-        styles={{
-          header: {
-            borderBottom: "1px solid var(--mantine-color-default-border)",
-            marginBottom: "xl",
-          },
-          content: { boxShadow: "var(--mantine-shadow-xl)" },
-        }}
+        title={editingEP ? "Edit EntryPoint" : "Create New EntryPoint"}
+        width="narrow"
       >
         <EntryPointForm onSuccess={close} initialData={editingEP} />
-      </Drawer>
+      </FormDrawer>
     </Stack>
   );
 }

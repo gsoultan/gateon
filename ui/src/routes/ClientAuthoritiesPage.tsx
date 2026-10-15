@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 import { useState, useEffect, useMemo } from 'react'
-import { Card, Title, Text, Stack, TextInput, Button, Group, Divider, Alert, Paper, ActionIcon, FileButton, Table, Tooltip, ScrollArea, Modal, Pagination, Box, Center, Select, Textarea } from '@mantine/core'
+import { Card, Text, Stack, TextInput, Button, Group, Divider, Alert, Paper, ActionIcon, FileButton, Table, Tooltip, ScrollArea, Modal, Pagination, Box, Center, Select, Textarea } from '@mantine/core'
 import { IconShieldLock, IconUpload, IconInfoCircle, IconPlus, IconTrash, IconLockCheck, IconClipboard, IconAlertTriangle } from '@tabler/icons-react'
 import { useDisclosure } from '@mantine/hooks'
 import type { GlobalConfig, ClientAuthority } from '../types/gateon'
@@ -11,6 +11,7 @@ import { usePermissions } from '../hooks/usePermissions'
 import { useGlobalConfigDraft } from '../hooks/useGlobalConfigDraft'
 import { ConfirmDeleteModal } from '../components/ConfirmDelete'
 import { AdminOnlyNote } from '../components/settings/adminOnly/AdminOnlyNote'
+import { PageHeader } from "../components/layout";
 
 export default function ClientAuthoritiesPage() {
   const { canUploadCerts: canWriteCerts, canChangeSecurityBoundary } = usePermissions()
@@ -172,15 +173,15 @@ export default function ClientAuthoritiesPage() {
 
   return (
     <Stack gap="xl">
-      <Group justify="space-between">
-        <div>
-          <Title order={2} fw={800} style={{ letterSpacing: -1 }}>Client Authorities</Title>
-          <Text c="dimmed" size="sm">Manage trusted Root CAs for mTLS client authentication.</Text>
-        </div>
-        {canUploadCerts && (
-          <Button leftSection={<IconPlus size={16} />} onClick={startAdd} disabled={!canEdit}>Add CA</Button>
-        )}
-      </Group>
+      <PageHeader
+        title="Client Authorities"
+        description="Manage trusted Root CAs for mTLS client authentication."
+        actions={
+          canUploadCerts && (
+            <Button leftSection={<IconPlus size={16} />} onClick={startAdd} disabled={!canEdit}>Add CA</Button>
+          )
+        }
+      />
       <AdminOnlyNote locked={canWriteCerts && !canChangeSecurityBoundary} />
 
       {status === 'failed' && (

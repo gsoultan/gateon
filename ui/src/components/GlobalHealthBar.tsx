@@ -2,12 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 import { useMemo } from "react";
-import {
-  Group,
-  Text,
-  Tooltip,
-  useMantineColorScheme,
-} from "@mantine/core";
+import { Group, Text, Tooltip } from "@mantine/core";
 import {
   IconRoute,
   IconServer,
@@ -15,7 +10,6 @@ import {
   IconPlugConnected,
   IconAlertTriangle,
 } from "@tabler/icons-react";
-import { safeToFixed } from "../utils/format";
 import {
   useGateonStatus,
   usePathStats,
@@ -23,17 +17,20 @@ import {
   useRequestsPerSecond,
 } from "../hooks/useGateon";
 
-export function GlobalHealthBar() {
+// One decimal, as the counts are read at a glance. Kept local: utils/format
+// carries date-fns, and this component is in the startup chunk.
+const oneDecimal = (n: number) => (Number.isFinite(n) ? n.toFixed(1) : "0");
+
+export function GlobalHealthBar({ wrap = false }: { wrap?: boolean }) {
   const { data: status } = useGateonStatus();
   const { data: pathStats } = usePathStats();
   const { data: aggStats } = useAggStats();
   const reqPerSec = useRequestsPerSecond();
-  const { colorScheme } = useMantineColorScheme();
 
   const reqsLabel = useMemo(() => {
     const totalReqs = pathStats?.reduce((s, p) => s + (p.requestCount ?? 0), 0) ?? 0;
-    if (totalReqs >= 1_000_000) return `${safeToFixed(totalReqs / 1_000_000, 1)}M`;
-    if (totalReqs >= 1000) return `${safeToFixed(totalReqs / 1000, 1)}K`;
+    if (totalReqs >= 1_000_000) return `${oneDecimal(totalReqs / 1_000_000)}M`;
+    if (totalReqs >= 1000) return `${oneDecimal(totalReqs / 1000)}K`;
     return String(totalReqs);
   }, [pathStats]);
 
@@ -76,14 +73,8 @@ export function GlobalHealthBar() {
     return s;
   }, [status, reqPerSec, reqsLabel, aggStats]);
 
-  const themeColors = useMemo(() => {
-    const bg = colorScheme === "dark" ? "var(--mantine-color-dark-6)" : "var(--mantine-color-gray-1)";
-    const borderColor = colorScheme === "dark" ? "var(--mantine-color-dark-4)" : "var(--mantine-color-gray-3)";
-    return { bg, borderColor };
-  }, [colorScheme]);
-
   return (
-    <Group gap={6} wrap="nowrap" className="shrink-0">
+    <Group gap={6} wrap={wrap ? "wrap" : "nowrap"} className="shrink-0">
       {stats.map(({ icon: Icon, value, label, color }) => (
         <Tooltip key={label} label={label} openDelay={500}>
           <Group
@@ -91,11 +82,13 @@ export function GlobalHealthBar() {
             px={10}
             justify="center"
             wrap="nowrap"
-            className="rounded-[20px] h-7"
-            style={{ 
-              backgroundColor: themeColors.bg,
-              borderColor: themeColors.borderColor,
-              border: '1px solid',
+            h={28}
+            // The border used to be set as a colour and then overwritten by
+            // the `border` shorthand, so every pill had a black outline.
+            style={{
+              borderRadius: 999,
+              backgroundColor: "var(--mantine-color-default)",
+              border: "1px solid var(--mantine-color-default-border)",
             }}
           >
             <Icon size={12} color={color} stroke={2.5} />

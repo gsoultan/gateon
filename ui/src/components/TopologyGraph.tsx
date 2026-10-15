@@ -26,7 +26,7 @@ import {
   ThemeIcon,
   Badge,
   Stack,
-  useMantineColorScheme,
+  useComputedColorScheme,
   Box,
   SegmentedControl,
 } from "@mantine/core";
@@ -136,8 +136,9 @@ const getLayoutedElements = (
 };
 
 const CustomNode = React.memo(({ data, type }: NodeProps<TopologyNode>) => {
-  const { colorScheme } = useMantineColorScheme();
-  const isDark = colorScheme === "dark";
+  // The computed scheme, never the setting: the setting is "auto" when the
+  // dashboard follows the system, and "auto" is not "dark".
+  const isDark = useComputedColorScheme("light") === "dark";
   const handleColor = isDark ? "var(--mantine-color-dark-3)" : "#adb5bd";
   const isHorizontal = data.isHorizontal !== false;
   const targetPos = isHorizontal ? Position.Left : Position.Top;

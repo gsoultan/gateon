@@ -42,8 +42,13 @@ func TestHangDBWaitsUntilReleasedWhateverItsContextSays(t *testing.T) {
 	h.Release()
 	wg.Wait()
 	close(errs)
+	// Either answer is right once Release has happened. The driver returns no
+	// rows, but database/sql closes a result set whose context is already
+	// done from a goroutine of its own, and Scan reports that context's error
+	// whenever that goroutine gets there first. What this test holds is the
+	// select above: nothing returned before Release.
 	for err := range errs {
-		if !errors.Is(err, sql.ErrNoRows) {
+		if !errors.Is(err, sql.ErrNoRows) && !errors.Is(err, context.DeadlineExceeded) {
 			t.Errorf("after Release a query answered %v, want no row", err)
 		}
 	}

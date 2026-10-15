@@ -39,6 +39,7 @@ import {
   tokenNameError,
   tokenRefusalMessage,
 } from "../components/apiTokens";
+import { PageHeader } from "../components/layout";
 
 /**
  * API tokens (ADR 0050): long-lived, scoped credentials an administrator
@@ -87,18 +88,15 @@ function TokensView() {
 
   return (
     <Stack gap="lg">
-      <Group justify="space-between" align="flex-end">
-        <Stack gap={0}>
-          <Title order={2}>API tokens</Title>
-          <Text c="dimmed" size="sm">
-            Credentials for machines. A token with "Read metrics" lets a scraper read /metrics and nothing else;
-            it is never a dashboard session.
-          </Text>
-        </Stack>
-        <Button leftSection={<IconPlus size={16} />} onClick={() => setCreating(true)}>
-          Create token
-        </Button>
-      </Group>
+      <PageHeader
+        title="API tokens"
+        description={'Credentials for machines. A token with "Read metrics" lets a scraper read /metrics and nothing else; it is never a dashboard session.'}
+        actions={
+          <Button leftSection={<IconPlus size={16} />} onClick={() => setCreating(true)}>
+            Create token
+          </Button>
+        }
+      />
 
       <Card withBorder radius="md" p={0}>
         {isLoading && (

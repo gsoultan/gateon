@@ -1,8 +1,8 @@
 // Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
 // SPDX-License-Identifier: MIT
 
-import { Fragment, useState } from 'react'
-import { Card, Title, Text, Stack, Group, Button, Drawer, Table, ActionIcon, Badge, TextInput, Center, Box, Menu, Tooltip, Paper, SimpleGrid, Pagination, Skeleton } from '@mantine/core'
+import { Fragment, useCallback, useState } from 'react'
+import { Card, Text, Stack, Group, Button,  Table, ActionIcon, Badge, TextInput, Center, Box, Menu, Tooltip, Paper, SimpleGrid, Pagination, Skeleton } from '@mantine/core'
 import { useDisclosure } from '@mantine/hooks'
 import { IconPlus, IconServer, IconSearch, IconDotsVertical, IconEdit, IconTrash, IconExternalLink, IconActivity, IconChevronDown, IconChevronRight, IconRocket } from '@tabler/icons-react'
 import { useServices, apiFetch, getApiErrorMessage } from '../hooks/useGateon'
@@ -14,6 +14,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { notifications } from '@mantine/notifications'
 import { QueryError } from "../components/QueryError";
 import { ConfirmDeleteModal } from "../components/ConfirmDelete";
+import { FormDrawer, PageHeader, useCreateFromLink } from "../components/layout";
 
 export default function ServicesPage() {
   const { canWrite } = usePermissions()
@@ -82,27 +83,26 @@ export default function ServicesPage() {
     openCanary()
   }
 
-  const handleCreate = () => {
+  const handleCreate = useCallback(() => {
     setEditingService(null)
     open()
-  }
+  }, [open])
+  useCreateFromLink(canWrite, handleCreate)
 
   const services = data?.services || []
   const totalCount = data?.totalCount || 0
 
   return (
     <Stack gap="lg">
-      <Group justify="space-between" align="center">
-        <div>
-          <Title order={2} fw={800} style={{ letterSpacing: -1 }}>Services</Title>
-          <Text c="dimmed" size="sm" fw={500}>
-            Define HTTP & gRPC backend targets and load balancing policies.
-          </Text>
-        </div>
-        {canWrite && (
-          <Button leftSection={<IconPlus size={18} />} onClick={handleCreate} size="md" radius="md">Create Service</Button>
-        )}
-      </Group>
+      <PageHeader
+        title="Services"
+        description="Define HTTP & gRPC backend targets and load balancing policies."
+        actions={
+          canWrite && (
+            <Button leftSection={<IconPlus size={18} />} onClick={handleCreate}>Create Service</Button>
+          )
+        }
+      />
 
       <SimpleGrid cols={{ base: 1, sm: 3 }} spacing="md">
         <Paper p="md" radius="lg" withBorder>
@@ -362,31 +362,23 @@ export default function ServicesPage() {
         onConfirm={() => pendingDelete && deleteMutation.mutate(pendingDelete.id)}
       />
 
-      <Drawer
+      <FormDrawer
         opened={opened}
         onClose={close}
-        title={<Text fw={800} size="xl" style={{ letterSpacing: -0.5 }}>{editingService ? 'Edit Service' : 'Create New Service'}</Text>}
-        position="right"
-        size={isMobile ? "100%" : "50%"}
-        padding="xl"
-        styles={{
-          header: { borderBottom: '1px solid var(--mantine-color-default-border)', marginBottom: 'xl' },
-          content: { boxShadow: 'var(--mantine-shadow-xl)' }
-        }}
+        title={editingService ? 'Edit Service' : 'Create New Service'}
+        width="wide"
       >
         <ServiceForm 
           onSuccess={close} 
           initialData={editingService}
         />
-      </Drawer>
+      </FormDrawer>
 
-      <Drawer
+      <FormDrawer
         opened={canaryOpened}
         onClose={closeCanary}
-        title={<Text fw={800} size="xl" style={{ letterSpacing: -0.5 }}>Canary Deployment Wizard</Text>}
-        position="right"
-        size={isMobile ? "100%" : "md"}
-        padding="xl"
+        title="Canary Deployment Wizard"
+        width="narrow"
       >
         {canaryService && (
           <CanaryWizard 
@@ -394,7 +386,7 @@ export default function ServicesPage() {
             onSuccess={closeCanary}
           />
         )}
-      </Drawer>
+      </FormDrawer>
     </Stack>
   )
 }

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 import { useState, useEffect, useMemo } from 'react'
-import { Card, Title, Text, Stack, TextInput, Button, Group, Divider, Alert, Paper, ActionIcon, FileButton, Table, Tooltip, ScrollArea, Modal, Pagination, Box, Center, Badge, List, ThemeIcon, Textarea, Code, SimpleGrid } from '@mantine/core'
+import { Card, Text, Stack, TextInput, Button, Group, Divider, Alert, Paper, ActionIcon, FileButton, Table, Tooltip, ScrollArea, Modal, Pagination, Box, Center, Badge, List, ThemeIcon, Textarea, Code, SimpleGrid } from '@mantine/core'
 import { IconShieldLock, IconUpload, IconInfoCircle, IconPlus, IconCertificate, IconKey, IconTrash, IconPencil, IconAlertTriangle, IconCheck, IconBulb, IconClipboard, IconDotsVertical } from '@tabler/icons-react'
 import { useDisclosure } from '@mantine/hooks'
 import { useIsMobile } from "../hooks/useMobile"
@@ -11,6 +11,7 @@ import { apiFetch, getApiErrorMessage } from '../hooks/useGateon'
 import { usePermissions } from '../hooks/usePermissions'
 import { useGlobalConfigDraft } from '../hooks/useGlobalConfigDraft'
 import { ConfirmDeleteModal } from '../components/ConfirmDelete'
+import { PageHeader } from "../components/layout";
 
 export default function CertificatesPage() {
   const { canUploadCerts } = usePermissions()
@@ -171,15 +172,15 @@ export default function CertificatesPage() {
 
   return (
     <Stack gap="xl">
-      <Group justify="space-between" wrap="wrap" gap="md">
-        <div>
-          <Title order={2} fw={800} style={{ letterSpacing: -1 }}>Certificates</Title>
-          <Text c="dimmed" size="sm">Manage SSL/TLS certificates for your domains.</Text>
-        </div>
-        {canUploadCerts && (
-          <Button leftSection={<IconPlus size={16} />} onClick={startAdd} fullWidth={isMobile} disabled={!canEdit}>Add Certificate</Button>
-        )}
-      </Group>
+      <PageHeader
+        title="Certificates"
+        description="Manage SSL/TLS certificates for your domains."
+        actions={
+          canUploadCerts && (
+            <Button leftSection={<IconPlus size={16} />} onClick={startAdd} fullWidth={isMobile} disabled={!canEdit}>Add Certificate</Button>
+          )
+        }
+      />
 
       {status === 'failed' && (
         <Alert color="red" variant="light" radius="md" icon={<IconAlertTriangle size={16} />} title="Certificates could not be loaded">

@@ -1,17 +1,18 @@
 // Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
 // SPDX-License-Identifier: MIT
 
-import { lazy, Suspense } from "react";
-import { Title, Text, Stack, Button, Group, Alert, Paper, Skeleton, Tabs } from "@mantine/core";
+import { lazy, Suspense, useEffect } from "react";
+import { Text, Stack, Button, Group, Alert, Skeleton, Tabs } from "@mantine/core";
 import {
   IconAdjustments,
   IconAlertTriangle,
-  IconCheck,
   IconNetwork,
   IconServer,
   IconShieldLock,
 } from "@tabler/icons-react";
 import { useUrlFilters } from "../hooks/useUrlFilters";
+import { PageHeader } from "../components/layout";
+import { SettingsSaveBar } from "../components/settings/tabs/SettingsSaveBar";
 import { useSettingsState } from "../components/settings/tabs/settingsState";
 import { asSettingsTab, type SettingsTab } from "../components/settings/tabs/settingsTab";
 
@@ -28,7 +29,15 @@ export default function SettingsPage() {
   // in a tab: keepMounted is off, so a tab that is not showing is unmounted,
   // and its chunk is not fetched until it is first opened.
   const settings = useSettingsState();
-  const { configLoad, configLoadError, canEditGlobal, saving, error, savedOk } = settings;
+  const { configLoad, configLoadError, canEditGlobal, saving, error, savedOk, hasChanges } = settings;
+
+  // Leaving the page drops every unsaved edit, so the browser asks first.
+  useEffect(() => {
+    if (!hasChanges) return;
+    const warn = (e: BeforeUnloadEvent) => e.preventDefault();
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [hasChanges]);
   const [filters, setFilters] = useUrlFilters<{ tab: string }>();
   const tab = asSettingsTab(filters.tab);
   const showTab = (next: string | null) => {
@@ -38,14 +47,7 @@ export default function SettingsPage() {
 
   return (
     <Stack gap="xl">
-      <div>
-        <Title order={2} fw={800} style={{ letterSpacing: -1 }}>
-          Settings
-        </Title>
-        <Text c="dimmed" size="sm">
-          Manage your gateway preferences and UI appearance.
-        </Text>
-      </div>
+      <PageHeader title="Settings" description="Manage your gateway preferences and UI appearance." />
 
       {configLoad === "failed" && (
         <Alert color="red" variant="light" icon={<IconAlertTriangle size="1rem" />} title="Gateway settings could not be loaded">
@@ -94,36 +96,18 @@ export default function SettingsPage() {
       </Tabs>
 
       {/* Outside the tabs, so every tab can save and every save reports here,
-          whichever tab's button made it. */}
+          whichever tab's button made it. It floats only while there are
+          unsaved edits. */}
       {canEditGlobal && (
-        <Paper withBorder p="md" radius="md" style={{ position: 'sticky', bottom: 20, zIndex: 10, boxShadow: 'var(--mantine-shadow-lg)' }}>
-          <Stack gap="xs">
-            <Group justify="space-between">
-              <div>
-                <Text fw={600}>Unsaved Changes</Text>
-                <Text size="xs" c="dimmed">You have modified the global configuration. Save to apply changes.</Text>
-              </div>
-              <Button
-                onClick={settings.saveGatewayConfig}
-                loading={saving}
-                disabled={configLoad !== "loaded"}
-                leftSection={<IconCheck size={16} />}
-              >
-                Save Global Configuration
-              </Button>
-            </Group>
-            {error && (
-              <Text c="red" size="sm" fw={600}>
-                {error}
-              </Text>
-            )}
-            {savedOk && (
-              <Text c="green" size="sm" fw={600}>
-                Configuration successfully updated!
-              </Text>
-            )}
-          </Stack>
-        </Paper>
+        <SettingsSaveBar
+          hasChanges={hasChanges}
+          saving={saving}
+          canSave={configLoad === "loaded"}
+          error={error}
+          savedOk={savedOk}
+          onSave={settings.saveGatewayConfig}
+          onDiscard={settings.discardChanges}
+        />
       )}
     </Stack>
   );

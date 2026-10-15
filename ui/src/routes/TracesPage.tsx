@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: MIT
 
 import {
-  Title,
   Text,
   Card,
   Table,
@@ -50,6 +49,7 @@ import { QueryError } from "../components/QueryError";
 import TraceDetailsModal from "../components/Traces/TraceDetailsModal";
 import { getDurationColor, getStatusColor, isSuccessStatus } from "../components/Traces/traceFormat";
 import { hourPeriod, type Period } from "../components/Traces/tracePeriods";
+import { PageHeader } from "../components/layout";
 
 // The History and Archive tabs load when first opened: most visits to this
 // page are for the live view.
@@ -154,39 +154,36 @@ export default function TracesPage() {
 
   return (
     <Stack gap="lg">
-      <Group justify="space-between">
-        <Stack gap={0}>
-          <Group gap="sm" align="center">
-            <Title order={2}>Distributed Tracing</Title>
+      <PageHeader
+        title={
+          <Group gap="sm" align="center" component="span">
+            Distributed Tracing
             {tab === "live" && traces.length > 0 && (
               <Badge variant="light" size="lg" radius="sm">
                 {traces.length} Total
               </Badge>
             )}
           </Group>
-          <Text c="dimmed">
-            Monitor and visualize end-to-end request flows across your
-            microservices.
-          </Text>
-        </Stack>
-        <Group>
-          {tab === "live" && (
-            <Stack gap={0} align="flex-end">
+        }
+        description="Monitor and visualize end-to-end request flows across your microservices."
+        actions={
+          tab === "live" && (
+            <Group gap="sm">
+              <Text size="xs" c="dimmed">
+                Auto-refreshes every 5s
+              </Text>
               <Button
                 leftSection={<IconRefresh size={16} />}
-                variant="light"
+                variant="default"
                 loading={isLoading}
                 onClick={() => refetch()}
               >
                 Refresh
               </Button>
-              <Text size="xs" c="dimmed" mt={4}>
-                Auto-refreshes every 5s
-              </Text>
-            </Stack>
-          )}
-        </Group>
-      </Group>
+            </Group>
+          )
+        }
+      />
 
       {/* keepMounted off: a tab that is not showing is not mounted, so the
           archive is not listed and no period is queried until they are. */}
