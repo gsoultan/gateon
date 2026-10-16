@@ -11,6 +11,21 @@ here after the fact.
 
 ## Unreleased
 
+### A git push through the WAF needs the route to say it hosts git
+
+The WAF used to skip the body of any request whose `Content-Type` or path named
+git's smart-HTTP protocol. Both are written by the client, and every client the
+gateway has not seen passed the reputation gate on that skip, so naming git was
+enough to send any body, of any size, past the WAF to a backend that parses it
+without checking `Content-Type` (ADR 0071). The body is now inspected unless the
+route opts in.
+
+**Who is affected:** routes with a WAF in front of a git server (Gitea, GitLab,
+cgit, `git http-backend`). A push larger than the WAF body limit is refused with
+`403` until you turn on **This route hosts git** on the route's WAF middleware
+(`git_smart_http: "true"`). For the gateway-wide WAF, or as a default for every
+route, set `GATEON_WAF_GIT_SMART_HTTP=true`; a route's own value wins over it.
+
 ### Large request bodies can get 503 while the WAF is saturated
 
 A request body over 64 KiB is now inspected only when one of a fixed number of

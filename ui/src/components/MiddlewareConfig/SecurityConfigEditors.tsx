@@ -281,6 +281,15 @@ export function WAFConfigFields({ config, updateConfig, global, globalUnreadable
         checked={config.ssrf_protection === "true"}
         onChange={(e) => updateConfig("ssrf_protection", e.currentTarget.checked ? "true" : "false")}
       />
+      <Switch
+        label="This route hosts git (smart HTTP)"
+        description="Let git push and fetch bodies through uninspected, so a packfile larger than the
+          body limit is not refused. Only for a route in front of a git server: any client can claim
+          to be git, so on other routes this lets request bodies past the WAF. The request line and
+          headers are still inspected."
+        checked={config.git_smart_http === "true"}
+        onChange={(e) => updateConfig("git_smart_http", e.currentTarget.checked ? "true" : "false")}
+      />
 
       <Divider label="Body Limits" labelPosition="center" />
       <Group grow>
