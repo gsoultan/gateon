@@ -89,9 +89,27 @@ func (d *sharedHTTPDispatcher) Accept() (net.Conn, error) {
 // return, and Serve returns only when Accept does. This used to return nil and
 // do nothing, so the first HTTP request a plaintext TCP entrypoint inspected
 // left the process unable to finish a graceful shutdown at all.
+//
+// A connection still queued then is never accepted, so it is closed here --
+// which also gives back the slots it holds on its TCP entrypoint.
 func (d *sharedHTTPDispatcher) Close() error {
 	d.closeOnce.Do(func() { close(d.done) })
+	d.closeQueued()
 	return nil
+}
+
+// closeQueued closes every connection waiting in the queue. Close calls it,
+// and so does a sender that queued a connection and then found the
+// dispatcher closed: between them nothing is left in the queue for good.
+func (d *sharedHTTPDispatcher) closeQueued() {
+	for {
+		select {
+		case c := <-d.conns:
+			_ = c.Close()
+		default:
+			return
+		}
+	}
 }
 
 func (d *sharedHTTPDispatcher) Addr() net.Addr {
@@ -161,6 +179,11 @@ func serveConnAsHTTP(conn net.Conn, peeked []byte, ep *gateonv1.EntryPoint, deps
 	}
 	select {
 	case d.conns <- newPeekedConn(conn, peeked):
+		select {
+		case <-d.done: // closed while this was being queued
+			d.closeQueued()
+		default:
+		}
 	default:
 		// Connection queue full, drop to protect system
 		logger.L.LogWarn("shared http connection queue full, dropping", "ep", ep.Id)

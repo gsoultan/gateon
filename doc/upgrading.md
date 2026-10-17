@@ -109,6 +109,20 @@ node-local DNS cache, an IPv6 link-local device), set
 `GATEON_ALLOW_LINK_LOCAL_TARGETS=1`; the metadata addresses themselves stay
 refused whatever it says. UDP services are not affected.
 
+### HTTP connections through a plaintext TCP entrypoint count against its connection caps
+
+A plaintext TCP entrypoint that detected HTTP gave a connection's slot back as
+soon as it handed the connection to its HTTP server, so `max_connections`, the
+per-address cap (`GATEON_ENTRYPOINT_MAX_CONN_PER_ADDR`) and the block hook never
+reached HTTP served there (ADR 0076). The slot is now held until the connection
+closes, idle keep-alive time included, as on an HTTP entrypoint.
+
+**Who is affected:** TCP entrypoints that also serve HTTP routes and whose HTTP
+clients hold more open connections than the entrypoint's `max_connections` (or
+than the per-address cap from one address). The excess is refused at accept;
+raise `max_connections` if that traffic is legitimate. A blocked address's open
+HTTP connections on such an entrypoint are now closed when it is blocked.
+
 ### A git push through the WAF needs the route to say it hosts git
 
 The WAF used to skip the body of any request whose `Content-Type` or path named

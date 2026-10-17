@@ -87,6 +87,7 @@ ADRs follow a lightweight [MADR](https://adr.github.io/madr/)-style format:
 | [0075](./0075-schema-validation-decodes-a-bounded-body-a-bounded-number-of-times-at-once.md) | Schema validation decodes a bounded body, a bounded number of times at once | Accepted |
 | [0078](./0078-the-gateway-never-proxies-to-cloud-instance-metadata.md) | The gateway never proxies to cloud instance metadata | Accepted |
 | [0079](./0079-a-route-wafs-audit-log-stays-in-the-audit-directory.md) | A route WAF's audit log stays in the audit directory | Accepted |
+| [0076](./0076-an-http-connection-through-a-tcp-entrypoint-holds-its-slot-until-it-closes.md) | An HTTP connection through a TCP entrypoint holds its slot until it closes | Accepted |
 
 ## Conventions
 

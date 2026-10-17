@@ -395,10 +395,10 @@ func (s *tcpServer) serve(l net.Listener) {
 			s.refusePerAddr(conn)
 		case admitted:
 			telemetry.GlobalDiagnostics.RecordConnection(s.ep.Id)
+			lease := s.lease(conn)
 			s.wg.Go(func() {
-				defer s.conns.remove(conn)
-				defer telemetry.GlobalDiagnostics.RecordDisconnect(s.ep.Id)
-				s.handle(conn)
+				defer lease.releaseUnlessHandedOff()
+				s.handle(conn, lease)
 			})
 		}
 	}
@@ -411,12 +411,16 @@ func (s *tcpServer) serve(l net.Listener) {
 // path too, where no HTTP request ever reaches IPMitigation. A blocked address
 // used to connect to a TCP entrypoint as freely as any other whenever eBPF was
 // not there to drop it in the kernel.
-func (s *tcpServer) handle(c net.Conn) {
+//
+// lease is c's hold on the entrypoint's slots. The HTTP path hands it off with
+// the connection, which the shared HTTP server goes on serving after this
+// returns; every other path leaves it to the caller to end.
+func (s *tcpServer) handle(c net.Conn, lease *connLease) {
 	if s.refuseBlocked(c) {
 		return
 	}
 	if s.plaintext {
-		handleTCPConnWithInspection(c, s.ep, s.deps, s.wg)
+		handleTCPConnWithInspection(c, s.ep, s.deps, lease)
 		return
 	}
 	defer c.Close()
@@ -425,6 +429,16 @@ func (s *tcpServer) handle(c net.Conn) {
 		return
 	}
 	handleTCPConn(c)
+}
+
+// lease is the hold an admitted connection has on s's slots, ended when the
+// connection is done with -- by the goroutine serving it, or, once it is
+// handed to the shared HTTP server, by its Close.
+func (s *tcpServer) lease(conn net.Conn) *connLease {
+	return &connLease{end: func() {
+		telemetry.GlobalDiagnostics.RecordDisconnect(s.ep.Id)
+		s.conns.remove(conn)
+	}}
 }
 
 // refuseOverLimit closes a connection accepted while the entrypoint already
@@ -505,7 +519,10 @@ var (
 // ends in the process's monotonic clock reading, which is its uptime.
 const noRouteReply = "Gateon TCP Entrypoint - no route for this connection\n"
 
-func handleTCPConnWithInspection(conn net.Conn, ep *gateonv1.EntryPoint, deps *Deps, wg *syncutil.WaitGroup) {
+// handleTCPConnWithInspection serves conn by what its first bytes say. lease
+// is its hold on the entrypoint's slots, nil for a connection no entrypoint
+// admitted: a connection handed to the shared HTTP server takes it along.
+func handleTCPConnWithInspection(conn net.Conn, ep *gateonv1.EntryPoint, deps *Deps, lease *connLease) {
 	if debugLogging() {
 		logger.L.LogDebug("TCP connection received for inspection", "ep", ep.Id, "remote", conn.RemoteAddr().String())
 	}
@@ -523,6 +540,16 @@ func handleTCPConnWithInspection(conn net.Conn, ep *gateonv1.EntryPoint, deps *D
 	if !ok {
 		return
 	}
+	if len(first) > 0 && IsTCPAppHTTP(first) {
+		if debugLogging() {
+			logger.L.LogDebug("TCP inspection: HTTP detected", "ep", ep.Id)
+		}
+		// The shared HTTP server reads it on another goroutine, after the
+		// peek buffer has gone back to the pool, and for as long as the
+		// client keeps it open: the connection keeps its slots until then.
+		serveConnAsHTTP(lease.handOff(conn), bytes.Clone(first), ep, deps)
+		return
+	}
 	if len(first) > 0 && routeInspected(conn, first, ep, deps) {
 		return
 	}
@@ -538,19 +565,9 @@ func resolveTCPRoute(ep *gateonv1.EntryPoint, deps *Deps, protocol string) l4.TC
 	return deps.L4Resolver.ResolveTCP(ep, protocol)
 }
 
-// routeInspected hands a connection whose first bytes are first to where they
-// say it goes -- the entrypoint's HTTP server, or the L4 route for its
-// protocol -- and reports whether anything took it.
+// routeInspected hands a connection whose first bytes are first, and are not
+// HTTP, to the L4 route for its protocol, and reports whether one took it.
 func routeInspected(conn net.Conn, first []byte, ep *gateonv1.EntryPoint, deps *Deps) bool {
-	if IsTCPAppHTTP(first) {
-		if debugLogging() {
-			logger.L.LogDebug("TCP inspection: HTTP detected", "ep", ep.Id)
-		}
-		// The shared HTTP server reads it on another goroutine, after the
-		// peek buffer has gone back to the pool.
-		serveConnAsHTTP(conn, bytes.Clone(first), ep, deps)
-		return true
-	}
 	protocol := l4Protocol(first)
 	p := resolveTCPRoute(ep, deps, protocol)
 	if p == nil {
