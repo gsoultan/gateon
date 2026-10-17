@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"net/netip"
+	"strings"
 	"testing"
 
 	"golang.org/x/net/dns/dnsmessage"
@@ -108,6 +109,39 @@ func serveOneDNS(c net.Conn, a netip.Addr) {
 		}
 		if _, err := c.Write(append([]byte{byte(len(out) >> 8), byte(len(out))}, out...)); err != nil {
 			return
+		}
+	}
+}
+
+// TestCheckTargetRefusesCloudMetadata (ADR 0077): a service target naming the
+// metadata service is refused at save time in every form the proxy reads --
+// bare address, host:port, URL under any TCP scheme, published name -- and
+// while no management listener has bound, since the metadata check runs
+// before the management one looks at the port.
+func TestCheckTargetRefusesCloudMetadata(t *testing.T) {
+	withPort(t, 0)
+	for _, target := range []string{
+		"169.254.169.254", " 169.254.169.254:8080 ", "http://169.254.169.254/latest/meta-data",
+		"https://[fd00:ec2::254]", "tcp://100.100.100.200:80", "grpc://[::ffff:169.254.169.254]:443",
+		"http://metadata.google.internal", "METADATA.GOOGLE.INTERNAL.:80", "ws://instance-data.ec2.internal",
+	} {
+		if err := CheckTarget(context.Background(), target); err == nil || !strings.Contains(err.Error(), "metadata") {
+			t.Errorf("CheckTarget(%q) = %v, want a metadata refusal", target, err)
+		}
+	}
+}
+
+// TestCheckTargetLeavesOtherTargetsToTheDialer: a UDP target is not a TCP
+// connect, an unparseable URL says nowhere to refuse, and an ordinary backend
+// is not metadata; none is refused here.
+func TestCheckTargetLeavesOtherTargetsToTheDialer(t *testing.T) {
+	withPort(t, 0)
+	for _, target := range []string{
+		"udp://169.254.169.254:53", "h3://169.254.169.254:443", "http://[::1", "http://10.0.0.5:8080",
+		"backend.internal:9000", "metadata.google.internal.evil.example",
+	} {
+		if err := CheckTarget(context.Background(), target); err != nil {
+			t.Errorf("CheckTarget(%q) = %v, want nil", target, err)
 		}
 	}
 }

@@ -240,3 +240,80 @@ func TestSaveDoesNotInvalidateTheWAFCacheForOtherTypes(t *testing.T) {
 		t.Errorf("WAF invalidations = %d, want 0 for a non-waf middleware", waf.calls)
 	}
 }
+
+// refusingGuard records the saves it saw and refuses each with err.
+type refusingGuard struct {
+	seen []string
+	err  error
+}
+
+func (g *refusingGuard) AuthorizeMiddlewareSave(_ context.Context, mw *gateonv1.Middleware) error {
+	g.seen = append(g.seen, mw.Id)
+	return g.err
+}
+
+// TestSaveStopsAtTheFirstGuardThatRefuses (ADR 0072): a refused save writes
+// nothing, a nil guard is ignored rather than dereferenced, and every guard
+// runs on a save they all allow.
+func TestSaveStopsAtTheFirstGuardThatRefuses(t *testing.T) {
+	refused := errors.New("forward auth on a credential route needs an admin")
+	allow, deny := &refusingGuard{}, &refusingGuard{err: refused}
+	store := newMwStore()
+	svc := NewService(store, &fakeRouteStore{}, &fakeInvalidator{}, nil, nil, logger.Default(), nil, allow, deny)
+
+	err := svc.SaveMiddleware(context.Background(), &gateonv1.Middleware{Id: "fa", Type: "forwardauth"})
+	if !errors.Is(err, refused) {
+		t.Fatalf("SaveMiddleware = %v, want the guard's refusal", err)
+	}
+	if _, ok := store.items["fa"]; ok {
+		t.Fatal("a refused save was written")
+	}
+	if len(allow.seen) != 1 || len(deny.seen) != 1 {
+		t.Fatalf("guards saw %v and %v, want one save each", allow.seen, deny.seen)
+	}
+
+	svc = NewService(store, &fakeRouteStore{}, &fakeInvalidator{}, nil, nil, logger.Default(), nil, allow)
+	if err := svc.SaveMiddleware(context.Background(), &gateonv1.Middleware{Id: "fa", Type: "forwardauth"}); err != nil {
+		t.Fatalf("SaveMiddleware with every guard allowing = %v", err)
+	}
+	if _, ok := store.items["fa"]; !ok {
+		t.Fatal("an allowed save was not written")
+	}
+}
+
+func TestSaveRejectsANilMiddleware(t *testing.T) {
+	svc := newSvc(newMwStore(), &fakeRouteStore{}, &fakeInvalidator{}, nil)
+	if err := svc.SaveMiddleware(context.Background(), nil); err == nil {
+		t.Fatal("SaveMiddleware(nil) = nil, want an error")
+	}
+}
+
+// TestReadsGoToTheStore: Get and ListPaginated are the store's answers.
+func TestReadsGoToTheStore(t *testing.T) {
+	svc := newSvc(newMwStore(&gateonv1.Middleware{Id: "a"}), &fakeRouteStore{}, &fakeInvalidator{}, nil)
+	if m, ok := svc.GetMiddleware(context.Background(), "a"); !ok || m.Id != "a" {
+		t.Fatalf("GetMiddleware(a) = %v, %v", m, ok)
+	}
+	if _, ok := svc.GetMiddleware(context.Background(), "b"); ok {
+		t.Fatal("GetMiddleware(b) found a middleware that does not exist")
+	}
+	if _, n := svc.ListPaginated(context.Background(), 1, 10, ""); n != 0 {
+		t.Fatalf("ListPaginated total = %d, want the store's 0", n)
+	}
+}
+
+// TestRoutesUsingMiddlewareNamesOnlyTheRoutesThatBindIt: an empty ID binds
+// nothing, and a route binding the middleware twice is named once.
+func TestRoutesUsingMiddlewareNamesOnlyTheRoutesThatBindIt(t *testing.T) {
+	rts := &fakeRouteStore{routes: []*gateonv1.Route{
+		{Id: "r1", Middlewares: []string{"x", "m", "m"}}, {Id: "r2", Middlewares: []string{"x"}}, {Id: "r3"},
+	}}
+	svc := newSvc(newMwStore(), rts, &fakeInvalidator{}, nil)
+	if got := svc.RoutesUsingMiddleware(context.Background(), ""); got != nil {
+		t.Fatalf("RoutesUsingMiddleware(\"\") = %v, want nil", got)
+	}
+	got := svc.RoutesUsingMiddleware(context.Background(), "m")
+	if len(got) != 1 || got[0].Id != "r1" {
+		t.Fatalf("RoutesUsingMiddleware(m) = %v, want [r1]", got)
+	}
+}
