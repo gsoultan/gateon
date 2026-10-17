@@ -42,6 +42,22 @@ credential, or changing the type, config or wasm module of one bound to such a
 route now gets `403` / `PermissionDenied`; an administrator makes the change.
 Renaming it, and everything on routes without a credential, is unchanged.
 
+### br responses can be sent gzip while brotli is busy
+
+The compress middleware now brotli-encodes only a fixed number of responses at
+once in the whole process: 8 on minimal, 32 on standard, 128 on enterprise
+(ADR 0074). A client that offers br when every slot is taken gets gzip, or an
+unencoded response if it does not take gzip. It never waits. Encoders also run
+at quality 5 with a 256 KiB window, so br output is about 1% larger than before
+and each encoder uses about a quarter of the memory. The dashboard's own assets
+now come from the precompressed files shipped in the build.
+
+**Who is affected:** routes with the compress middleware, and anyone who uses
+the dashboard. Nothing needs to change. If
+`gateon_middleware_compress_brotli_fallbacks_total` rises on ordinary traffic and
+you would rather pay the memory, raise `GATEON_COMPRESS_MAX_BROTLI_ENCODERS`.
+Budget about 2.6 MiB per slot.
+
 ### A git push through the WAF needs the route to say it hosts git
 
 The WAF used to skip the body of any request whose `Content-Type` or path named

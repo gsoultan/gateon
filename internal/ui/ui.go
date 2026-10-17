@@ -9,10 +9,12 @@ package ui
 import (
 	"bytes"
 	"embed"
+	"io"
 	"io/fs"
 	"mime"
 	"net/http"
 	"path"
+	"strconv"
 	"strings"
 
 	"github.com/gsoultan/gateon/internal/middleware/kind"
@@ -92,6 +94,9 @@ func StaticHandler(content fs.FS, subDir string) http.Handler {
 		} else {
 			_ = f.Close()
 		}
+		if servePrecompressed(w, r, dist, cleanPath) {
+			return
+		}
 		fileServer.ServeHTTP(w, r)
 	})
 }
@@ -105,6 +110,113 @@ func isAsset(p string) bool {
 	switch ext {
 	case ".js", ".mjs", ".css", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico", ".woff", ".woff2", ".ttf", ".eot", ".json", ".wasm", ".map":
 		return true
+	}
+	return false
+}
+
+// precompressedVariants are the encodings the dashboard build writes beside
+// each asset, best first.
+var precompressedVariants = [...]struct{ encoding, suffix string }{
+	{"br", ".br"},
+	{"gzip", ".gz"},
+}
+
+// servePrecompressed answers with the variant the build already compressed,
+// when the client accepts one, and reports whether it did.
+//
+// Without it the management chain's compress middleware brotli-encoded every
+// asset on the fly, for unauthenticated clients, at about 11 MiB of live heap
+// per encoder: 200 concurrent requests for the largest bundle held 2.2 GiB
+// (ADR 0074). The variant carries its own Content-Encoding, which the compress
+// middleware takes as already encoded and passes through untouched.
+//
+// index.html never reaches here: it is rewritten per request with the CSP
+// nonce, so its precompressed copy is not what is served.
+func servePrecompressed(w http.ResponseWriter, r *http.Request, dist fs.FS, name string) bool {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		return false
+	}
+	accept := r.Header.Get("Accept-Encoding")
+	varies := false
+	for _, v := range precompressedVariants {
+		f, err := dist.Open(name + v.suffix)
+		if err != nil {
+			continue
+		}
+		varies = true
+		if !acceptsEncoding(accept, v.encoding) {
+			_ = f.Close()
+			continue
+		}
+		served := serveVariant(w, r, f, name, v.encoding)
+		_ = f.Close()
+		if served {
+			return true
+		}
+	}
+	if varies {
+		// The plain answer differs by Accept-Encoding too, or a shared cache
+		// could hand it the br one.
+		w.Header().Add("Vary", "Accept-Encoding")
+	}
+	return false
+}
+
+// serveVariant writes f as name encoded with encoding. It reports false, having
+// written nothing, when f cannot be served from (not seekable, no stat).
+func serveVariant(w http.ResponseWriter, r *http.Request, f fs.File, name, encoding string) bool {
+	rs, ok := f.(io.ReadSeeker)
+	if !ok {
+		return false
+	}
+	info, err := f.Stat()
+	if err != nil || info.IsDir() {
+		return false
+	}
+	h := w.Header()
+	if ct := mime.TypeByExtension(path.Ext(name)); ct != "" {
+		h.Set("Content-Type", ct)
+	}
+	h.Set("Content-Encoding", encoding)
+	h.Add("Vary", "Accept-Encoding")
+	// ServeContent leaves Content-Length off an encoded answer. The variant is
+	// served whole, so its length is the file's; a range of the encoded bytes
+	// is not worth what it would take to get right, and the whole answer is
+	// what a client gets for a Range it cannot have.
+	h.Set("Content-Length", strconv.FormatInt(info.Size(), 10))
+	if r.Header.Get("Range") != "" {
+		r = r.Clone(r.Context())
+		r.Header.Del("Range")
+	}
+	http.ServeContent(w, r, name, info.ModTime(), rs)
+	return true
+}
+
+// acceptsEncoding reports whether an Accept-Encoding header admits coding: it
+// is named, or "*" is, without q=0.
+func acceptsEncoding(header, coding string) bool {
+	star := false
+	for part := range strings.SplitSeq(header, ",") {
+		name, params, _ := strings.Cut(part, ";")
+		name = strings.ToLower(strings.TrimSpace(name))
+		switch name {
+		case coding:
+			return !zeroQuality(params)
+		case "*":
+			star = !zeroQuality(params)
+		}
+	}
+	return star
+}
+
+// zeroQuality reports whether a coding's parameters carry q=0, which refuses it.
+func zeroQuality(params string) bool {
+	for p := range strings.SplitSeq(params, ";") {
+		k, v, ok := strings.Cut(strings.TrimSpace(p), "=")
+		if ok && strings.EqualFold(strings.TrimSpace(k), "q") {
+			q, err := strconv.ParseFloat(strings.TrimSpace(v), 64)
+			return err == nil && q == 0
+		}
 	}
 	return false
 }

@@ -163,6 +163,16 @@ type TierDefaults struct {
 	// overrides it; it cannot be switched off.
 	WAFMaxLargeBodyInspections int
 
+	// CompressMaxBrotliEncoders is how many responses the compress middleware
+	// brotli-encodes at once in the whole process (ADR 0074). One encoder holds
+	// about 2.6 MiB once it has seen more than its 256 KiB window -- gzip about
+	// 1 MiB -- and every client that offers br asks for one, so it is the
+	// count, not any one response, that runs out of memory. A response that
+	// finds every encoder in use is sent gzip, or unencoded to a client that
+	// takes only br; it never waits. GATEON_COMPRESS_MAX_BROTLI_ENCODERS
+	// overrides it; it cannot be switched off.
+	CompressMaxBrotliEncoders int
+
 	// MaxHeaderBytes is the most request-header bytes an HTTP listener --
 	// every entrypoint and the management listener, over HTTP/1, HTTP/2 and
 	// HTTP/3 -- buffers for one request; a request past it is refused with 431
@@ -284,6 +294,7 @@ func DefaultsFor(tier Tier) TierDefaults {
 			EntryPointMaxConnections:   1000,
 			EntryPointMaxConnPerAddr:   128,
 			WAFMaxLargeBodyInspections: 4,
+			CompressMaxBrotliEncoders:  8,
 			MaxHeaderBytes:             32 << 10, // 32 KiB
 			StreamIdleTimeout:          2 * time.Minute,
 			StreamMaxLifetime:          time.Hour,
@@ -325,6 +336,7 @@ func DefaultsFor(tier Tier) TierDefaults {
 			EntryPointMaxConnections:   50000,
 			EntryPointMaxConnPerAddr:   1024,
 			WAFMaxLargeBodyInspections: 64,
+			CompressMaxBrotliEncoders:  128,
 			MaxHeaderBytes:             64 << 10, // 64 KiB
 			StreamIdleTimeout:          10 * time.Minute,
 			StreamMaxLifetime:          12 * time.Hour,
@@ -366,6 +378,7 @@ func DefaultsFor(tier Tier) TierDefaults {
 			EntryPointMaxConnections:   10000,
 			EntryPointMaxConnPerAddr:   256,
 			WAFMaxLargeBodyInspections: 16,
+			CompressMaxBrotliEncoders:  32,
 			MaxHeaderBytes:             32 << 10, // 32 KiB
 			StreamIdleTimeout:          5 * time.Minute,
 			StreamMaxLifetime:          4 * time.Hour,
