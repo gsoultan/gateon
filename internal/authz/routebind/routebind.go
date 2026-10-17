@@ -18,6 +18,12 @@
 // backend. An operator keeps every other power: ordinary routes, and an
 // existing admin-made binding left untouched.
 //
+// ADR 0072 adds the case that needs no repoint at all: a middleware that sends
+// the request to a destination of its own (forward auth, OAuth2 introspection,
+// wasm) placed after the credential on the same route, or reconfigured while it
+// is. Binding one there, moving it after the credential, and changing its
+// configuration while it sits on a credential route all need an administrator.
+//
 // The guard runs inside the domain SaveRoute/SaveService, which REST,
 // Connect/gRPC and config-import all funnel through, so no transport is a way
 // around it (mem:transport_rbac_bypass: authz that lived in one transport was
@@ -26,8 +32,10 @@
 package routebind
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"maps"
 	"slices"
 	"strings"
 
@@ -41,7 +49,8 @@ import (
 // ErrRequiresAdmin refuses a non-admin save that would newly bind, or repoint,
 // a credential-injecting middleware. Handlers map it to 403 / PermissionDenied.
 var ErrRequiresAdmin = errors.New("binding a middleware that injects a credential toward the backend, " +
-	"or repointing a route that carries one, requires an administrator")
+	"repointing a route that carries one, or sending such a route's requests to a middleware's own " +
+	"destination, requires an administrator")
 
 // Guard resolves the middlewares a route binds and the routes a service backs,
 // so it can tell an ordinary save from one that moves a credential toward a
@@ -73,6 +82,39 @@ func (g *Guard) AuthorizeRouteSave(ctx context.Context, updated *gateonv1.Route)
 	}
 	if g.repointsCredentialRoute(ctx, stored, updated) {
 		return ErrRequiresAdmin
+	}
+	if g.exposesCredentialToForwarder(ctx, stored, updated) {
+		return ErrRequiresAdmin
+	}
+	return nil
+}
+
+// AuthorizeMiddlewareSave refuses a restricted caller who creates or changes a
+// middleware that forwards the request to a destination of its own (see
+// forwardsRequestOffRoute) while a route that carries a credential binds it
+// (ADR 0072). Changing where forward auth sends the request, or what a wasm
+// guest does with it, is the same capture as binding a new one: the credential
+// the route sets reaches whatever the configuration now names. It runs after
+// the stored secrets are restored, so a placeholder sent back compares equal
+// to what it stands for. A save that leaves type, config and module untouched
+// (a rename) is allowed.
+func (g *Guard) AuthorizeMiddlewareSave(ctx context.Context, updated *gateonv1.Middleware) error {
+	if g == nil || updated == nil || !g.restricted(ctx) || !forwardsRequestOffRoute(updated) {
+		return nil
+	}
+	id := strings.TrimSpace(updated.GetId())
+	if id == "" {
+		return nil // a fresh id is assigned after this; no route can name it yet
+	}
+	if stored, ok := g.mws.Get(ctx, id); ok && sameForwarding(stored, updated) {
+		return nil
+	}
+	// A stored middleware is not required: a route may already name an id that
+	// has no middleware yet, and creating it under that id is the binding.
+	for _, rt := range g.routes.List(ctx) {
+		if slices.Contains(trimmedIDs(rt), id) && g.routeCarriesCredential(ctx, rt) {
+			return ErrRequiresAdmin
+		}
 	}
 	return nil
 }
@@ -171,6 +213,93 @@ func (g *Guard) routeCarriesCredential(ctx context.Context, rt *gateonv1.Route) 
 		}
 	}
 	return false
+}
+
+// exposesCredentialToForwarder reports whether updated puts a middleware that
+// forwards the request off the route after a credential-injecting one, where
+// stored did not already run that forwarder after that credential. Order is
+// what matters: a forwarder that runs first has not seen the credential yet, so
+// moving it later is as much a capture as adding it. A pair the stored route
+// already had is an existing (admin-made) binding the caller kept.
+func (g *Guard) exposesCredentialToForwarder(ctx context.Context, stored, updated *gateonv1.Route) bool {
+	before := trimmedIDs(stored)
+	var sawCredential []string
+	for _, id := range trimmedIDs(updated) {
+		mw, ok := g.mws.Get(ctx, id)
+		if !ok {
+			continue
+		}
+		if mwsecret.InjectsCredentialUpstream(mw) {
+			sawCredential = append(sawCredential, id)
+			continue
+		}
+		if !forwardsRequestOffRoute(mw) {
+			continue
+		}
+		for _, cred := range sawCredential {
+			if !runsBefore(before, cred, id) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// runsBefore reports whether some occurrence of first precedes some occurrence
+// of second in ids.
+func runsBefore(ids []string, first, second string) bool {
+	i := slices.Index(ids, first)
+	if i < 0 {
+		return false
+	}
+	return slices.Contains(ids[i+1:], second)
+}
+
+// forwardsRequestOffRoute reports whether mw sends the request, or the
+// credential on it, somewhere other than the route's backend -- to a
+// destination its own configuration chooses. Forward auth copies the request
+// headers to its address (all of them when auth_request_headers is empty);
+// OAuth2 introspection posts the request's bearer token to its
+// introspection_url; a wasm guest reads any request header and can carry it
+// out through what it records. Each of these, run after a credential-injecting
+// middleware, delivers the credential to wherever it is configured to send,
+// with no repoint of the route or its service (ADR 0072).
+//
+// Not included: the JWT and OIDC validators fetch keys from their issuer but
+// send it nothing from the request; the oidc proxy sends its own client secret,
+// which ADR 0034 already binds to its issuer.
+func forwardsRequestOffRoute(mw *gateonv1.Middleware) bool {
+	switch strings.ToLower(strings.TrimSpace(mw.GetType())) {
+	case "forwardauth", "wasm":
+		return true
+	case "auth":
+		switch strings.ToLower(strings.TrimSpace(mw.GetConfig()["type"])) {
+		case "oauth2", "oauth2_introspection":
+			return true
+		}
+	}
+	return false
+}
+
+// sameForwarding reports whether updated forwards exactly as stored does: the
+// same type, configuration and wasm module. The name is not compared.
+func sameForwarding(stored, updated *gateonv1.Middleware) bool {
+	return stored != nil &&
+		strings.TrimSpace(stored.GetType()) == strings.TrimSpace(updated.GetType()) &&
+		maps.Equal(stored.GetConfig(), updated.GetConfig()) &&
+		bytes.Equal(stored.GetWasmBlob(), updated.GetWasmBlob())
+}
+
+// trimmedIDs is rt's middleware ids in order, blanks dropped; empty for a nil
+// route.
+func trimmedIDs(rt *gateonv1.Route) []string {
+	ids := make([]string, 0, len(rt.GetMiddlewares()))
+	for _, id := range rt.GetMiddlewares() {
+		if id = strings.TrimSpace(id); id != "" {
+			ids = append(ids, id)
+		}
+	}
+	return ids
 }
 
 func middlewareSet(rt *gateonv1.Route) map[string]bool {

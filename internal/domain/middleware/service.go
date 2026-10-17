@@ -20,6 +20,14 @@ type WAFCacheInvalidator interface {
 	Invalidate()
 }
 
+// SaveGuard refuses a middleware save the caller may not make (ADR 0072: a
+// middleware that forwards the request to its own destination, changed while a
+// credential-carrying route binds it). It sees the middleware after its stored
+// secrets are restored and before anything is written.
+type SaveGuard interface {
+	AuthorizeMiddlewareSave(ctx context.Context, mw *gateonv1.Middleware) error
+}
+
 // Service encapsulates middleware business logic: validation, ID generation, persistence, proxy invalidation.
 type Service interface {
 	ListPaginated(ctx context.Context, page, pageSize int32, search string) ([]*gateonv1.Middleware, int32)

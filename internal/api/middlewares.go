@@ -56,7 +56,7 @@ func (s *ApiService) UpdateMiddleware(ctx context.Context, req *gateonv1.UpdateM
 	// skips a middleware whose Create fails, so the route ran without it. See
 	// domain_services.go.
 	if err := s.middlewareService().SaveMiddleware(ctx, req.Middleware); err != nil {
-		return &gateonv1.UpdateMiddlewareResponse{Success: false}, err
+		return &gateonv1.UpdateMiddlewareResponse{Success: false}, mapBindingRefusal(err)
 	}
 	s.logAudit(ctx, "update", "middleware", fmt.Sprintf("Updated middleware %s", req.Middleware.Id))
 	return &gateonv1.UpdateMiddlewareResponse{Success: true}, nil

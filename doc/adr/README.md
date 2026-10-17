@@ -82,6 +82,7 @@ ADRs follow a lightweight [MADR](https://adr.github.io/madr/)-style format:
 | [0069](./0069-the-waf-inspects-a-bounded-number-of-large-bodies-at-once.md) | The WAF inspects a bounded number of large bodies at once | Accepted |
 | [0070](./0070-a-language-model-narrates-the-local-analysis-and-never-replaces-it.md) | A language model narrates the local analysis and never replaces it | Accepted |
 | [0071](./0071-a-request-cannot-exempt-its-own-body-from-the-waf.md) | A request cannot exempt its own body from the WAF | Accepted |
+| [0072](./0072-a-credential-route-forwards-its-requests-only-where-an-admin-chose.md) | A credential route forwards its requests only where an administrator chose | Accepted |
 
 ## Conventions
 

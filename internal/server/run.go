@@ -187,7 +187,8 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 	wafmw.SetRouteOriginProvider(func() []string {
 		return config.RouteOrigins(context.Background(), s.RouteStore)
 	})
-	mwService := dmw.NewService(s.MwStore, s.RouteStore, proxyInvalidator, mwFactory, wafmw.WAFCacheInvalidator{}, s.Logger)
+	mwService := dmw.NewService(s.MwStore, s.RouteStore, proxyInvalidator, mwFactory, wafmw.WAFCacheInvalidator{}, s.Logger,
+		bindingGuard)
 	tlsOptService := dtls.NewService(s.TLSOptStore, proxyInvalidator, s.Logger)
 	canaryService := canary.NewService(ctx, serviceService, s.Logger)
 

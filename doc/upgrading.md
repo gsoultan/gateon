@@ -11,6 +11,20 @@ here after the fact.
 
 ## Unreleased
 
+### An operator cannot add or reconfigure forward auth on a route that carries a credential
+
+Forward auth copies the request headers to its own address, OAuth2
+introspection posts the bearer token to its own URL, and a wasm guest reads any
+header. Placed after a `headers` or `rewrite` middleware that sets an
+`Authorization` or API-key value, each delivered that credential to wherever it
+was configured to send, without the route being repointed (ADR 0072).
+
+**Who is affected:** accounts with the operator role. Adding one of these
+middlewares to a route that carries a credential, moving one after the
+credential, or changing the type, config or wasm module of one bound to such a
+route now gets `403` / `PermissionDenied`; an administrator makes the change.
+Renaming it, and everything on routes without a credential, is unchanged.
+
 ### A git push through the WAF needs the route to say it hosts git
 
 The WAF used to skip the body of any request whose `Content-Type` or path named

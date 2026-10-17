@@ -28,11 +28,14 @@ type serviceImpl struct {
 	validator           ConfigValidator
 	wafCacheInvalidator WAFCacheInvalidator
 	logger              logger.Logger
+	guards              []SaveGuard
 }
 
-// NewService creates a Middleware Service.
-func NewService(store config.MiddlewareStore, routeStore config.RouteStore, invalidator proxy.Invalidator, validator ConfigValidator, wafCacheInvalidator WAFCacheInvalidator, l logger.Logger) Service {
-	return &serviceImpl{
+// NewService creates a Middleware Service. The optional SaveGuards each refuse
+// saves of their own kind and all of them run; every caller that serves the
+// management API passes the ADR 0072 binding guard.
+func NewService(store config.MiddlewareStore, routeStore config.RouteStore, invalidator proxy.Invalidator, validator ConfigValidator, wafCacheInvalidator WAFCacheInvalidator, l logger.Logger, guards ...SaveGuard) Service {
+	s := &serviceImpl{
 		store:               store,
 		routeStore:          routeStore,
 		invalidator:         invalidator,
@@ -40,6 +43,12 @@ func NewService(store config.MiddlewareStore, routeStore config.RouteStore, inva
 		wafCacheInvalidator: wafCacheInvalidator,
 		logger:              l,
 	}
+	for _, g := range guards {
+		if g != nil {
+			s.guards = append(s.guards, g)
+		}
+	}
+	return s
 }
 
 // ListPaginated returns paginated middlewares.
@@ -66,6 +75,11 @@ func (s *serviceImpl) SaveMiddleware(ctx context.Context, mw *gateonv1.Middlewar
 	}
 	if err := mwsecret.Restore(mw, stored); err != nil {
 		return err
+	}
+	for _, g := range s.guards {
+		if err := g.AuthorizeMiddlewareSave(ctx, mw); err != nil {
+			return err
+		}
 	}
 	if s.validator != nil {
 		if err := s.validator.Validate(mw); err != nil {
