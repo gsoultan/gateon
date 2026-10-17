@@ -63,6 +63,15 @@ type WAFConfig struct {
 	// stated, appears in the config fingerprint, and can differ by tier.
 	// Configure with the "fail_open" key or GATEON_WAF_FAIL_OPEN.
 	FailOpen bool
+
+	// AllowGitSmartHTTP lets the body of a git smart-HTTP request (a packfile:
+	// binary, routinely larger than the body limit) through uninspected. It is
+	// off, and only the operator turns it on, because the signals that mark a
+	// request as git -- a Content-Type and a path suffix -- are written by the
+	// client, and every client the gateway has not seen carries the top
+	// reputation score (ADR 0071).
+	// Configure with the "git_smart_http" key or GATEON_WAF_GIT_SMART_HTTP.
+	AllowGitSmartHTTP bool
 	// ExtraRules are typed rules supplied programmatically, replacing the
 	// SecLang "Directives" string. A rule is now a value that either compiles
 	// or does not, rather than text concatenated into a directive block where a
@@ -165,9 +174,9 @@ func (c WAFConfig) Fingerprint() string {
 		c.EnableDOSProtection, c.EnableMalwareDetection, c.EnableRansomwareDetection,
 		c.EnableDLP, c.EnableResponseInspection, c.DisableEntropy, c.EnableBodyEntropy,
 		c.EnableFingerprintValidation, c.EnableConfidenceScoring)
-	fmt.Fprintf(h, "i:%d%d%d%d%d%t\n",
+	fmt.Fprintf(h, "i:%d%d%d%d%d%t%t\n",
 		c.ParanoiaLevel, c.AnomalyThreshold, c.RequestBodyLimit,
-		c.ResponseBodyLimit, int(c.EntropyThreshold*100), c.FailOpen)
+		c.ResponseBodyLimit, int(c.EntropyThreshold*100), c.FailOpen, c.AllowGitSmartHTTP)
 	// String fields. The data-leak action belongs here rather than with the
 	// booleans: it changes what the middleware does with a decision, so two
 	// configs differing only in it describe different behaviour and must not
@@ -389,15 +398,17 @@ func (t *wafRuntime) serve(next http.Handler, w http.ResponseWriter, r *http.Req
 
 	// git's smart-HTTP bodies are packfiles: binary, routinely larger
 	// than the body limit, and refusing one as uninspectable would break
-	// every git host behind the gateway. So the *body* of a request that
-	// looks like git traffic from a client in good standing is not read
-	// into the engine. Nothing else is exempt. This used to skip the whole
-	// middleware — engine, entropy checks, response inspection — on a
-	// Content-Type and a path suffix, both of which the client writes, and
-	// every client the gateway has not seen carries the neutral score the
-	// skip was gated on. A WAF a request can opt out of by naming a
-	// protocol is not a WAF.
-	inspectBody := !(repScore > 90 && isGitTraffic(r))
+	// every git host behind the gateway. So on a route or deployment the
+	// operator has said hosts git, the *body* of a request that looks like
+	// git traffic from a client in good standing is not read into the
+	// engine. Nothing else is exempt, and nothing is exempt by default.
+	//
+	// This used to apply everywhere, on a Content-Type and a path suffix
+	// the client writes, gated on a reputation score every unseen client
+	// carries at the top of the scale: naming git was enough to send any
+	// body, of any size, to the backend uninspected (ADR 0071). A WAF a
+	// request can opt out of by naming a protocol is not a WAF.
+	inspectBody := !(t.cfg.AllowGitSmartHTTP && repScore > 90 && isGitTraffic(r))
 
 	// The Aho-Corasick signature prefilter that used to run here was
 	// retired. It blocked on a substring hit before the engine ran,
@@ -933,6 +944,24 @@ func isGitTraffic(r *http.Request) bool {
 	return strings.HasSuffix(path, "/git-receive-pack") || strings.HasSuffix(path, "/git-upload-pack")
 }
 
+// gitSmartHTTPEnv is the deployment-wide default for AllowGitSmartHTTP, for the
+// gateway-wide WAF (whose settings are a proto with no such field) and for
+// routes that leave the key unset. Every tunable needs an environment path.
+const gitSmartHTTPEnv = "GATEON_WAF_GIT_SMART_HTTP"
+
+// gitSmartHTTP reads the opt-in. An explicit value on the route wins in either
+// direction; unset falls through to the environment, then to off.
+func gitSmartHTTP(v string) bool {
+	if strings.TrimSpace(v) == "" {
+		v = os.Getenv(gitSmartHTTPEnv)
+	}
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "true", "1":
+		return true
+	}
+	return false
+}
+
 func hasPrefixFold(s, prefix string) bool {
 	if len(s) < len(prefix) {
 		return false
@@ -1021,6 +1050,7 @@ func parseWAFConfig(cfg map[string]string) WAFConfig {
 		EntropyThreshold:            entropyThreshold,
 		DisableEntropy:              disableEntropy,
 		FailOpen:                    failOpen,
+		AllowGitSmartHTTP:           gitSmartHTTP(cfg["git_smart_http"]),
 		AllowedMethods:              parseAllowedMethods(cfg["allowed_methods"]),
 		DisableProtocolChecks:       isFalse("protocol"),
 		RequestBodyLimit:            intVal(cfg["request_body_limit"]),

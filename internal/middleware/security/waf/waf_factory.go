@@ -103,7 +103,8 @@ func NewGlobalWAF(d security.Deps) (kind.Middleware, error) {
 	// not part of the WAF proto, so it must be in the cache key alongside the
 	// proto hash and the gRPC variant.
 	tier := resolveWAFTier(w)
-	key := "global-waf:" + string(tier) + ":" + strconv.FormatBool(grpcMode) + ":" + hashWAFProto(w)
+	key := "global-waf:" + string(tier) + ":" + strconv.FormatBool(grpcMode) + ":" + hashWAFProto(w) +
+		":git=" + strconv.FormatBool(gitSmartHTTP(""))
 	if cached, ok := globalWAFCache.Load(key); ok {
 		return cached.(kind.Middleware), nil
 	}
@@ -155,6 +156,7 @@ func globalWAFConfig(w *gateonv1.WafConfig, tier config.Tier, d security.Deps) W
 		EnableFingerprintValidation: w.GetEnableFingerprintValidation(),
 		EnableConfidenceScoring:     w.GetEnableConfidenceScoring(),
 		AuditOnly:                   w.GetAuditOnly(),
+		AllowGitSmartHTTP:           gitSmartHTTP(""),
 		TrustCloudflare:             config.TrustCloudflare(w),
 		AppProfiles:                 w.GetAppProfiles(),
 		EnableSSRFProtection:        w.GetSsrfProtection(),

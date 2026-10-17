@@ -71,6 +71,9 @@ var dashboardKeyEffects = []keyEffect{
 	{mwType: "waf", key: "nodejs", a: "true", b: "false", probe: get("/?q=process.mainModule")},
 	{mwType: "waf", key: "scanner", a: "true", b: "false", probe: withUA("sqlmap/1.7.2#stable (https://sqlmap.org)")},
 	{mwType: "waf", key: "audit_only", a: "false", b: "true", probe: get("/?id=1%27%20OR%20%271%27%3D%271")},
+	// Off, a body claiming git is inspected and the injection refused; on, the
+	// route hosts git and the body is left unread (ADR 0071).
+	{mwType: "waf", key: "git_smart_http", a: "false", b: "true", probe: gitPushClaim},
 	{mwType: "ipfilter", key: "deny_list", a: "", b: "198.51.100.9", probe: getFrom("/", "198.51.100.9:4000")},
 	{mwType: "ipfilter", key: "allow_list", a: "", b: "203.0.113.1", probe: getFrom("/", "198.51.100.9:4000")},
 	{mwType: "xfcc", key: "forward_subject", a: "false", b: "true", probe: withClientCert},
@@ -233,6 +236,16 @@ func getFrom(target, remote string) func(*testing.T) *http.Request {
 		r.RemoteAddr = remote
 		return r
 	}
+}
+
+// gitPushClaim is a POST whose body carries an injection under git's push
+// Content-Type, which only a route that hosts git may leave uninspected.
+func gitPushClaim(*testing.T) *http.Request {
+	r := httptest.NewRequest(http.MethodPost, "http://app.example/api/login",
+		strings.NewReader(`{"user":"admin' OR '1'='1' -- "}`))
+	r.RemoteAddr = "198.51.100.10:4000"
+	r.Header.Set("Content-Type", "application/x-git-receive-pack-request")
+	return r
 }
 
 func withUA(ua string) func(*testing.T) *http.Request {

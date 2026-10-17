@@ -65,9 +65,10 @@ func TestWAF_GitContentTypeDoesNotSkipInspection(t *testing.T) {
 // TestWAF_GitPushBodyStillPassesUninspected pins the reason the exemption exists
 // at all: a push is a packfile, binary and routinely larger than the body limit,
 // and refusing it as oversize would break every git host behind the gateway.
-// The body stays exempt; nothing else does.
+// The body stays exempt where the operator has said the route hosts git;
+// nothing else does (ADR 0071).
 func TestWAF_GitPushBodyStillPassesUninspected(t *testing.T) {
-	mw, err := WAF(WAFConfig{ParanoiaLevel: 1, RequestBodyLimit: 64 << 10})
+	mw, err := WAF(WAFConfig{ParanoiaLevel: 1, RequestBodyLimit: 64 << 10, AllowGitSmartHTTP: true})
 	if err != nil {
 		t.Fatalf("create WAF: %v", err)
 	}
