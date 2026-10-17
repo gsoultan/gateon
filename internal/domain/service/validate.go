@@ -84,15 +84,17 @@ func validateHealthCheck(svc *gateonv1.Service) error {
 	return nil
 }
 
-// validateTargets refuses a target that connects to this gateway's own
-// management listener (ADR 0052). Behind a Host() route on a public
+// validateTargets refuses a target that connects to a cloud instance metadata
+// service (ADR 0078) or to this gateway's own management listener (ADR 0052).
+// Behind a public route, the first handed the instance's role credentials to
+// anyone who sent the route's Host. Behind a Host() route on a public
 // entrypoint, such a service served the dashboard, sign-in and API to the
 // internet from loopback, past the listener's bind, its allowlist, its
 // per-address cap and the sign-in lockout. Every writer of a service -- REST,
 // gRPC, config import, the canary controller -- saves through SaveService, so
 // this is the one place it is refused; the connection is refused again when
-// it is dialled, for a name that resolves here only later. A UDP service
-// never reaches the TCP-only listener and is not checked.
+// it is dialled, for a name that resolves there only later. A UDP service
+// never reaches either TCP-only listener and is not checked.
 func validateTargets(ctx context.Context, svc *gateonv1.Service) error {
 	if strings.EqualFold(svc.GetBackendType(), "udp") {
 		return nil

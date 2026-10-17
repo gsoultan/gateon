@@ -85,6 +85,7 @@ ADRs follow a lightweight [MADR](https://adr.github.io/madr/)-style format:
 | [0072](./0072-a-credential-route-forwards-its-requests-only-where-an-admin-chose.md) | A credential route forwards its requests only where an administrator chose | Accepted |
 | [0074](./0074-brotli-encoders-are-bounded-in-cost-and-count-and-the-dashboard-is-served-precompressed.md) | Brotli encoders are bounded in cost and count, and the dashboard is served precompressed | Accepted |
 | [0075](./0075-schema-validation-decodes-a-bounded-body-a-bounded-number-of-times-at-once.md) | Schema validation decodes a bounded body, a bounded number of times at once | Accepted |
+| [0078](./0078-the-gateway-never-proxies-to-cloud-instance-metadata.md) | The gateway never proxies to cloud instance metadata | Accepted |
 
 ## Conventions
 

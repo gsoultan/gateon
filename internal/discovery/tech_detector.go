@@ -10,11 +10,13 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/netip"
 	"os"
 	"strings"
 	"syscall"
 	"time"
 
+	"github.com/gsoultan/gateon/internal/cloudmeta"
 	gtls "github.com/gsoultan/gateon/internal/tls"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
@@ -50,11 +52,27 @@ type TechDetector struct {
 // 10.0.0.5 or a NAS on 192.168.1.10 is what this feature is for. What is
 // refused is the machine itself and the addresses that are dangerous precisely
 // because the gateway can reach them and the caller cannot.
+//
+// An IPv4-mapped or NAT64 address is judged as the IPv4 address it reaches,
+// and the cloud metadata addresses outside link-local space -- Alibaba's in
+// 100.64/10, AWS's IPv6 ULA, Azure's WireServer -- are refused with it, from
+// the list the data plane's dialer refuses too (ADR 0078).
 func blockedProbeTarget(ip net.IP) (string, bool) {
-	switch {
-	case ip == nil:
+	a, ok := netip.AddrFromSlice(ip)
+	if !ok {
 		return "unparseable", true
-	case ip.IsLoopback():
+	}
+	a = cloudmeta.Embedded(a)
+	switch {
+	case a.IsLinkLocalUnicast() || cloudmeta.IsMetadataAddr(a):
+		// 169.254.0.0/16 and fe80::/10, and the metadata addresses outside
+		// them. This is the cloud metadata service: on EC2, 169.254.169.254
+		// hands out the instance's IAM credentials to anything that can reach
+		// it, which would turn "may edit services" into control of the
+		// account. Refused whatever GATEON_ALLOW_LINK_LOCAL_TARGETS says: that
+		// is a data-plane setting, and the probe has no use for link-local.
+		return "link-local or cloud metadata, which is where instance credentials live", true
+	case a.IsLoopback():
 		// Blocks all of 127.0.0.0/8 and ::1, including the gateway's own
 		// management API if it is bound to loopback.
 		//
@@ -62,21 +80,15 @@ func blockedProbeTarget(ip net.IP) (string, bool) {
 		// real deployment, and there the backend genuinely is on 127.0.0.1, so
 		// this one case can be opted into. It is deliberately its own switch
 		// rather than a general "skip the SSRF check": it permits loopback and
-		// nothing else, and the link-local case below stays refused however it
+		// nothing else, and the link-local case above stays refused however it
 		// is set, because that is the one that leaks credentials.
 		if allowLoopbackProbes() {
 			return "", false
 		}
 		return "loopback; set GATEON_ALLOW_LOOPBACK_PROBE=1 if the backend really is on this host", true
-	case ip.IsLinkLocalUnicast():
-		// 169.254.0.0/16 and fe80::/10. This is the cloud metadata service:
-		// on EC2, 169.254.169.254 hands out the instance's IAM credentials to
-		// anything that can reach it, which would turn "may edit services"
-		// into control of the account.
-		return "link-local, which is where cloud instance metadata lives", true
-	case ip.IsLinkLocalMulticast() || ip.IsInterfaceLocalMulticast():
+	case a.IsLinkLocalMulticast() || a.IsInterfaceLocalMulticast():
 		return "link-local multicast", true
-	case ip.IsUnspecified():
+	case a.IsUnspecified():
 		// 0.0.0.0 and :: route to the local host on most stacks.
 		return "unspecified", true
 	}

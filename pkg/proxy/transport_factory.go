@@ -42,7 +42,7 @@ const backendResponseHeaderTimeout = time.Minute
 // HTTP/1 and HTTP/2 transports, h2c, the PROXY-protocol path, the WebSocket
 // tunnel and the health checks. Its timeouts are http.DefaultTransport's.
 // Control refuses a connection to this gateway's own management listener
-// (ADR 0052): checked on the address being connected to, after the name is
+// (ADR 0052) or to a cloud instance metadata service (ADR 0078): checked on the address being connected to, after the name is
 // resolved, so a target that resolves here only after it was saved is refused
 // too. A net.Dialer is safe for concurrent use, so one serves them all.
 var backendDialer = &net.Dialer{

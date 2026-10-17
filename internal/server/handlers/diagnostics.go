@@ -21,6 +21,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/gsoultan/gateon/internal/auth"
+	"github.com/gsoultan/gateon/internal/cloudmeta"
 	"github.com/gsoultan/gateon/internal/ebpf"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware"
@@ -78,11 +79,15 @@ func (e *rateEstimator) observe(total uint64, now time.Time) float64 {
 }
 
 // isBlockedIP reports whether an address is in a range that must never be
-// reachable via the diagnostics test-target (SSRF protection).
+// reachable via the diagnostics test-target (SSRF protection). An IPv4-mapped
+// or NAT64 address is judged as the IPv4 address it reaches, and the cloud
+// metadata addresses outside these ranges (Alibaba's in 100.64/10, Azure's
+// WireServer) are refused by cloudmeta's list (ADR 0078).
 func isBlockedIP(ip netip.Addr) bool {
-	ip = ip.Unmap()
+	ip = cloudmeta.Embedded(ip)
 	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() ||
-		ip.IsLinkLocalMulticast() || ip.IsUnspecified() || ip.IsMulticast()
+		ip.IsLinkLocalMulticast() || ip.IsUnspecified() || ip.IsMulticast() ||
+		cloudmeta.IsMetadataAddr(ip)
 }
 
 // hostResolvesToBlockedIP resolves host and returns true if it is (or resolves

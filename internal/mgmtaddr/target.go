@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/gsoultan/gateon/internal/cloudmeta"
 )
 
 // resolveTimeout bounds the name lookup a save makes for a target on the
@@ -27,14 +29,20 @@ var defaultPorts = map[string]int{
 	"https": 443, "wss": 443, "h2": 443,
 }
 
-// CheckTarget returns an error naming raw when it is a service target that
-// would connect to this gateway's management listener: the management port,
-// on a loopback, unspecified or own address of this host, written as one or
-// as a name that resolves to one. It returns nil when no management listener
-// has bound, when raw does not say where it connects, and when its name does
-// not resolve -- the connection is refused again at dial time (Control), which
-// is the check that cannot be outrun by a name that changes.
+// CheckTarget returns an error naming raw when it is a service target the
+// data plane refuses to connect to: a cloud instance metadata service (ADR
+// 0078), written as its address or as one of the names it is published under,
+// or this gateway's management listener (ADR 0052) -- the management port, on
+// a loopback, unspecified or own address of this host, written as one or as a
+// name that resolves to one. A name is not resolved for the metadata check,
+// and the management check returns nil when no management listener has bound,
+// when raw does not say where it connects, and when its name does not
+// resolve: the connection is refused again at dial time (Control), which is
+// the check that cannot be outrun by a name that changes.
 func CheckTarget(ctx context.Context, raw string) error {
+	if err := checkMetadataTarget(raw); err != nil {
+		return err
+	}
 	p := Port()
 	if p == 0 {
 		return nil
@@ -52,6 +60,40 @@ func CheckTarget(ctx context.Context, raw string) error {
 		}
 	}
 	return nil
+}
+
+// checkMetadataTarget refuses raw when its host is a cloud instance metadata
+// address or name, on any port and under any TCP scheme. A target with no
+// scheme and no port ("169.254.169.254") is read as a bare host, which is how
+// the proxy reads it.
+func checkMetadataTarget(raw string) error {
+	raw = strings.TrimSpace(raw)
+	host, ok := targetHost(raw)
+	if !ok || !cloudmeta.IsMetadataHostOrAddr(host) {
+		return nil
+	}
+	return fmt.Errorf("target %s is a cloud instance metadata service; the gateway does not "+
+		"proxy to it, because behind a route it hands this machine's identity and credentials "+
+		"to whoever reaches that route (ADR 0078)", raw)
+}
+
+// targetHost is the host raw connects to, whatever its port. ok is false when
+// raw is not a URL or connects over UDP (udp://, h3://).
+func targetHost(raw string) (string, bool) {
+	if !strings.Contains(raw, "://") {
+		if h, _, err := net.SplitHostPort(raw); err == nil {
+			return h, true
+		}
+		return raw, true
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "", false
+	}
+	if s := strings.ToLower(u.Scheme); s == "udp" || s == "h3" {
+		return "", false
+	}
+	return u.Hostname(), true
 }
 
 // targetHostPort is where raw connects: a URL's host and port (its scheme's

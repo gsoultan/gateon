@@ -75,6 +75,25 @@ the dashboard. Nothing needs to change. If
 you would rather pay the memory, raise `GATEON_COMPRESS_MAX_BROTLI_ENCODERS`.
 Budget about 2.6 MiB per slot.
 
+### A service can no longer point at cloud instance metadata
+
+A service or TCP target on a cloud metadata address -- `169.254.169.254`,
+`169.254.170.2`, `fd00:ec2::254`, `100.100.100.200`, `168.63.129.16`, any
+other link-local address (`169.254.0.0/16`, `fe80::/10`), or a name such as
+`metadata.google.internal` -- is refused when it is saved, and the connection
+is refused when it is dialled, also for a name that resolves there (ADR 0078).
+Behind a public route such a target handed the instance's role credentials to
+anyone.
+
+**Who is affected:** an install with such a target stops proxying to it on
+upgrade: requests get `502`, its health check reports it down, and the
+service cannot be saved again until the target is changed. The log says
+`refused a backend connection to a cloud instance metadata service` at most
+once a minute. If a backend genuinely lives on a link-local address (a
+node-local DNS cache, an IPv6 link-local device), set
+`GATEON_ALLOW_LINK_LOCAL_TARGETS=1`; the metadata addresses themselves stay
+refused whatever it says. UDP services are not affected.
+
 ### A git push through the WAF needs the route to say it hosts git
 
 The WAF used to skip the body of any request whose `Content-Type` or path named
