@@ -27,13 +27,12 @@ const numShards = 16
 // maxFingerprintsPerShard bounds each shard's connection map.
 //
 // The map is keyed on the client's IP:port and written from the TLS handshake
-// callback, which has no guaranteed teardown partner. RemoveFingerprints has
-// exactly one non-test caller -- the http.Server ConnState hook on the
-// HTTP/1.1-2 entrypoint -- so the HTTP/3 listener, which has no ConnState, and
-// the bare TCP accept loop in start_servers.go both write entries that are
-// never removed. A QUIC Initial packet or a TCP connect plus ClientHello is
-// enough to mint one, and ephemeral source ports make every reconnect from a
-// single address a fresh key.
+// callback, which has no guaranteed teardown partner. RemoveFingerprints is
+// called by the http.Server ConnState hook on the HTTP/1.1-2 entrypoint and
+// when a TLS-terminating TCP entrypoint's session ends; the HTTP/3 listener,
+// which has no ConnState, still writes entries that are never removed. A QUIC
+// Initial packet is enough to mint one, and ephemeral source ports make every
+// reconnect from a single address a fresh key.
 //
 // A bound rather than a third teardown hook, because the next TLS-terminating
 // path added will reintroduce the leak otherwise. 16 shards x 4096 is 65,536

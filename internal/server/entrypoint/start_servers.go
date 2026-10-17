@@ -424,6 +424,12 @@ func (s *tcpServer) handle(c net.Conn, lease *connLease) {
 		return
 	}
 	defer c.Close()
+	// The handshake recorded c's TLS fingerprint, and only the HTTP
+	// entrypoint's ConnState hook ever removed one: every session here left
+	// its entry in the bounded table, which in time refused new entries for
+	// every listener. Deferred after the close, so it runs before it, while
+	// no new connection can have been given the same address.
+	defer identity.RemoveFingerprints(c)
 	if p := resolveTCPRoute(s.ep, s.deps, ""); p != nil {
 		handleTCPProxyL4(c, p)
 		return
