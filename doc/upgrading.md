@@ -11,6 +11,23 @@ here after the fact.
 
 ## Unreleased
 
+### "Apply fix" asks for the permission of what it changes
+
+A security finding's **Apply fix** needs only `diagnostics:write`, but several
+fixes change something else: the shadowed-route fix a route's priority, the
+CORS fix a middleware, the WAF false-positive fix a rule exception, and the
+geofence, WAF-hardening and public-management fixes the global configuration.
+Each now also needs write on that resource (`routes`, `middlewares`,
+`waf_rules`, `global`), and the route and CORS fixes save through the same path
+as the Routes and Middlewares pages, so their validation and binding rules
+apply. The CORS fix also refuses a finding whose origin is not exactly one
+`scheme://host[:port]` (a list, `*`, `null`), since that text came from the
+client's `Origin` header.
+
+**Who is affected:** custom RBAC roles that hold `diagnostics:write` without
+the resource's own write permission; their fixes are now refused with nothing
+changed. The built-in admin and operator roles are unaffected.
+
 ### An operator cannot add or reconfigure forward auth on a route that carries a credential
 
 Forward auth copies the request headers to its own address, OAuth2
