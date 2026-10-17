@@ -135,15 +135,15 @@ github.com/gsoultan/gateon/internal/ai/advisory 67.7%
 github.com/gsoultan/gateon/internal/ai/llm 88.9%
 github.com/gsoultan/gateon/internal/ai/models/default -
 github.com/gsoultan/gateon/internal/alerting 54.7%
-github.com/gsoultan/gateon/internal/api 66.3%
-github.com/gsoultan/gateon/internal/audit 59.4%
+github.com/gsoultan/gateon/internal/api 68.2%
+github.com/gsoultan/gateon/internal/audit 61.6%
 github.com/gsoultan/gateon/internal/auth 78.0%
 github.com/gsoultan/gateon/internal/auth/admission 92.0%
 github.com/gsoultan/gateon/internal/auth/apitoken 90.2%
 github.com/gsoultan/gateon/internal/auth/lockout 96.8%
 github.com/gsoultan/gateon/internal/auth/passpolicy 100.0%
 github.com/gsoultan/gateon/internal/authz/globalbound 85.1%
-github.com/gsoultan/gateon/internal/authz/routebind 92.4%
+github.com/gsoultan/gateon/internal/authz/routebind 94.5%
 github.com/gsoultan/gateon/internal/config 47.4%
 github.com/gsoultan/gateon/internal/config/mwsecret 91.2%
 github.com/gsoultan/gateon/internal/config/storedsecret 86.8%
@@ -152,7 +152,7 @@ github.com/gsoultan/gateon/internal/deadline 79.5%
 github.com/gsoultan/gateon/internal/discovery 42.1%
 github.com/gsoultan/gateon/internal/domain/canary 81.3%
 github.com/gsoultan/gateon/internal/domain/entrypoint 76.0%
-github.com/gsoultan/gateon/internal/domain/middleware 64.2%
+github.com/gsoultan/gateon/internal/domain/middleware 85.1%
 github.com/gsoultan/gateon/internal/domain/proxy -
 github.com/gsoultan/gateon/internal/domain/route 95.5%
 github.com/gsoultan/gateon/internal/domain/service 91.5%
@@ -164,15 +164,15 @@ github.com/gsoultan/gateon/internal/inits 79.5%
 github.com/gsoultan/gateon/internal/install 25.0%
 github.com/gsoultan/gateon/internal/k8s 85.3%
 github.com/gsoultan/gateon/internal/logger 60.5%
-github.com/gsoultan/gateon/internal/mgmtaddr 93.5%
+github.com/gsoultan/gateon/internal/mgmtaddr 93.9%
 github.com/gsoultan/gateon/internal/middleware 85.5%
 github.com/gsoultan/gateon/internal/middleware/auth 76.3%
 github.com/gsoultan/gateon/internal/middleware/kind 69.2%
-github.com/gsoultan/gateon/internal/middleware/security 77.6%
+github.com/gsoultan/gateon/internal/middleware/security 80.1%
 github.com/gsoultan/gateon/internal/middleware/security/challenge 65.8%
 github.com/gsoultan/gateon/internal/middleware/security/identity 87.5%
 github.com/gsoultan/gateon/internal/middleware/security/waf 85.6%
-github.com/gsoultan/gateon/internal/middleware/traffic 52.1%
+github.com/gsoultan/gateon/internal/middleware/traffic 54.1%
 github.com/gsoultan/gateon/internal/middleware/transform 63.0%
 github.com/gsoultan/gateon/internal/phantom 91.7%
 github.com/gsoultan/gateon/internal/redis 85.2%
@@ -205,7 +205,7 @@ github.com/gsoultan/gateon/internal/server/entrypoint 85.5%
 # its tests left this package for internal/ai/advisory, which the REST
 # handlers now reach through ApiService. The tests moved with the code; the
 # handlers kept here are the thin transport, tested in ai_advisory_test.go.
-github.com/gsoultan/gateon/internal/server/handlers 41.8%
+github.com/gsoultan/gateon/internal/server/handlers 44.3%
 github.com/gsoultan/gateon/internal/server/mgmtorigin 100.0%
 github.com/gsoultan/gateon/internal/server/readiness 98.1%
 github.com/gsoultan/gateon/internal/syncutil -
@@ -219,7 +219,7 @@ github.com/gsoultan/gateon/internal/telemetry/tracebudget 82.4%
 github.com/gsoultan/gateon/internal/testutil 36.0%
 github.com/gsoultan/gateon/internal/tls 59.6%
 github.com/gsoultan/gateon/internal/tui 55.4%
-github.com/gsoultan/gateon/internal/ui 46.9%
+github.com/gsoultan/gateon/internal/ui 70.3%
 github.com/gsoultan/gateon/pkg/httputil 100.0%
 github.com/gsoultan/gateon/pkg/l4 80.8%
 github.com/gsoultan/gateon/pkg/proxy 74.9%

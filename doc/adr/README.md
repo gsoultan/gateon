@@ -82,6 +82,13 @@ ADRs follow a lightweight [MADR](https://adr.github.io/madr/)-style format:
 | [0069](./0069-the-waf-inspects-a-bounded-number-of-large-bodies-at-once.md) | The WAF inspects a bounded number of large bodies at once | Accepted |
 | [0070](./0070-a-language-model-narrates-the-local-analysis-and-never-replaces-it.md) | A language model narrates the local analysis and never replaces it | Accepted |
 | [0071](./0071-a-request-cannot-exempt-its-own-body-from-the-waf.md) | A request cannot exempt its own body from the WAF | Accepted |
+| [0072](./0072-a-credential-route-forwards-its-requests-only-where-an-admin-chose.md) | A credential route forwards its requests only where an administrator chose | Accepted |
+| [0073](./0073-brotli-encoders-are-bounded-in-cost-and-count-and-the-dashboard-is-served-precompressed.md) | Brotli encoders are bounded in cost and count, and the dashboard is served precompressed | Accepted |
+| [0074](./0074-schema-validation-decodes-a-bounded-body-a-bounded-number-of-times-at-once.md) | Schema validation decodes a bounded body, a bounded number of times at once | Accepted |
+| [0075](./0075-an-http-connection-through-a-tcp-entrypoint-holds-its-slot-until-it-closes.md) | An HTTP connection through a TCP entrypoint holds its slot until it closes | Accepted |
+| [0076](./0076-a-management-stream-is-re-authorized-while-it-is-open.md) | A management stream is re-authorized while it is open | Accepted |
+| [0077](./0077-the-gateway-never-proxies-to-cloud-instance-metadata.md) | The gateway never proxies to cloud instance metadata | Accepted |
+| [0078](./0078-a-route-wafs-audit-log-stays-in-the-audit-directory.md) | A route WAF's audit log stays in the audit directory | Accepted |
 
 ## Conventions
 

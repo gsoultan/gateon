@@ -11,6 +11,7 @@ import (
 	"math"
 	"net"
 	"net/netip"
+	"net/url"
 	"os"
 	"slices"
 	"strconv"
@@ -21,6 +22,7 @@ import (
 
 	"github.com/gsoultan/gateon/internal/ai"
 	"github.com/gsoultan/gateon/internal/ai/advisory"
+	"github.com/gsoultan/gateon/internal/auth"
 	"github.com/gsoultan/gateon/internal/ebpf"
 	"github.com/gsoultan/gateon/internal/httputil"
 	"github.com/gsoultan/gateon/internal/logger"
@@ -34,6 +36,7 @@ import (
 	"github.com/gsoultan/gateon/internal/telemetry/repid"
 	"github.com/gsoultan/gateon/pkg/proxy"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
+	"google.golang.org/protobuf/proto"
 )
 
 func (s *ApiService) GetDiagnostics(ctx context.Context, _ *gateonv1.GetDiagnosticsRequest) (*gateonv1.GetDiagnosticsResponse, error) {
@@ -776,101 +779,147 @@ func applyFingerprintBlock(source string) *gateonv1.ApplyRecommendationResponse 
 	}
 }
 
+// fixNeedsPermission refuses a fix whose caller may not write what it
+// changes. ApplyRecommendation itself needs only diagnostics:write, which a
+// custom role can hold without the permission the resource's own API asks for;
+// a fix is not a way around that API.
+func fixNeedsPermission(what string) *gateonv1.ApplyRecommendationResponse {
+	return refuseFix(fmt.Sprintf("This fix changes %s, which needs a permission your role does not have. "+
+		"Nothing was changed.", what))
+}
+
 func (s *ApiService) applyCORSRecommendation(ctx context.Context, threatID string) (*gateonv1.ApplyRecommendationResponse, error) {
 	if threatID == "" {
 		return &gateonv1.ApplyRecommendationResponse{Success: false, Message: "Threat ID is required"}, nil
+	}
+	if !callerMayWrite(ctx, auth.ResourceMiddlewares) {
+		return fixNeedsPermission("the route's CORS middleware"), nil
 	}
 
 	threat, err := telemetry.GetSecurityThreatByID(ctx, threatID)
 	if err != nil {
 		return &gateonv1.ApplyRecommendationResponse{Success: false, Message: "Failed to find threat: " + err.Error()}, nil
 	}
-
 	if threat.Type != "cors_violation" {
 		return &gateonv1.ApplyRecommendationResponse{Success: false, Message: "Threat is not a CORS violation"}, nil
 	}
-
-	// Details: "Invalid CORS request from origin: http://example.com. Allowed origins: [...]"
-	prefix := "Invalid CORS request from origin: "
-	if !strings.HasPrefix(threat.Details, prefix) {
-		return &gateonv1.ApplyRecommendationResponse{Success: false, Message: "Invalid threat details format"}, nil
+	origin, problem := corsThreatOrigin(threat.Details)
+	if problem != "" {
+		return refuseFix(problem), nil
 	}
-	remaining := threat.Details[len(prefix):]
-	end := strings.Index(remaining, ". Allowed origins:")
-	if end == -1 {
-		return &gateonv1.ApplyRecommendationResponse{Success: false, Message: "Invalid threat details format (missing separator)"}, nil
+	rt, problem := s.threatRoute(ctx, threat.RouteID)
+	if problem != "" {
+		return refuseFix(problem), nil
 	}
-	origin := strings.TrimSpace(remaining[:end])
-
-	if threat.RouteID == "" {
-		return &gateonv1.ApplyRecommendationResponse{Success: false, Message: "Route ID not found in threat"}, nil
-	}
-
-	rt, ok := s.Routes.Get(ctx, threat.RouteID)
-	if !ok {
-		// Try by name if ID fails
-		routes := s.Routes.List(ctx)
-		for _, r := range routes {
-			if r.Name == threat.RouteID {
-				rt = r
-				ok = true
-				break
-			}
-		}
-		if !ok {
-			return &gateonv1.ApplyRecommendationResponse{Success: false, Message: "Route not found: " + threat.RouteID}, nil
-		}
-	}
-
-	var corsMw *gateonv1.Middleware
-	for _, mwID := range rt.Middlewares {
-		mw, ok := s.Middlewares.Get(ctx, mwID)
-		if ok && mw.Type == "cors" {
-			corsMw = mw
-			break
-		}
-	}
-
+	corsMw := s.routeCORSMiddleware(ctx, rt)
 	if corsMw == nil {
 		return &gateonv1.ApplyRecommendationResponse{Success: false, Message: "No CORS middleware found for this route"}, nil
 	}
 
+	allowedOrigins := corsMw.GetConfig()["allowed_origins"]
+	for o := range strings.SplitSeq(allowedOrigins, ",") {
+		if strings.TrimSpace(o) == origin || o == "*" {
+			return &gateonv1.ApplyRecommendationResponse{Success: true, Message: "Origin is already allowed or wildcard is used"}, nil
+		}
+	}
 	if corsMw.Config == nil {
 		corsMw.Config = make(map[string]string)
 	}
-
-	allowedOrigins := corsMw.Config["allowed_origins"]
-	origins := strings.Split(allowedOrigins, ",")
-	alreadyAllowed := false
-	for _, o := range origins {
-		if strings.TrimSpace(o) == origin || o == "*" {
-			alreadyAllowed = true
-			break
-		}
-	}
-
-	if alreadyAllowed {
-		return &gateonv1.ApplyRecommendationResponse{Success: true, Message: "Origin is already allowed or wildcard is used"}, nil
-	}
-
 	if allowedOrigins == "" {
 		corsMw.Config["allowed_origins"] = origin
 	} else {
 		corsMw.Config["allowed_origins"] = strings.TrimSpace(allowedOrigins) + "," + origin
 	}
 
-	if err := s.Middlewares.Update(ctx, corsMw); err != nil {
-		return &gateonv1.ApplyRecommendationResponse{Success: false, Message: "Failed to update middleware: " + err.Error()}, nil
+	// Through the domain service, as an edit on the Middlewares page: the
+	// factory proves the config builds, the binding guard runs (ADR 0072) and
+	// every route using the middleware is rebuilt. Written to the store, none
+	// of that ran.
+	if err := s.middlewareService().SaveMiddleware(ctx, corsMw); err != nil {
+		return refuseFix("Failed to update middleware: " + errorMessage(mapBindingRefusal(err))), nil
 	}
-
-	if s.Invalidator != nil {
-		s.Invalidator.InvalidateRoutes(func(r *gateonv1.Route) bool { return r.Id == rt.Id })
-	}
-
 	return &gateonv1.ApplyRecommendationResponse{
 		Success: true,
 		Message: fmt.Sprintf("Origin %s has been added to the allowed origins for route %s.", origin, rt.Id),
 	}, nil
+}
+
+// corsThreatOrigin is the origin a cors_violation's Details name, or why there
+// is none to allow. Details are built by reportCORSViolation from the raw
+// Origin header -- the client's text, written into allowed_origins if taken as
+// it is -- so it must be exactly one serialized origin: http or https, a host,
+// an optional port, and nothing else. "*" allowed every site, a comma added a
+// second origin the operator never saw, and "null" admits every sandboxed
+// document.
+func corsThreatOrigin(details string) (string, string) {
+	const prefix = "Invalid CORS request from origin: "
+	remaining, ok := strings.CutPrefix(details, prefix)
+	if !ok {
+		return "", "Invalid threat details format"
+	}
+	end := strings.Index(remaining, ". Allowed origins:")
+	if end == -1 {
+		return "", "Invalid threat details format (missing separator)"
+	}
+	origin := strings.TrimSpace(remaining[:end])
+	if !isSingleOrigin(origin) {
+		return "", "The finding's origin is not a single scheme://host[:port] origin, so it was not allowed. " +
+			"Nothing was changed; add an origin by hand on the route's CORS middleware if one is wanted."
+	}
+	return origin, ""
+}
+
+// isSingleOrigin reports whether origin is one serialized web origin as a
+// browser sends it: http or https, a host, an optional numeric port, and no
+// user, path, query, fragment, wildcard, list separator or whitespace.
+func isSingleOrigin(origin string) bool {
+	if origin == "" || strings.ContainsAny(origin, ",* \t\r\n") {
+		return false
+	}
+	u, err := url.Parse(origin)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
+		return false
+	}
+	if u.Host == "" || u.Hostname() == "" || u.User != nil || u.Opaque != "" {
+		return false
+	}
+	if u.Path != "" || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" {
+		return false
+	}
+	return origin == u.Scheme+"://"+u.Host
+}
+
+// threatRoute is the route a finding names, by id or else by name, or why
+// there is none.
+func (s *ApiService) threatRoute(ctx context.Context, routeID string) (*gateonv1.Route, string) {
+	if routeID == "" {
+		return nil, "Route ID not found in threat"
+	}
+	if rt, ok := s.Routes.Get(ctx, routeID); ok {
+		return rt, ""
+	}
+	for _, r := range s.Routes.List(ctx) {
+		if r.Name == routeID {
+			return r, ""
+		}
+	}
+	return nil, "Route not found: " + routeID
+}
+
+// routeCORSMiddleware is a copy of the first cors middleware rt binds, or nil.
+// A copy: the store hands out its live configuration, which the router reads
+// while the fix edits it.
+func (s *ApiService) routeCORSMiddleware(ctx context.Context, rt *gateonv1.Route) *gateonv1.Middleware {
+	for _, mwID := range rt.Middlewares {
+		mw, ok := s.Middlewares.Get(ctx, mwID)
+		if !ok || mw.Type != "cors" {
+			continue
+		}
+		if clone, ok := proto.Clone(mw).(*gateonv1.Middleware); ok {
+			return clone
+		}
+	}
+	return nil
 }
 
 func (s *ApiService) applyDisablePublicManagementRecommendation(ctx context.Context) (*gateonv1.ApplyRecommendationResponse, error) {
@@ -908,17 +957,27 @@ func (s *ApiService) applyFixShadowedRouteRecommendation(ctx context.Context, ro
 	if routeID == "" {
 		return &gateonv1.ApplyRecommendationResponse{Success: false, Message: "Route ID is required to fix shadowing"}, nil
 	}
-	rt, ok := s.Routes.Get(ctx, routeID)
+	if !callerMayWrite(ctx, auth.ResourceRoutes) {
+		return fixNeedsPermission("a route's priority"), nil
+	}
+	stored, ok := s.Routes.Get(ctx, routeID)
 	if !ok {
 		return &gateonv1.ApplyRecommendationResponse{Success: false, Message: "Route not found"}, nil
 	}
+	// A copy, saved through the domain service as a Routes-page edit is: the
+	// rule and stream mode are validated and the binding guards run (ADR 0038,
+	// 0046, 0072). The live route used to be raised in place and written to the
+	// store, so the router saw the change before the save and no check ran.
+	rt, ok := proto.Clone(stored).(*gateonv1.Route)
+	if !ok {
+		return refuseFix("Route could not be copied; nothing was changed."), nil
+	}
 	rt.Priority += 100
-	if err := s.Routes.Update(ctx, rt); err != nil {
-		return &gateonv1.ApplyRecommendationResponse{Success: false, Message: "Failed to update route priority: " + err.Error()}, nil
+	if err := s.routeService().SaveRoute(ctx, rt); err != nil {
+		return refuseFix("Failed to update route priority: " + errorMessage(mapBindingRefusal(err))), nil
 	}
-	if s.Invalidator != nil {
-		s.Invalidator.InvalidateRoutes(func(*gateonv1.Route) bool { return true })
-	}
+	// Priority orders every route against every other, so all are rebuilt.
+	s.invalidator().InvalidateRoutes(func(*gateonv1.Route) bool { return true })
 	return &gateonv1.ApplyRecommendationResponse{
 		Success: true,
 		Message: fmt.Sprintf("Priority for route '%s' increased to %d.", rt.Name, rt.Priority),
@@ -1580,6 +1639,10 @@ func (s *ApiService) applyBlockCountryRecommendation(ctx context.Context, countr
 }
 
 func (s *ApiService) applyWafExclusionRecommendation(ctx context.Context, threatID string) (*gateonv1.ApplyRecommendationResponse, error) {
+	// An exception is a WAF rule change, which the WAF rules API guards.
+	if !callerMayWrite(ctx, auth.ResourceWafRules) {
+		return fixNeedsPermission("the WAF's rule exceptions"), nil
+	}
 	threat, err := telemetry.GetSecurityThreatByID(ctx, threatID)
 	if err != nil {
 		return &gateonv1.ApplyRecommendationResponse{Success: false, Message: "Threat not found: " + err.Error()}, nil

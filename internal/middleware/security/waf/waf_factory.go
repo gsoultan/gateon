@@ -469,6 +469,7 @@ func NewWAF(cfg map[string]string, d security.Deps) (kind.Middleware, error) {
 	if err := checkRouteCloudflareTrust(cfg, d); err != nil {
 		return nil, err
 	}
+	ownAuditLog := cfg[keyAuditLogPath] // before the global WAF's is merged in
 	globalDirectives := mergeGlobalWAFDefaults(cfg, d)
 
 	grpcMode := d.IsGRPCRoute()
@@ -477,6 +478,7 @@ func NewWAF(cfg map[string]string, d security.Deps) (kind.Middleware, error) {
 		return cached.(kind.Middleware), nil
 	}
 	wafCfg := parseWAFConfig(cfg)
+	confineRouteAuditLog(&wafCfg, ownAuditLog)
 	warnUnexecutableDirectives(globalDirectives, wafCfg.RouteID)
 	wafCfg.EbpfManager = d.EbpfManager
 	wafCfg.Reputation = d.Reputation

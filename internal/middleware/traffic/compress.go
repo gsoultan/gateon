@@ -9,11 +9,14 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
 
 	"github.com/andybalholm/brotli"
+	"github.com/gsoultan/gateon/internal/config"
+	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware/kind"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	"github.com/gsoultan/gateon/pkg/httputil"
@@ -30,11 +33,70 @@ var gzipWriterPool = sync.Pool{
 	},
 }
 
+// brotliQuality and brotliWindowLog bound what one brotli encoder holds.
+//
+// At the library's defaults an encoder held about 11 MiB live once it had seen
+// more than 64 KiB, against about 1 MiB for gzip, and br was chosen whenever
+// a client offered it: 200 concurrent requests for the dashboard's largest
+// bundle held 2.2 GiB. Quality 5 with a 256 KiB window holds about 2.6 MiB,
+// compresses that bundle to 27.3% of its size against 27.0% at the defaults,
+// and takes about 15% less CPU. Quality 4 is faster again but compresses
+// little better than gzip, which is when brotli stops being worth its memory
+// (ADR 0073).
+const (
+	brotliQuality   = 5
+	brotliWindowLog = 18
+)
+
 var brotliWriterPool = sync.Pool{
 	New: func() any {
-		return brotli.NewWriter(io.Discard)
+		return brotli.NewWriterOptions(io.Discard, brotli.WriterOptions{
+			Quality: brotliQuality,
+			LGWin:   brotliWindowLog,
+		})
 	},
 }
+
+// brotliEncodersEnv overrides the tier's brotli encoder count.
+const brotliEncodersEnv = "GATEON_COMPRESS_MAX_BROTLI_ENCODERS"
+
+// encoderGate bounds how many brotli encoders are in use at once in the whole
+// process. One gate for every route and the management listener, because the
+// memory it protects is the process's. Taking a slot never waits: a response
+// that finds none is sent gzip or unencoded, so the gate costs a client bytes
+// on the wire, never latency.
+type encoderGate struct {
+	once  sync.Once
+	slots chan struct{}
+}
+
+var brotliEncoders encoderGate
+
+// maxBrotliEncoders is the slot count: brotliEncodersEnv when it is a positive
+// integer, else the resource profile's default. The bound cannot be switched
+// off; a value that is not a positive integer is ignored with a warning.
+func maxBrotliEncoders() int {
+	if v := strings.TrimSpace(os.Getenv(brotliEncodersEnv)); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+		logger.L.LogWarn("ignoring an invalid brotli encoder bound; using the profile default",
+			"env", brotliEncodersEnv, "value", v)
+	}
+	return config.CurrentTierDefaults().CompressMaxBrotliEncoders
+}
+
+func (g *encoderGate) tryAcquire() bool {
+	g.once.Do(func() { g.slots = make(chan struct{}, max(1, maxBrotliEncoders())) })
+	select {
+	case g.slots <- struct{}{}:
+		return true
+	default:
+		return false
+	}
+}
+
+func (g *encoderGate) release() { <-g.slots }
 
 // CompressConfig configures the compress middleware (Traefik-style).
 type CompressConfig struct {
@@ -123,6 +185,7 @@ func CompressWithConfig(cfg CompressConfig) kind.Middleware {
 			cw := &compressWriter{
 				ResponseWriter: w,
 				encoding:       encoding,
+				gzipAccepted:   strings.Contains(acceptEncoding, "gzip"),
 				minBytes:       minBytes,
 				maxBytes:       maxBytes,
 				excluded:       excluded,
@@ -139,7 +202,12 @@ func CompressWithConfig(cfg CompressConfig) kind.Middleware {
 type compressWriter struct {
 	http.ResponseWriter
 	encoding string
-	minBytes int
+	// gzipAccepted is what a br response falls back to when every brotli
+	// encoder slot is in use; without it the response goes out unencoded.
+	gzipAccepted bool
+	// brotliSlot marks a slot taken from brotliEncoders, returned by Close.
+	brotliSlot bool
+	minBytes   int
 	// maxBytes is max_buffer_bytes: a response that declares a longer body
 	// goes out uncompressed. The dashboard offered the setting and the factory
 	// read it into CompressConfig, where nothing looked at it (found by the
@@ -240,7 +308,7 @@ func (w *compressWriter) decide() {
 	w.decided = true
 
 	h := w.Header()
-	w.should = w.shouldCompress()
+	w.should = w.shouldCompress() && w.claimEncoder()
 	if w.should {
 		h.Set("Content-Encoding", w.encoding)
 		h.Del("Content-Length")
@@ -269,7 +337,27 @@ func (w *compressWriter) decide() {
 	w.buf = nil
 }
 
+// claimEncoder takes a brotli encoder slot for a br response. With none free
+// it switches the response to gzip when the client takes it, and otherwise
+// reports that the response goes out unencoded. It never waits.
+func (w *compressWriter) claimEncoder() bool {
+	if w.encoding != "br" {
+		return true
+	}
+	if brotliEncoders.tryAcquire() {
+		w.brotliSlot = true
+		return true
+	}
+	telemetry.MiddlewareCompressBrotliFallbacksTotal.Inc()
+	w.encoding = "gzip"
+	return w.gzipAccepted
+}
+
 func (w *compressWriter) Close() error {
+	if w.brotliSlot {
+		defer brotliEncoders.release()
+		w.brotliSlot = false
+	}
 	if !w.decided {
 		w.undersized = true
 		w.decide()

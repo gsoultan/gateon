@@ -312,15 +312,15 @@ export function WAFConfigFields({ config, updateConfig, global, globalUnreadable
       <Divider label="Audit Logging" labelPosition="center" />
       <Stack gap="xs">
         <TextInput
-          label="Audit Log Path (optional)"
-          description="Leave blank — Gateon automatically creates the folder and file and writes WAF audit events there. Only set this to override the default location."
+          label="Audit Log File (optional)"
+          description="Leave blank to use <route>_audit.log. To choose another file, give a name such as myroute.log or team/myroute.log; it is always created under <data-dir>/audit/waf/. Paths elsewhere are refused; only an administrator can choose one, in the global WAF settings."
           placeholder="Auto: <data-dir>/audit/waf/<route>_audit.log"
           value={config.audit_log_path || ""}
           onChange={(e) => updateConfig("audit_log_path", e.currentTarget.value)}
         />
         <Text size="xs" c="dimmed">
           {config.audit_log_path
-            ? `Gateon will create this file and its parent folder if they don't exist.`
+            ? `Gateon will create this file under <data-dir>/audit/waf/, and its folder, if they don't exist.`
             : `Default location: the Gateon data directory under audit/waf/. The folder and log file are created for you on save.`}
         </Text>
         <Switch
@@ -431,6 +431,15 @@ export function SchemaValidationConfigEditor({ config, updateConfig }: EditorPro
         minRows={10}
         autosize
         styles={{ input: { fontFamily: "monospace" } }}
+      />
+      <NumberInput
+        label="Max body size (bytes)"
+        description="Longer bodies are refused with 413 before they are decoded. Leave empty for the resource profile's default (1 MiB; 4 MiB on enterprise)."
+        placeholder="1048576"
+        min={1}
+        allowDecimal={false}
+        value={config.max_body_bytes ? Number(config.max_body_bytes) : ""}
+        onChange={(val) => updateConfig("max_body_bytes", val === "" ? "" : String(val))}
       />
     </Stack>
   );

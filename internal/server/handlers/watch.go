@@ -96,6 +96,9 @@ func RegisterWatchHandler(mux *http.ServeMux, d *Deps) {
 		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceDiagnostics) {
 			return
 		}
+		ctx, cancel := context.WithCancel(r.Context())
+		defer cancel()
+		d.streamGuard(r, diagnosticsRead).watch(ctx, cancel)
 
 		SetSSEHeaders(w)
 		flusher, ok := w.(http.Flusher)
@@ -118,7 +121,7 @@ func RegisterWatchHandler(mux *http.ServeMux, d *Deps) {
 		// Create a common channel for all events
 		eventCh := make(chan WatchEvent, 20)
 
-		go forwardWatchEvents(r.Context(), watchSources{
+		go forwardWatchEvents(ctx, watchSources{
 			audit:   auditCh,
 			threat:  threatCh,
 			metrics: metricsCh,
@@ -127,7 +130,7 @@ func RegisterWatchHandler(mux *http.ServeMux, d *Deps) {
 
 		for {
 			select {
-			case <-r.Context().Done():
+			case <-ctx.Done():
 				return
 			case ev := <-eventCh:
 				if ev.Type == "heartbeat" {

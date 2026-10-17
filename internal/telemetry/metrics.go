@@ -201,6 +201,15 @@ var MiddlewareWAFShedLargeBodiesTotal = promauto.NewCounterVec(prometheus.Counte
 	Help: "Large request bodies refused with 503 because no inspection slot was free, by route.",
 }, []string{"route"})
 
+// MiddlewareCompressBrotliFallbacksTotal counts responses a client asked for
+// as br that were sent gzip or unencoded because every brotli encoder slot was
+// in use (ADR 0073). A steady rate on ordinary traffic means the tier's
+// CompressMaxBrotliEncoders is low for the host; the response still went out.
+var MiddlewareCompressBrotliFallbacksTotal = promauto.NewCounter(prometheus.CounterOpts{
+	Name: "gateon_middleware_compress_brotli_fallbacks_total",
+	Help: "Responses offered br that were sent gzip or unencoded because no brotli encoder slot was free.",
+})
+
 // MiddlewareWAFWouldBlockTotal counts requests an audit-only WAF declined to
 // refuse but would have refused if it were enforcing.
 //

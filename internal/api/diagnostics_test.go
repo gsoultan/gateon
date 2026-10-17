@@ -426,7 +426,10 @@ func TestApplyRecommendation(t *testing.T) {
 	})
 
 	t.Run("Fix Shadowed Route", func(t *testing.T) {
-		_ = routeStore.Update(ctx, &gateonv1.Route{Id: "rt-spec", Name: "Specific", Priority: 50})
+		// A route the Routes page could save: the fix now goes through the same
+		// domain save, which needs a service and a rule that parses.
+		_ = routeStore.Update(ctx, &gateonv1.Route{Id: "rt-spec", Name: "Specific", Priority: 50,
+			Type: "http", Rule: "Host(`specific.test`)", ServiceId: "svc"})
 
 		resp, err := apiSvc.ApplyRecommendation(ctx, &gateonv1.ApplyRecommendationRequest{
 			AnomalyType: "shadowed_route",

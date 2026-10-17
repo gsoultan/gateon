@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gsoultan/gateon/internal/config"
@@ -143,6 +144,64 @@ func (o *openConns) remove(c net.Conn) {
 	if o.closing && len(o.conns) == 0 {
 		o.signalDrainedLocked()
 	}
+}
+
+// connLease is an admitted connection's hold on its entrypoint's slots -- the
+// max_connections slot, the per-address one, and its place in the set a block
+// event walks. It ends once, through release, however many paths reach it.
+//
+// The goroutine an admitted connection is served on owns the lease and ends it
+// when it returns, unless it has handed the connection off to the shared HTTP
+// server, which serves a keep-alive connection for as long as its client keeps
+// it open. That goroutine returned at the hand-off, and the slot went with it:
+// max_connections, the per-address cap and the block hook stopped reaching
+// every HTTP connection a plaintext TCP entrypoint served (ADR 0075). A
+// handed-off connection's lease now ends when the connection is closed.
+type connLease struct {
+	once   sync.Once
+	end    func()
+	handed atomic.Bool
+}
+
+// release ends the lease; only the first call does anything.
+func (l *connLease) release() {
+	if l != nil {
+		l.once.Do(l.end)
+	}
+}
+
+// releaseUnlessHandedOff is the serving goroutine's end of the lease: it ends
+// it, unless the connection was handed off and its Close now does.
+func (l *connLease) releaseUnlessHandedOff() {
+	if l != nil && !l.handed.Load() {
+		l.release()
+	}
+}
+
+// handOff passes the lease to c's new owner: it returns c wrapped so that
+// closing it ends the lease. A nil lease -- a connection no entrypoint
+// admitted, as in a test -- returns c as it is.
+func (l *connLease) handOff(c net.Conn) net.Conn {
+	if l == nil {
+		return c
+	}
+	l.handed.Store(true)
+	return &leasedConn{Conn: c, lease: l}
+}
+
+// leasedConn is a handed-off connection whose Close ends its lease. A block
+// event or a forced shutdown closes the socket beneath it, never this: the
+// server reading it then fails, closes it, and that ends the lease -- so the
+// lease is never ended under the lock those two hold.
+type leasedConn struct {
+	net.Conn
+	lease *connLease
+}
+
+func (c *leasedConn) Close() error {
+	err := c.Conn.Close()
+	c.lease.release()
+	return err
 }
 
 // closeByAddr closes every held connection whose source address is ip and

@@ -5,10 +5,12 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 
 	"github.com/gsoultan/gateon/internal/audit"
 	"github.com/gsoultan/gateon/internal/auth"
+	"github.com/gsoultan/gateon/internal/authz/routebind"
 	"github.com/gsoultan/gateon/internal/config/mwsecret"
 	"github.com/gsoultan/gateon/internal/request"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
@@ -131,6 +133,10 @@ func registerMiddlewareHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Dep
 		// The service keeps every stored secret the caller sent the
 		// placeholder back for, and refuses one it cannot keep (ADR 0033).
 		if err := d.MwService.SaveMiddleware(r.Context(), &mw); err != nil {
+			if errors.Is(err, routebind.ErrRequiresAdmin) {
+				WriteHTTPError(w, http.StatusForbidden, err.Error())
+				return
+			}
 			// Validation/config errors are client errors
 			WriteHTTPError(w, http.StatusBadRequest, err.Error())
 			return

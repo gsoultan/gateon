@@ -36,6 +36,11 @@ func TestBlockedProbeTargetPolicy(t *testing.T) {
 		{"0.0.0.0", true, "unspecified, routes to this host"},
 		{"::", true, "IPv6 unspecified"},
 		{"224.0.0.1", true, "link-local multicast"},
+		{"100.100.100.200", true, "Alibaba Cloud metadata; in 100.64/10, not link-local (ADR 0077)"},
+		{"fd00:ec2::254", true, "EC2 metadata over IPv6; a ULA, not link-local (ADR 0077)"},
+		{"64:ff9b::a9fe:a9fe", true, "NAT64 form of 169.254.169.254 (ADR 0077)"},
+		{"64:ff9b::7f00:1", true, "NAT64 form of 127.0.0.1 (ADR 0077)"},
+		{"100.64.0.5", false, "the rest of carrier-grade NAT space"},
 
 		{"10.0.0.5", false, "a backend in a VPC -- the point of the feature"},
 		{"192.168.1.10", false, "a NAS on the LAN"},

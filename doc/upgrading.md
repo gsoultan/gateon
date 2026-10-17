@@ -11,6 +11,133 @@ here after the fact.
 
 ## Unreleased
 
+### "Apply fix" asks for the permission of what it changes
+
+A security finding's **Apply fix** needs only `diagnostics:write`, but several
+fixes change something else: the shadowed-route fix a route's priority, the
+CORS fix a middleware, the WAF false-positive fix a rule exception, and the
+geofence, WAF-hardening and public-management fixes the global configuration.
+Each now also needs write on that resource (`routes`, `middlewares`,
+`waf_rules`, `global`), and the route and CORS fixes save through the same path
+as the Routes and Middlewares pages, so their validation and binding rules
+apply. The CORS fix also refuses a finding whose origin is not exactly one
+`scheme://host[:port]` (a list, `*`, `null`), since that text came from the
+client's `Origin` header.
+
+**Who is affected:** custom RBAC roles that hold `diagnostics:write` without
+the resource's own write permission; their fixes are now refused with nothing
+changed. The built-in admin and operator roles are unaffected.
+
+### An operator cannot add or reconfigure forward auth on a route that carries a credential
+
+Forward auth copies the request headers to its own address, OAuth2
+introspection posts the bearer token to its own URL, and a wasm guest reads any
+header. Placed after a `headers` or `rewrite` middleware that sets an
+`Authorization` or API-key value, each delivered that credential to wherever it
+was configured to send, without the route being repointed (ADR 0072).
+
+**Who is affected:** accounts with the operator role. Adding one of these
+middlewares to a route that carries a credential, moving one after the
+credential, or changing the type, config or wasm module of one bound to such a
+route now gets `403` / `PermissionDenied`; an administrator makes the change.
+Renaming it, and everything on routes without a credential, is unchanged.
+
+### Schema validation refuses bodies over 1 MiB
+
+The `schema_validation` middleware now refuses with `413` any body longer than
+its limit, before decoding it: 1 MiB on minimal and standard, 4 MiB on
+enterprise (ADR 0074). It used to decode anything up to the gateway's 10 MiB
+request limit. Decoding JSON can hold up to 45 times the body's size, so one
+10 MiB body could take hundreds of MiB. A body over 64 KiB also needs one of a
+fixed number of decode slots: 2 on minimal, 8 on standard, 16 on enterprise. A
+body that gets no slot within 2 s is answered `503` with `Retry-After: 2`.
+
+**Who is affected:** routes with `schema_validation` that accept JSON bodies
+over 1 MiB (over 4 MiB on enterprise). Set **Max body size** on the route's
+schema validation middleware (`max_body_bytes`), or
+`GATEON_SCHEMA_VALIDATION_MAX_BODY_BYTES` for every route. Raise
+`GATEON_SCHEMA_VALIDATION_MAX_LARGE_BODIES` if legitimate large bodies get
+`503`. Budget up to 45 times the body limit in memory per slot.
+
+### br responses can be sent gzip while brotli is busy
+
+The compress middleware now brotli-encodes only a fixed number of responses at
+once in the whole process: 8 on minimal, 32 on standard, 128 on enterprise
+(ADR 0073). A client that offers br when every slot is taken gets gzip, or an
+unencoded response if it does not take gzip. It never waits. Encoders also run
+at quality 5 with a 256 KiB window, so br output is about 1% larger than before
+and each encoder uses about a quarter of the memory. The dashboard's own assets
+now come from the precompressed files shipped in the build.
+
+**Who is affected:** routes with the compress middleware, and anyone who uses
+the dashboard. Nothing needs to change. If
+`gateon_middleware_compress_brotli_fallbacks_total` rises on ordinary traffic and
+you would rather pay the memory, raise `GATEON_COMPRESS_MAX_BROTLI_ENCODERS`.
+Budget about 2.6 MiB per slot.
+
+### A route WAF's audit log file must be under the audit directory
+
+A WAF middleware's `audit_log_path` used to be any file the gateway could
+write, and anyone who may edit a middleware could point it at the gateway's own
+configuration (ADR 0078). It is now a file under `<data-dir>/audit/waf/`: a
+name such as `myroute.log` or `team/myroute.log`, or an absolute path already
+inside that directory.
+
+**Who is affected:** route WAF middlewares whose `audit_log_path` is elsewhere,
+or contains `..`. They keep running, but write
+`<data-dir>/audit/waf/<route>_audit.log` instead, with a WARN naming the stored
+value, and saving them unchanged is refused. Change the value to a name inside
+the directory, or clear it. The global WAF's `audit_log_path` (an
+administrator's setting) is unchanged and may still be anywhere.
+
+### A service can no longer point at cloud instance metadata
+
+A service or TCP target on a cloud metadata address -- `169.254.169.254`,
+`169.254.170.2`, `fd00:ec2::254`, `100.100.100.200`, `168.63.129.16`, any
+other link-local address (`169.254.0.0/16`, `fe80::/10`), or a name such as
+`metadata.google.internal` -- is refused when it is saved, and the connection
+is refused when it is dialled, also for a name that resolves there (ADR 0077).
+Behind a public route such a target handed the instance's role credentials to
+anyone.
+
+**Who is affected:** an install with such a target stops proxying to it on
+upgrade: requests get `502`, its health check reports it down, and the
+service cannot be saved again until the target is changed. The log says
+`refused a backend connection to a cloud instance metadata service` at most
+once a minute. If a backend genuinely lives on a link-local address (a
+node-local DNS cache, an IPv6 link-local device), set
+`GATEON_ALLOW_LINK_LOCAL_TARGETS=1`; the metadata addresses themselves stay
+refused whatever it says. UDP services are not affected.
+
+### Open log and event streams end when their session does
+
+The system log WebSocket (`/v1/logs`) and the dashboard's event streams were
+authorized once, when they opened, and ran on after the account was signed
+out, disabled or demoted (ADR 0076). They now re-check the session every 30
+seconds and end when it no longer holds, and never outlive the token that
+opened them. The log WebSocket also now pings its client and ends the stream
+after 60 seconds without an answer, and is bounded by the stream lifetime cap
+(`GATEON_STREAM_MAX_LIFETIME`) like the event streams.
+
+**Who is affected:** anything that holds a management stream open with a
+token: it now has to reconnect when the token expires (8 hours) or the session
+is ended. A WebSocket client of `/v1/logs` that does not answer pings is
+disconnected; browsers and common client libraries answer them automatically.
+
+### HTTP connections through a plaintext TCP entrypoint count against its connection caps
+
+A plaintext TCP entrypoint that detected HTTP gave a connection's slot back as
+soon as it handed the connection to its HTTP server, so `max_connections`, the
+per-address cap (`GATEON_ENTRYPOINT_MAX_CONN_PER_ADDR`) and the block hook never
+reached HTTP served there (ADR 0075). The slot is now held until the connection
+closes, idle keep-alive time included, as on an HTTP entrypoint.
+
+**Who is affected:** TCP entrypoints that also serve HTTP routes and whose HTTP
+clients hold more open connections than the entrypoint's `max_connections` (or
+than the per-address cap from one address). The excess is refused at accept;
+raise `max_connections` if that traffic is legitimate. A blocked address's open
+HTTP connections on such an entrypoint are now closed when it is blocked.
+
 ### A git push through the WAF needs the route to say it hosts git
 
 The WAF used to skip the body of any request whose `Content-Type` or path named

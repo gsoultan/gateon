@@ -422,7 +422,7 @@ func (s *ApiService) tlsOptionService() dtls.Service {
 
 func (s *ApiService) middlewareService() dmw.Service {
 	return dmw.NewService(s.Middlewares, s.Routes, s.invalidator(), s.MiddlewareValidator,
-		wafmw.WAFCacheInvalidator{}, logger.Default())
+		wafmw.WAFCacheInvalidator{}, logger.Default(), s.bindingGuard())
 }
 
 // invalidator is the proxy invalidator, or one that does nothing when the

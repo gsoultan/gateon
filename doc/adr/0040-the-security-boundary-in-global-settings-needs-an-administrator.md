@@ -180,6 +180,9 @@ entry says so.
   own `audit_log_path`, and middlewares are operator-writable. The same file
   write is reachable there; it belongs with the middleware-config validation
   (ADR 0043's area), not here.
+  *Addressed 2026-10-17 by ADR 0078: a route WAF's `audit_log_path` is
+  confined to `<data-dir>/audit/waf/`; the global one stays the
+  administrator's.*
 - **`waf.clamav.docker_image`** is operational: an operator may choose the
   image the gateway runs for ClamAV. It runs unprivileged with only a port
   published, so it is not a host escalation by itself, but it is code the

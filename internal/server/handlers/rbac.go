@@ -4,7 +4,9 @@
 package handlers
 
 import (
+	"context"
 	"net/http"
+	"time"
 
 	"github.com/gsoultan/gateon/internal/auth"
 	"github.com/gsoultan/gateon/internal/logger"
@@ -128,4 +130,139 @@ func auditUser(r *http.Request) string {
 		return "system"
 	}
 	return claims.Username
+}
+
+// streamRecheckEvery is how often an open management stream asks again whether
+// its caller may still read it: the session binding's cache TTL
+// (auth.DefaultBindingTTL), so a stream outlives a sign-out, a disable or a
+// demotion by at most one interval more than a request made after it would.
+const streamRecheckEvery = 30 * time.Second
+
+// streamPermission is what a management stream needs to go on.
+type streamPermission struct {
+	action   auth.Action
+	resource auth.Resource
+}
+
+// diagnosticsRead is the permission every management stream is opened under:
+// the system log and the live events are read-only observability.
+var diagnosticsRead = streamPermission{action: auth.ActionRead, resource: auth.ResourceDiagnostics}
+
+// streamGrant is what a management stream was opened under: the session token
+// that authorized it, and the permission it needs to go on.
+type streamGrant struct {
+	verifier auth.Service
+	token    string
+	perm     streamPermission
+}
+
+// holds re-runs the check the stream was opened under -- the token through the
+// same VerifyToken every request takes, which compares the session binding
+// (password, role, disabled flag, sign-out epoch; ADR 0005, 0012) and the
+// expiry, then the role against the permission, which reads the RBAC policy in
+// force now. It returns the claims when they still hold.
+func (g streamGrant) holds(ctx context.Context) (*auth.Claims, bool) {
+	if g.token == "" || !auth.Available(g.verifier) {
+		return nil, false
+	}
+	raw, err := g.verifier.VerifyToken(g.token)
+	if err != nil {
+		return nil, false
+	}
+	claims, isClaims := raw.(*auth.Claims)
+	if !isClaims || claims == nil {
+		return nil, false
+	}
+	return claims, auth.Allowed(ctx, claims.Role, g.perm.action, g.perm.resource)
+}
+
+// streamGuard is what keeps a management stream to its caller's session. A
+// stream was authorized once, when it opened, and then ran until its client
+// left or the stream lifetime cap (up to 12h, past the 8h token lifetime)
+// ended it, so signing out, disabling the account or demoting it left every
+// open log and event stream running (ADR 0076). Its watch ends the stream when
+// the token expires, and when a re-check every streamRecheckEvery finds the
+// caller no longer holds the permission.
+//
+// It is nil for a stream opened with no caller, where the base handler waived
+// authentication for the deployment: there is no session to lose.
+func (d *Deps) streamGuard(r *http.Request, p streamPermission) *streamRecheck {
+	if claims, ok := callerClaims(r); ok && claims == nil {
+		return nil
+	}
+	return &streamRecheck{
+		grant: streamGrant{verifier: d.AuthManager, token: middleware.ExtractToken(r), perm: p},
+		clock: d.newStreamTicker,
+	}
+}
+
+// streamRecheck is one stream's re-check: the grant it re-checks and the clock
+// it re-checks by.
+type streamRecheck struct {
+	grant  streamGrant
+	clock  func() (<-chan time.Time, func())
+	cancel context.CancelFunc
+}
+
+// watch ends the stream through cancel -- at once when the grant does not
+// hold now, else at the token's expiry or the first re-check on which it no
+// longer holds -- and stops watching when ctx ends. A nil guard watches
+// nothing.
+func (s *streamRecheck) watch(ctx context.Context, cancel context.CancelFunc) {
+	if s == nil {
+		return
+	}
+	claims, ok := s.grant.holds(ctx)
+	if !ok {
+		cancel()
+		return
+	}
+	s.cancel = cancel
+	ticks, stop := s.clock()
+	expiry := expiryTimer(claims.Expiration)
+	go func() {
+		defer stop()
+		defer expiry.Stop()
+		s.run(ctx, ticks, expiry.C)
+	}()
+}
+
+// run is the watch loop: it cancels the stream at expired or at the first tick
+// on which the grant no longer holds, and returns when ctx ends either way.
+func (s *streamRecheck) run(ctx context.Context, ticks <-chan time.Time, expired <-chan time.Time) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-expired:
+			s.cancel()
+			return
+		case <-ticks:
+			if _, ok := s.grant.holds(ctx); !ok {
+				s.cancel()
+				return
+			}
+		}
+	}
+}
+
+// expiryTimer fires when a token expiring at exp does; a token that states no
+// expiry gets a timer that never fires.
+func expiryTimer(exp time.Time) *time.Timer {
+	if exp.IsZero() {
+		t := time.NewTimer(time.Hour)
+		t.Stop()
+		return t
+	}
+	return time.NewTimer(time.Until(exp))
+}
+
+// newStreamTicker is the clock a stream re-checks by: every
+// streamRecheckEvery, unless a test gave Deps a clock of its own.
+func (d *Deps) newStreamTicker() (<-chan time.Time, func()) {
+	if d.streamTicks != nil {
+		return d.streamTicks()
+	}
+	t := time.NewTicker(streamRecheckEvery)
+	return t.C, t.Stop
 }

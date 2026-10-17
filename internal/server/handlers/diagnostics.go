@@ -21,6 +21,8 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/gsoultan/gateon/internal/auth"
+	"github.com/gsoultan/gateon/internal/cloudmeta"
+	"github.com/gsoultan/gateon/internal/deadline"
 	"github.com/gsoultan/gateon/internal/ebpf"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware"
@@ -36,8 +38,134 @@ import (
 // which a cross-site WebSocket is free to do (review M9). The handshake is
 // checked the way the management plane checks a write: the management origin,
 // a configured CORS origin, or a client that is not a browser (ADR 0041).
+//
+// The handshake has a timeout of its own: gorilla clears the connection's
+// deadlines when it upgrades, and a hijacked connection keeps none the
+// listener set.
 func logsUpgrader(origins *mgmtorigin.Policy) *websocket.Upgrader {
-	return &websocket.Upgrader{CheckOrigin: origins.Allows}
+	return &websocket.Upgrader{CheckOrigin: origins.Allows, HandshakeTimeout: logsHandshakeTimeout}
+}
+
+// The log WebSocket's bounds. Once upgraded it has no deadline from its
+// listener, so it had none at all: a client that stopped reading, or vanished
+// without a FIN, held the stream and its goroutine until the process ended.
+const (
+	logsHandshakeTimeout = 10 * time.Second
+	// logsPongWait is how long the client may go without answering a ping,
+	// or sending anything, before the stream is ended.
+	logsPongWait = 60 * time.Second
+	// logsPingEvery is how often the server pings: well inside logsPongWait.
+	logsPingEvery = 45 * time.Second
+	// logsWriteWait bounds each write, so a client that stopped reading
+	// cannot hold the writer.
+	logsWriteWait = 10 * time.Second
+	// logsReadLimit bounds what the client may send: nothing but control
+	// frames is expected.
+	logsReadLimit = 512
+)
+
+// logStream serves GET /v1/logs: the system log over a WebSocket, for as long
+// as the caller's session holds and no longer than the stream lifetime cap
+// (ADR 0076).
+type logStream struct {
+	deps     *Deps
+	upgrader *websocket.Upgrader
+	// lifetime is the stream lifetime cap (deadline.CurrentStreamLimits),
+	// which the event streams get from their listener and a hijacked
+	// connection does not; 0 is no cap.
+	lifetime time.Duration
+}
+
+func (s *logStream) serve(w http.ResponseWriter, r *http.Request) {
+	if !isLogsRequestAuthorized(r, s.deps.AuthManager) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"error":"unauthorized"}`))
+		return
+	}
+	conn, err := s.upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		return
+	}
+	ctx, cancel := withLifetime(r.Context(), s.lifetime)
+	defer cancel()
+	s.deps.streamGuard(r, diagnosticsRead).watch(ctx, cancel)
+	peerGone := readLogsPeer(conn, cancel)
+	defer func() {
+		_ = conn.Close()
+		<-peerGone
+	}()
+	logCh, history := logger.Broadcaster.Subscribe()
+	defer logger.Broadcaster.Unsubscribe(logCh)
+	for _, msg := range history {
+		if writeLogLine(conn, msg) != nil {
+			return
+		}
+	}
+	pumpLogs(ctx, conn, logCh)
+}
+
+// withLifetime is parent ending after lifetime, or only cancellable when
+// lifetime is 0, the cap disabled.
+func withLifetime(parent context.Context, lifetime time.Duration) (context.Context, context.CancelFunc) {
+	if lifetime <= 0 {
+		return context.WithCancel(parent)
+	}
+	return context.WithTimeout(parent, lifetime)
+}
+
+// readLogsPeer reads what the client sends -- only control frames are
+// expected -- so its pongs are seen and its close is noticed, and ends the
+// stream through cancel when the client goes quiet past logsPongWait or the
+// connection fails. The returned channel closes when the reader has returned.
+func readLogsPeer(conn *websocket.Conn, cancel context.CancelFunc) <-chan struct{} {
+	done := make(chan struct{})
+	conn.SetReadLimit(logsReadLimit)
+	_ = conn.SetReadDeadline(time.Now().Add(logsPongWait))
+	conn.SetPongHandler(func(string) error {
+		return conn.SetReadDeadline(time.Now().Add(logsPongWait))
+	})
+	go func() {
+		defer close(done)
+		defer cancel()
+		for {
+			if _, _, err := conn.NextReader(); err != nil {
+				return
+			}
+		}
+	}()
+	return done
+}
+
+// pumpLogs sends each log line, and a ping every logsPingEvery, until ctx ends
+// -- the client left, the session no longer holds, or the lifetime cap -- and
+// tells the client why it is being closed.
+func pumpLogs(ctx context.Context, conn *websocket.Conn, logCh <-chan string) {
+	ping := time.NewTicker(logsPingEvery)
+	defer ping.Stop()
+	for {
+		select {
+		case msg, ok := <-logCh:
+			if !ok || writeLogLine(conn, msg) != nil {
+				return
+			}
+		case <-ping.C:
+			if conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(logsWriteWait)) != nil {
+				return
+			}
+		case <-ctx.Done():
+			_ = conn.WriteControl(websocket.CloseMessage,
+				websocket.FormatCloseMessage(websocket.ClosePolicyViolation, "stream ended"),
+				time.Now().Add(logsWriteWait))
+			return
+		}
+	}
+}
+
+// writeLogLine sends one line within logsWriteWait.
+func writeLogLine(conn *websocket.Conn, msg string) error {
+	_ = conn.SetWriteDeadline(time.Now().Add(logsWriteWait))
+	return conn.WriteMessage(websocket.TextMessage, []byte(msg))
 }
 
 // aggRateEstimator derives a system-wide requests/second figure from the
@@ -78,11 +206,15 @@ func (e *rateEstimator) observe(total uint64, now time.Time) float64 {
 }
 
 // isBlockedIP reports whether an address is in a range that must never be
-// reachable via the diagnostics test-target (SSRF protection).
+// reachable via the diagnostics test-target (SSRF protection). An IPv4-mapped
+// or NAT64 address is judged as the IPv4 address it reaches, and the cloud
+// metadata addresses outside these ranges (Alibaba's in 100.64/10, Azure's
+// WireServer) are refused by cloudmeta's list (ADR 0077).
 func isBlockedIP(ip netip.Addr) bool {
-	ip = ip.Unmap()
+	ip = cloudmeta.Embedded(ip)
 	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() ||
-		ip.IsLinkLocalMulticast() || ip.IsUnspecified() || ip.IsMulticast()
+		ip.IsLinkLocalMulticast() || ip.IsUnspecified() || ip.IsMulticast() ||
+		cloudmeta.IsMetadataAddr(ip)
 }
 
 // hostResolvesToBlockedIP resolves host and returns true if it is (or resolves
@@ -353,6 +485,9 @@ func registerDiagnosticHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Dep
 		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceDiagnostics) {
 			return
 		}
+		ctx, cancel := context.WithCancel(r.Context())
+		defer cancel()
+		d.streamGuard(r, diagnosticsRead).watch(ctx, cancel)
 		SetSSEHeaders(w)
 
 		flusher, ok := w.(http.Flusher)
@@ -367,14 +502,14 @@ func registerDiagnosticHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Dep
 		for {
 			select {
 			case <-ticker.C:
-				res, err := svc.GetDiagnostics(r.Context(), &gateonv1.GetDiagnosticsRequest{})
+				res, err := svc.GetDiagnostics(ctx, &gateonv1.GetDiagnosticsRequest{})
 				if err != nil {
 					return
 				}
 				data, _ := ProtojsonOptions().Marshal(res)
 				_, _ = fmt.Fprintf(w, "data: %s\n\n", string(data))
 				flusher.Flush()
-			case <-r.Context().Done():
+			case <-ctx.Done():
 				return
 			}
 		}
@@ -469,43 +604,8 @@ func registerDiagnosticHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Dep
 		data, _ := ProtojsonOptions().Marshal(res)
 		_, _ = w.Write(data)
 	})
-	upgrader := logsUpgrader(d.MgmtOrigins)
-	mux.HandleFunc("GET /v1/logs", func(w http.ResponseWriter, r *http.Request) {
-		if !isLogsRequestAuthorized(r, d.AuthManager) {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusUnauthorized)
-			_ = json.NewEncoder(w).Encode(map[string]string{"error": "unauthorized"})
-			return
-		}
-		conn, err := upgrader.Upgrade(w, r, nil)
-		if err != nil {
-			return
-		}
-		defer conn.Close()
-		logCh, history := logger.Broadcaster.Subscribe()
-		defer logger.Broadcaster.Unsubscribe(logCh)
-
-		// Send history first
-		for _, msg := range history {
-			if err := conn.WriteMessage(websocket.TextMessage, []byte(msg)); err != nil {
-				return
-			}
-		}
-
-		for {
-			select {
-			case msg, ok := <-logCh:
-				if !ok {
-					return
-				}
-				if err := conn.WriteMessage(websocket.TextMessage, []byte(msg)); err != nil {
-					return
-				}
-			case <-r.Context().Done():
-				return
-			}
-		}
-	})
+	logs := &logStream{deps: d, upgrader: logsUpgrader(d.MgmtOrigins), lifetime: deadline.CurrentStreamLimits().MaxLifetime}
+	mux.HandleFunc("GET /v1/logs", logs.serve)
 	mux.HandleFunc("GET /v1/diag/sys", func(w http.ResponseWriter, r *http.Request) {
 		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceDiagnostics) {
 			return
@@ -656,6 +756,9 @@ func registerDiagnosticHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Dep
 		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceDiagnostics) {
 			return
 		}
+		ctx, cancel := context.WithCancel(r.Context())
+		defer cancel()
+		d.streamGuard(r, diagnosticsRead).watch(ctx, cancel)
 		SetSSEHeaders(w)
 
 		ch := telemetry.MetricsBroadcaster.Subscribe()
@@ -684,7 +787,7 @@ func registerDiagnosticHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Dep
 				data, _ := json.Marshal(snap)
 				_, _ = fmt.Fprintf(w, "data: %s\n\n", string(data))
 				flusher.Flush()
-			case <-r.Context().Done():
+			case <-ctx.Done():
 				return
 			}
 		}
@@ -802,6 +905,9 @@ func registerDiagnosticHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Dep
 		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceDiagnostics) {
 			return
 		}
+		ctx, cancel := context.WithCancel(r.Context())
+		defer cancel()
+		d.streamGuard(r, diagnosticsRead).watch(ctx, cancel)
 		SetSSEHeaders(w)
 
 		ch := telemetry.ThreatBroadcaster.Subscribe()
@@ -822,7 +928,7 @@ func registerDiagnosticHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Dep
 				data, _ := json.Marshal(threat)
 				_, _ = fmt.Fprintf(w, "data: %s\n\n", string(data))
 				flusher.Flush()
-			case <-r.Context().Done():
+			case <-ctx.Done():
 				return
 			}
 		}

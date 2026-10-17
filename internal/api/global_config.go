@@ -373,11 +373,18 @@ var errSessionKeyByReference = errors.New("the session key comes from a referenc
 	"Helm install); change the value it names and restart, with GATEON_PREVIOUS_SESSION_KEY set to the old key " +
 	"so stored second factors move to the new one")
 
+// errGlobalWriteDenied refuses an internal writer whose caller may not write
+// the global configuration. UpdateGlobalConfig is global:write; a fix applied
+// from diagnostics, or any other fixed-purpose writer, is not a way around it.
+var errGlobalWriteDenied = status.Error(codes.PermissionDenied,
+	"changing the global configuration needs a permission your role does not have; nothing was changed")
+
 // errGlobalStoreUnavailable is answered by an internal writer with no store.
 var errGlobalStoreUnavailable = errors.New("global configuration store not available")
 
 // editGlobal applies edit to a copy of the stored configuration and stores the
-// result, under the same administrator-only rule as UpdateGlobalConfig.
+// result, under the same rules as UpdateGlobalConfig: global:write, and the
+// administrator-only boundary fields.
 //
 // The fixed-purpose writers here (a recommendation, the ClamAV mode) used to
 // edit the registry's live configuration in place and then store that same
@@ -387,6 +394,9 @@ var errGlobalStoreUnavailable = errors.New("global configuration store not avail
 func (s *ApiService) editGlobal(ctx context.Context, edit func(*gateonv1.GlobalConfig)) error {
 	if s.Globals == nil {
 		return errGlobalStoreUnavailable
+	}
+	if !callerMayWrite(ctx, auth.ResourceGlobal) {
+		return errGlobalWriteDenied
 	}
 	stored := s.Globals.Get(ctx)
 	proposed, ok := proto.Clone(stored).(*gateonv1.GlobalConfig)

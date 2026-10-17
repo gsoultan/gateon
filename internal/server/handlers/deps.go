@@ -54,4 +54,9 @@ type Deps struct {
 	// the caller's session: the management origin and the configured CORS
 	// origins. Nil allows the management origin only.
 	MgmtOrigins *mgmtorigin.Policy
+
+	// streamTicks, when set, is the clock open management streams re-check
+	// their caller by, in place of a ticker every streamRecheckEvery: a test
+	// sends the ticks itself.
+	streamTicks func() (<-chan time.Time, func())
 }
