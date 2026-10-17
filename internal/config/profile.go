@@ -173,6 +173,23 @@ type TierDefaults struct {
 	// overrides it; it cannot be switched off.
 	CompressMaxBrotliEncoders int
 
+	// SchemaMaxBodyBytes is the longest request body the schema_validation
+	// middleware decodes (ADR 0075); a longer one is refused with 413 before
+	// any of it is decoded. Decoding JSON into a generic value holds up to
+	// about 45 times the body's length, so the gateway's 10 MiB request limit
+	// is far too loose a bound for it. A route's max_body_bytes overrides it
+	// for that route, and GATEON_SCHEMA_VALIDATION_MAX_BODY_BYTES for every
+	// route that sets none.
+	SchemaMaxBodyBytes int64
+
+	// SchemaMaxLargeBodies is how many bodies over 64 KiB the
+	// schema_validation middleware decodes at once in the whole process
+	// (ADR 0075). A body that finds every slot taken for two seconds is
+	// refused with 503 and Retry-After, never forwarded unvalidated.
+	// GATEON_SCHEMA_VALIDATION_MAX_LARGE_BODIES overrides it; it cannot be
+	// switched off.
+	SchemaMaxLargeBodies int
+
 	// MaxHeaderBytes is the most request-header bytes an HTTP listener --
 	// every entrypoint and the management listener, over HTTP/1, HTTP/2 and
 	// HTTP/3 -- buffers for one request; a request past it is refused with 431
@@ -295,6 +312,8 @@ func DefaultsFor(tier Tier) TierDefaults {
 			EntryPointMaxConnPerAddr:   128,
 			WAFMaxLargeBodyInspections: 4,
 			CompressMaxBrotliEncoders:  8,
+			SchemaMaxBodyBytes:         1 << 20, // 1 MiB
+			SchemaMaxLargeBodies:       2,
 			MaxHeaderBytes:             32 << 10, // 32 KiB
 			StreamIdleTimeout:          2 * time.Minute,
 			StreamMaxLifetime:          time.Hour,
@@ -337,6 +356,8 @@ func DefaultsFor(tier Tier) TierDefaults {
 			EntryPointMaxConnPerAddr:   1024,
 			WAFMaxLargeBodyInspections: 64,
 			CompressMaxBrotliEncoders:  128,
+			SchemaMaxBodyBytes:         4 << 20, // 4 MiB
+			SchemaMaxLargeBodies:       16,
 			MaxHeaderBytes:             64 << 10, // 64 KiB
 			StreamIdleTimeout:          10 * time.Minute,
 			StreamMaxLifetime:          12 * time.Hour,
@@ -379,6 +400,8 @@ func DefaultsFor(tier Tier) TierDefaults {
 			EntryPointMaxConnPerAddr:   256,
 			WAFMaxLargeBodyInspections: 16,
 			CompressMaxBrotliEncoders:  32,
+			SchemaMaxBodyBytes:         1 << 20, // 1 MiB
+			SchemaMaxLargeBodies:       8,
 			MaxHeaderBytes:             32 << 10, // 32 KiB
 			StreamIdleTimeout:          5 * time.Minute,
 			StreamMaxLifetime:          4 * time.Hour,

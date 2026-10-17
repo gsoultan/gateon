@@ -184,6 +184,10 @@ the longest test history:
    compression is bounded by `GATEON_COMPRESS_MAX_BROTLI_ENCODERS`, and past
    that limit responses are sent gzip; watch
    `gateon_middleware_compress_brotli_fallbacks_total` (ADR 0074).
+   Routes that validate JSON bodies over 1 MiB need `max_body_bytes` on their
+   `schema_validation` middleware, and sites with many concurrent large
+   validated bodies may need `GATEON_SCHEMA_VALIDATION_MAX_LARGE_BODIES`
+   raised (ADR 0075).
 2. **Health checks** with an explicit path and both a failure and a recovery
    threshold, so one bad probe does not drain a pool.
 3. **Rate limiting** per route, sized from real traffic, not guessed.

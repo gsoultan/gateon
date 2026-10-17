@@ -42,6 +42,23 @@ credential, or changing the type, config or wasm module of one bound to such a
 route now gets `403` / `PermissionDenied`; an administrator makes the change.
 Renaming it, and everything on routes without a credential, is unchanged.
 
+### Schema validation refuses bodies over 1 MiB
+
+The `schema_validation` middleware now refuses with `413` any body longer than
+its limit, before decoding it: 1 MiB on minimal and standard, 4 MiB on
+enterprise (ADR 0075). It used to decode anything up to the gateway's 10 MiB
+request limit. Decoding JSON can hold up to 45 times the body's size, so one
+10 MiB body could take hundreds of MiB. A body over 64 KiB also needs one of a
+fixed number of decode slots: 2 on minimal, 8 on standard, 16 on enterprise. A
+body that gets no slot within 2 s is answered `503` with `Retry-After: 2`.
+
+**Who is affected:** routes with `schema_validation` that accept JSON bodies
+over 1 MiB (over 4 MiB on enterprise). Set **Max body size** on the route's
+schema validation middleware (`max_body_bytes`), or
+`GATEON_SCHEMA_VALIDATION_MAX_BODY_BYTES` for every route. Raise
+`GATEON_SCHEMA_VALIDATION_MAX_LARGE_BODIES` if legitimate large bodies get
+`503`. Budget up to 45 times the body limit in memory per slot.
+
 ### br responses can be sent gzip while brotli is busy
 
 The compress middleware now brotli-encodes only a fixed number of responses at

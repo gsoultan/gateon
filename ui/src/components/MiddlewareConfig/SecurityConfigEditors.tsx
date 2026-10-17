@@ -432,6 +432,15 @@ export function SchemaValidationConfigEditor({ config, updateConfig }: EditorPro
         autosize
         styles={{ input: { fontFamily: "monospace" } }}
       />
+      <NumberInput
+        label="Max body size (bytes)"
+        description="Longer bodies are refused with 413 before they are decoded. Leave empty for the resource profile's default (1 MiB; 4 MiB on enterprise)."
+        placeholder="1048576"
+        min={1}
+        allowDecimal={false}
+        value={config.max_body_bytes ? Number(config.max_body_bytes) : ""}
+        onChange={(val) => updateConfig("max_body_bytes", val === "" ? "" : String(val))}
+      />
     </Stack>
   );
 }

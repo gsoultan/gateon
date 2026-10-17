@@ -101,6 +101,9 @@ var dashboardKeyEffects = []keyEffect{
 		probe: postJSON("/graphql", `{"query":"{ a { b { c { d } } } }"}`)},
 	{mwType: "graphql_firewall", key: "introspection", a: "true", b: "false",
 		probe: postJSON("/graphql", `{"query":"{ __schema { types { name } } }"}`)},
+	// Under the bound the body is validated and passed; over it, 413 (ADR 0075).
+	{mwType: "schema_validation", key: "max_body_bytes", base: map[string]string{"schema": `{"type":"array"}`},
+		a: "1048576", b: "8", probe: postJSON("/items", "[1,2,3,4,5,6,7,8]")},
 }
 
 func TestDashboardKeysChangeWhatTheGatewayDoes(t *testing.T) {
