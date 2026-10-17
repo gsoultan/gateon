@@ -75,6 +75,21 @@ the dashboard. Nothing needs to change. If
 you would rather pay the memory, raise `GATEON_COMPRESS_MAX_BROTLI_ENCODERS`.
 Budget about 2.6 MiB per slot.
 
+### A route WAF's audit log file must be under the audit directory
+
+A WAF middleware's `audit_log_path` used to be any file the gateway could
+write, and anyone who may edit a middleware could point it at the gateway's own
+configuration (ADR 0079). It is now a file under `<data-dir>/audit/waf/`: a
+name such as `myroute.log` or `team/myroute.log`, or an absolute path already
+inside that directory.
+
+**Who is affected:** route WAF middlewares whose `audit_log_path` is elsewhere,
+or contains `..`. They keep running, but write
+`<data-dir>/audit/waf/<route>_audit.log` instead, with a WARN naming the stored
+value, and saving them unchanged is refused. Change the value to a name inside
+the directory, or clear it. The global WAF's `audit_log_path` (an
+administrator's setting) is unchanged and may still be anywhere.
+
 ### A service can no longer point at cloud instance metadata
 
 A service or TCP target on a cloud metadata address -- `169.254.169.254`,

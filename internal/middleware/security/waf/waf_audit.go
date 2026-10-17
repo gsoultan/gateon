@@ -5,6 +5,7 @@ package waf
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/logger"
+	"github.com/gsoultan/gateon/internal/middleware/kind"
 	"github.com/gsoultan/gateon/internal/security/redact"
 	"github.com/gsoultan/gwaf"
 	"github.com/gsoultan/gwaf/types"
@@ -132,6 +134,15 @@ type auditLog struct {
 // newAuditLog opens the audit log a config asks for, or returns nil when the
 // config asks for none.
 func newAuditLog(cfg WAFConfig) (*auditLog, error) {
+	if cfg.auditLogConfined {
+		f, err := openConfinedAuditLog(cfg.AuditLogPath)
+		if err == nil {
+			return &auditLog{file: f, relevantOnly: cfg.AuditLogRelevantOnly}, nil
+		}
+		logger.L.LogWarn("route WAF audit_log_path cannot be opened inside the audit directory; "+
+			"writing the route's default audit log instead (ADR 0079)", "route", cfg.RouteID, "error", err)
+		cfg.AuditLogPath = ""
+	}
 	path := resolveAuditLogPath(cfg)
 	if path == "" {
 		return nil, nil
@@ -220,7 +231,121 @@ func resolveAuditLogPath(cfg WAFConfig) string {
 	if name == "" {
 		name = "waf"
 	}
-	return filepath.Join(config.DataDir(), "audit", "waf", name+"_audit.log")
+	return filepath.Join(auditLogDir(), name+"_audit.log")
+}
+
+// keyAuditLogPath is the route config key naming a WAF's audit log file.
+const keyAuditLogPath = "audit_log_path"
+
+// auditLogDir is the directory every route WAF's audit log lives in.
+func auditLogDir() string {
+	return filepath.Join(config.DataDir(), "audit", "waf")
+}
+
+// errAuditLogOutside is why a route's audit_log_path is refused.
+var errAuditLogOutside = errors.New("a route WAF's audit log is a file under <data-dir>/audit/waf/; " +
+	"give a name such as myroute.log (or team/myroute.log), with no \"..\" and no absolute path " +
+	"elsewhere -- only an administrator chooses a path outside it, in the global WAF settings")
+
+// routeAuditLogPath is where a route WAF's own audit_log_path writes: a
+// file under auditLogDir, returned as a path relative to it (ADR 0079).
+//
+// The key is written by anyone who may edit a middleware, and the WAF creates
+// the directory and appends captured request data to whatever file it names,
+// so an unconfined value appended to the gateway's own configuration, a cron
+// directory, or any other file the process can write. A relative name is
+// read inside the directory; an absolute one is accepted only when it is
+// already inside it (the default path an older dashboard stored); any ".."
+// element is refused rather than resolved. This is the lexical half: the open
+// (openConfinedAuditLog) refuses a symlink out of the directory.
+func routeAuditLogPath(raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	base, err := filepath.Abs(auditLogDir())
+	if err != nil {
+		return "", fmt.Errorf("resolve the audit directory: %w", err)
+	}
+	p := raw
+	if filepath.IsAbs(p) {
+		if p, err = filepath.Rel(base, filepath.Clean(p)); err != nil {
+			return "", errAuditLogOutside
+		}
+	}
+	for _, el := range strings.Split(filepath.ToSlash(p), "/") {
+		if el == ".." {
+			return "", errAuditLogOutside
+		}
+	}
+	p = filepath.Clean(p)
+	if p == "." || !filepath.IsLocal(p) {
+		return "", errAuditLogOutside
+	}
+	return p, nil
+}
+
+// CheckAuditLogPathSave refuses, at save, a route WAF audit_log_path outside
+// the audit directory (ADR 0079). A stored one predating the refusal keeps
+// building and writes the route's default file instead (confineRouteAuditLog).
+func CheckAuditLogPathSave(cfg map[string]string) error {
+	v := strings.TrimSpace(cfg[keyAuditLogPath])
+	if v == "" {
+		return nil
+	}
+	if _, err := routeAuditLogPath(v); err != nil {
+		return kind.CfgError(keyAuditLogPath, v, err)
+	}
+	return nil
+}
+
+// confineRouteAuditLog applies a route's own audit_log_path, own, to c: a
+// path inside the audit directory is opened there, confined; one outside it
+// is logged and dropped, so the route writes its default file. own is the
+// route's value before the global WAF's is merged in -- the global path is an
+// administrator's (a Boundary setting) and is used as given.
+func confineRouteAuditLog(c *WAFConfig, own string) {
+	own = strings.TrimSpace(own)
+	if own == "" {
+		return
+	}
+	rel, err := routeAuditLogPath(own)
+	if err != nil {
+		logger.L.LogWarn("ignoring a route WAF audit_log_path outside the audit directory; "+
+			"writing the route's default audit log instead -- change it to a name under "+
+			"<data-dir>/audit/waf/ (ADR 0079)", "route", c.RouteID, "audit_log_path", own)
+		c.AuditLogPath = ""
+		return
+	}
+	c.AuditLogPath = filepath.Join(auditLogDir(), rel)
+	c.auditLogConfined = true
+}
+
+// openConfinedAuditLog opens path, a file under auditLogDir, through an
+// os.Root on that directory, so neither a ".." nor a symlink -- in a parent
+// or in the file itself -- reaches outside it.
+func openConfinedAuditLog(path string) (*os.File, error) {
+	base := auditLogDir()
+	rel, err := routeAuditLogPath(path)
+	if err != nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(base, 0o750); err != nil {
+		return nil, fmt.Errorf("create audit log dir %q: %w", base, err)
+	}
+	root, err := os.OpenRoot(base)
+	if err != nil {
+		return nil, fmt.Errorf("open audit log dir %q: %w", base, err)
+	}
+	defer root.Close()
+	if dir := filepath.Dir(rel); dir != "." {
+		if err := root.MkdirAll(dir, 0o750); err != nil {
+			return nil, fmt.Errorf("create audit log dir %q: %w", dir, err)
+		}
+	}
+	// 0600 for the reason newAuditLog gives: this is captured attack traffic.
+	f, err := root.OpenFile(rel, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("open audit log %q: %w", rel, err)
+	}
+	return f, nil
 }
 
 // sanitizeAuditName makes a route identifier safe to use as a file name.

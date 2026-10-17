@@ -125,6 +125,10 @@ type WAFConfig struct {
 	AllowedAdminIps             []string // IPs allowed to access WP admin
 	WafRules                    *waf.Store
 
+	// auditLogConfined says AuditLogPath is a route's own, opened only inside
+	// the audit directory (ADR 0079); a global or default path is not.
+	auditLogConfined bool
+
 	// AppProfiles names the platforms behind this route — "wordpress",
 	// "drupal", "laravel", "issue_tracker" — each loading the scoped exceptions
 	// that platform needs so it does not block on its own ordinary traffic.
@@ -181,7 +185,7 @@ func (c WAFConfig) Fingerprint() string {
 	// booleans: it changes what the middleware does with a decision, so two
 	// configs differing only in it describe different behaviour and must not
 	// share a cached engine.
-	fmt.Fprintf(h, "s:%s|%s\n", c.AuditLogPath, c.DLPAction)
+	fmt.Fprintf(h, "s:%s|%t|%s\n", c.AuditLogPath, c.auditLogConfined, c.DLPAction)
 	// Programmatic rules are part of the policy, so two configs differing only
 	// in them must not share a cached engine.
 	for i := range c.ExtraRules {

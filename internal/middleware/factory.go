@@ -140,6 +140,8 @@ func (f *Factory) checkSave(m *gateonv1.Middleware) error {
 		return security.CheckEntropySave(cfg)
 	case typeTarpit:
 		return security.CheckTarpitSave(cfg)
+	case "waf":
+		return waf.CheckAuditLogPathSave(cfg)
 	}
 	return nil
 }

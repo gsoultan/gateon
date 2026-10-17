@@ -223,7 +223,7 @@ describe("waf editor", () => {
       "SSRF Parameter Protection",
       "Request Body Limit",
       "Response Body Limit",
-      "Audit Log Path (optional)",
+      "Audit Log File (optional)",
     ]) {
       expect(findElement(tree, byLabel(label))).not.toBeNull();
     }
