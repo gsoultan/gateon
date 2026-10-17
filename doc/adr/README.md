@@ -88,6 +88,7 @@ ADRs follow a lightweight [MADR](https://adr.github.io/madr/)-style format:
 | [0078](./0078-the-gateway-never-proxies-to-cloud-instance-metadata.md) | The gateway never proxies to cloud instance metadata | Accepted |
 | [0079](./0079-a-route-wafs-audit-log-stays-in-the-audit-directory.md) | A route WAF's audit log stays in the audit directory | Accepted |
 | [0076](./0076-an-http-connection-through-a-tcp-entrypoint-holds-its-slot-until-it-closes.md) | An HTTP connection through a TCP entrypoint holds its slot until it closes | Accepted |
+| [0077](./0077-a-management-stream-is-re-authorized-while-it-is-open.md) | A management stream is re-authorized while it is open | Accepted |
 
 ## Conventions
 

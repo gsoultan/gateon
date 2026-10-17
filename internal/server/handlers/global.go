@@ -263,6 +263,9 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceDiagnostics) {
 			return
 		}
+		ctx, cancel := context.WithCancel(r.Context())
+		defer cancel()
+		d.streamGuard(r, diagnosticsRead).watch(ctx, cancel)
 		SetSSEHeaders(w)
 
 		ch := audit.Subscribe()
@@ -287,7 +290,7 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 				data, _ := json.Marshal(entry)
 				_, _ = fmt.Fprintf(w, "data: %s\n\n", string(data))
 				flusher.Flush()
-			case <-r.Context().Done():
+			case <-ctx.Done():
 				return
 			}
 		}
@@ -400,6 +403,9 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceDiagnostics) {
 			return
 		}
+		ctx, cancel := context.WithCancel(r.Context())
+		defer cancel()
+		d.streamGuard(r, diagnosticsRead).watch(ctx, cancel)
 		SetSSEHeaders(w)
 
 		flusher, ok := w.(http.Flusher)
@@ -414,14 +420,14 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 		for {
 			select {
 			case <-ticker.C:
-				res, err := svc.GetStatus(r.Context(), &gateonv1.GetStatusRequest{})
+				res, err := svc.GetStatus(ctx, &gateonv1.GetStatusRequest{})
 				if err != nil {
 					return
 				}
 				data, _ := ProtojsonOptions().Marshal(res)
 				_, _ = fmt.Fprintf(w, "data: %s\n\n", string(data))
 				flusher.Flush()
-			case <-r.Context().Done():
+			case <-ctx.Done():
 				return
 			}
 		}

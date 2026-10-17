@@ -109,6 +109,21 @@ node-local DNS cache, an IPv6 link-local device), set
 `GATEON_ALLOW_LINK_LOCAL_TARGETS=1`; the metadata addresses themselves stay
 refused whatever it says. UDP services are not affected.
 
+### Open log and event streams end when their session does
+
+The system log WebSocket (`/v1/logs`) and the dashboard's event streams were
+authorized once, when they opened, and ran on after the account was signed
+out, disabled or demoted (ADR 0077). They now re-check the session every 30
+seconds and end when it no longer holds, and never outlive the token that
+opened them. The log WebSocket also now pings its client and ends the stream
+after 60 seconds without an answer, and is bounded by the stream lifetime cap
+(`GATEON_STREAM_MAX_LIFETIME`) like the event streams.
+
+**Who is affected:** anything that holds a management stream open with a
+token: it now has to reconnect when the token expires (8 hours) or the session
+is ended. A WebSocket client of `/v1/logs` that does not answer pings is
+disconnected; browsers and common client libraries answer them automatically.
+
 ### HTTP connections through a plaintext TCP entrypoint count against its connection caps
 
 A plaintext TCP entrypoint that detected HTTP gave a connection's slot back as
