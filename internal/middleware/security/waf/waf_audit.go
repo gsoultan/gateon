@@ -140,7 +140,7 @@ func newAuditLog(cfg WAFConfig) (*auditLog, error) {
 			return &auditLog{file: f, relevantOnly: cfg.AuditLogRelevantOnly}, nil
 		}
 		logger.L.LogWarn("route WAF audit_log_path cannot be opened inside the audit directory; "+
-			"writing the route's default audit log instead (ADR 0079)", "route", cfg.RouteID, "error", err)
+			"writing the route's default audit log instead (ADR 0078)", "route", cfg.RouteID, "error", err)
 		cfg.AuditLogPath = ""
 	}
 	path := resolveAuditLogPath(cfg)
@@ -248,7 +248,7 @@ var errAuditLogOutside = errors.New("a route WAF's audit log is a file under <da
 	"elsewhere -- only an administrator chooses a path outside it, in the global WAF settings")
 
 // routeAuditLogPath is where a route WAF's own audit_log_path writes: a
-// file under auditLogDir, returned as a path relative to it (ADR 0079).
+// file under auditLogDir, returned as a path relative to it (ADR 0078).
 //
 // The key is written by anyone who may edit a middleware, and the WAF creates
 // the directory and appends captured request data to whatever file it names,
@@ -283,7 +283,7 @@ func routeAuditLogPath(raw string) (string, error) {
 }
 
 // CheckAuditLogPathSave refuses, at save, a route WAF audit_log_path outside
-// the audit directory (ADR 0079). A stored one predating the refusal keeps
+// the audit directory (ADR 0078). A stored one predating the refusal keeps
 // building and writes the route's default file instead (confineRouteAuditLog).
 func CheckAuditLogPathSave(cfg map[string]string) error {
 	v := strings.TrimSpace(cfg[keyAuditLogPath])
@@ -310,7 +310,7 @@ func confineRouteAuditLog(c *WAFConfig, own string) {
 	if err != nil {
 		logger.L.LogWarn("ignoring a route WAF audit_log_path outside the audit directory; "+
 			"writing the route's default audit log instead -- change it to a name under "+
-			"<data-dir>/audit/waf/ (ADR 0079)", "route", c.RouteID, "audit_log_path", own)
+			"<data-dir>/audit/waf/ (ADR 0078)", "route", c.RouteID, "audit_log_path", own)
 		c.AuditLogPath = ""
 		return
 	}

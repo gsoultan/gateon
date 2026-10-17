@@ -1,4 +1,4 @@
-# 75. Schema validation decodes a bounded body, a bounded number of times at once
+# 74. Schema validation decodes a bounded body, a bounded number of times at once
 
 Date: 2026-10-17
 

@@ -31,7 +31,7 @@ var defaultPorts = map[string]int{
 
 // CheckTarget returns an error naming raw when it is a service target the
 // data plane refuses to connect to: a cloud instance metadata service (ADR
-// 0078), written as its address or as one of the names it is published under,
+// 0077), written as its address or as one of the names it is published under,
 // or this gateway's management listener (ADR 0052) -- the management port, on
 // a loopback, unspecified or own address of this host, written as one or as a
 // name that resolves to one. A name is not resolved for the metadata check,
@@ -74,7 +74,7 @@ func checkMetadataTarget(raw string) error {
 	}
 	return fmt.Errorf("target %s is a cloud instance metadata service; the gateway does not "+
 		"proxy to it, because behind a route it hands this machine's identity and credentials "+
-		"to whoever reaches that route (ADR 0078)", raw)
+		"to whoever reaches that route (ADR 0077)", raw)
 }
 
 // targetHost is the host raw connects to, whatever its port. ok is false when

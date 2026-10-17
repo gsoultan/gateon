@@ -1,4 +1,4 @@
-# 78. The gateway never proxies to cloud instance metadata
+# 77. The gateway never proxies to cloud instance metadata
 
 Date: 2026-10-17
 

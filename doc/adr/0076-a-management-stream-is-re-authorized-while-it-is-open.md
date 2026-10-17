@@ -1,4 +1,4 @@
-# 77. A management stream is re-authorized while it is open
+# 76. A management stream is re-authorized while it is open
 
 Date: 2026-10-17
 

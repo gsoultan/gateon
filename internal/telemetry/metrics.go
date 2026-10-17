@@ -203,7 +203,7 @@ var MiddlewareWAFShedLargeBodiesTotal = promauto.NewCounterVec(prometheus.Counte
 
 // MiddlewareCompressBrotliFallbacksTotal counts responses a client asked for
 // as br that were sent gzip or unencoded because every brotli encoder slot was
-// in use (ADR 0074). A steady rate on ordinary traffic means the tier's
+// in use (ADR 0073). A steady rate on ordinary traffic means the tier's
 // CompressMaxBrotliEncoders is low for the host; the response still went out.
 var MiddlewareCompressBrotliFallbacksTotal = promauto.NewCounter(prometheus.CounterOpts{
 	Name: "gateon_middleware_compress_brotli_fallbacks_total",

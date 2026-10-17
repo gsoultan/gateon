@@ -164,7 +164,7 @@ type TierDefaults struct {
 	WAFMaxLargeBodyInspections int
 
 	// CompressMaxBrotliEncoders is how many responses the compress middleware
-	// brotli-encodes at once in the whole process (ADR 0074). One encoder holds
+	// brotli-encodes at once in the whole process (ADR 0073). One encoder holds
 	// about 2.6 MiB once it has seen more than its 256 KiB window -- gzip about
 	// 1 MiB -- and every client that offers br asks for one, so it is the
 	// count, not any one response, that runs out of memory. A response that
@@ -174,7 +174,7 @@ type TierDefaults struct {
 	CompressMaxBrotliEncoders int
 
 	// SchemaMaxBodyBytes is the longest request body the schema_validation
-	// middleware decodes (ADR 0075); a longer one is refused with 413 before
+	// middleware decodes (ADR 0074); a longer one is refused with 413 before
 	// any of it is decoded. Decoding JSON into a generic value holds up to
 	// about 45 times the body's length, so the gateway's 10 MiB request limit
 	// is far too loose a bound for it. A route's max_body_bytes overrides it
@@ -184,7 +184,7 @@ type TierDefaults struct {
 
 	// SchemaMaxLargeBodies is how many bodies over 64 KiB the
 	// schema_validation middleware decodes at once in the whole process
-	// (ADR 0075). A body that finds every slot taken for two seconds is
+	// (ADR 0074). A body that finds every slot taken for two seconds is
 	// refused with 503 and Retry-After, never forwarded unvalidated.
 	// GATEON_SCHEMA_VALIDATION_MAX_LARGE_BODIES overrides it; it cannot be
 	// switched off.

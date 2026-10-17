@@ -85,7 +85,7 @@ func validateHealthCheck(svc *gateonv1.Service) error {
 }
 
 // validateTargets refuses a target that connects to a cloud instance metadata
-// service (ADR 0078) or to this gateway's own management listener (ADR 0052).
+// service (ADR 0077) or to this gateway's own management listener (ADR 0052).
 // Behind a public route, the first handed the instance's role credentials to
 // anyone who sent the route's Host. Behind a Host() route on a public
 // entrypoint, such a service served the dashboard, sign-in and API to the

@@ -14,7 +14,7 @@ import (
 	"golang.org/x/net/dns/dnsmessage"
 )
 
-// TestControlRefusesCloudMetadata (ADR 0078): the dial hook every data-plane
+// TestControlRefusesCloudMetadata (ADR 0077): the dial hook every data-plane
 // backend connection carries refuses the metadata service, also while no
 // management listener has bound -- the check used to return before looking at
 // any address whose port was not the management port.

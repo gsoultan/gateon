@@ -180,7 +180,7 @@ func (g streamGrant) holds(ctx context.Context) (*auth.Claims, bool) {
 // stream was authorized once, when it opened, and then ran until its client
 // left or the stream lifetime cap (up to 12h, past the 8h token lifetime)
 // ended it, so signing out, disabling the account or demoting it left every
-// open log and event stream running (ADR 0077). Its watch ends the stream when
+// open log and event stream running (ADR 0076). Its watch ends the stream when
 // the token expires, and when a re-check every streamRecheckEvery finds the
 // caller no longer holds the permission.
 //

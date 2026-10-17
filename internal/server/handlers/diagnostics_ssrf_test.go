@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-// TestTestTargetRefusesMetadataOutsidePrivateRanges (ADR 0078): the
+// TestTestTargetRefusesMetadataOutsidePrivateRanges (ADR 0077): the
 // diagnostics test-target refuses loopback, private and link-local ranges,
 // but Alibaba's metadata address sits in carrier-grade NAT space, Azure's
 // WireServer on a public address, and a NAT64 address reaches the IPv4

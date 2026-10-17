@@ -1,4 +1,4 @@
-# 79. A route WAF's audit log stays in the audit directory
+# 78. A route WAF's audit log stays in the audit directory
 
 Date: 2026-10-17
 

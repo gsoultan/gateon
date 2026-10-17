@@ -42,7 +42,7 @@ var gzipWriterPool = sync.Pool{
 // compresses that bundle to 27.3% of its size against 27.0% at the defaults,
 // and takes about 15% less CPU. Quality 4 is faster again but compresses
 // little better than gzip, which is when brotli stops being worth its memory
-// (ADR 0074).
+// (ADR 0073).
 const (
 	brotliQuality   = 5
 	brotliWindowLog = 18

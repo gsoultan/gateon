@@ -11,7 +11,7 @@ import (
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
-// TestSaveRefusesACloudMetadataTarget (ADR 0078): a service pointed at the
+// TestSaveRefusesACloudMetadataTarget (ADR 0077): a service pointed at the
 // cloud instance metadata service, behind a Host() route on a public
 // entrypoint, handed the instance's identity and role credentials -- IMDSv2's
 // token PUT included -- to anyone who sent the route's Host. The save is

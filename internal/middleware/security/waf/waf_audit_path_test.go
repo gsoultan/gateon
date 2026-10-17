@@ -24,7 +24,7 @@ func withDataDir(t *testing.T) string {
 	return dir
 }
 
-// TestRouteAuditLogPathIsRefusedOutsideTheAuditDirectory (ADR 0079): a route
+// TestRouteAuditLogPathIsRefusedOutsideTheAuditDirectory (ADR 0078): a route
 // WAF's audit_log_path is written by anyone who may edit a middleware, and the
 // WAF created the directory and appended captured request data to whatever
 // file it named -- the gateway's own configuration included. A path outside

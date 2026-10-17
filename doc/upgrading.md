@@ -46,7 +46,7 @@ Renaming it, and everything on routes without a credential, is unchanged.
 
 The `schema_validation` middleware now refuses with `413` any body longer than
 its limit, before decoding it: 1 MiB on minimal and standard, 4 MiB on
-enterprise (ADR 0075). It used to decode anything up to the gateway's 10 MiB
+enterprise (ADR 0074). It used to decode anything up to the gateway's 10 MiB
 request limit. Decoding JSON can hold up to 45 times the body's size, so one
 10 MiB body could take hundreds of MiB. A body over 64 KiB also needs one of a
 fixed number of decode slots: 2 on minimal, 8 on standard, 16 on enterprise. A
@@ -63,7 +63,7 @@ schema validation middleware (`max_body_bytes`), or
 
 The compress middleware now brotli-encodes only a fixed number of responses at
 once in the whole process: 8 on minimal, 32 on standard, 128 on enterprise
-(ADR 0074). A client that offers br when every slot is taken gets gzip, or an
+(ADR 0073). A client that offers br when every slot is taken gets gzip, or an
 unencoded response if it does not take gzip. It never waits. Encoders also run
 at quality 5 with a 256 KiB window, so br output is about 1% larger than before
 and each encoder uses about a quarter of the memory. The dashboard's own assets
@@ -79,7 +79,7 @@ Budget about 2.6 MiB per slot.
 
 A WAF middleware's `audit_log_path` used to be any file the gateway could
 write, and anyone who may edit a middleware could point it at the gateway's own
-configuration (ADR 0079). It is now a file under `<data-dir>/audit/waf/`: a
+configuration (ADR 0078). It is now a file under `<data-dir>/audit/waf/`: a
 name such as `myroute.log` or `team/myroute.log`, or an absolute path already
 inside that directory.
 
@@ -96,7 +96,7 @@ A service or TCP target on a cloud metadata address -- `169.254.169.254`,
 `169.254.170.2`, `fd00:ec2::254`, `100.100.100.200`, `168.63.129.16`, any
 other link-local address (`169.254.0.0/16`, `fe80::/10`), or a name such as
 `metadata.google.internal` -- is refused when it is saved, and the connection
-is refused when it is dialled, also for a name that resolves there (ADR 0078).
+is refused when it is dialled, also for a name that resolves there (ADR 0077).
 Behind a public route such a target handed the instance's role credentials to
 anyone.
 
@@ -113,7 +113,7 @@ refused whatever it says. UDP services are not affected.
 
 The system log WebSocket (`/v1/logs`) and the dashboard's event streams were
 authorized once, when they opened, and ran on after the account was signed
-out, disabled or demoted (ADR 0077). They now re-check the session every 30
+out, disabled or demoted (ADR 0076). They now re-check the session every 30
 seconds and end when it no longer holds, and never outlive the token that
 opened them. The log WebSocket also now pings its client and ends the stream
 after 60 seconds without an answer, and is bounded by the stream lifetime cap
@@ -129,7 +129,7 @@ disconnected; browsers and common client libraries answer them automatically.
 A plaintext TCP entrypoint that detected HTTP gave a connection's slot back as
 soon as it handed the connection to its HTTP server, so `max_connections`, the
 per-address cap (`GATEON_ENTRYPOINT_MAX_CONN_PER_ADDR`) and the block hook never
-reached HTTP served there (ADR 0076). The slot is now held until the connection
+reached HTTP served there (ADR 0075). The slot is now held until the connection
 closes, idle keep-alive time included, as on an HTTP entrypoint.
 
 **Who is affected:** TCP entrypoints that also serve HTTP routes and whose HTTP

@@ -3,7 +3,7 @@
 
 // Package cloudmeta knows where cloud instance metadata services answer, so
 // that nothing the gateway connects to on someone else's behalf reaches one
-// (ADR 0078).
+// (ADR 0077).
 //
 // A metadata service hands whatever can reach it the instance's identity and,
 // on most clouds, short-lived credentials for its role: on EC2 a GET of

@@ -56,7 +56,7 @@ type TechDetector struct {
 // An IPv4-mapped or NAT64 address is judged as the IPv4 address it reaches,
 // and the cloud metadata addresses outside link-local space -- Alibaba's in
 // 100.64/10, AWS's IPv6 ULA, Azure's WireServer -- are refused with it, from
-// the list the data plane's dialer refuses too (ADR 0078).
+// the list the data plane's dialer refuses too (ADR 0077).
 func blockedProbeTarget(ip net.IP) (string, bool) {
 	a, ok := netip.AddrFromSlice(ip)
 	if !ok {

@@ -1,4 +1,4 @@
-# 76. An HTTP connection through a TCP entrypoint holds its slot until it closes
+# 75. An HTTP connection through a TCP entrypoint holds its slot until it closes
 
 Date: 2026-10-17
 

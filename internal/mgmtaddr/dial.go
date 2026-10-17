@@ -21,12 +21,12 @@ var ErrManagementListener = errors.New("refused: the address is this gateway's m
 
 // ErrCloudMetadata is the error a refused connection fails with when the
 // address it was about to connect to is a cloud instance metadata service
-// (ADR 0078).
+// (ADR 0077).
 var ErrCloudMetadata = errors.New("refused: the address is a cloud instance metadata service")
 
 // Control is a net.Dialer Control hook that refuses a backend connection to
 // the management listener (ADR 0052) or to a cloud instance metadata service
-// (ADR 0078). It runs after the name is resolved, on the address actually
+// (ADR 0077). It runs after the name is resolved, on the address actually
 // being connected to, so a target saved as a name that later resolves to this
 // host or to 169.254.169.254 is refused as surely as one saved as the
 // address. Every dialer that carries data-plane traffic to a backend installs
@@ -44,7 +44,7 @@ func Control(network, address string, _ syscall.RawConn) error {
 	}
 	if cloudmeta.IsMetadataAddr(ap.Addr()) {
 		warnRefused(&lastMetadataWarn, address, "refused a backend connection to a cloud instance "+
-			"metadata service; a service target resolves to it (ADR 0078)")
+			"metadata service; a service target resolves to it (ADR 0077)")
 		return ErrCloudMetadata
 	}
 	if !Reaches(ap) {

@@ -126,7 +126,7 @@ type WAFConfig struct {
 	WafRules                    *waf.Store
 
 	// auditLogConfined says AuditLogPath is a route's own, opened only inside
-	// the audit directory (ADR 0079); a global or default path is not.
+	// the audit directory (ADR 0078); a global or default path is not.
 	auditLogConfined bool
 
 	// AppProfiles names the platforms behind this route — "wordpress",

@@ -33,7 +33,7 @@ type SchemaValidationConfig struct {
 // Decoding JSON into `any` holds 6 to 45 times the input's length -- 45 for an
 // array of small objects -- and the body used to be read up to the gateway's
 // 10 MiB request limit and decoded whole: one 10 MiB array held about 225 MiB
-// live, and nothing bounded how many ran at once (ADR 0075). So the body has a
+// live, and nothing bounded how many ran at once (ADR 0074). So the body has a
 // bound of its own, and a body past schemaLargeBody needs a decode slot.
 const (
 	schemaMaxBodyEnv    = "GATEON_SCHEMA_VALIDATION_MAX_BODY_BYTES"

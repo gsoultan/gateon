@@ -45,7 +45,7 @@ const dialTimeout = 10 * time.Second
 // (ADR 0052): an L4 route carries no request for the listener to tell apart,
 // so a TCP service pointed at it would hand the dashboard and API to whoever
 // reached the entrypoint, with the gateway's loopback address as the client.
-// It refuses a cloud instance metadata service for the same reason (ADR 0078).
+// It refuses a cloud instance metadata service for the same reason (ADR 0077).
 var backendDialer = &net.Dialer{Timeout: dialTimeout, Control: mgmtaddr.Control}
 
 // DialBackend picks a backend for client and connects to it, sending the

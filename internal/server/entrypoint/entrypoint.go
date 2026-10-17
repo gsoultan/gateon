@@ -155,7 +155,7 @@ func (o *openConns) remove(c net.Conn) {
 // server, which serves a keep-alive connection for as long as its client keeps
 // it open. That goroutine returned at the hand-off, and the slot went with it:
 // max_connections, the per-address cap and the block hook stopped reaching
-// every HTTP connection a plaintext TCP entrypoint served (ADR 0076). A
+// every HTTP connection a plaintext TCP entrypoint served (ADR 0075). A
 // handed-off connection's lease now ends when the connection is closed.
 type connLease struct {
 	once   sync.Once

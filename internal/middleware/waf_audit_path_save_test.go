@@ -12,7 +12,7 @@ import (
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
-// TestRouteWAFAuditLogPathIsRefusedAtSave (ADR 0079): the save path every
+// TestRouteWAFAuditLogPathIsRefusedAtSave (ADR 0078): the save path every
 // transport reaches through the domain service refuses a route WAF whose
 // audit_log_path leaves <data-dir>/audit/waf/, before Create would make the
 // directory and open the file -- and saves a name inside it.

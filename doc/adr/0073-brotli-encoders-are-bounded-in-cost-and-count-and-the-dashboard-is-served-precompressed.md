@@ -1,4 +1,4 @@
-# 74. Brotli encoders are bounded in cost and count, and the dashboard is served precompressed
+# 73. Brotli encoders are bounded in cost and count, and the dashboard is served precompressed
 
 Date: 2026-10-17
 

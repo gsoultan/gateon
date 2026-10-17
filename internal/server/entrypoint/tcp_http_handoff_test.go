@@ -18,7 +18,7 @@ import (
 // for as long as its client kept it alive: an entrypoint with max_connections
 // 2 served twenty idle keep-alive connections at once, and a blocked
 // address's open HTTP connection outlived the block. The slot is now held
-// until the HTTP connection closes (ADR 0076).
+// until the HTTP connection closes (ADR 0075).
 
 // keepAliveExchange sends one keep-alive request on c and reports whether a
 // response came back; c stays open for the next.

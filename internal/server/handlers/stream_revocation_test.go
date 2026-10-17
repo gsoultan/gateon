@@ -26,7 +26,7 @@ import (
 // and the event streams then ran until the client left or the stream lifetime
 // cap ended them -- up to twelve hours, past the eight-hour token -- so a
 // sign-out, a disabled account or a demotion left every open stream reading
-// the system log and the live security events (ADR 0077). Each now re-runs
+// the system log and the live security events (ADR 0076). Each now re-runs
 // the request's own check on a clock, and ends when it no longer holds.
 
 // streamBound bounds every wait in these tests; nothing here waits for it

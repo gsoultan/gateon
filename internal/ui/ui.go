@@ -127,7 +127,7 @@ var precompressedVariants = [...]struct{ encoding, suffix string }{
 // Without it the management chain's compress middleware brotli-encoded every
 // asset on the fly, for unauthenticated clients, at about 11 MiB of live heap
 // per encoder: 200 concurrent requests for the largest bundle held 2.2 GiB
-// (ADR 0074). The variant carries its own Content-Encoding, which the compress
+// (ADR 0073). The variant carries its own Content-Encoding, which the compress
 // middleware takes as already encoded and passes through untouched.
 //
 // index.html never reaches here: it is rewritten per request with the CSP

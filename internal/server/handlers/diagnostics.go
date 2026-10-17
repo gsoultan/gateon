@@ -66,7 +66,7 @@ const (
 
 // logStream serves GET /v1/logs: the system log over a WebSocket, for as long
 // as the caller's session holds and no longer than the stream lifetime cap
-// (ADR 0077).
+// (ADR 0076).
 type logStream struct {
 	deps     *Deps
 	upgrader *websocket.Upgrader
@@ -209,7 +209,7 @@ func (e *rateEstimator) observe(total uint64, now time.Time) float64 {
 // reachable via the diagnostics test-target (SSRF protection). An IPv4-mapped
 // or NAT64 address is judged as the IPv4 address it reaches, and the cloud
 // metadata addresses outside these ranges (Alibaba's in 100.64/10, Azure's
-// WireServer) are refused by cloudmeta's list (ADR 0078).
+// WireServer) are refused by cloudmeta's list (ADR 0077).
 func isBlockedIP(ip netip.Addr) bool {
 	ip = cloudmeta.Embedded(ip)
 	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() ||
