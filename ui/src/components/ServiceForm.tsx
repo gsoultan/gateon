@@ -25,7 +25,8 @@ import { apiFetch, getApiErrorMessage } from "../hooks/useGateon";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "@tanstack/react-form";
 import { notifications } from "@mantine/notifications";
-import { defaultTlsClientConfig } from "./serviceTlsDefaults";
+import { backendTlsProblem, defaultTlsClientConfig } from "./serviceTlsDefaults";
+import { BackendTlsIdentities } from "./BackendTlsIdentities";
 import { healthCheckBehaviour, healthCheckProblem, showsWeights, weightsToSave } from "./serviceFormRules";
 import { FieldGrid, FormActions, FormSection } from "./layout";
 
@@ -166,7 +167,9 @@ export function ServiceForm({
         });
         return;
       }
-      const problem = isL4Backend(bt) ? null : healthCheckProblem(value.healthCheckType, value.healthCheckPath);
+      const problem =
+        (isL4Backend(bt) ? null : healthCheckProblem(value.healthCheckType, value.healthCheckPath)) ??
+        backendTlsProblem(value.tlsClientConfig);
       if (problem) {
         notifications.show({ title: "Validation Error", message: problem, color: "red" });
         return;
@@ -252,7 +255,7 @@ export function ServiceForm({
       );
       form.setFieldValue("l4ProxyProtocol", initialData.l4ProxyProtocol ?? false);
       form.setFieldValue("discoveryUrl", initialData.discoveryUrl || "");
-      form.setFieldValue("tlsClientConfig", initialData.tlsClientConfig || defaultTlsClientConfig());
+      form.setFieldValue("tlsClientConfig", { ...defaultTlsClientConfig(), ...initialData.tlsClientConfig });
     }
   }, [initialData, form]);
 
@@ -902,6 +905,8 @@ export function ServiceForm({
                           )}
                         />
                       </Group>
+                      <Divider />
+                      <BackendTlsIdentities form={form} />
                     </Stack>
                   )
                 }
