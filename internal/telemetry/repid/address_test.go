@@ -47,3 +47,31 @@ func TestAddressKeyIsOneKeyPerSlashSixtyFourAndAFixedPoint(t *testing.T) {
 		t.Fatal("Address accepted text that is not an address")
 	}
 }
+
+// ForAddress is the reputation score's key (ADR 0079): the class For keys a
+// network by, on one address -- an IPv4 address itself, an IPv6 address's /64.
+func TestForAddressKeysTheClassOnOneAddress(t *testing.T) {
+	const build = "t13d1516h2_8daaf6152771_b0da82dd1658_ge11cr0200_7e33b58890ac"
+	class := Class(build)
+	for _, c := range []struct{ fp, ip, want string }{
+		{build, "203.0.113.7", class + "|203.0.113.7"},
+		{build, "::ffff:203.0.113.7", class + "|203.0.113.7"},
+		{build, "2001:db8:1:2::5", class + "|2001:db8:1:2::"},
+		{"", "203.0.113.7", "203.0.113.7"},
+		{"", "2001:db8:1:2::5", "2001:db8:1:2::"},
+		{build, "", class + "|"},
+	} {
+		if got := ForAddress(c.fp, c.ip); got != c.want {
+			t.Errorf("ForAddress(%q, %q) = %q, want %q", c.fp, c.ip, got, c.want)
+		}
+	}
+	if ForAddress(build, "203.0.113.7") == ForAddress(build, "203.0.113.8") {
+		t.Error("two IPv4 addresses on one /24 share a score key")
+	}
+	if ForAddress(build, "2001:db8:1:2::5") != ForAddress(build, "2001:db8:1:2:ffff::1") {
+		t.Error("two addresses of one IPv6 /64 have different score keys")
+	}
+	if k := ForAddress(build, "203.0.113.7"); !Scoped(k) || ClassOf(k) != class {
+		t.Errorf("ForAddress key %q is not scoped to its class %q", k, class)
+	}
+}
