@@ -16,7 +16,7 @@ import (
 	"github.com/gsoultan/gateon/internal/telemetry/repid"
 )
 
-// A reputation score is recorded under repid.For(fingerprint, network) and
+// A reputation score is recorded under repid.ForAddress(fingerprint, address) and
 // enforced against the same, and since ADR 0024 the fingerprint's class leaves
 // out the bits of JA4H a client varies per request. These pin that from the
 // telemetry side: the fingerprint the gateway composes (GenerateJA4H, JA4+), the

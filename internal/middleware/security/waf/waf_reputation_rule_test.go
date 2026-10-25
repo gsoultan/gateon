@@ -84,9 +84,9 @@ func wafBlocksFor(ip string) float64 {
 func assertRefusalOfEarlierDecision(t *testing.T, h http.Handler, threats chan telemetry.SecurityThreat,
 	client, bystander string, score float64, rule string) {
 	t.Helper()
-	key := repid.For(stockBuild, client)
-	t.Cleanup(func() { telemetry.ResetReputation(key) })
-	before := telemetry.GetReputationScore(key)
+	key, scoreKey := repid.For(stockBuild, client), repid.ForAddress(stockBuild, client)
+	t.Cleanup(func() { telemetry.ResetReputation(scoreKey) })
+	before := telemetry.GetReputationScore(scoreKey)
 
 	for i := range 4 {
 		rr, rs := visitScored(t, h, client, score)
@@ -100,7 +100,7 @@ func assertRefusalOfEarlierDecision(t *testing.T, h http.Handler, threats chan t
 	}
 	assertRecordedNotHeld(t, recorded(threats), rule)
 
-	if got := telemetry.GetReputationScore(key); got != before {
+	if got := telemetry.GetReputationScore(scoreKey); got != before {
 		t.Errorf("the refusals moved the client's score from %v to %v", before, got)
 	}
 	if got := wafBlocksFor(client); got != 0 {

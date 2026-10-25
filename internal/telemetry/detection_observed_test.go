@@ -47,7 +47,7 @@ func TestBehaviouralProfilingNeverLowersTheClientsReputation(t *testing.T) {
 	freshStore(t)
 	threats := subscribeThreats(t)
 	const client = "100.64.20.10"
-	id := repid.For(allowlistedBuild, client)
+	id := repid.ForAddress(allowlistedBuild, client)
 	t.Cleanup(func() { ResetReputation(id) })
 
 	for range 6 {
@@ -77,7 +77,7 @@ func TestADevicePostureChangeIsNotHeldAgainstTheNewDevice(t *testing.T) {
 		user      = "posture-user"
 		client    = "100.64.21.10"
 	)
-	id := repid.For(newDevice, "")
+	id := repid.ForAddress(newDevice, "")
 	t.Cleanup(func() { ResetReputation(id); userLocationCache.Remove(user) })
 	r := httptest.NewRequest(http.MethodGet, "/account", nil)
 

@@ -63,7 +63,7 @@ func TestAutomaticIPShunAfterTheSourceHasBeenSeen(t *testing.T) {
 	// which escalateMitigation shuns the address itself (ADR 0029).
 	for i := range telemetry.IPShunMinClasses {
 		fp := fmt.Sprintf("t13d1516h2_release_cache_%d", i)
-		t.Cleanup(func() { telemetry.ResetReputation(repid.For(fp, ip)) })
+		t.Cleanup(func() { telemetry.ResetReputation(repid.ForAddress(fp, ip)) })
 		telemetry.RecordSecurityThreat(telemetry.SecurityThreat{
 			Type: "waf_blocked", SourceIP: ip, Fingerprint: fp, Score: 100,
 			Category: "sqli", Severity: "critical", ActionTaken: telemetry.ActionBlocked,

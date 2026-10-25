@@ -86,7 +86,7 @@ func drained(threats chan telemetry.SecurityThreat) []telemetry.SecurityThreat {
 }
 
 func detectingScore(ip string) float64 {
-	return telemetry.GetReputationScore(repid.For(detectingBuild, ip))
+	return telemetry.GetReputationScore(repid.ForAddress(detectingBuild, ip))
 }
 
 func randomBody(t *testing.T) string {
@@ -130,7 +130,7 @@ func TestADetectionTheGatewayLetThroughNeverRefusesItsClient(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			threats := detectionStore(t)
 			client := fmt.Sprintf("100.64.%d.10", 10+i)
-			t.Cleanup(func() { telemetry.ResetReputation(repid.For(detectingBuild, client)) })
+			t.Cleanup(func() { telemetry.ResetReputation(repid.ForAddress(detectingBuild, client)) })
 			h := enforcedRoute("route-"+tc.name, tc.mw)
 
 			for n := range requestsToExhaust {
@@ -162,7 +162,7 @@ func TestADetectionTheGatewayLetThroughNeverRefusesItsClient(t *testing.T) {
 func TestATrapStillRefusesTheClientEverywhere(t *testing.T) {
 	const attacker = "192.0.2.40"
 	detectionStore(t)
-	t.Cleanup(func() { telemetry.ResetReputation(repid.For(detectingBuild, attacker)) })
+	t.Cleanup(func() { telemetry.ResetReputation(repid.ForAddress(detectingBuild, attacker)) })
 	h := enforcedRoute("trap-route", Deception(DeceptionConfig{RouteID: "trap-route", HoneypotPaths: []string{"/wp-admin"}}))
 
 	for range 2 {

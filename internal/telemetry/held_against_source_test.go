@@ -21,7 +21,7 @@ func TestARefusalOfALowScoreDoesNotLowerItFurther(t *testing.T) {
 	t.Setenv("GATEON_ENABLE_TEST_REPUTATION", "1")
 	freshStore(t)
 	const client = "203.0.113.60"
-	id := repid.For(allowlistedBuild, client)
+	id := repid.ForAddress(allowlistedBuild, client)
 	t.Cleanup(func() { ResetReputation(id) })
 	DecreaseReputation(id, 98.5, "test: an earlier penalty")
 	before := GetReputationScore(id)

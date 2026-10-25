@@ -119,7 +119,7 @@ func recorded(threats chan telemetry.SecurityThreat) []telemetry.SecurityThreat 
 }
 
 func scoreOf(ip string) float64 {
-	return telemetry.GetReputationScore(repid.For(stockBuild, ip))
+	return telemetry.GetReputationScore(repid.ForAddress(stockBuild, ip))
 }
 
 func xssProbe() *http.Request {
@@ -133,7 +133,7 @@ func xssProbe() *http.Request {
 func TestAnAuditOnlyWAFNeverRefusesItsClients(t *testing.T) {
 	const client = "203.0.113.30"
 	h, threats := innocentRoute(t, map[string]string{"audit_only": "true"}, plainPage)
-	t.Cleanup(func() { telemetry.ResetReputation(repid.For(stockBuild, client)) })
+	t.Cleanup(func() { telemetry.ResetReputation(repid.ForAddress(stockBuild, client)) })
 
 	for i := range 4 {
 		if rr := visit(t, h, client, xssProbe()); rr.Code != http.StatusOK {
@@ -154,7 +154,7 @@ func TestAnAuditOnlyWAFNeverRefusesItsClients(t *testing.T) {
 func TestAnAuditOnlyWAFDoesNotRefuseOnItsFastPathChecks(t *testing.T) {
 	const client = "203.0.113.31"
 	h, threats := innocentRoute(t, map[string]string{"audit_only": "true"}, plainPage)
-	t.Cleanup(func() { telemetry.ResetReputation(repid.For(stockBuild, client)) })
+	t.Cleanup(func() { telemetry.ResetReputation(repid.ForAddress(stockBuild, client)) })
 
 	req := httptest.NewRequest(http.MethodGet, "/account", nil)
 	req.Header.Set("Authorization", "Bearer eyJhbGciOiJIUzI1NiJ9.not-a-jwt-payload-at-all")
@@ -176,7 +176,7 @@ func TestAnAuditOnlyWAFDoesNotRefuseOnItsFastPathChecks(t *testing.T) {
 func TestAMatchTheWAFDidNotRefuseLeavesTheClientAlone(t *testing.T) {
 	const client = "203.0.113.32"
 	h, threats := innocentRoute(t, nil, plainPage)
-	t.Cleanup(func() { telemetry.ResetReputation(repid.For(stockBuild, client)) })
+	t.Cleanup(func() { telemetry.ResetReputation(repid.ForAddress(stockBuild, client)) })
 
 	for i := range 3 {
 		req := httptest.NewRequest(http.MethodPost, "/support/tickets",
@@ -202,7 +202,7 @@ func TestADataLeakInAResponseNeverRefusesItsReader(t *testing.T) {
 		t.Run(action, func(t *testing.T) {
 			const reader = "203.0.113.40"
 			h, threats := innocentRoute(t, map[string]string{"dlp": "true", "dlp_action": action}, innocentPage)
-			t.Cleanup(func() { telemetry.ResetReputation(repid.For(stockBuild, reader)) })
+			t.Cleanup(func() { telemetry.ResetReputation(repid.ForAddress(stockBuild, reader)) })
 
 			for i := range 4 {
 				rr := visit(t, h, reader, httptest.NewRequest(http.MethodGet, "/orders/1", nil))
@@ -248,7 +248,7 @@ func assertAnExposureOnTheRoute(t *testing.T, threats []telemetry.SecurityThreat
 func TestAnAttackerIsStillRefused(t *testing.T) {
 	const attacker, elsewhere = "198.18.5.5", "203.0.113.11"
 	h, _ := innocentRoute(t, map[string]string{"audit_only": "false"}, plainPage)
-	t.Cleanup(func() { telemetry.ResetReputation(repid.For(stockBuild, attacker)) })
+	t.Cleanup(func() { telemetry.ResetReputation(repid.ForAddress(stockBuild, attacker)) })
 
 	for i := range 2 {
 		if rr := visit(t, h, attacker, xssProbe()); rr.Code != http.StatusForbidden {

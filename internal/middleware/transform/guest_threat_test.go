@@ -83,7 +83,7 @@ func TestAPluginsThreatIsObservedAndBounded(t *testing.T) {
 
 	for i, score := range []float64{1e9, math.Inf(1), math.NaN(), -5, 40} {
 		client := fmt.Sprintf("100.64.%d.1", 30+i)
-		t.Cleanup(func() { telemetry.ResetReputation(repid.For(pluginBuild, client)) })
+		t.Cleanup(func() { telemetry.ResetReputation(repid.ForAddress(pluginBuild, client)) })
 		mw, err := Wasm(t.Context(), threatGuest(score), "plugin-route")
 		if err != nil {
 			t.Fatalf("build the guest: %v", err)

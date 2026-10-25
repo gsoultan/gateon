@@ -65,8 +65,9 @@ func earnRefusal(t *testing.T, gate http.Handler, fingerprint, ip string, blocks
 // TestReleaseLiftsTheReputationBlock is the regression test for a release that
 // reported success and left the client refused.
 //
-// Since ADR 0011 a reputation score lives under repid.For(fingerprint,
-// network), and that composite is what the reputation blocker reads. The
+// Since ADR 0011 a reputation score lives under a fingerprint scoped to where
+// it came from -- repid.ForAddress since ADR 0079 -- and that composite is what
+// the reputation blocker reads. The
 // release path still reset the bare address and the bare fingerprint -- keys
 // the recording path stopped writing when the identity was scoped -- so it
 // removed nothing, answered "removed successfully", and the client stayed at
@@ -81,7 +82,7 @@ func TestReleaseLiftsTheReputationBlock(t *testing.T) {
 		const fp, ip = "t13d1516h2_release_by_address_a1_b2", "203.0.113.41"
 		svc := newMitigationTestService(t)
 		gate := enforcementGate(t)
-		t.Cleanup(func() { telemetry.ResetReputation(repid.For(fp, ip)) })
+		t.Cleanup(func() { telemetry.ResetReputation(repid.ForAddress(fp, ip)) })
 
 		// Two blocks: enough to drive the score to zero, not enough for the
 		// fingerprint block, so the reputation blocker is the only refusal.
@@ -101,7 +102,7 @@ func TestReleaseLiftsTheReputationBlock(t *testing.T) {
 		const fp, ip = "t13d1516h2_release_by_fingerprint_c3_d4", "198.51.100.42"
 		svc := newMitigationTestService(t)
 		gate := enforcementGate(t)
-		t.Cleanup(func() { telemetry.ResetReputation(repid.For(fp, ip)) })
+		t.Cleanup(func() { telemetry.ResetReputation(repid.ForAddress(fp, ip)) })
 
 		// Three blocks: the fingerprint is blocked as well, which is what gives
 		// the fingerprint release something to release.
@@ -129,7 +130,7 @@ func TestReleaseLiftsTheReputationBlock(t *testing.T) {
 		const fp, ip = "t13d1516h2_release_block_by_address_e5_f6", "192.0.2.43"
 		svc := newMitigationTestService(t)
 		gate := enforcementGate(t)
-		t.Cleanup(func() { telemetry.ResetReputation(repid.For(fp, ip)) })
+		t.Cleanup(func() { telemetry.ResetReputation(repid.ForAddress(fp, ip)) })
 
 		earnRefusal(t, gate, fp, ip, 3)
 		if !telemetry.IsUserMitigated(repid.For(fp, ip)) {

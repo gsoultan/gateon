@@ -100,7 +100,7 @@ func TestAllowlistExemptsEnforcementNotObservation(t *testing.T) {
 	t.Cleanup(func() { _ = telemetry.ClosePathStatsStore(context.Background()) })
 	withAllowlist(t, "203.0.113.0/24")
 	const ip, build = "203.0.113.7", "t13d1516h2_8daaf6152771_b0da82dd1658_observed"
-	id := repid.For(build, ip)
+	id := repid.ForAddress(build, ip)
 	t.Cleanup(func() { telemetry.ResetReputation(id) })
 
 	if !mitigation.IsAllowlisted(ip) {

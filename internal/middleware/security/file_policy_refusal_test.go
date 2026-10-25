@@ -40,7 +40,7 @@ func TestAnUploadRefusedForWhatItIsIsNotMalware(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			threats := detectionStore(t)
 			client := []string{"100.64.40.10", "100.64.41.10"}[i]
-			t.Cleanup(func() { telemetry.ResetReputation(repid.For(detectingBuild, client)) })
+			t.Cleanup(func() { telemetry.ResetReputation(repid.ForAddress(detectingBuild, client)) })
 			tc.cfg.RouteID = "upload-route"
 			h := enforcedRoute("upload-route", FileSecurity(tc.cfg))
 
@@ -73,7 +73,7 @@ func TestAnUploadRefusedForWhatItIsIsNotMalware(t *testing.T) {
 func TestAMalwareUploadIsStillHeldAgainstItsSender(t *testing.T) {
 	const attacker = "100.64.42.10"
 	threats := detectionStore(t)
-	t.Cleanup(func() { telemetry.ResetReputation(repid.For(detectingBuild, attacker)) })
+	t.Cleanup(func() { telemetry.ResetReputation(repid.ForAddress(detectingBuild, attacker)) })
 	h := enforcedRoute("upload-route", FileSecurity(FileSecurityConfig{RouteID: "upload-route"}))
 	elf := append([]byte{0x7f, 'E', 'L', 'F', 0x02, 0x01, 0x01, 0x00}, make([]byte, 64)...)
 

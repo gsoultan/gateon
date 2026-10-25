@@ -25,7 +25,7 @@ func TestTheResponderDoesNotPenaliseAnAllowlistedParticipant(t *testing.T) {
 	publishMitigationAllowlist()
 	t.Cleanup(func() { mitigation.SetAllowlist(nil) })
 	for _, ip := range []string{attacker, allowlisted, other} {
-		id := repid.For(build, ip)
+		id := repid.ForAddress(build, ip)
 		t.Cleanup(func() { telemetry.ResetReputation(id) })
 	}
 
@@ -34,15 +34,15 @@ func TestTheResponderDoesNotPenaliseAnAllowlistedParticipant(t *testing.T) {
 		Severity: "high", SignalTypes: []string{"waf_blocked", "honeypot_triggered"},
 	})
 
-	if got := telemetry.GetReputationScore(repid.For(build, allowlisted)); got < 100 {
+	if got := telemetry.GetReputationScore(repid.ForAddress(build, allowlisted)); got < 100 {
 		t.Errorf("an allowlisted participant's network now scores %v for its build: its neighbours "+
 			"running the build are refused for an incident the operator exempted it from", got)
 	}
-	if got := telemetry.GetReputationScore(repid.For(build, other)); got < 100 {
+	if got := telemetry.GetReputationScore(repid.ForAddress(build, other)); got < 100 {
 		t.Errorf("a participant on another network now scores %v for its build: a browser-class "+
 			"match across networks is context, never a reason to act", got)
 	}
-	if got := telemetry.GetReputationScore(repid.For(build, attacker)); got >= 100 {
+	if got := telemetry.GetReputationScore(repid.ForAddress(build, attacker)); got >= 100 {
 		t.Errorf("the incident's source was not penalised (%v); the assertions above prove nothing", got)
 	}
 }

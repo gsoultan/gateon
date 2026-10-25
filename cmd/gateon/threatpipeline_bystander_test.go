@@ -35,7 +35,7 @@ func TestABystanderIsNotRefusedForAnotherNetworksAttack(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = telemetry.ClosePathStatsStore(t.Context()) })
 	for _, ip := range []string{victim, attacker} {
-		id := repid.For(stockChrome, ip)
+		id := repid.ForAddress(stockChrome, ip)
 		t.Cleanup(func() { telemetry.ResetReputation(id) })
 	}
 
@@ -69,8 +69,8 @@ func TestABystanderIsNotRefusedForAnotherNetworksAttack(t *testing.T) {
 		t.Errorf("a client on %s/24 that sent nothing got %d: another network's attack, sharing only a "+
 			"browser build, was held against its network", victim, code)
 	}
-	if got := telemetry.GetReputationScore(repid.For(stockChrome, attacker)); got >= 2 {
-		t.Errorf("the attacker's own network scores %v for the build; the incident on it was not acted on, "+
+	if got := telemetry.GetReputationScore(repid.ForAddress(stockChrome, attacker)); got >= 2 {
+		t.Errorf("the attacker's own address scores %v for the build; the incident on it was not acted on, "+
 			"so the assertion above proves nothing", got)
 	}
 }

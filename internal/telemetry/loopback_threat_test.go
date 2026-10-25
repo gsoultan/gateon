@@ -31,7 +31,7 @@ func TestALoopbackWAFBlockIsShownAndHeldAgainstNobody(t *testing.T) {
 	t.Setenv("GATEON_ENABLE_TEST_REPUTATION", "1")
 	freshStore(t)
 	const ip = "127.0.0.1"
-	shared := repid.For(allowlistedBuild, ip)
+	shared := repid.ForAddress(allowlistedBuild, ip)
 	t.Cleanup(func() { ResetReputation(shared) })
 	wafBlocks := MiddlewareWAFBlockedTotal.WithLabelValues("loopback-route", "942100")
 	before := counterValueOf(t, wafBlocks)

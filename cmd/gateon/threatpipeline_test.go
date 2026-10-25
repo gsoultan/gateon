@@ -43,7 +43,7 @@ func TestMitigationAllowlistReachesTheRequestPath(t *testing.T) {
 	const browser = "t13d1516h2_allowlist_reaches_request_path"
 	allowlisted, stranger := "203.0.113.7", "198.51.100.7"
 	for _, ip := range []string{allowlisted, stranger} {
-		id := repid.For(browser, ip)
+		id := repid.ForAddress(browser, ip)
 		telemetry.DecreaseReputation(id, 200, "test: score driven to zero")
 		t.Cleanup(func() { telemetry.ResetReputation(id) })
 	}

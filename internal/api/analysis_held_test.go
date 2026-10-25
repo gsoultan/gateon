@@ -154,7 +154,7 @@ func TestTheAnalysisEnginesFindingIsNotHeldAgainstTheAddress(t *testing.T) {
 		attacker = "100.64.72.10"
 		build    = "t13d1516h2_8daaf6152771_b0da82dd1658_ge11cr0200_7e33b58890ac"
 	)
-	id := repid.For(build, attacker)
+	id := repid.ForAddress(build, attacker)
 	t.Cleanup(func() { telemetry.ResetReputation(id) })
 	recordN(3, telemetry.SecurityThreat{Type: "waf_blocked", SourceIP: attacker, Score: 100,
 		Category: "waf", ActionTaken: telemetry.ActionBlocked})
