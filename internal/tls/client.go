@@ -6,6 +6,7 @@ package tls
 import (
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"fmt"
 	"os"
 
@@ -61,4 +62,68 @@ func CreateTLSClientConfig(cfg *gateonv1.TlsClientConfig) (*tls.Config, error) {
 	}
 
 	return tlsConfig, nil
+}
+
+// ValidateClientConfig reports why the proxy could not build cfg as written.
+// The proxy builds it only when a route is first served, and a file it cannot
+// load there is logged and dropped: the static certificate falls back to a
+// verifying config with no certificate and no custom CA, an identity is left
+// out. A backend that requires mutual TLS then refuses every request while the
+// dashboard shows the service saved. Saving is where an operator can still be
+// told. A disabled config is not built and is not checked.
+func ValidateClientConfig(cfg *gateonv1.TlsClientConfig) error {
+	if cfg == nil || !cfg.Enabled {
+		return nil
+	}
+	if (cfg.CertFile == "") != (cfg.KeyFile == "") {
+		return errors.New("backend TLS needs both a client certificate and its key, or neither")
+	}
+	if _, err := CreateTLSClientConfig(cfg); err != nil {
+		return fmt.Errorf("backend TLS: %w", err)
+	}
+	return validateClientIdentities(cfg)
+}
+
+// validateClientIdentities refuses identities the selector would never choose
+// or could not load. STATIC presents cert_file and consults no identity, so
+// identities saved under it were stored and never read.
+func validateClientIdentities(cfg *gateonv1.TlsClientConfig) error {
+	if len(cfg.CertIdentities) == 0 {
+		return nil
+	}
+	strategy := cfg.CertSelectionStrategy
+	if strategy == gateonv1.TlsClientCertSelectionStrategy_TLS_CLIENT_CERT_SELECTION_STRATEGY_STATIC {
+		return errors.New("client identities are chosen by host or by header; with the static strategy " +
+			"only the client certificate is presented, so choose a strategy or remove the identities")
+	}
+	for i, item := range cfg.CertIdentities {
+		name := item.Id
+		if name == "" {
+			name = fmt.Sprintf("#%d", i+1)
+		}
+		if err := validateClientIdentity(item, strategy); err != nil {
+			return fmt.Errorf("client identity %s: %w", name, err)
+		}
+	}
+	return nil
+}
+
+func validateClientIdentity(item *gateonv1.TlsClientIdentity, strategy gateonv1.TlsClientCertSelectionStrategy) error {
+	if item.CertFile == "" || item.KeyFile == "" {
+		return errors.New("needs both a certificate and a key")
+	}
+	switch strategy {
+	case gateonv1.TlsClientCertSelectionStrategy_TLS_CLIENT_CERT_SELECTION_STRATEGY_BY_HOST:
+		if len(item.MatchHosts) == 0 {
+			return errors.New("matches no host, so it is never presented")
+		}
+	case gateonv1.TlsClientCertSelectionStrategy_TLS_CLIENT_CERT_SELECTION_STRATEGY_BY_HEADER:
+		if item.MatchHeader == "" {
+			return errors.New("matches no header, so it is never presented")
+		}
+	}
+	if _, err := tls.LoadX509KeyPair(config.ResolvePath(item.CertFile), config.ResolvePath(item.KeyFile)); err != nil {
+		return fmt.Errorf("failed to load certificate and key: %w", err)
+	}
+	return nil
 }
