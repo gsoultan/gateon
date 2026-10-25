@@ -347,8 +347,13 @@ type tlsClientIdentitySelector struct {
 	headers []string
 }
 
+// newTLSClientIdentitySelector loads cfg's per-request client identities. A
+// disabled config yields none: CreateTLSClientConfig already drops the static
+// certificate when Enabled is false, and the identities used to ignore the
+// flag, so switching backend TLS off in the dashboard left the gateway
+// presenting every identity it had been given.
 func newTLSClientIdentitySelector(cfg *gateonv1.TlsClientConfig) (*tlsClientIdentitySelector, error) {
-	if cfg == nil || len(cfg.CertIdentities) == 0 {
+	if cfg == nil || !cfg.Enabled || len(cfg.CertIdentities) == 0 {
 		return nil, nil
 	}
 

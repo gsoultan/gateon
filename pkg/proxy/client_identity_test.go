@@ -60,6 +60,7 @@ func TestClientIdentitiesWithoutIDsDoNotShareACertificate(t *testing.T) {
 	aCert, aKey := writeClientCert(t, dir, "a.identity.test")
 	bCert, bKey := writeClientCert(t, dir, "b.identity.test")
 	selector, err := newTLSClientIdentitySelector(&gateonv1.TlsClientConfig{
+		Enabled:               true,
 		CertSelectionStrategy: gateonv1.TlsClientCertSelectionStrategy_TLS_CLIENT_CERT_SELECTION_STRATEGY_BY_HEADER,
 		CertIdentities: []*gateonv1.TlsClientIdentity{
 			{CertFile: aCert, KeyFile: aKey, MatchHeader: "X-Tenant", MatchHeaderValue: "a"},
@@ -85,6 +86,35 @@ func TestClientIdentitiesWithoutIDsDoNotShareACertificate(t *testing.T) {
 			t.Fatalf("tenant %q's transport presents %s, not its own certificate %s",
 				tenant, presentedName(certs), want)
 		}
+	}
+}
+
+// Backend TLS switched off still presented the per-request identities: the
+// static certificate honoured Enabled and the identities did not, so turning
+// the setting off in the dashboard changed nothing for a BY_HEADER or BY_HOST
+// service.
+func TestDisabledBackendTLSPresentsNoClientIdentity(t *testing.T) {
+	dir := t.TempDir()
+	certFile, keyFile := writeClientCert(t, dir, "a.identity.test")
+	selector, err := newTLSClientIdentitySelector(&gateonv1.TlsClientConfig{
+		Enabled:               false,
+		CertSelectionStrategy: gateonv1.TlsClientCertSelectionStrategy_TLS_CLIENT_CERT_SELECTION_STRATEGY_BY_HEADER,
+		CertIdentities: []*gateonv1.TlsClientIdentity{
+			{CertFile: certFile, KeyFile: keyFile, MatchHeader: "X-Tenant", MatchHeaderValue: "a"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("load identities: %v", err)
+	}
+	f := newBackendTransportFactory(&tls.Config{MinVersion: tls.VersionTLS12}, nil, selector)
+	req := httptest.NewRequest(http.MethodGet, "https://example.com", nil)
+	req.Header.Set("X-Tenant", "a")
+	tr, ok := f.TransportFor(newTargetState("https://backend:443", 1), req).(*http.Transport)
+	if !ok {
+		t.Fatal("expected *http.Transport")
+	}
+	if certs := tr.TLSClientConfig.Certificates; len(certs) != 0 {
+		t.Fatalf("backend TLS is disabled but the transport presents %s", presentedName(certs))
 	}
 }
 
