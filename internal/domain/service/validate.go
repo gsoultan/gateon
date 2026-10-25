@@ -11,6 +11,7 @@ import (
 
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/mgmtaddr"
+	gtls "github.com/gsoultan/gateon/internal/tls"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
@@ -37,7 +38,13 @@ func validateService(svc *gateonv1.Service) error {
 	if err := validateWeights(svc, policy); err != nil {
 		return err
 	}
-	return validateHealthCheck(svc)
+	if err := validateHealthCheck(svc); err != nil {
+		return err
+	}
+	if err := gtls.ValidateClientConfig(svc.GetTlsClientConfig()); err != nil {
+		return fmt.Errorf("%w: %w", ErrInvalidService, err)
+	}
+	return nil
 }
 
 // validateWeights refuses weights the chosen balancer would not read. Round

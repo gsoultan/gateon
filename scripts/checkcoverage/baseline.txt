@@ -217,7 +217,7 @@ github.com/gsoultan/gateon/internal/telemetry/repid 97.8%
 github.com/gsoultan/gateon/internal/telemetry/tracearchive 87.5%
 github.com/gsoultan/gateon/internal/telemetry/tracebudget 82.4%
 github.com/gsoultan/gateon/internal/testutil 36.0%
-github.com/gsoultan/gateon/internal/tls 59.6%
+github.com/gsoultan/gateon/internal/tls 67.4%
 github.com/gsoultan/gateon/internal/tui 55.4%
 github.com/gsoultan/gateon/internal/ui 70.3%
 github.com/gsoultan/gateon/pkg/httputil 100.0%
