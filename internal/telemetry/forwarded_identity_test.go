@@ -44,8 +44,8 @@ func TestAForwardingHeaderFromAnUntrustedPeerNeverNamesTheReputationIdentity(t *
 				t.Errorf("state=%v, %s: the identity carries the address the client claimed: %q", withState, h, got)
 			}
 		}
-		if !strings.HasSuffix(plain, "|198.51.100") {
-			t.Errorf("state=%v: identity %q is not scoped to the peer's network", withState, plain)
+		if !strings.HasSuffix(plain, "|"+peer) {
+			t.Errorf("state=%v: identity %q is not scoped to the peer's address", withState, plain)
 		}
 	}
 }

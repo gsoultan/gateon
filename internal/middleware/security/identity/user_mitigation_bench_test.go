@@ -17,10 +17,11 @@ import (
 
 // BenchmarkUserMitigation measures the fingerprint block on the path a request
 // takes through it most often: not blocked. ADR 0026 keys the block on the
-// scoped identity (telemetry.GetReputationID), which the reputation blocker
-// behind it builds anyway; "alone" is the middleware by itself, a request's
-// first consumer of that identity, and "enforcement-chain" is the three
-// refusals every route carries, where the identity is built once and shared.
+// network-scoped identity (telemetry.GetNetworkClassID); "alone" is the
+// middleware by itself, and "enforcement-chain" is the three refusals every
+// route carries, where each identity is built once per request and cached --
+// the network one here, the per-address one the reputation blocker reads
+// (ADR 0079).
 func BenchmarkUserMitigation(b *testing.B) {
 	b.Setenv("GATEON_TRACE_DIR", filepath.Join(b.TempDir(), "traces"))
 	if err := telemetry.InitPathStatsStore(filepath.Join(b.TempDir(), "bench.db"), 1); err != nil {

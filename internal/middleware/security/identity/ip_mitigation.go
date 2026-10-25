@@ -176,10 +176,9 @@ var unmitigatedPaths = map[string]bool{
 // UserMitigation returns a middleware that refuses clients whose fingerprint is
 // blocked on their network.
 //
-// The block is kept for, and read under, telemetry.GetReputationID -- the
+// The block is kept for, and read under, telemetry.GetNetworkClassID -- the
 // fingerprint's class on the client's /24 or /64 (repid.For) -- which is the
-// key the recording path writes, and the one the reputation blocker behind
-// this reads (ADR 0026). Keyed on the whole JA4+ it refused every user of one
+// key the recording path writes (ADR 0026). Keyed on the whole JA4+ it refused every user of one
 // browser build on every network, while the client it was meant for shed it by
 // dropping a Referer.
 //
@@ -208,7 +207,7 @@ func serveUserMitigation(next http.Handler, w http.ResponseWriter, r *http.Reque
 		next.ServeHTTP(w, r)
 		return
 	}
-	key := telemetry.GetReputationID(r)
+	key := telemetry.GetNetworkClassID(r)
 	// As listRefusal: the exemption is read only for a request a block would
 	// refuse -- and before the database is asked, never after, so an exempt
 	// client never waits for it (ADR 0054). The address is the one the key is

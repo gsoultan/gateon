@@ -11,6 +11,18 @@ here after the fact.
 
 ## Unreleased
 
+### A WAF block no longer refuses everyone else on the client's network
+
+A reputation score used to be kept for one browser build on one /24 (or /64),
+and the reputation blocker refuses any score under 2 on every route. Two WAF
+blocks against two people on one office or carrier network with the same
+browser were enough to get everyone else there `403 Forbidden by Security
+Policy (Reputation Block)` for hours. A score is now kept per address: an IPv4
+address on its own, or an IPv6 /64 (ADR 0079). The fingerprint block and the
+per-fingerprint rate limit still act on the /24. Scores recorded before the
+upgrade are not carried over, so a client that was being refused under the old
+key is served again.
+
 ### "Apply fix" asks for the permission of what it changes
 
 A security finding's **Apply fix** needs only `diagnostics:write`, but several

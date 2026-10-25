@@ -43,7 +43,7 @@ func TestAllowlistedSourceIsNotChallengedByProofOfWork(t *testing.T) {
 	// to have earned a bad score first. Without this the test would pass whether
 	// or not the allowlist is consulted, which is the most common way an
 	// exemption test proves nothing.
-	telemetry.DecreaseReputation(repid.For(browser, ip), 99, "test: pow")
+	telemetry.DecreaseReputation(repid.ForAddress(browser, ip), 99, "test: pow")
 
 	serve := func() (bool, int) {
 		reached := false

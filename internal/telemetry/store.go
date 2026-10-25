@@ -3242,7 +3242,7 @@ func IsUserMitigated(ja4plus string) bool {
 
 // IsUserMitigatedContext reports whether a client class is blocked on a
 // network: key is repid.For(fingerprint, address), the identity UserMitigation
-// enforces (telemetry.GetReputationID). A key without a network scope -- a
+// enforces (telemetry.GetNetworkClassID). A key without a network scope -- a
 // bare fingerprint, as blocks were keyed before ADR 0026 -- names a class on
 // every network and is never enforced.
 func IsUserMitigatedContext(ctx context.Context, ja4plus string) bool {

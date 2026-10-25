@@ -125,7 +125,7 @@ func serveAs(h http.Handler, c sessionClient, path string) int {
 // one: it would couple this file to what the WAF happens to detect, so a rule
 // change would move a number that is supposed to be about identity.
 func misbehave(c sessionClient) {
-	telemetry.DecreaseReputation(repid.For(c.ja4Plus, c.ip), 99,
+	telemetry.DecreaseReputation(repid.ForAddress(c.ja4Plus, c.ip), 99,
 		"chain fp harness: simulated violation history")
 }
 
@@ -329,8 +329,8 @@ func TestChainHarnessCanFail(t *testing.T) {
 	// Reputation is process-wide and resetChainState does not clear it, so a
 	// second run (-count=2) met the zero score the first run gave this client
 	// and failed at the clean-client check. Reset it here and after.
-	telemetry.ResetReputation(repid.For(c.ja4Plus, c.ip))
-	t.Cleanup(func() { telemetry.ResetReputation(repid.For(c.ja4Plus, c.ip)) })
+	telemetry.ResetReputation(repid.ForAddress(c.ja4Plus, c.ip))
+	t.Cleanup(func() { telemetry.ResetReputation(repid.ForAddress(c.ja4Plus, c.ip)) })
 	h := unconditionalChain(t, "chain-fp-negative")
 
 	if got := serveAs(h, c, "/"); got != http.StatusOK {

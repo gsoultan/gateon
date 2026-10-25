@@ -39,8 +39,8 @@ func TestARefusalOfPolicyNotConductMovesNoReputation(t *testing.T) {
 	for i, refusal := range volumeAndPolicyRefusals {
 		// Its own /24 per case, so one case cannot lower the next one's score.
 		network := "203.0." + strconv.Itoa(120+i) + "."
-		busy, neighbour := network+"10", network+"11"
-		t.Cleanup(func() { ResetReputation(repid.For(allowlistedBuild, busy)) })
+		busy := network + "10"
+		t.Cleanup(func() { ResetReputation(repid.ForAddress(allowlistedBuild, busy)) })
 
 		for range 30 {
 			th := refusal
@@ -50,19 +50,19 @@ func TestARefusalOfPolicyNotConductMovesNoReputation(t *testing.T) {
 		}
 		FlushThreats()
 
-		if got := GetReputationScore(repid.For(allowlistedBuild, neighbour)); got < 100 {
-			t.Errorf("%s: thirty refusals of %s lowered the score its neighbour %s is refused on "+
+		if got := GetReputationScore(repid.ForAddress(allowlistedBuild, busy)); got < 100 {
+			t.Errorf("%s: thirty refusals of %s lowered the score it is refused on everywhere "+
 				"to %v; a %s is policy about who a client is or how much it sends, not evidence "+
-				"of an attack", refusal.Type, busy, neighbour, got, refusal.Type)
+				"of an attack", refusal.Type, busy, got, refusal.Type)
 		}
 	}
 
 	// The control: an attack the WAF refused still lowers the score, so the
 	// assertions above are not passing on a pipeline that moves nothing.
 	const attacker = "203.0.119.10"
-	t.Cleanup(func() { ResetReputation(repid.For(allowlistedBuild, attacker)) })
+	t.Cleanup(func() { ResetReputation(repid.ForAddress(allowlistedBuild, attacker)) })
 	recordWAFBlockFrom(attacker)
-	if got := GetReputationScore(repid.For(allowlistedBuild, attacker)); got >= 100 {
+	if got := GetReputationScore(repid.ForAddress(allowlistedBuild, attacker)); got >= 100 {
 		t.Errorf("a WAF block left its source's score at %v; the control is not moving it", got)
 	}
 }

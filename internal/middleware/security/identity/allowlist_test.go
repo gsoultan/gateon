@@ -34,7 +34,7 @@ func TestAllowlistedSourceIsNotRefusedByReputation(t *testing.T) {
 
 	// Earn a score of zero the way the threat pipeline would.
 	telemetry.DecreaseReputation(
-		repid.For(client.ja4Plus, client.remoteIP),
+		repid.ForAddress(client.ja4Plus, client.remoteIP),
 		99, "test: allowlisted source with a bad score")
 
 	h := blockerHandler(t)

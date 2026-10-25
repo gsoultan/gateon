@@ -96,6 +96,29 @@ func For(fingerprint, sourceIP string) string {
 	return string(b)
 }
 
+// ForAddress returns the identity a reputation score is recorded under and
+// enforced against: the fingerprint's class on one address (AddressKey -- an
+// IPv4 address as itself, an IPv6 address as its /64).
+//
+// A score is a penalty for what a client did, and the reputation blocker
+// refuses on it on every route. Kept under For -- the class on a /24 -- two
+// WAF blocks from two people on one office or carrier network took the score
+// every other person there with the same browser was refused on to 0, for
+// hours (ADR 0079). A penalty lands on the address that earned it. What a /24
+// is still right for -- the fingerprint block, which acts on several
+// addresses' evidence (ADR 0026), and correlation -- stays on For.
+func ForAddress(fingerprint, sourceIP string) string {
+	addr := AddressKey(sourceIP)
+	if fingerprint == "" {
+		return addr
+	}
+	var buf [forBufLen]byte
+	b := appendClass(buf[:0], fingerprint)
+	b = append(b, separator...)
+	b = append(b, addr...)
+	return string(b)
+}
+
 // Class returns the part of a fingerprint a reputation score is kept for: the
 // prefix of For's identity, and what ClassOf recovers from one.
 //

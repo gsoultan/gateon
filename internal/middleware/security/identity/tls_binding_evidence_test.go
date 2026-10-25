@@ -57,8 +57,8 @@ func TestADuplicateSessionCookieIsRefusedAndNotHeldAgainstTheClient(t *testing.T
 	certA, certB := sha256.Sum256([]byte("cert-A")), sha256.Sum256([]byte("cert-B"))
 	const user, thief = "100.64.80.10", "100.64.81.10"
 	t.Cleanup(func() {
-		telemetry.ResetReputation(repid.For(bindingBuild, user))
-		telemetry.ResetReputation(repid.For(bindingBuild, thief))
+		telemetry.ResetReputation(repid.ForAddress(bindingBuild, user))
+		telemetry.ResetReputation(repid.ForAddress(bindingBuild, thief))
 	})
 
 	twice := "session=OWN; session=OWN; session_binding=" + b.mac(certA[:], "OWN")
@@ -69,7 +69,7 @@ func TestADuplicateSessionCookieIsRefusedAndNotHeldAgainstTheClient(t *testing.T
 				"before it were held against the client", n+1, rec.Code, rec.Body.String())
 		}
 	}
-	if got := telemetry.GetReputationScore(repid.For(bindingBuild, user)); got != 100 {
+	if got := telemetry.GetReputationScore(repid.ForAddress(bindingBuild, user)); got != 100 {
 		t.Errorf("refused duplicate cookies moved the client's score to %v", got)
 	}
 
@@ -77,7 +77,7 @@ func TestADuplicateSessionCookieIsRefusedAndNotHeldAgainstTheClient(t *testing.T
 	if rec := sendBound(h, thief, stolen); rec.Code != http.StatusForbidden {
 		t.Fatalf("a session bound to another certificate got %d, want 403", rec.Code)
 	}
-	if got := telemetry.GetReputationScore(repid.For(bindingBuild, thief)); got >= 100 {
+	if got := telemetry.GetReputationScore(repid.ForAddress(bindingBuild, thief)); got >= 100 {
 		t.Errorf("a binding mismatch left the presenter's score at %v: a stolen cookie is evidence", got)
 	}
 }

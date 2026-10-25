@@ -25,7 +25,7 @@ import (
 // GetIPFingerprint returns the request's JA4+ fingerprint: the class half of
 // its reputation identity (GetReputationID), and what telemetry and
 // correlation display. It is "" when the request has none, and then
-// repid.For keys the identity by the address alone -- the one ClientIPOf
+// repid.ForAddress keys the identity by the address alone -- the one ClientIPOf
 // resolves, which believes a forwarding header only from a trusted proxy.
 //
 // It used to fall back to the leftmost X-Forwarded-For, or X-Real-IP, read
@@ -224,7 +224,7 @@ func DecreaseReputationOf(fingerprint, sourceIP string, penalty float64, reason 
 	if mitigation.IsAllowlisted(sourceIP) {
 		return
 	}
-	DecreaseReputation(repid.For(fingerprint, sourceIP), penalty, reason)
+	DecreaseReputation(repid.ForAddress(fingerprint, sourceIP), penalty, reason)
 }
 
 // DecreaseReputation lowers the score kept under an identity: a repid.For key.
@@ -614,9 +614,26 @@ func GetReputationID(r *http.Request) string {
 		return rs.ReputationID
 	}
 
-	id := repid.For(GetIPFingerprint(r), ClientIPOf(r))
+	id := repid.ForAddress(GetIPFingerprint(r), ClientIPOf(r))
 	if rs != nil {
 		rs.ReputationID = id
+	}
+	return id
+}
+
+// GetNetworkClassID returns this request's fingerprint class on its /24 or
+// /64 (repid.For): the identity the fingerprint block is kept and enforced
+// under (ADR 0026), and the per-fingerprint rate-limit bucket. It is not the
+// reputation identity, which is per address (GetReputationID, ADR 0079).
+func GetNetworkClassID(r *http.Request) string {
+	rs := request.GetRequestState(r)
+	if rs != nil && rs.NetworkClassID != "" {
+		return rs.NetworkClassID
+	}
+
+	id := repid.For(GetIPFingerprint(r), ClientIPOf(r))
+	if rs != nil {
+		rs.NetworkClassID = id
 	}
 	return id
 }

@@ -114,7 +114,7 @@ func TestReleasingAFingerprintResetsEveryVariantOfIt(t *testing.T) {
 	recorded := ja4 + "_ge11cr0200_7e33b58890ac"
 	released := ja4 + "_po11nn0200_7e33b58890ac"
 
-	ids := []string{repid.For(recorded, "192.0.2.43"), repid.For(recorded, "198.51.100.43")}
+	ids := []string{repid.ForAddress(recorded, "192.0.2.43"), repid.ForAddress(recorded, "198.51.100.43")}
 	for _, id := range ids {
 		telemetry.DecreaseReputation(id, 99, "test: release by class")
 		t.Cleanup(func() { telemetry.ResetReputation(id) })

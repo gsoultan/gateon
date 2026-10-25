@@ -35,10 +35,10 @@ func TestAnAllowlistedSourceDoesNotLowerItsNetworksScore(t *testing.T) {
 	t.Setenv("GATEON_ENABLE_TEST_REPUTATION", "1")
 	freshStore(t)
 	const scanner, stranger = "203.0.113.50", "198.51.100.50"
-	shared := repid.For(allowlistedBuild, scanner)
+	shared := repid.ForAddress(allowlistedBuild, scanner)
 	t.Cleanup(func() {
 		ResetReputation(shared)
-		ResetReputation(repid.For(allowlistedBuild, stranger))
+		ResetReputation(repid.ForAddress(allowlistedBuild, stranger))
 	})
 	mitigation.SetAllowlist(mitigation.ParseAllowlist(scanner + "/32"))
 	t.Cleanup(func() { mitigation.SetAllowlist(nil) })
@@ -57,7 +57,7 @@ func TestAnAllowlistedSourceDoesNotLowerItsNetworksScore(t *testing.T) {
 	// The control: the same threat from an address the allowlist does not name
 	// still lowers its network's score, so the assertion above is not vacuous.
 	recordWAFBlockFrom(stranger)
-	if got := GetReputationScore(repid.For(allowlistedBuild, stranger)); got >= 100 {
+	if got := GetReputationScore(repid.ForAddress(allowlistedBuild, stranger)); got >= 100 {
 		t.Errorf("a WAF block from an address that is not allowlisted left its score at %v", got)
 	}
 }
@@ -69,15 +69,15 @@ func TestDecreaseReputationOfSkipsAnAllowlistedSource(t *testing.T) {
 	const allowlisted, other = "203.0.113.51", "203.0.113.52"
 	mitigation.SetAllowlist(mitigation.ParseAllowlist(allowlisted + "/32"))
 	t.Cleanup(func() { mitigation.SetAllowlist(nil) })
-	id := repid.For(allowlistedBuild, allowlisted) // the same /24 as other: one shared score
-	t.Cleanup(func() { ResetReputation(id) })
+	id, otherID := repid.ForAddress(allowlistedBuild, allowlisted), repid.ForAddress(allowlistedBuild, other)
+	t.Cleanup(func() { ResetReputation(id); ResetReputation(otherID) })
 
 	DecreaseReputationOf(allowlistedBuild, allowlisted, 50, "test: correlated incident")
 	if got := GetReputationScore(id); got < 100 {
 		t.Errorf("a penalty for an allowlisted participant lowered its network's score to %v", got)
 	}
 	DecreaseReputationOf(allowlistedBuild, other, 50, "test: correlated incident")
-	if got := GetReputationScore(id); got >= 100 {
+	if got := GetReputationScore(otherID); got >= 100 {
 		t.Errorf("a penalty for a participant the allowlist does not name did not move the score (%v)", got)
 	}
 }

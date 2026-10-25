@@ -1323,18 +1323,18 @@ func ThreatToAnomaly(t *telemetry.SecurityThreat) *gateonv1.Anomaly {
 func (s *ApiService) resetReputationForIP(ctx context.Context, ip string) {
 	// 1. Reset reputation for the IP itself: the identity a threat carrying no
 	// fingerprint is scored under.
-	telemetry.ResetReputation(repid.For("", ip))
+	telemetry.ResetReputation(repid.ForAddress("", ip))
 
 	// 2. Find and reset reputation for all associated fingerprints (JA4, etc.)
 	//
-	// Under the key the reputation blocker reads: the fingerprint scoped to this
-	// address's network, never the bare fingerprint (ADR 0011). Resetting the
+	// Under the key the reputation blocker reads: the fingerprint on this
+	// address, never the bare fingerprint (ADR 0011, 0079). Resetting the
 	// bare one cleared a key the recording path stopped writing when scores were
 	// scoped, so a release answered "removed successfully" while the client kept
 	// its score of zero and its 403 on every route.
 	fps := telemetry.GetAssociatedFingerprints(ctx, ip)
 	for _, fp := range fps {
-		telemetry.ResetReputation(repid.For(fp, ip))
+		telemetry.ResetReputation(repid.ForAddress(fp, ip))
 		// And the fingerprint block, which is the class on this address's
 		// network (ADR 0026): the one this address's clients were refused by.
 		telemetry.MarkUserUnmitigated(repid.For(fp, ip))

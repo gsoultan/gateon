@@ -5,6 +5,7 @@ package identity
 
 import (
 	"context"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -42,7 +43,7 @@ type repTestClient struct {
 // address through a handler, the way the entrypoint would have populated them.
 func serveWithIdentity(h http.Handler, c repTestClient) int {
 	req := httptest.NewRequest(http.MethodGet, "/dashboard", nil)
-	req.RemoteAddr = c.remoteIP + ":51234"
+	req.RemoteAddr = net.JoinHostPort(c.remoteIP, "51234")
 
 	rs := &request.RequestState{JA4Plus: c.ja4Plus}
 	req = req.WithContext(context.WithValue(req.Context(),
@@ -82,7 +83,7 @@ func TestReputationBlockIsScopedToTheOffendersNetwork(t *testing.T) {
 	// Record the violation exactly as the threat pipeline does, through the one
 	// function that decides what a score is about. A test that invented its own
 	// key would prove only that the test and itself agree.
-	offenderID := repid.For(offender.ja4Plus, offender.remoteIP)
+	offenderID := repid.ForAddress(offender.ja4Plus, offender.remoteIP)
 	telemetry.DecreaseReputation(offenderID, 99, "test: repeated waf violations")
 
 	h := blockerHandler(t)
@@ -126,31 +127,37 @@ func TestReputationClassScoreAloneDoesNotRefuse(t *testing.T) {
 	}
 }
 
-// TestReputationScopeSeparatesNetworksNotUsers records the limit of the fix, so
-// nobody reads it as more than it is.
+// TestReputationScopeSeparatesAddressesNotUsers records the limit of the fix,
+// so nobody reads it as more than it is.
 //
-// Scoping is per network, not per person. Two clients behind one NAT still share
-// an identity, because from outside the gateway there is nothing to tell them
-// apart — the request carries no evidence of which of them sent it. The fix
-// bounds the blast radius to one network; it does not eliminate it, and claiming
-// otherwise would be the same overstatement that made the original design look
-// safe.
-func TestReputationScopeSeparatesNetworksNotUsers(t *testing.T) {
+// The score is per address (ADR 0079): a neighbour on the offender's /24 is
+// served, which it was not while the score was kept for the /24. Two clients
+// behind one NAT, or on one IPv6 /64, still share an identity, because from
+// outside the gateway there is nothing to tell them apart -- the request
+// carries no evidence of which of them sent it.
+func TestReputationScopeSeparatesAddressesNotUsers(t *testing.T) {
 	const sharedBrowser = "t13d1516h2_8daaf6152771_b0da82dd1658_natshared"
 
 	neighbour := repTestClient{ja4Plus: sharedBrowser, remoteIP: "203.0.113.77"}
 	offender := repTestClient{ja4Plus: sharedBrowser, remoteIP: "203.0.113.10"}
-
-	telemetry.DecreaseReputation(
-		repid.For(offender.ja4Plus, offender.remoteIP),
-		99, "test: same-network offender")
+	v6Offender := repTestClient{ja4Plus: sharedBrowser, remoteIP: "2001:db8:7:7::10"}
+	v6SameSubnet := repTestClient{ja4Plus: sharedBrowser, remoteIP: "2001:db8:7:7::99"}
+	for _, c := range []repTestClient{offender, v6Offender} {
+		id := repid.ForAddress(c.ja4Plus, c.remoteIP)
+		telemetry.DecreaseReputation(id, 99, "test: same-network offender")
+		t.Cleanup(func() { telemetry.ResetReputation(id) })
+	}
 
 	h := blockerHandler(t)
 
-	if got := serveWithIdentity(h, neighbour); got != http.StatusForbidden {
-		t.Errorf("a client sharing the offender's /24 got %d, want 403 — this test "+
-			"documents that scoping is per network. If it now passes, the scope was "+
-			"narrowed and this expectation should be updated deliberately rather "+
-			"than discovered later.", got)
+	if got := serveWithIdentity(h, neighbour); got != http.StatusOK {
+		t.Errorf("a client sharing only the offender's /24 got %d, want 200: the score is "+
+			"the offender's address's, not its network's", got)
+	}
+	for _, c := range []repTestClient{offender, v6SameSubnet} {
+		if got := serveWithIdentity(h, c); got != http.StatusForbidden {
+			t.Errorf("%s got %d, want 403: the offender's address, or another address on its "+
+				"/64, holds the score", c.remoteIP, got)
+		}
 	}
 }

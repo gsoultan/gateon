@@ -17,7 +17,7 @@ import (
 // holds exactly score, and the identity it resolves to.
 func scoredRequest(t *testing.T, fp, ip string, score float64, mgmt bool) *http.Request {
 	t.Helper()
-	key := repid.For(fp, ip)
+	key := repid.ForAddress(fp, ip)
 	// A peer's value, so the score is exactly what the test names rather than
 	// what the adaptive penalty makes of a series of violations.
 	telemetry.ApplyRemoteReputation(key, score, 1, []string{"waf_blocked"})

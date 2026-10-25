@@ -468,10 +468,12 @@ func PerJA4H(r *http.Request) string {
 }
 
 // PerFingerprint keys on the detailed client fingerprint within the client's
-// network, for the reason PerJA4H gives: the identity reputation itself is
-// keyed on (ADR 0011), already composed and cached on the request.
+// network, for the reason PerJA4H gives: the class on the /24 or /64 (ADR
+// 0011), already composed and cached on the request. Reputation is per address
+// (ADR 0079), but a bucket per address would hand a /24 that rotates addresses
+// a limit per address; the network bucket is what this strategy has always been.
 func PerFingerprint(r *http.Request) string {
-	return telemetry.GetReputationID(r)
+	return telemetry.GetNetworkClassID(r)
 }
 
 func fingerprintInNetwork(fingerprint string, r *http.Request) string {

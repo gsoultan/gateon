@@ -72,7 +72,7 @@ func TestJA4PlusMitigationE2E(t *testing.T) {
 				rs.JA4Plus = ""
 			}
 			seenJA4Plus = telemetry.GetJA4Plus(r)
-			seenKey = telemetry.GetReputationID(r)
+			seenKey = telemetry.GetNetworkClassID(r)
 			next.ServeHTTP(w, r)
 		})
 	}

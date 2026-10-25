@@ -42,11 +42,14 @@ type RequestState struct {
 	ResolvedClientIP string
 
 	// ReputationID is the identity a reputation score is recorded under and
-	// enforced against: the client's class (repid.Class) scoped to its network. It is
+	// enforced against: the client's class (repid.Class) on its address. It is
 	// cached here because several middlewares on one request ask for it (the
 	// reputation blocker, proof-of-work, deception, the tarpit) and building it
-	// allocates. See repid.For for why it is a pair.
-	ReputationID   string
+	// allocates. See repid.ForAddress for why it is a pair.
+	ReputationID string
+	// NetworkClassID is the client's class on its /24 or /64 (repid.For), the
+	// key the fingerprint block is enforced under, cached for the same reason.
+	NetworkClassID string
 	Recommendation string
 	Reputation     float64
 	// Breakdown timings (nanoseconds for precision)
@@ -244,6 +247,7 @@ func (rs *RequestState) Reset() {
 	rs.JA4Plus = ""
 	rs.ResolvedClientIP = ""
 	rs.ReputationID = ""
+	rs.NetworkClassID = ""
 	rs.Recommendation = ""
 	rs.Reputation = 0
 	rs.TEntrypoint = 0
