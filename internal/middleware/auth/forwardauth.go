@@ -96,6 +96,13 @@ func ForwardAuth(cfg ForwardAuthConfig) (Middleware, error) {
 			for h := range authResponseSet {
 				r.Header.Del(h)
 			}
+			// Del above removes only the canonical spelling. A backend that
+			// folds '-', '_' and '.' together (PHP/CGI, WSGI, nginx) reads an
+			// underscore or dot alias as the same identity header, so strip
+			// those too -- otherwise a client-supplied X_Auth_User survives to
+			// impersonate the identity the auth service vouches for
+			// (CVE-2026-88879 / CVE-2026-88011 class).
+			request.StripHeaderAliases(r.Header, cfg.AuthResponseHeaders...)
 
 			if IsCorsPreflight(r) {
 				next.ServeHTTP(w, r)
@@ -151,6 +158,16 @@ func ForwardAuth(cfg ForwardAuthConfig) (Middleware, error) {
 			// base handler has already withheld them (ADR 0051); this is the
 			// second line, on the copy, so the backend's request is untouched.
 			WithholdManagementCredentials(authReq.Header, cfg.ManagementSessions)
+
+			// The copy above carried every client header across, aliases
+			// included. The X-Forwarded-* values below are the gateway's to
+			// decide, so strip any underscore/dot alias of them before setting
+			// the canonical form: an auth service that folds separators would
+			// otherwise read a client-supplied X_Forwarded_Proto / X.Forwarded.Host
+			// as the trusted value and allow a request on it (CVE-2026-39858).
+			request.StripHeaderAliases(authReq.Header,
+				"X-Forwarded-Method", "X-Forwarded-Proto", "X-Forwarded-Host",
+				"X-Forwarded-Uri", "X-Forwarded-For")
 
 			// X-Forwarded-* headers (Traefik-style). Set *after* the copy
 			// above: Set replaces and Add appends, and these are the values the

@@ -251,6 +251,13 @@ func newUpgradeRequest(r *http.Request, targetURL *url.URL) *http.Request {
 	backendReq = backendReq.WithContext(r.Context())
 	maps.Copy(backendReq.Header, r.Header)
 
+	// maps.Copy carried every inbound header across, aliases included. The
+	// gateway sets the identity headers below by their canonical spelling, so
+	// strip any underscore/dot alias a backend would fold onto the same name
+	// (CVE-2026-88879 class); the same hygiene rewriteRequest applies on the
+	// HTTP path.
+	request.StripHeaderAliases(backendReq.Header, gatewayAssertedHeaders...)
+
 	// Identity headers: the same set rewriteRequest normalises on the HTTP path.
 	// maps.Copy above carried every inbound header across, and a backend reads
 	// these for who the client is and what name it was reached by, so none of
