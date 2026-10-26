@@ -173,8 +173,19 @@ func (p *UDPSessionProxy) HandlePacket(serverConn *net.UDPConn, clientAddr *net.
 			for {
 				n, err := conn.Read(buf)
 				if err != nil {
+					// Only this session's own entry. The read fails because
+					// expiry or Stop closed the socket, and by the time this
+					// goroutine has the lock the same client may have sent
+					// again and been given a new session under the same key.
+					// Deleting the key outright dropped that successor from
+					// the table while its socket and goroutine lived on: the
+					// client's next packet made a third, and the orphan held
+					// a descriptor, a goroutine and its 64KiB buffer with
+					// nothing left that could close it.
 					p.mu.Lock()
-					delete(p.sessions, key)
+					if p.sessions[key] == s {
+						delete(p.sessions, key)
+					}
 					p.mu.Unlock()
 					_ = conn.Close()
 					return
