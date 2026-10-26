@@ -4,6 +4,7 @@
 package api
 
 import (
+	"context"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -33,7 +34,7 @@ func applyFixService(t *testing.T) (*ApiService, *config.RouteRegistry, *config.
 	if err := telemetry.InitPathStatsStore(filepath.Join(dir, "fix.db"), 1); err != nil {
 		t.Fatalf("init telemetry store: %v", err)
 	}
-	t.Cleanup(func() { telemetry.ClosePathStatsStore(t.Context()) })
+	t.Cleanup(func() { telemetry.ClosePathStatsStore(context.Background()) })
 	svc := NewApiService(ApiServiceConfig{
 		Routes: routes, Middlewares: mws, Globals: globals,
 		EntryPoints: config.NewEntryPointRegistry(filepath.Join(dir, "entrypoints.json")),

@@ -4,6 +4,7 @@
 package identity
 
 import (
+	"context"
 	"net/http"
 	"path/filepath"
 	"testing"
@@ -28,7 +29,7 @@ func TestBlocksWrittenBeforeARestartAreRefusedWithTheDatabaseHung(t *testing.T) 
 		}
 	}
 	open()
-	t.Cleanup(func() { _ = telemetry.ClosePathStatsStore(t.Context()) })
+	t.Cleanup(func() { _ = telemetry.ClosePathStatsStore(context.Background()) })
 	const blockedIP, client = "198.51.100.231", "198.51.100.232"
 	if err := telemetry.MarkIPMitigated(blockedIP, "before the restart"); err != nil {
 		t.Fatal(err)

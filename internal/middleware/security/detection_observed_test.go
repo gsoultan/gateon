@@ -4,6 +4,7 @@
 package security
 
 import (
+	"context"
 	"crypto/rand"
 	"fmt"
 	"io"
@@ -42,7 +43,7 @@ func detectionStore(t *testing.T) chan telemetry.SecurityThreat {
 	if err := telemetry.InitPathStatsStore(filepath.Join(t.TempDir(), "detection.db"), 1); err != nil {
 		t.Fatalf("init telemetry store: %v", err)
 	}
-	t.Cleanup(func() { _ = telemetry.ClosePathStatsStore(t.Context()) })
+	t.Cleanup(func() { _ = telemetry.ClosePathStatsStore(context.Background()) })
 	threats := telemetry.ThreatBroadcaster.Subscribe()
 	t.Cleanup(func() { telemetry.ThreatBroadcaster.Unsubscribe(threats) })
 	return threats

@@ -4,6 +4,7 @@
 package identity
 
 import (
+	"context"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -26,7 +27,7 @@ func BenchmarkUserMitigation(b *testing.B) {
 	if err := telemetry.InitPathStatsStore(filepath.Join(b.TempDir(), "bench.db"), 1); err != nil {
 		b.Fatal(err)
 	}
-	b.Cleanup(func() { _ = telemetry.ClosePathStatsStore(b.Context()) })
+	b.Cleanup(func() { _ = telemetry.ClosePathStatsStore(context.Background()) })
 
 	ok := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 	for _, tc := range []struct {

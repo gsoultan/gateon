@@ -4,6 +4,7 @@
 package api
 
 import (
+	"context"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -23,7 +24,7 @@ func TestMitigateTellsTheTruthAboutAnExemptAddress(t *testing.T) {
 	if err := telemetry.InitPathStatsStore(filepath.Join(t.TempDir(), "mitigate.db"), 1); err != nil {
 		t.Fatalf("init telemetry store: %v", err)
 	}
-	t.Cleanup(func() { _ = telemetry.ClosePathStatsStore(t.Context()) })
+	t.Cleanup(func() { _ = telemetry.ClosePathStatsStore(context.Background()) })
 	mitigation.SetAllowlist(mitigation.ParseAllowlist("198.51.100.0/24"))
 	t.Cleanup(func() { mitigation.SetAllowlist(nil) })
 
