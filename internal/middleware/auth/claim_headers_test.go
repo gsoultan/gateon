@@ -61,6 +61,27 @@ func TestMappedClaimHeaderIsStrippedWhenTheTokenLacksTheClaim(t *testing.T) {
 	}
 }
 
+// A mapped claim header is set by its canonical spelling, so a backend that
+// folds separators would read a client-supplied X_User_Id alias as the mapped
+// value. The client must not be able to supply the identity under an alias
+// (CVE-2026-88879 class).
+func TestMappedClaimHeaderAliasesAreStripped(t *testing.T) {
+	rr, seen := serveWithClaimHeaders(t, claimMappingConfig(), mint(t, baseClaims()),
+		map[string]string{"X_User_Id": "attacker", "X.User.Id": "attacker"})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("got %d, want 200", rr.Code)
+	}
+	if got := seen.Get("X-User-Id"); got != "user-1" {
+		t.Errorf("X-User-Id = %q, want the token's sub %q", got, "user-1")
+	}
+	for _, alias := range []string{"X_User_Id", "X.User.Id"} {
+		if vals := seen.Values(alias); len(vals) != 0 {
+			t.Errorf("backend saw claim alias %s = %q; it folds to X-User-Id "+
+				"and must be stripped", alias, vals)
+		}
+	}
+}
+
 func TestDryRunDoesNotForwardClientSuppliedClaimHeaders(t *testing.T) {
 	cfg := claimMappingConfig()
 	cfg.DryRun = true

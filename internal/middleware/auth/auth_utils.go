@@ -122,6 +122,11 @@ func (c AuthBaseConfig) validateRoles(claims map[string]any) error {
 func (c AuthBaseConfig) MapClaimsToHeaders(r *http.Request, claims any) {
 	m := ToMap(claims)
 	for claim, header := range c.ClaimMappings {
+		// Set/Del touch only the canonical spelling; drop the underscore and
+		// dot aliases a header-folding backend reads as the same name, so the
+		// client cannot supply the mapped claim value under X_User / X.User
+		// (CVE-2026-88879 class).
+		request.StripHeaderAliases(r.Header, header)
 		if val, ok := m[claim]; ok {
 			r.Header.Set(header, fmt.Sprintf("%v", val))
 		} else {
@@ -157,6 +162,7 @@ func (c AuthBaseConfig) authorizeCredential(r *http.Request, claims map[string]a
 func (c AuthBaseConfig) stripMappedHeaders(r *http.Request) {
 	for _, header := range c.ClaimMappings {
 		r.Header.Del(header)
+		request.StripHeaderAliases(r.Header, header)
 	}
 }
 
