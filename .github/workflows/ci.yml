@@ -51,6 +51,16 @@ jobs:
         with:
           fetch-depth: 0
 
+      # Agent sessions commit as "Claude <noreply@anthropic.com>" unless told
+      # otherwise, and GitHub then lists Claude as a contributor. In `build`
+      # because that check is already required, so an offending PR cannot merge.
+      - name: Commit identity
+        if: github.event_name == 'pull_request'
+        run: >-
+          ./scripts/check-commit-identity.sh
+          ${{ github.event.pull_request.base.sha }}
+          ${{ github.event.pull_request.head.sha }}
+
       - name: Setup Go
         uses: actions/setup-go@v6
         with:
