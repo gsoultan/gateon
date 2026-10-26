@@ -4,6 +4,7 @@
 package identity
 
 import (
+	"context"
 	"net/http"
 	"path/filepath"
 	"testing"
@@ -22,13 +23,13 @@ func TestBlocksWrittenBeforeARestartAreRefusedWithTheDatabaseHung(t *testing.T) 
 	t.Setenv("GATEON_TRACE_DIR", filepath.Join(t.TempDir(), "traces"))
 	path := filepath.Join(t.TempDir(), "telemetry.db")
 	open := func() {
-		_ = telemetry.ClosePathStatsStore(t.Context())
+		_ = telemetry.ClosePathStatsStore(context.Background())
 		if err := telemetry.InitPathStatsStore(path, 1); err != nil {
 			t.Fatalf("init telemetry store: %v", err)
 		}
 	}
 	open()
-	t.Cleanup(func() { _ = telemetry.ClosePathStatsStore(t.Context()) })
+	t.Cleanup(func() { _ = telemetry.ClosePathStatsStore(context.Background()) })
 	const blockedIP, client = "198.51.100.231", "198.51.100.232"
 	if err := telemetry.MarkIPMitigated(blockedIP, "before the restart"); err != nil {
 		t.Fatal(err)
