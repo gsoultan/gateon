@@ -335,12 +335,15 @@ func TestSecurityThreatDetector_CoordinatedAttack(t *testing.T) {
 		now := time.Now()
 		engine := NewAnomalyAnalysisEngine(&gateonv1.GlobalConfig{}, nil)
 		var traces []*telemetry.TraceRecord
-		// 5 IPs accessing the same random set of 6 paths
+		// 5 IPs probing the same random set of 6 paths, none of which exist.
+		// A shared footprint alone is what every visitor of a single-page
+		// application has (TestVisitorsOfASinglePageAppAreNotACoordinatedAttack);
+		// the failures are what make this a scan.
 		paths := []string{"/p1", "/p2", "/p3", "/p4", "/p5", "/p6"}
 		for i := 1; i <= 5; i++ {
 			ip := fmt.Sprintf("172.16.0.%d", i)
 			for _, p := range paths {
-				traces = append(traces, &telemetry.TraceRecord{ServiceDelay: 1, SourceIP: ip, Path: p, Method: "GET", Timestamp: now})
+				traces = append(traces, &telemetry.TraceRecord{ServiceDelay: 1, SourceIP: ip, Path: p, Method: "GET", Status: "404", Timestamp: now})
 			}
 		}
 

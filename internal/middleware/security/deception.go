@@ -118,7 +118,7 @@ func (cfg DeceptionConfig) refuse(w http.ResponseWriter, r *http.Request, threat
 	})
 
 	if cfg.EnableTrollResponse &&
-		telemetry.GetReputationScore(telemetry.GetReputationID(r)) < trollReputationThreshold {
+		telemetry.ReputationScoreOf(r) < trollReputationThreshold {
 		serveTrollResponse(w)
 		return
 	}

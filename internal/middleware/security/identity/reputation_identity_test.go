@@ -131,26 +131,40 @@ func TestReputationClassScoreAloneDoesNotRefuse(t *testing.T) {
 //
 // Scoping is per network, not per person. Two clients behind one NAT still share
 // an identity, because from outside the gateway there is nothing to tell them
-// apart — the request carries no evidence of which of them sent it. The fix
-// bounds the blast radius to one network; it does not eliminate it, and claiming
-// otherwise would be the same overstatement that made the original design look
-// safe.
+// apart -- the request carries no evidence of which of them sent it. What ADR
+// 0079 adds is who the score refuses: the address that earned it, until a
+// second address on the network earns it too. One client of an office NAT
+// tripping a WAF rule twice is refused alone; a class attacking from two
+// addresses of one network is the network's record, and the network is
+// refused, as it always was. This test documents both halves; if either now
+// passes the other way, the scope was changed and this expectation should be
+// updated deliberately rather than discovered later.
 func TestReputationScopeSeparatesNetworksNotUsers(t *testing.T) {
 	const sharedBrowser = "t13d1516h2_8daaf6152771_b0da82dd1658_natshared"
 
 	neighbour := repTestClient{ja4Plus: sharedBrowser, remoteIP: "203.0.113.77"}
 	offender := repTestClient{ja4Plus: sharedBrowser, remoteIP: "203.0.113.10"}
+	second := repTestClient{ja4Plus: sharedBrowser, remoteIP: "203.0.113.11"}
 
-	telemetry.DecreaseReputation(
-		repid.For(offender.ja4Plus, offender.remoteIP),
-		99, "test: same-network offender")
+	// Recorded as the threat pipeline records it: naming the address.
+	t.Setenv("GATEON_ENABLE_TEST_REPUTATION", "1")
+	t.Cleanup(func() { telemetry.ResetReputation(repid.For(sharedBrowser, offender.remoteIP)) })
+	telemetry.DecreaseReputationOf(offender.ja4Plus, offender.remoteIP, 99, "test: same-network offender")
 
 	h := blockerHandler(t)
 
+	if got := serveWithIdentity(h, offender); got != http.StatusForbidden {
+		t.Errorf("the offender got %d, want 403", got)
+	}
+	if got := serveWithIdentity(h, neighbour); got != http.StatusOK {
+		t.Errorf("a client sharing the offender's /24 got %d, want 200 -- the score was earned by "+
+			"one address, and that address is the one it refuses (ADR 0079)", got)
+	}
+
+	telemetry.DecreaseReputationOf(second.ja4Plus, second.remoteIP, 99, "test: second same-network offender")
+
 	if got := serveWithIdentity(h, neighbour); got != http.StatusForbidden {
-		t.Errorf("a client sharing the offender's /24 got %d, want 403 — this test "+
-			"documents that scoping is per network. If it now passes, the scope was "+
-			"narrowed and this expectation should be updated deliberately rather "+
-			"than discovered later.", got)
+		t.Errorf("a client sharing a /24 that two addresses attacked from got %d, want 403 -- this "+
+			"documents that scoping is per network once the network's record is more than one client's", got)
 	}
 }
