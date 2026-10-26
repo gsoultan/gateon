@@ -49,7 +49,7 @@ func TestColdCacheDiagnosticsRunOnePass(t *testing.T) {
 	if err := telemetry.InitPathStatsStore(filepath.Join(dir, "traces.db"), 1); err != nil {
 		t.Fatalf("init telemetry store: %v", err)
 	}
-	t.Cleanup(func() { _ = telemetry.ClosePathStatsStore(ctx) })
+	t.Cleanup(func() { _ = telemetry.ClosePathStatsStore(context.Background()) })
 	// Enough distinct clients for the isolation forest to train (it needs 20).
 	start := time.Now().Add(-5 * time.Minute)
 	for c := range 30 {
