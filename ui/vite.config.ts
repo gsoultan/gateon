@@ -21,12 +21,18 @@ export default defineConfig({
     // PWA: Offline-first assets and near-instant loading
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'mask-icon.svg'],
+      // Every file named here exists in public/. The manifest used to point at
+      // five icons that were never shipped, so the dashboard registered a
+      // service worker but no browser offered to install it: an installable
+      // PWA needs a 192 px and a 512 px PNG the manifest can actually fetch.
+      // The PNGs are rendered from gateon-logo.svg (ui/scripts/pwa-icons.cjs).
+      includeAssets: ['gateon-favicon.svg', 'gateon-logo.svg', 'apple-touch-icon.png'],
       manifest: {
         name: 'Gateon Dashboard',
         short_name: 'Gateon',
-        description: 'Ultra-Intelligent Defense Gateway',
+        description: 'API gateway and web application firewall',
         theme_color: '#1a1b1e',
+        background_color: '#1a1b1e',
         icons: [
           {
             src: 'pwa-192x192.png',
@@ -37,6 +43,12 @@ export default defineConfig({
             src: 'pwa-512x512.png',
             sizes: '512x512',
             type: 'image/png'
+          },
+          {
+            src: 'pwa-512x512-maskable.png',
+            sizes: '512x512',
+            type: 'image/png',
+            purpose: 'maskable'
           }
         ]
       },
