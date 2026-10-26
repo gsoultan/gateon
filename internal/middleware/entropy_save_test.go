@@ -4,6 +4,7 @@
 package middleware
 
 import (
+	"context"
 	"crypto/rand"
 	"net/http"
 	"net/http/httptest"
@@ -23,7 +24,7 @@ func entropyThreats(t *testing.T, cfg map[string]string, body string) int {
 	if err := telemetry.InitPathStatsStore(filepath.Join(t.TempDir(), "entropy.db"), 1); err != nil {
 		t.Fatalf("init telemetry store: %v", err)
 	}
-	t.Cleanup(func() { _ = telemetry.ClosePathStatsStore(t.Context()) })
+	t.Cleanup(func() { _ = telemetry.ClosePathStatsStore(context.Background()) })
 	threats := telemetry.ThreatBroadcaster.Subscribe()
 	t.Cleanup(func() { telemetry.ThreatBroadcaster.Unsubscribe(threats) })
 

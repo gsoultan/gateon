@@ -4,6 +4,7 @@
 package identity
 
 import (
+	"context"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -40,7 +41,7 @@ func scopeTestStore(t *testing.T) {
 	}
 	telemetry.ResetFingerprintSightings()
 	t.Cleanup(func() {
-		_ = telemetry.ClosePathStatsStore(t.Context())
+		_ = telemetry.ClosePathStatsStore(context.Background())
 		telemetry.ResetFingerprintSightings()
 	})
 }
