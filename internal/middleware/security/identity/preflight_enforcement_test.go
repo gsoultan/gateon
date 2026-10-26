@@ -4,6 +4,7 @@
 package identity
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -35,7 +36,7 @@ func TestIPMitigationRefusesAPreflightFromAShunnedIP(t *testing.T) {
 	if err := telemetry.InitPathStatsStore(filepath.Join(t.TempDir(), "ipmit.db"), 1); err != nil {
 		t.Fatalf("init telemetry store: %v", err)
 	}
-	defer telemetry.ClosePathStatsStore(t.Context())
+	defer telemetry.ClosePathStatsStore(context.Background())
 
 	// An address of this test's own, so the mitigation it sets is not an
 	// identity any other test in the package resolves to.
@@ -69,7 +70,7 @@ func TestIPMitigationStillAllowsAPreflightFromACleanIP(t *testing.T) {
 	if err := telemetry.InitPathStatsStore(filepath.Join(t.TempDir(), "ipmit-ok.db"), 1); err != nil {
 		t.Fatalf("init telemetry store: %v", err)
 	}
-	defer telemetry.ClosePathStatsStore(t.Context())
+	defer telemetry.ClosePathStatsStore(context.Background())
 
 	var reached bool
 	h := IPMitigation()(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -95,7 +96,7 @@ func TestUserMitigationRefusesAPreflightFromAMitigatedFingerprint(t *testing.T) 
 	if err := telemetry.InitPathStatsStore(filepath.Join(t.TempDir(), "usermit.db"), 1); err != nil {
 		t.Fatalf("init telemetry store: %v", err)
 	}
-	defer telemetry.ClosePathStatsStore(t.Context())
+	defer telemetry.ClosePathStatsStore(context.Background())
 
 	// Blocked on the network httptest's requests come from (ADR 0026).
 	const fp = "t13d1516h2_preflight_enforcement_test"
@@ -132,7 +133,7 @@ func TestReputationBlockerRefusesAPreflightFromAZeroScoreClient(t *testing.T) {
 	if err := telemetry.InitPathStatsStore(filepath.Join(t.TempDir(), "rep-preflight.db"), 1); err != nil {
 		t.Fatalf("init telemetry store: %v", err)
 	}
-	defer telemetry.ClosePathStatsStore(t.Context())
+	defer telemetry.ClosePathStatsStore(context.Background())
 
 	req := withState(asPreflight(httptest.NewRequest(http.MethodOptions, "/", nil)), &request.RequestState{})
 	// A network of its own, for the reason reputation_severity_test.go gives.

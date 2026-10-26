@@ -4,6 +4,7 @@
 package main
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -33,7 +34,7 @@ func TestABystanderIsNotRefusedForAnotherNetworksAttack(t *testing.T) {
 	if err := telemetry.InitPathStatsStore(filepath.Join(t.TempDir(), "bystander.db"), 1); err != nil {
 		t.Fatalf("init telemetry store: %v", err)
 	}
-	t.Cleanup(func() { _ = telemetry.ClosePathStatsStore(t.Context()) })
+	t.Cleanup(func() { _ = telemetry.ClosePathStatsStore(context.Background()) })
 	for _, ip := range []string{victim, attacker} {
 		id := repid.For(stockChrome, ip)
 		t.Cleanup(func() { telemetry.ResetReputation(id) })

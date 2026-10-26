@@ -4,6 +4,7 @@
 package waf
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -47,7 +48,7 @@ func innocentRoute(t *testing.T, cfg map[string]string, page string) (http.Handl
 	if err := telemetry.InitPathStatsStore(filepath.Join(t.TempDir(), "innocent.db"), 1); err != nil {
 		t.Fatalf("init telemetry store: %v", err)
 	}
-	t.Cleanup(func() { _ = telemetry.ClosePathStatsStore(t.Context()) })
+	t.Cleanup(func() { _ = telemetry.ClosePathStatsStore(context.Background()) })
 	threats := telemetry.ThreatBroadcaster.Subscribe()
 	t.Cleanup(func() { telemetry.ThreatBroadcaster.Unsubscribe(threats) })
 

@@ -37,7 +37,7 @@ func reputationRuleRoute(t *testing.T, feed *reputation.IPReputationStore) (http
 	if err := telemetry.InitPathStatsStore(filepath.Join(t.TempDir(), "rep-rule.db"), 1); err != nil {
 		t.Fatalf("init telemetry store: %v", err)
 	}
-	t.Cleanup(func() { _ = telemetry.ClosePathStatsStore(t.Context()) })
+	t.Cleanup(func() { _ = telemetry.ClosePathStatsStore(context.Background()) })
 	telemetry.ResetFingerprintSightings()
 	t.Cleanup(telemetry.ResetFingerprintSightings)
 	threats := telemetry.ThreatBroadcaster.Subscribe()
