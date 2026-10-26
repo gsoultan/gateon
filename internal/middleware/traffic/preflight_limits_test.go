@@ -125,9 +125,12 @@ func TestRateLimitAppliesToPreflightShapedRequests(t *testing.T) {
 
 // TestPerIPConnectionLimitAppliesToPreflightShapedRequests holds the first
 // request inside the handler so the second arrives while the single permit is
-// taken. No sleep: the release is driven by the test.
+// taken. No sleep: the release is driven by the test. The signal channel is
+// buffered so the first request's send succeeds whether or not the test has
+// reached its receive yet; unbuffered, the select took its default when the
+// handler ran first and the test waited on the receive forever.
 func TestPerIPConnectionLimitAppliesToPreflightShapedRequests(t *testing.T) {
-	inHandler := make(chan struct{})
+	inHandler := make(chan struct{}, 1)
 	release := make(chan struct{})
 
 	h := MaxConnectionsPerIP(1, PerIP)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

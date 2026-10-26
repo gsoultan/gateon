@@ -201,7 +201,11 @@ func CreateBaseHandler(
 		case isLoginPath(r.URL.Path) || isPublicAuthPath(r.URL.Path):
 			limit = publicBodyLimit
 		}
-		r.Body = http.MaxBytesReader(w, r.Body, limit)
+		// A request with no body has nothing to limit; wrapping http.NoBody
+		// allocated a reader per bodiless request.
+		if r.Body != nil && r.Body != http.NoBody {
+			r.Body = http.MaxBytesReader(w, r.Body, limit)
+		}
 
 		rs := middleware.GetRequestState(r)
 		epID := ""

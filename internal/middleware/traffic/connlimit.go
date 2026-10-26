@@ -87,15 +87,25 @@ func isGatewayProbe(r *http.Request) bool {
 	return r.URL.Path == "/healthz" || r.URL.Path == "/readyz"
 }
 
+// connBucket is one address's in-flight count. Every field is guarded by its
+// shard's mutex: the count was a buffered channel, taken and released outside
+// the lock, which cost a channel per bucket -- and a bucket per request, since
+// an address's bucket is dropped when its last request ends -- on top of the
+// lock the reference count needed anyway.
 type connBucket struct {
-	sem chan struct{}
-	ref int
+	inflight int
+	ref      int
 }
 
 const connLimitShards = 16
 
 type perIPConnMap struct {
 	shards []*connLimitShard
+	// free holds buckets no address uses. A bucket is created when an
+	// address's first request arrives and dropped when its last one ends, so
+	// one request alone allocated and discarded one; pooled, a steady flow of
+	// single requests reuses a handful.
+	free sync.Pool
 }
 
 type connLimitShard struct {
@@ -106,6 +116,7 @@ type connLimitShard struct {
 func newPerIPConnMap() *perIPConnMap {
 	m := &perIPConnMap{
 		shards: make([]*connLimitShard, connLimitShards),
+		free:   sync.Pool{New: func() any { return new(connBucket) }},
 	}
 	for i := range connLimitShards {
 		m.shards[i] = &connLimitShard{
@@ -124,37 +135,47 @@ func (m *perIPConnMap) getShard(key string) *connLimitShard {
 	return m.shards[hash%connLimitShards]
 }
 
-func (m *perIPConnMap) get(key string, cap int) *connBucket {
+// acquire takes a slot for key when fewer than cap are in flight, and reports
+// whether it did. A bucket refused a slot is dropped again at once when
+// nothing else holds it, so an address that is only ever refused -- an attacker
+// with a spoofable per-IP key -- never grows the map.
+func (m *perIPConnMap) acquire(key string, cap int) bool {
 	s := m.getShard(key)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	b, ok := s.buckets[key]
 	if !ok {
-		b = &connBucket{sem: make(chan struct{}, cap)}
+		b = m.free.Get().(*connBucket)
 		s.buckets[key] = b
 	}
+	if b.inflight >= cap {
+		if b.ref == 0 {
+			delete(s.buckets, key)
+			m.free.Put(b)
+		}
+		return false
+	}
+	b.inflight++
 	b.ref++
-	return b
+	return true
 }
 
-func (m *perIPConnMap) release(key string, b *connBucket) {
-	<-b.sem
-	m.unref(key, b)
-}
-
-// unref drops the reference taken by get() WITHOUT consuming a semaphore slot.
-// It must be used on the reject path, where get() incremented ref but no slot
-// was ever acquired (so release()'s `<-b.sem` would block/underflow). Without
-// this, every rejected request leaks a ref and the bucket is never evicted,
-// allowing an attacker (especially with a spoofable per-IP key) to grow the
-// bucket map without bound.
-func (m *perIPConnMap) unref(key string, b *connBucket) {
+// release gives back a slot acquire granted, dropping the bucket when it was
+// the last.
+func (m *perIPConnMap) release(key string) {
 	s := m.getShard(key)
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	b, ok := s.buckets[key]
+	if !ok {
+		return
+	}
+	b.inflight--
 	b.ref--
 	if b.ref <= 0 {
 		delete(s.buckets, key)
+		b.inflight, b.ref = 0, 0
+		m.free.Put(b)
 	}
 }
 
@@ -172,21 +193,17 @@ func MaxConnectionsPerIP(max int, keyFunc func(*http.Request) string) kind.Middl
 				next.ServeHTTP(w, r)
 				return
 			}
-			b := m.get(key, max)
-			select {
-			case b.sem <- struct{}{}:
-				defer m.release(key, b)
-				next.ServeHTTP(w, r)
-			default:
-				// Rejected: drop the ref taken by get() (no slot acquired).
-				m.unref(key, b)
+			if !m.acquire(key, max) {
 				if !kind.ShouldSkipMetrics(r) {
 					inflightRejectedTotal.WithLabelValues("max_connections_per_ip").Inc()
 					telemetry.IncInflightRejected("max_connections_per_ip")
 				}
 				w.Header().Set("Retry-After", "1")
 				httputil.WriteJSONError(w, http.StatusTooManyRequests, "too many connections from this IP", "")
+				return
 			}
+			defer m.release(key)
+			next.ServeHTTP(w, r)
 		})
 	}
 }

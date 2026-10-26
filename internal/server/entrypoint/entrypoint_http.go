@@ -118,6 +118,14 @@ func dynamicTimeouts(ep *gateonv1.EntryPoint, deps *Deps, next http.Handler) htt
 // was chosen, which pre-empted every route's own policy, every backend's, and
 // the management API's; CORS is decided per route now (ADR-0015).
 func entrypointChain(ctx context.Context, ep *gateonv1.EntryPoint, deps *Deps) []middleware.Middleware {
+	return Chain(ctx, ep, deps)
+}
+
+// Chain is entrypointChain for the gateway-chain benchmark in internal/server,
+// which assembles an entrypoint around the base handler the way Run does and
+// has to use this list rather than a copy of it: a copy would measure the
+// chain as it was the day it was copied.
+func Chain(ctx context.Context, ep *gateonv1.EntryPoint, deps *Deps) []middleware.Middleware {
 	epLabel := cmp.Or(ep.Name, ep.Id)
 	chain := []middleware.Middleware{
 		middleware.EntryPoint(ep.Id, epLabel, IsManagementAddress(ep.Address, deps)),

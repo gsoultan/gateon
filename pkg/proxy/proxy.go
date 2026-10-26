@@ -386,19 +386,25 @@ func (h *ProxyHandler) rewriteRequest(pr *httputil.ProxyRequest, state *targetSt
 	pr.Out.Host = targetURL.Host
 
 	clientIP := request.GetClientIP(pr.In, false)
-	pr.Out.Header.Set("X-Real-IP", clientIP)
-	if xff := pr.In.Header.Get("X-Forwarded-For"); xff != "" {
-		pr.Out.Header.Set("X-Forwarded-For", xff+", "+clientIP)
-	} else {
-		pr.Out.Header.Set("X-Forwarded-For", clientIP)
+	xff := clientIP
+	if prior := pr.In.Header.Get("X-Forwarded-For"); prior != "" {
+		xff = prior + ", " + clientIP
 	}
-	pr.Out.Header.Set("X-Forwarded-Host", pr.In.Host)
 	scheme := request.Scheme(pr.In)
-	pr.Out.Header.Set("X-Forwarded-Proto", scheme)
+	// The forwarding headers' values, cut from one array: Header.Set
+	// allocates a one-element slice per header, and these are set on every
+	// proxied request. Each slice is capped at its element so an append to
+	// one by anything downstream copies rather than writes into the next.
+	vals := [5]string{clientIP, xff, pr.In.Host, scheme, "on"}
+	out := pr.Out.Header
+	out["X-Real-Ip"] = vals[0:1:1]
+	out["X-Forwarded-For"] = vals[1:2:2]
+	out["X-Forwarded-Host"] = vals[2:3:3]
+	out["X-Forwarded-Proto"] = vals[3:4:4]
 	if scheme == "https" {
-		pr.Out.Header.Set("X-Forwarded-Ssl", "on")
+		out["X-Forwarded-Ssl"] = vals[4:5:5]
 	}
-	setGatewayJA4(pr.Out.Header, pr.In)
+	setGatewayJA4(out, pr.In)
 
 	// 2. Handle gRPC and HTTP/2 protocol specifics
 	origURL := state.url

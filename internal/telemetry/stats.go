@@ -51,7 +51,13 @@ type DomainStats struct {
 
 type pathStatsShard struct {
 	mu sync.RWMutex
-	m  map[string]*pathStatsInternal
+	m  map[pathKey]*pathStatsInternal
+}
+
+// pathKey is what a path's statistics are kept under: the host and the path
+// as they are, so a lookup costs no concatenated string per request.
+type pathKey struct {
+	host, path string
 }
 
 var (
@@ -67,15 +73,21 @@ var (
 func init() {
 	for i := range pathStatsShards {
 		pathShards[i] = &pathStatsShard{
-			m: make(map[string]*pathStatsInternal),
+			m: make(map[pathKey]*pathStatsInternal),
 		}
 	}
 }
 
-func getPathShard(key string) *pathStatsShard {
+func getPathShard(key pathKey) *pathStatsShard {
 	var h uint32 = 2166136261
-	for i := range len(key) {
-		h ^= uint32(key[i])
+	for i := range len(key.host) {
+		h ^= uint32(key.host[i])
+		h *= 16777619
+	}
+	h ^= uint32(':')
+	h *= 16777619
+	for i := range len(key.path) {
+		h ^= uint32(key.path[i])
 		h *= 16777619
 	}
 	return pathShards[h%pathStatsShards]
@@ -119,7 +131,7 @@ func RecordPathRequest(host, path string, latencySeconds float64, bytesTotal uin
 	host = truncateLabel(host)
 	path = truncateLabel(path)
 
-	key := host + ":" + path
+	key := pathKey{host: host, path: path}
 	shard := getPathShard(key)
 
 	shard.mu.RLock()
@@ -305,7 +317,7 @@ func ResetPathStats() {
 	for i := range pathStatsShards {
 		shard := pathShards[i]
 		shard.mu.Lock()
-		shard.m = make(map[string]*pathStatsInternal)
+		shard.m = make(map[pathKey]*pathStatsInternal)
 		shard.mu.Unlock()
 	}
 }

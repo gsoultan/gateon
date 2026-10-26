@@ -208,8 +208,13 @@ const maxHoneypotBlocklist = 10_000
 // everyone sharing that address. Operators who front no such app can still add
 // them explicitly via SecurityAdvanced.Deception.HoneypotPaths.
 func defaultHoneypotPaths() []string {
-	return []string{"/.env", "/.git", "/config.php", "/backup.sql", "/.aws", "/.ssh"}
+	return builtinHoneypotPaths
 }
+
+// builtinHoneypotPaths is the default trap list. One slice, read by every
+// request on every entrypoint and never written: returning a fresh one
+// allocated per request to be compared against and dropped.
+var builtinHoneypotPaths = []string{"/.env", "/.git", "/config.php", "/backup.sql", "/.aws", "/.ssh"}
 
 // ReleaseHoneypotBan lifts the honeypot's ban on ip and forgets its strikes,
 // reporting whether there was a ban to lift.

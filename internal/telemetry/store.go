@@ -105,8 +105,8 @@ func isMitigatingAction(action string) bool {
 // block -- one "Name: value" per line, as FormatHeaders writes it -- with
 // [REDACTED], and masks the credentials in the query string of each header
 // whose value is a URI (Referer, Location, X-Forwarded-Uri; redact.URI). It
-// runs on the store's goroutine, and builds into a pooled strings.Builder
-// rather than splitting the block.
+// runs on the store's goroutine, and builds into a pooled buffer rather than
+// splitting the block.
 //
 // A trace keeps that a credential was sent, which is what a debugging session
 // needs, and not what it said: the trace store is read from the dashboard,
@@ -121,12 +121,9 @@ func RedactHeaders(headers string) string {
 		return ""
 	}
 
-	sb := builderPool.Get().(*strings.Builder)
+	sb := bufferPool.Get().(*bytes.Buffer)
 	sb.Reset()
-	defer builderPool.Put(sb)
-	// One buffer of the block's size: the result is rarely longer, and
-	// growing by doubling from empty allocated five times for a browser's
-	// headers.
+	defer bufferPool.Put(sb)
 	sb.Grow(len(headers))
 
 	start := 0
@@ -148,22 +145,87 @@ func RedactHeaders(headers string) string {
 
 // writeRedactedHeaderLine writes one "Name: value" line of a header block with
 // its credential, if any, masked.
-func writeRedactedHeaderLine(sb *strings.Builder, line string) {
+func writeRedactedHeaderLine(sb *bytes.Buffer, line string) {
 	colon := strings.IndexByte(line, ':')
-	switch {
-	case colon <= 0:
+	if colon <= 0 {
 		sb.WriteString(line)
-	case redact.IsCredentialHeader(line[:colon]):
-		sb.WriteString(line[:colon])
+		return
+	}
+	name := line[:colon]
+	switch headerKindOf(name) {
+	case headerCredential:
+		sb.WriteString(name)
 		sb.WriteString(": " + redact.Mask)
-	case redact.IsURIHeader(line[:colon]):
+	case headerURI:
 		sb.WriteString(line[:colon+1])
 		sb.WriteString(redact.URI(line[colon+1:]))
 	default:
 		// By shape: a token under a name that does not say so (ADR 0060).
 		sb.WriteString(line[:colon+1])
-		sb.WriteString(redact.HeaderValue(line[:colon], line[colon+1:]))
+		sb.WriteString(redact.HeaderValue(name, line[colon+1:]))
 	}
+}
+
+// headerKind is what a header's name says about its value: that it is a
+// credential, a URI, or nothing.
+type headerKind uint8
+
+const (
+	headerPlain headerKind = iota
+	headerCredential
+	headerURI
+)
+
+// classifyHeader is headerKindOf without the memo: redact.IsCredentialHeader
+// then redact.IsURIHeader, in the order writeRedactedHeaderLine has always
+// asked them.
+func classifyHeader(name string) headerKind {
+	switch {
+	case redact.IsCredentialHeader(name):
+		return headerCredential
+	case redact.IsURIHeader(name):
+		return headerURI
+	}
+	return headerPlain
+}
+
+// Bounds on the header-kind memo. A name is the client's to write, so the
+// memo holds a bounded number of them, each no longer than any real header
+// name, and forgets everything rather than evicting when it is full: names
+// are few and repeat, so it refills with the same ones at once.
+const (
+	headerKindMemoMax     = 512
+	headerKindMemoNameMax = 64
+)
+
+var headerKindMemo struct {
+	mu sync.RWMutex
+	m  map[string]headerKind
+}
+
+// headerKindOf is classifyHeader, remembered by name. Classifying a name
+// folds it against every credential header and fragment the vocabulary has,
+// and a trace is classified name by name on the store's goroutine for every
+// request at the default sampling: it was a tenth of the gateway's CPU, spent
+// re-deciding that User-Agent is not a credential.
+func headerKindOf(name string) headerKind {
+	if len(name) > headerKindMemoNameMax {
+		return classifyHeader(name)
+	}
+	headerKindMemo.mu.RLock()
+	kind, ok := headerKindMemo.m[name]
+	headerKindMemo.mu.RUnlock()
+	if ok {
+		return kind
+	}
+	kind = classifyHeader(name)
+	headerKindMemo.mu.Lock()
+	if len(headerKindMemo.m) >= headerKindMemoMax || headerKindMemo.m == nil {
+		headerKindMemo.m = make(map[string]headerKind, 64)
+	}
+	headerKindMemo.m[strings.Clone(name)] = kind
+	headerKindMemo.mu.Unlock()
+	return kind
 }
 
 // ParseHeaders parses a plain text header block (formatted by FormatHeaders) back into a map.
@@ -206,29 +268,52 @@ func ParseHeaders(s string) map[string]string {
 }
 
 // CloneHeader performs a deep clone of http.Header.
+//
+// Two allocations, the map and one backing array every value slice is cut
+// from, as http.Header.Clone does. A slice per key cost a browser's request
+// headers ten allocations per trace, on every request at the default sampling.
 func CloneHeader(h map[string][]string) map[string][]string {
 	if h == nil {
 		return nil
 	}
+	n := 0
+	for _, v := range h {
+		n += len(v)
+	}
+	if n == 0 {
+		return make(map[string][]string, len(h))
+	}
+	values := make([]string, n)
 	h2 := make(map[string][]string, len(h))
 	for k, v := range h {
-		v2 := make([]string, len(v))
-		copy(v2, v)
-		h2[k] = v2
+		if v == nil {
+			h2[k] = nil
+			continue
+		}
+		n := copy(values, v)
+		h2[k] = values[:n:n]
+		values = values[n:]
 	}
 	return h2
 }
 
-// FormatHeaders formats multiple http.Headers into a single string.
-// Optimized to minimize allocations using a pooled builder.
+// bufferPool holds the buffers FormatHeaders and RedactHeaders build into. A
+// bytes.Buffer, not a strings.Builder: Reset on a Builder drops its array, so a
+// pooled one grew from nothing on every use and the pool saved nothing.
+var bufferPool = sync.Pool{
+	New: func() any { return new(bytes.Buffer) },
+}
+
+// FormatHeaders formats multiple http.Headers into a single string, built in
+// a pooled buffer: one allocation, the result.
 func FormatHeaders(h map[string][]string, trailers ...map[string][]string) string {
 	if len(h) == 0 && len(trailers) == 0 {
 		return ""
 	}
 
-	sb := builderPool.Get().(*strings.Builder)
+	sb := bufferPool.Get().(*bytes.Buffer)
 	sb.Reset()
-	defer builderPool.Put(sb)
+	defer bufferPool.Put(sb)
 
 	for k, v := range h {
 		sb.WriteString(k)

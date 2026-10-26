@@ -258,6 +258,77 @@ Reproduce with:
 go test ./internal/middleware/ -run '^$' -bench 'ReputationBlocker' -benchmem -count 6
 ```
 
+## The proxy request path — 2026-10-26, linux/amd64, 4 vCPU Xeon (shared)
+
+A pass over what one benign proxied request costs end to end on a 2-core /
+2 GB budget: entrypoint chain, base handler, route chain, `pkg/proxy`. The
+machine is a shared container, so `sec/op` here is ±10–40% between runs and
+only the deterministic columns, `B/op` and `allocs/op`, are quoted as
+evidence; latency is reported where benchstat found it significant.
+
+`BenchmarkGatewayChain` in `internal/server` is new: the whole chain against a
+stub backend with no socket, with the telemetry store open and trace recording
+at the standard tier's sampling, so a delta is the gateway's and not the
+loopback stack's. `BenchmarkDataPlaneRequest` spends ~140 µs of its ~200 µs in
+the kernel and could not resolve a 10 µs change.
+
+| Benchmark | before | after |
+| :-- | --: | --: |
+| `GatewayChain/no-tracing` (sec/op · B/op · allocs/op) | ~20 µs · ~10 KiB · 88 | **12.8 µs · 5.5 KiB · 47** |
+| `GatewayChain/tracing` | ~20 µs · ~10 KiB · 90 | 16.4 µs · 8.9 KiB · 67 |
+| `InfraChain_TraceAll` | 2.68 µs · 818 · 14 | 1.79 µs (−33%) · 770 · 12 |
+| `InfraChain_TraceOff` | 610 · 7 | 578 · 6 |
+| `HTTPEntrypointConnection` (B/op · allocs/op) | 10.58 KiB · 112 | 9.55 KiB · 100 |
+| `pkg/proxy ServeHTTP` (allocs/op) | 103 | 99 |
+| `pkg/proxy ServeHTTP_Parallel` (allocs/op) | 111 | 107 |
+
+The "before" `GatewayChain` row is what cmd/gateon ran: `InitTracer` installed
+an SDK tracer provider whether or not `OTEL_EXPORTER_OTLP_ENDPOINT` was set, so
+every request recorded a span (3.6 µs, 2.4 KiB, 12 allocations, measured on its
+own) that nothing exported. That was the single largest item in the profile
+and the first change: with no endpoint there is no provider and the
+`Telemetry` middleware starts no span, gated by `telemetry.TracingEnabled()`.
+The `tracing` row is the cost once an endpoint is configured.
+
+The rest of the gap, in profile order:
+
+- **Trace recording** — `CloneHeader` ran twice per traced request and
+  allocated a slice per header name; it now cuts the values from one backing
+  array. On the store's goroutine, `RedactHeaders` spent a tenth of the
+  gateway's CPU re-classifying `User-Agent` against the credential vocabulary
+  on every request; `headerKindOf` remembers the answer per name, bounded at
+  512 names of at most 64 bytes, forgetting all rather than evicting when full.
+- **Request ids** — the span no longer replaces an id the entrypoint already
+  made, the inbound `X-Request-Id` is read and set through one canonical
+  constant so `net/http` does not re-canonicalize it per call, and the
+  entrypoint's route label is built once.
+- **Per-IP connection limit** — each address's in-flight count was a buffered
+  channel built and dropped with the bucket on every lone request; it is an
+  integer under the shard lock and the buckets are pooled.
+- **Forwarding headers** — `pkg/proxy` set five headers with `Header.Set`, one
+  slice each; they are cut from one array with capped sub-slices.
+- **Smaller** — `PathTrie.Lookup` walks segments with `strings.Cut` instead of
+  splitting; `RealIP` only rejoins host:port when the host changed; the base
+  handler skips `MaxBytesReader` on a bodiless request; `MetricsWithService`
+  resolves a fixed route's Prometheus series once instead of hashing the
+  labels per request; `GetRecommendation` returns early while no
+  recommendation has ever been registered; the honeypot path list is a
+  package variable; JA4H and JA4+ are formatted in one allocation.
+
+What remains at 47 allocations a request, for the next pass: the ARC caches
+behind the mitigation and reputation checks take `any` keys, so each `Get`
+boxes a string (≈6 allocations); the trace's two header clones (≈6); the
+harness's own request and recorder (≈10). The typed `golang-lru/arc/v2` would
+remove the boxing but is a new dependency and touches every store cache, so
+it is left for its own change.
+
+Reproduce with:
+
+```sh
+go test -tags=noebpf ./internal/server/ -run '^$' -bench GatewayChain -benchmem -count 8
+go test -tags=noebpf ./internal/middleware/ -run '^$' -bench InfraChain -benchmem -count 8
+```
+
 ## PGO
 
 `cmd/gateon/default.pgo` is committed and `go build ./cmd/gateon` applies it
