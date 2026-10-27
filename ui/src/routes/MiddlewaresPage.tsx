@@ -53,6 +53,7 @@ import {
 } from "../components/MiddlewareConfig/middlewareConfigProblems";
 import { QueryError } from "../components/QueryError";
 import { FieldGrid, PageHeader } from "../components/layout";
+import { Term } from "../components/status";
 
 export default function MiddlewaresPage() {
   const { canWrite } = usePermissions();
@@ -88,7 +89,7 @@ export default function MiddlewaresPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["middlewares"] });
       notifications.show({
-        title: "Middleware Saved",
+        title: "Policy saved",
         message: "The middleware configuration has been updated.",
         color: "green",
         icon: <IconCheck size={18} />,
@@ -97,7 +98,7 @@ export default function MiddlewaresPage() {
     },
     onError: (err: unknown) => {
       notifications.show({
-        title: "Error Saving Middleware",
+        title: "The policy was not saved",
         message: getApiErrorMessage(err),
         color: "red",
       });
@@ -119,14 +120,14 @@ export default function MiddlewaresPage() {
       queryClient.invalidateQueries({ queryKey: ["middlewares"] });
       setDeleteTarget(null);
       notifications.show({
-        title: "Middleware Deleted",
+        title: "Policy deleted",
         message: "The middleware has been removed.",
         color: "blue",
       });
     },
     onError: (err: unknown) => {
       notifications.show({
-        title: "Error Deleting Middleware",
+        title: "The policy was not deleted",
         message: getApiErrorMessage(err),
         color: "red",
       });
@@ -159,12 +160,12 @@ export default function MiddlewaresPage() {
   return (
     <Stack gap="xl">
       <PageHeader
-        title={<>Middlewares ({totalCount})</>}
-        description="Define reusable middleware policies for your routes."
+        title="Policies"
+        description={<>Reusable rules you attach to routes: limits, access, protection, headers, traffic shaping (a <Term of="policy" /> is called a middleware in the API and config).</>}
         actions={
           <Group wrap={isMobile ? "wrap" : "nowrap"} style={{ flex: isMobile ? "1 1 100%" : "none" }}>
             <TextInput
-              placeholder="Search middlewares..."
+              placeholder="Search policies..."
               leftSection={<IconSearch size={16} />}
               size="xs"
               w={isMobile ? "100%" : 250}
@@ -181,7 +182,7 @@ export default function MiddlewaresPage() {
                 onClick={startAdd}
                 fullWidth={isMobile}
               >
-                Add Middleware
+                Add policy
               </Button>
             )}
           </Group>
@@ -377,7 +378,7 @@ export default function MiddlewaresPage() {
       <Modal
         opened={opened}
         onClose={close}
-        title={editingMW?.id ? "Edit Middleware" : "Add Middleware"}
+        title={editingMW?.id ? "Edit policy" : "Add policy"}
         radius="lg"
         size="lg"
       >
@@ -509,7 +510,7 @@ export default function MiddlewaresPage() {
               loading={mutation.isPending}
               disabled={!editingMW?.name || !!configProblem}
             >
-              Save Middleware
+              Save policy
             </Button>
           </Group>
         </Stack>
@@ -518,7 +519,7 @@ export default function MiddlewaresPage() {
       <Modal
         opened={!!deleteTarget}
         onClose={() => setDeleteTarget(null)}
-        title="Delete Middleware"
+        title="Delete policy"
         radius="lg"
       >
         <Stack gap="md">

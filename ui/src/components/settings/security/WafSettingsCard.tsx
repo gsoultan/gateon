@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
 // SPDX-License-Identifier: MIT
 
-import { Card, Title, Text, Stack, Textarea, NumberInput, Button, Group, Divider, Switch, Select, MultiSelect, TagsInput, Badge, Alert, Loader, SimpleGrid } from "@mantine/core";
+import { Card, Title, Text, Stack, NumberInput, Button, Group, Divider, Switch, Select, MultiSelect, TagsInput, Badge, Alert, Loader, SimpleGrid } from "@mantine/core";
 import { IconShieldLock } from "@tabler/icons-react";
 import { useQueryClient, type UseQueryResult } from "@tanstack/react-query";
 import { EFFECTIVE_WAF_QUERY_KEY, useEffectiveWaf, type EffectiveWafView } from "../../../hooks/useEffectiveWaf";
@@ -258,21 +258,6 @@ export function WafSettingsCard({
                 <BotManagementSection waf={waf} onChange={onChange} disabled={disabled} />
               </>
 
-            <Textarea
-              label="Custom Global Directives (not executed)"
-              description="Kept so an upgrade does not lose them. The current engine does not parse SecLang, so nothing here is enforced — re-author these as rules under WAF Rules."
-              placeholder="SecRule ARGS 'foo' 'id:1,deny,status:403'"
-              value={waf.customDirectives || ""}
-              onChange={(e) =>
-                onChange({
-                  ...waf!,
-                  customDirectives: e.currentTarget.value,
-                })
-              }
-              disabled={disabled}
-              minRows={4}
-              autosize
-            />
             {canEdit && (
               <Group justify="flex-end" mt="md">
                 <Button onClick={save} loading={saving} size="sm">

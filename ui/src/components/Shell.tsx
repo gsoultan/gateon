@@ -31,9 +31,8 @@ export function Shell() {
   // On a phone the sidebar is a drawer, and it always shows its labels.
   const expanded = isMobile || !sidebarCollapsed;
 
-  const clamavInstalled = !!status?.clamavInstalled;
   const isAdmin = user?.role === "admin";
-  const sections = useMemo(() => navSections({ clamavInstalled, isAdmin }), [clamavInstalled, isAdmin]);
+  const sections = useMemo(() => navSections({ isAdmin }), [isAdmin]);
 
   // The mobile drawer stayed open over the page it had just opened, so every
   // navigation on a phone took a second tap to see the result.

@@ -91,13 +91,13 @@ export function PipelineConfig({
         name="middlewares"
         children={(field: any) => (
           <MultiSelect
-            label="Middlewares"
-            description="Add protection presets above or select existing middlewares"
+            label="Policies"
+            description="Add a protection preset above or pick the policies this route is protected by"
             data={middlewareOptions}
             value={field.state.value}
             onBlur={field.handleBlur}
             onChange={(v) => field.handleChange(v)}
-            placeholder="Select middlewares"
+            placeholder="Select policies"
             searchable
           />
         )}

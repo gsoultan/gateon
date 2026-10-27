@@ -206,7 +206,7 @@ export default function RouteForm({
 
                   <Stepper.Step
                     label={isMobile ? null : "Security"}
-                    description={isMobile ? null : "Middlewares & TLS"}
+                    description={isMobile ? null : "Policies & TLS"}
                     icon={<IconShieldLock size={18} />}
                   >
                     <PipelineConfig

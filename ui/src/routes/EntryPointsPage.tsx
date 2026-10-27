@@ -48,6 +48,7 @@ import type { EntryPoint } from "../types/gateon";
 import { QueryError } from "../components/QueryError";
 import { ConfirmDeleteModal } from "../components/ConfirmDelete";
 import { FormDrawer, PageHeader } from "../components/layout";
+import { Term } from "../components/status";
 
 export default function EntryPointsPage() {
   const { canWrite } = usePermissions();
@@ -82,7 +83,7 @@ export default function EntryPointsPage() {
       setPendingDelete(null);
       queryClient.invalidateQueries({ queryKey: ["entryPoints"] });
       notifications.show({
-        title: "EntryPoint Deleted",
+        title: "Listener deleted",
         message: "The entrypoint has been successfully removed.",
         color: "green",
       });
@@ -122,8 +123,8 @@ export default function EntryPointsPage() {
   return (
     <Stack gap="lg">
       <PageHeader
-        title="EntryPoints"
-        description="Configure network entryPoints and listening addresses."
+        title="Listeners"
+        description={<>The addresses and ports the gateway accepts connections on (a <Term of="listener" /> is called an entryPoint in the API and config).</>}
         actions={
           canWrite && (
             <Button
@@ -133,7 +134,7 @@ export default function EntryPointsPage() {
               gradient={{ from: "blue", to: "cyan" }}
               fullWidth={isMobile}
             >
-              Create EntryPoint
+              Create listener
             </Button>
           )
         }
@@ -394,7 +395,7 @@ export default function EntryPointsPage() {
                                 </ActionIcon>
                               </Menu.Target>
                               <Menu.Dropdown>
-                                <Menu.Label>EntryPoint Actions</Menu.Label>
+                                <Menu.Label>Listener</Menu.Label>
                                 <Menu.Item
                                   leftSection={<IconEdit size={14} />}
                                   onClick={() => handleEdit(ep)}
@@ -445,7 +446,7 @@ export default function EntryPointsPage() {
       <FormDrawer
         opened={opened}
         onClose={close}
-        title={editingEP ? "Edit EntryPoint" : "Create New EntryPoint"}
+        title={editingEP ? "Edit listener" : "Create listener"}
         width="narrow"
       >
         <EntryPointForm onSuccess={close} initialData={editingEP} />

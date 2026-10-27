@@ -541,7 +541,7 @@ function MiddlewareMetricsSection({ mw }: { mw: MiddlewareMetrics }) {
             Performance Middleware
           </Title>
         </Group>
-        <Anchor component={Link} to="/security-center" size="xs" fw={600}>
+        <Anchor component={Link} to="/security" size="xs" fw={600}>
           Security counters are in the Security Hub funnel
         </Anchor>
       </Group>
@@ -976,7 +976,7 @@ export default function MetricsPage() {
   return (
     <Stack gap="lg">
       <PageHeader
-        title="Metrics Dashboard"
+        title="Metrics"
         description="Real-time Prometheus metrics — golden signals, per-route breakdown, middleware counters, TLS certificates, and system health."
         actions={
           <Badge variant="dot" color={isLoading ? "yellow" : "green"} size="lg">

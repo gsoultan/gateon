@@ -32,7 +32,7 @@ export function AccessControlCard() {
             </Text>
             <Button
               component={Link}
-              to="/users"
+              to="/access"
               variant="light"
               size="xs"
               radius="md"

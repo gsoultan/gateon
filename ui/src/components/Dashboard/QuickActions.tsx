@@ -21,7 +21,7 @@ import { CREATE_SEARCH } from "../layout";
 const actions = [
   { title: "Add route", icon: IconRoute, color: "blue", to: "/routes", create: true },
   { title: "Add service", icon: IconServer, color: "teal", to: "/services", create: true },
-  { title: "Certificates", icon: IconShieldLock, color: "indigo", to: "/certificates" },
+  { title: "Certificates", icon: IconShieldLock, color: "indigo", to: "/tls" },
   { title: "Real-time metrics", icon: IconActivity, color: "orange", to: "/metrics-dashboard" },
   { title: "System settings", icon: IconSettings, color: "gray", to: "/settings" },
 ];

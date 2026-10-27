@@ -523,8 +523,8 @@ export default function Dashboard() {
   return (
     <Stack gap="xl">
       <PageHeader
-        title="System Overview"
-        description="Real-time status and operational metrics"
+        title="Overview"
+        description="Is the gateway healthy, is traffic normal, and what needs attention."
       />
 
       <OnboardingChecklist />

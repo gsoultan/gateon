@@ -67,7 +67,9 @@ const CIPHER_SUITES = [
   "TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256",
 ];
 
-export default function TLSOptionsPage() {
+// embedded: rendered as a tab of a page that already has a title, so only
+// the description and the actions are shown.
+export default function TLSOptionsPage({ embedded = false }: { embedded?: boolean } = {}) {
   const { canWrite } = usePermissions();
   const density = useTableDensity();
   const queryClient = useQueryClient();
@@ -178,8 +180,9 @@ export default function TLSOptionsPage() {
   return (
     <Stack gap="xl">
       <PageHeader
-        title={<>TLS Options ({totalCount})</>}
-        description="Configure specialized TLS parameters for your routes."
+        title="TLS profiles"
+        variant={embedded ? "section" : "page"}
+        description="Named sets of TLS versions and ciphers that routes reuse (tlsOption in the API)."
         actions={
           <Group>
             <TextInput

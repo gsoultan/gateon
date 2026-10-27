@@ -362,8 +362,8 @@ const DiagnosticsPage: React.FC = () => {
 
       <Stack gap="xl">
         <PageHeader
-          title="Diagnostics & Connectivity"
-          description="Monitor real-time system health, TLS status, and entrypoint performance."
+          title="Diagnostics"
+          description="System stats, dependencies, connectivity and TLS handshakes, for when something is wrong."
           actions={
             <>
               <ActionIcon
@@ -527,7 +527,7 @@ const DiagnosticsPage: React.FC = () => {
               variant="light"
               leftSection={<IconShieldLock size={16} />}
               component={Link}
-              to="/security-center"
+              to="/security"
             >
               Open Security Hub
             </Button>

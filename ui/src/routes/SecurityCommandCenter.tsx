@@ -3,10 +3,7 @@
 
 import React from 'react';
 import { 
-  Container, 
-  Grid, 
   Text,
-  Title, 
   Group, 
   Stack, 
   Badge, 
@@ -56,7 +53,7 @@ import { AIAdvisoryTab } from '../components/SecurityCenter/AIAdvisoryTab';
 import { WAFRulesTab } from '../components/SecurityCenter/WAFRulesTab';
 // The archive reads files most visits never open, so it loads with its tab.
 const ThreatArchiveTab = React.lazy(() => import('../components/SecurityCenter/ThreatArchiveTab'));
-import { TimeDisplay } from '../components/TimeDisplay';
+import { PageHeader } from "../components/layout";
 import { getThreatColor } from '../utils/security';
 import { resolveTrafficRangeBounds, DAY_MS } from '../utils/dashboard';
 import type { TrafficRangePreset } from '../utils/dashboard';
@@ -326,64 +323,40 @@ export default function SecurityCommandCenter() {
   }, [metrics, trendRange]);
 
   return (
-    <Container size="xl" py="md">
-      <Stack gap="xl">
-        {/* Header Section */}
-        <Paper p="xl" radius="md" withBorder style={{ 
-          background: 'linear-gradient(135deg, light-dark(var(--mantine-color-blue-0), var(--mantine-color-dark-8)) 0%, var(--mantine-color-body) 100%)',
-          borderLeft: '4px solid var(--mantine-color-blue-filled)'
-        }}>
-          <Grid align="center">
-            <Grid.Col span={{ base: 12, md: 8 }}>
-              <Stack gap="xs">
-                <Group gap="xs">
-                  <Badge variant="dot" color="blue" size="sm">Autonomous Defense Active</Badge>
-                  <TimeDisplay />
-                </Group>
-                <Title order={1} fw={900} style={{ letterSpacing: -1.5 }}>Security Hub</Title>
-                <Text size="lg" c="dimmed" maw={600}>
-                  Unified orchestration of kernel-level protection, behavioral analysis, and automated threat mitigation.
-                </Text>
+    <Stack gap="xl">
+        <PageHeader
+          title="Security"
+          description="What protects traffic right now, what was seen, what was done about it, and the rules behind it."
+          actions={
+            <Group gap="sm" wrap="wrap">
+              <Stack gap={2}>
+                <Button
+                  leftSection={scanning ? <Loader size={16} color="white" /> : <IconShieldCheck size={16} />}
+                  onClick={handleDeepScan}
+                  disabled={scanning || !status?.clamavInstalled || !canWrite}
+                >
+                  {scanning ? 'Scanning...' : 'Deep scan'}
+                </Button>
+                {scanStatus?.lastScan && !scanning && (
+                  <Text size="10px" c="dimmed" ta="right" fw={500}>
+                    Last scan: {safeFormatDate(scanStatus.lastScan, 'MMM d, HH:mm')}
+                  </Text>
+                )}
               </Stack>
-            </Grid.Col>
-            <Grid.Col span={{ base: 12, md: 4 }}>
-              <Group justify="flex-end">
-                {!isViewer && (
-                  <Button variant="white" color="blue" leftSection={<IconAdjustments size={16} />} component={Link} to="/settings">
-                    Orchestration Rules
-                  </Button>
-                )}
-                <Stack gap={2}>
-                  <Button 
-                    variant="filled" 
-                    color="blue" 
-                    leftSection={scanning ? <Loader size={16} color="white" /> : <IconShieldCheck size={16} />}
-                    onClick={handleDeepScan}
-                    disabled={scanning || !status?.clamavInstalled || !canWrite}
-                  >
-                    {scanning ? 'Scanning...' : 'Deep Scan'}
-                  </Button>
-                  {scanStatus?.lastScan && !scanning && (
-                    <Text size="10px" c="dimmed" ta="right" fw={500}>
-                      Last scan: {safeFormatDate(scanStatus.lastScan, 'MMM d, HH:mm')}
-                    </Text>
-                  )}
-                </Stack>
-                {status?.clamavInstalled && (
-                  <Button
-                    variant="subtle"
-                    color="red"
-                    leftSection={uninstalling ? <Loader size={16} color="red" /> : <IconTrash size={16} />}
-                    onClick={() => setConfirmUninstallOpened(true)}
-                    disabled={uninstalling || !canWrite}
-                  >
-                    Uninstall ClamAV
-                  </Button>
-                )}
-              </Group>
-            </Grid.Col>
-          </Grid>
-        </Paper>
+              {status?.clamavInstalled && (
+                <Button
+                  variant="subtle"
+                  color="red"
+                  leftSection={uninstalling ? <Loader size={16} color="red" /> : <IconTrash size={16} />}
+                  onClick={() => setConfirmUninstallOpened(true)}
+                  disabled={uninstalling || !canWrite}
+                >
+                  Uninstall ClamAV
+                </Button>
+              )}
+            </Group>
+          }
+        />
 
         {globalConfig?.waf?.malwareDetection && status && !status.clamavInstalled && (
           <Alert icon={<IconInfoCircle size="1rem" />} title="Malware Protection Degraded" color="red" variant="filled" radius="md">
@@ -474,8 +447,6 @@ export default function SecurityCommandCenter() {
             </React.Suspense>
           </Tabs.Panel>
         </Tabs>
-      </Stack>
-
       <Modal
         opened={confirmUninstallOpened}
         onClose={() => setConfirmUninstallOpened(false)}
@@ -535,7 +506,7 @@ export default function SecurityCommandCenter() {
           </Group>
         </Stack>
       </Modal>
-    </Container>
+    </Stack>
   );
 }
 

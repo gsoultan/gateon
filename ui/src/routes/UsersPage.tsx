@@ -62,7 +62,9 @@ import {
 import { api } from "../services/client";
 import { PageHeader } from "../components/layout";
 
-export default function UsersPage() {
+// embedded: rendered as a tab of a page that already has a title, so only
+// the description and the actions are shown.
+export default function UsersPage({ embedded = false }: { embedded?: boolean } = {}) {
   const [search, setSearch] = useState("");
   const isMobile = useIsMobile();
   const [page, setPage] = useState(1);
@@ -392,8 +394,9 @@ export default function UsersPage() {
   return (
     <Stack gap="xl">
       <PageHeader
-        title={<>User Management ({totalCount})</>}
-        description="Manage system administrators and operators using Role Based Access Control."
+        title="Users"
+        variant={embedded ? "section" : "page"}
+        description="Administrators change anything, operators change traffic and security, viewers only read."
         actions={
           <Group wrap={isMobile ? "wrap" : "nowrap"} style={{ flex: isMobile ? "1 1 100%" : "none" }}>
             <TextInput

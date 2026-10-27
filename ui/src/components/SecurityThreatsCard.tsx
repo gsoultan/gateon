@@ -154,7 +154,7 @@ export function SecurityThreatsCard() {
 
       <Button
         component={Link}
-        to="/security-center"
+        to="/security"
         variant="subtle"
         color="brand"
         fullWidth

@@ -77,7 +77,7 @@ export function EntryPointForm({
     onSuccess: (savedEP: EntryPoint) => {
       queryClient.invalidateQueries({ queryKey: ["entryPoints"] });
       notifications.show({
-        title: "EntryPoint Saved",
+        title: "Listener saved",
         message: `EntryPoint ${savedEP.id} has been successfully created/updated.`,
         color: "green",
         icon: <IconCheck size={18} />,
@@ -86,7 +86,7 @@ export function EntryPointForm({
     },
     onError: (err: unknown) => {
       notifications.show({
-        title: "Error Saving EntryPoint",
+        title: "The listener was not saved",
         message: getApiErrorMessage(err),
         color: "red",
       });
@@ -191,7 +191,7 @@ export function EntryPointForm({
               name="name"
               children={(field: any) => (
                 <TextInput
-                  label="EntryPoint Name"
+                  label="Name"
                   description="Friendly name for this entrypoint"
                   placeholder="e.g. Public HTTP"
                   leftSection={<IconHash size={16} />}
@@ -363,7 +363,7 @@ export function EntryPointForm({
               loading={mutation.isPending}
               leftSection={<IconCheck size={18} />}
             >
-              {initialData ? "Update EntryPoint" : "Create EntryPoint"}
+              {initialData ? "Save listener" : "Create listener"}
             </Button>
         </FormActions>
       </Stack>

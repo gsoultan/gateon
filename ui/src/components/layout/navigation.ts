@@ -4,27 +4,19 @@
 import type { ComponentType } from "react";
 import {
   IconAccessPoint,
-  IconActivity,
-  IconBook2,
-  IconCertificate,
   IconChartBar,
-  IconCircuitSwitchClosed,
   IconDashboard,
-  IconKey,
   IconListDetails,
   IconLockAccess,
-  IconNetwork,
   IconRoute,
   IconServer,
   IconSettings,
   IconSettingsAutomation,
   IconShieldCheck,
-  IconShieldLock,
   IconStethoscope,
   IconTerminal2,
   IconTimeline,
   IconUsers,
-  IconVirus,
 } from "@tabler/icons-react";
 
 export interface NavItem {
@@ -39,66 +31,54 @@ export interface NavSection {
 }
 
 export interface NavContext {
-  /** ClamAV is listed only once the daemon is installed. */
-  clamavInstalled: boolean;
-  /** Users and API tokens are an administrator's pages. */
+  /** Access (users and API tokens) is an administrator's page. */
   isAdmin: boolean;
 }
 
 /**
- * The sidebar, in the order an operator reaches for it: traffic first, then
- * what protects it, then the gateway itself. Pages a role cannot use are left
- * out rather than shown and refused.
+ * The sidebar: fourteen destinations in four groups, ordered by the question
+ * an operator is asking. Where does traffic go (Traffic), what protects it
+ * (Security), what is happening (Observe), how is the gateway set up (System).
+ * The sidebar label is the page title, everywhere. Pages a role cannot use are
+ * left out rather than shown and refused. Docs is a book in the header.
  */
-export function navSections({ clamavInstalled, isAdmin }: NavContext): NavSection[] {
+export function navSections({ isAdmin }: NavContext): NavSection[] {
   return [
+    {
+      title: "",
+      items: [{ label: "Overview", to: "/", icon: IconDashboard }],
+    },
     {
       title: "Traffic",
       items: [
-        { label: "Dashboard", to: "/", icon: IconDashboard },
         { label: "Routes", to: "/routes", icon: IconRoute },
         { label: "Services", to: "/services", icon: IconServer },
-        { label: "EntryPoints", to: "/entryPoints", icon: IconAccessPoint },
-        { label: "Topology", to: "/topology", icon: IconNetwork },
-      ],
-    },
-    {
-      title: "Observe",
-      items: [
-        { label: "Metrics", to: "/metrics-dashboard", icon: IconChartBar },
-        { label: "Path Metrics", to: "/path-metrics", icon: IconActivity },
-        { label: "Traces", to: "/traces", icon: IconTimeline },
-        { label: "Circuit Breaker", to: "/circuit-breaker", icon: IconCircuitSwitchClosed },
-        { label: "Logs", to: "/logs", icon: IconTerminal2 },
+        { label: "Listeners", to: "/listeners", icon: IconAccessPoint },
+        { label: "Policies", to: "/policies", icon: IconSettingsAutomation },
       ],
     },
     {
       title: "Security",
       items: [
-        { label: "Security Hub", to: "/security-center", icon: IconShieldCheck },
-        // An operator without ClamAV has nothing to manage here, and a
-        // permanent dead entry teaches people to ignore the section. The
-        // route still exists for anyone who follows a link to it.
-        ...(clamavInstalled ? [{ label: "Antivirus", to: "/clamav", icon: IconVirus }] : []),
-        { label: "Middlewares", to: "/middlewares", icon: IconSettingsAutomation },
-        { label: "Certificates", to: "/certificates", icon: IconCertificate },
-        { label: "Client Authorities", to: "/client-authorities", icon: IconShieldLock },
-        { label: "TLS Options", to: "/tls-options", icon: IconLockAccess },
-        { label: "Audit Logs", to: "/audit-logs", icon: IconListDetails },
+        { label: "Security", to: "/security", icon: IconShieldCheck },
+        { label: "TLS", to: "/tls", icon: IconLockAccess },
+      ],
+    },
+    {
+      title: "Observe",
+      items: [
+        { label: "Logs", to: "/logs", icon: IconTerminal2 },
+        { label: "Traces", to: "/traces", icon: IconTimeline },
+        { label: "Metrics", to: "/metrics-dashboard", icon: IconChartBar },
       ],
     },
     {
       title: "System",
       items: [
         { label: "Settings", to: "/settings", icon: IconSettings },
-        ...(isAdmin
-          ? [
-              { label: "Users", to: "/users", icon: IconUsers },
-              { label: "API Tokens", to: "/api-tokens", icon: IconKey },
-            ]
-          : []),
+        ...(isAdmin ? [{ label: "Access", to: "/access", icon: IconUsers }] : []),
+        { label: "Audit log", to: "/audit-logs", icon: IconListDetails },
         { label: "Diagnostics", to: "/diagnostics", icon: IconStethoscope },
-        { label: "Docs", to: "/docs", icon: IconBook2 },
       ],
     },
   ];
@@ -106,7 +86,7 @@ export function navSections({ clamavInstalled, isAdmin }: NavContext): NavSectio
 
 /**
  * Whether a sidebar entry is the page being shown. A page's own sub-paths
- * count, so /traces/abc keeps Traces highlighted; the dashboard at "/" matches
+ * count, so /traces/abc keeps Traces highlighted; the Overview at "/" matches
  * only itself, or it would be highlighted on every page.
  */
 export function isActivePath(pathname: string, to: string): boolean {

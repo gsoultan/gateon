@@ -19,25 +19,45 @@ describe("the sidebar", () => {
     expect(isActivePath("/routes-archive", "/routes")).toBe(false);
   });
 
-  test("highlights the dashboard on the dashboard only", () => {
+  test("highlights the Overview on the Overview only", () => {
     expect(isActivePath("/", "/")).toBe(true);
     expect(isActivePath("/routes", "/")).toBe(false);
   });
 
-  test("lists Users and API Tokens for an administrator only", () => {
-    expect(labels({ clamavInstalled: false, isAdmin: true })).toContain("Users");
-    expect(labels({ clamavInstalled: false, isAdmin: true })).toContain("API Tokens");
-    expect(labels({ clamavInstalled: false, isAdmin: false })).not.toContain("Users");
-    expect(labels({ clamavInstalled: false, isAdmin: false })).not.toContain("API Tokens");
+  test("lists Access for an administrator only", () => {
+    expect(labels({ isAdmin: true })).toContain("Access");
+    expect(labels({ isAdmin: false })).not.toContain("Access");
   });
 
-  test("lists Antivirus only once ClamAV is installed", () => {
-    expect(labels({ clamavInstalled: true, isAdmin: false })).toContain("Antivirus");
-    expect(labels({ clamavInstalled: false, isAdmin: false })).not.toContain("Antivirus");
+  test("has fourteen destinations in four groups, and nothing else", () => {
+    const sections = navSections({ isAdmin: true });
+    expect(sections.filter((s) => s.title).map((s) => s.title)).toEqual(["Traffic", "Security", "Observe", "System"]);
+    expect(labels({ isAdmin: true })).toEqual([
+      "Overview",
+      "Routes",
+      "Services",
+      "Listeners",
+      "Policies",
+      "Security",
+      "TLS",
+      "Logs",
+      "Traces",
+      "Metrics",
+      "Settings",
+      "Access",
+      "Audit log",
+      "Diagnostics",
+    ]);
+  });
+
+  test("uses plain words, never the API's", () => {
+    for (const label of labels({ isAdmin: true })) {
+      expect(label).not.toMatch(/EntryPoint|Middleware|Authorit|Option|Hub|Dashboard/);
+    }
   });
 
   test("lists every page once", () => {
-    const all = navSections({ clamavInstalled: true, isAdmin: true }).flatMap((s) => s.items.map((i) => i.to));
+    const all = navSections({ isAdmin: true }).flatMap((s) => s.items.map((i) => i.to));
     expect(new Set(all).size).toBe(all.length);
   });
 });
