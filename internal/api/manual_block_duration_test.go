@@ -4,6 +4,7 @@
 package api
 
 import (
+	"context"
 	"path/filepath"
 	"testing"
 
@@ -24,7 +25,7 @@ func TestMitigateThreatRoundTripsAManualDuration(t *testing.T) {
 	if err := telemetry.InitPathStatsStore(filepath.Join(t.TempDir(), "mitigate.db"), 1); err != nil {
 		t.Fatalf("init telemetry store: %v", err)
 	}
-	t.Cleanup(func() { _ = telemetry.ClosePathStatsStore(t.Context()) })
+	t.Cleanup(func() { _ = telemetry.ClosePathStatsStore(context.Background()) })
 
 	const ip = "203.0.113.90"
 	svc := &ApiService{}
@@ -62,7 +63,7 @@ func TestMitigateThreatWithoutADurationIsOpenEnded(t *testing.T) {
 	if err := telemetry.InitPathStatsStore(filepath.Join(t.TempDir(), "mitigate.db"), 1); err != nil {
 		t.Fatalf("init telemetry store: %v", err)
 	}
-	t.Cleanup(func() { _ = telemetry.ClosePathStatsStore(t.Context()) })
+	t.Cleanup(func() { _ = telemetry.ClosePathStatsStore(context.Background()) })
 
 	const ip = "203.0.113.91"
 	svc := &ApiService{}

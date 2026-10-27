@@ -4,6 +4,7 @@
 package identity
 
 import (
+	"context"
 	"crypto/sha256"
 	"net/http"
 	"net/http/httptest"
@@ -26,7 +27,7 @@ func bindingRoute(t *testing.T) http.Handler {
 	if err := telemetry.InitPathStatsStore(filepath.Join(t.TempDir(), "binding.db"), 1); err != nil {
 		t.Fatalf("init telemetry store: %v", err)
 	}
-	t.Cleanup(func() { _ = telemetry.ClosePathStatsStore(t.Context()) })
+	t.Cleanup(func() { _ = telemetry.ClosePathStatsStore(context.Background()) })
 	var reached bool
 	return ReputationBlocker("binding-route")(bindingHandler(&reached))
 }

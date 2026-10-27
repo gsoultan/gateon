@@ -2864,6 +2864,12 @@ func (r ShunResult) Shunned() bool {
 // inside ipReleaseHold are exempt; an operator's own block (MarkIPMitigated)
 // holds until released and is never shortened by this.
 func ShunAutomatically(ip, reason string) (ShunResult, error) {
+	return ShunAutomaticallyContext(context.Background(), ip, reason)
+}
+
+// ShunAutomaticallyContext is ShunAutomatically under a caller's context, for
+// the detectors that run under one.
+func ShunAutomaticallyContext(ctx context.Context, ip, reason string) (ShunResult, error) {
 	s := getStore()
 	if s == nil {
 		return ShunResult{}, errNoTelemetryStore
@@ -2885,12 +2891,12 @@ func ShunAutomatically(ip, reason string) (ShunResult, error) {
 	case prev.held(now):
 		return ShunResult{Outcome: ShunExempt}, nil
 	}
-	return s.applyAutoShun(ip, reason, now, now.Add(prev.nextShunDuration(now)))
+	return s.applyAutoShun(ctx, ip, reason, now, now.Add(prev.nextShunDuration(now)))
 }
 
 // applyAutoShun writes ip's automatic shun until then and makes it take
 // effect: the cache the request path reads, and a leased kernel entry.
-func (s *pathStatsStore) applyAutoShun(ip, reason string, now, until time.Time) (ShunResult, error) {
+func (s *pathStatsStore) applyAutoShun(ctx context.Context, ip, reason string, now, until time.Time) (ShunResult, error) {
 	written, err := s.writeAutoShun(repid.AddressKey(ip), reason, now, until)
 	if err != nil {
 		logger.Default().LogError("failed to record an automatic shun", "ip", ip, "error", err)
@@ -2899,7 +2905,7 @@ func (s *pathStatsStore) applyAutoShun(ip, reason string, now, until time.Time) 
 	if !written {
 		// Another writer shunned or released it between the read and the
 		// write; the row says which.
-		if IsIPMitigated(ip) {
+		if IsIPMitigatedContext(ctx, ip) {
 			return ShunResult{Outcome: ShunAlreadyInForce}, nil
 		}
 		return ShunResult{Outcome: ShunExempt}, nil

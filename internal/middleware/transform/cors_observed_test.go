@@ -4,6 +4,7 @@
 package transform
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -24,7 +25,7 @@ func TestACORSViolationIsObserved(t *testing.T) {
 	if err := telemetry.InitPathStatsStore(filepath.Join(t.TempDir(), "cors.db"), 1); err != nil {
 		t.Fatalf("init telemetry store: %v", err)
 	}
-	t.Cleanup(func() { _ = telemetry.ClosePathStatsStore(t.Context()) })
+	t.Cleanup(func() { _ = telemetry.ClosePathStatsStore(context.Background()) })
 	threats := telemetry.ThreatBroadcaster.Subscribe()
 	t.Cleanup(func() { telemetry.ThreatBroadcaster.Unsubscribe(threats) })
 

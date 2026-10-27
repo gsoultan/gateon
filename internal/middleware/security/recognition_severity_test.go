@@ -4,6 +4,7 @@
 package security
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -35,7 +36,7 @@ func TestRecognitionMiddlewaresRecordDashboardSeverity(t *testing.T) {
 	if err := telemetry.InitPathStatsStore(filepath.Join(t.TempDir(), "rec.db"), 1); err != nil {
 		t.Fatalf("init telemetry store: %v", err)
 	}
-	defer telemetry.ClosePathStatsStore(t.Context())
+	defer telemetry.ClosePathStatsStore(context.Background())
 
 	recorded := make(chan telemetry.SecurityThreat, 8)
 	telemetry.SetAlertingHandler(func(th *telemetry.SecurityThreat) {
