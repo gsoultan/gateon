@@ -102,6 +102,20 @@ const (
 	bruteForceRateAtDefault = 0.75
 )
 
+// CredentialGuessMinRefusals is how many refused credential attempts an
+// address needs before anything may be held against it as guessing: the
+// analysis engine's harm rule (harmMinAuthFailures) and the brute-force check
+// here read this one number.
+//
+// The brute-force check used to act on six. Its rate bar already asks that most
+// of an address's traffic be refused logins, but six refusals in one interval
+// is a person who has forgotten a password, or an app retrying a stale one, and
+// it earned a shun -- and with it decisive attack evidence (AttackEvidenceWeight)
+// that fed every other control -- for what the analysis engine judges not yet
+// harmful. Below the bar the detection is recorded for the operator and held
+// against nobody, as a shared address's exploit-scan count is.
+const CredentialGuessMinRefusals = 10
+
 // bruteForceRateThreshold is the auth-failure rate above which an address is
 // reported, scaled inversely with sensitivity as the exploit, error-rate and
 // latency bars are: a higher setting lowers the bar, and 0 switches it off.
@@ -123,32 +137,46 @@ func (ad *AnomalyDetector) checkBruteForce(ctx context.Context, now time.Time) {
 		}
 		rate := s.AuthFail / s.Requests
 		if rate > threshold && s.AuthFail > 5 {
-			logger.L.LogWarn("ANOMALY DETECTED: Potential brute force detected from IP",
-				"ip", s.IP,
-				"auth_failure_rate", rate)
-
-			details := fmt.Sprintf("Potential brute force detected: auth failure rate %.2f", rate)
-			severity, action := severityMedium, ""
-			if rate > 0.8 {
-				// Shun for a critical threat.
-				severity = "critical"
-				action = ad.shun(ctx, s.IP, details)
-			} else {
-				action = ad.throttle(s.IP, 1*time.Second, "Anomaly detection: brute force") // Limit to 1 req/sec
-			}
-			RecordSecurityThreat(SecurityThreat{
-				ID:          fmt.Sprintf("anomaly-bruteforce-%s-%d", s.IP, now.Unix()),
-				Type:        "brute_force_attempt",
-				SourceIP:    s.IP,
-				Score:       rate * 100,
-				Details:     details,
-				Time:        now,
-				Category:    "brute_force",
-				Severity:    severity,
-				ActionTaken: action,
-			})
+			ad.recordBruteForce(ctx, s, rate, now)
 		}
 	}
+}
+
+// recordBruteForce records a brute force from s, failing credential attempts
+// at rate, and throttles or shuns it once its refusals reach
+// CredentialGuessMinRefusals.
+func (ad *AnomalyDetector) recordBruteForce(ctx context.Context, s IPResult, rate float64, now time.Time) {
+	logger.L.LogWarn("ANOMALY DETECTED: Potential brute force detected from IP",
+		"ip", s.IP,
+		"auth_failure_rate", rate)
+
+	details := fmt.Sprintf("Potential brute force detected: auth failure rate %.2f", rate)
+	guessing := s.AuthFail >= CredentialGuessMinRefusals
+	severity, action := severityMedium, ""
+	switch {
+	case !guessing:
+		details = fmt.Sprintf("%s, %.0f refused attempts: under the %d the harm rule asks for",
+			details, s.AuthFail, CredentialGuessMinRefusals)
+		action = ActionFlagged
+	case rate > 0.8:
+		// Shun for a critical threat.
+		severity = "critical"
+		action = ad.shun(ctx, s.IP, details)
+	default:
+		action = ad.throttle(s.IP, 1*time.Second, "Anomaly detection: brute force") // Limit to 1 req/sec
+	}
+	RecordSecurityThreat(SecurityThreat{
+		ID:          fmt.Sprintf("anomaly-bruteforce-%s-%d", s.IP, now.Unix()),
+		Type:        "brute_force_attempt",
+		SourceIP:    s.IP,
+		Score:       rate * 100,
+		Details:     details,
+		Time:        now,
+		Category:    "brute_force",
+		Severity:    severity,
+		ActionTaken: action,
+		Observed:    !guessing,
+	})
 }
 
 func (ad *AnomalyDetector) checkExploitScanning(ctx context.Context, now time.Time) {

@@ -138,13 +138,13 @@ func (s *IPStats) estimatedRequests(sampleRate uint32) float64 {
 // user's worth of it. The escalation to an IP shun makes the same trade
 // (ipShunMinClasses in the telemetry store, ADR 0029).
 const (
-	harmMinFailures     = 10  // failed requests before an address can look like a scan
-	harmMinFailedPaths  = 10  // distinct paths those failures were spread over
-	harmMinFailureShare = 0.5 // of all its requests
-	harmMinAuthFailures = 10  // POSTs answered 401/403 before it can look like credential guessing
-	harmMinAuthShare    = 0.3 // of all its requests
-	harmMinAttackWeight = 3.0 // three WAF blocks, or one decisive decision (attackEvidenceWeight)
-	harmMinAttackShare  = 0.2 // of all its requests
+	harmMinFailures     = 10                                   // failed requests before an address can look like a scan
+	harmMinFailedPaths  = 10                                   // distinct paths those failures were spread over
+	harmMinFailureShare = 0.5                                  // of all its requests
+	harmMinAuthFailures = telemetry.CredentialGuessMinRefusals // POSTs answered 401/403 before it can look like credential guessing
+	harmMinAuthShare    = 0.3                                  // of all its requests
+	harmMinAttackWeight = 3.0                                  // three WAF blocks, or one decisive decision (attackEvidenceWeight)
+	harmMinAttackShare  = 0.2                                  // of all its requests
 )
 
 // harmEvidence reports whether the address's traffic is harmful, as opposed to

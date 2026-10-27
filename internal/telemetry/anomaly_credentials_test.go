@@ -122,3 +122,46 @@ func TestAScannersWAFRefusalsAreNotBruteForce(t *testing.T) {
 			recorded, shunned)
 	}
 }
+
+// The check shunned on six refused logins in an interval, where the analysis
+// engine's harm rule asks for ten before it holds guessing against anyone: a
+// person who has forgotten a password, or an app retrying a stale one, was
+// shunned, and the shun's decisive attack evidence fed every other control.
+// Below the bar the attempt is still recorded, held against nobody.
+func TestBruteForceIsShunnedOnlyAtTheHarmRulesCount(t *testing.T) {
+	initAnomalyTestStore(t)
+	for _, tc := range []struct {
+		ip          string
+		refused     int
+		wantShunned bool
+	}{
+		{"198.51.100.80", CredentialGuessMinRefusals - 2, false},
+		{"198.51.100.81", CredentialGuessMinRefusals, true},
+	} {
+		agg := newIsolatedAggregator()
+		answered(agg, tc.ip, tc.refused, http.StatusUnauthorized, httptest.NewRequest(http.MethodPost, "/login", nil))
+
+		recorded, shunned := bruteForceOutcome(t, agg, tc.ip)
+		if !recorded || shunned != tc.wantShunned {
+			t.Errorf("%d refused logins: brute force recorded = %v, shunned = %v; want recorded, shunned = %v",
+				tc.refused, recorded, shunned, tc.wantShunned)
+		}
+		if !tc.wantShunned && bruteForceHeldAgainst(t, tc.ip) {
+			t.Errorf("%d refused logins, under the harm rule's %d, were held against the address",
+				tc.refused, CredentialGuessMinRefusals)
+		}
+	}
+}
+
+// bruteForceHeldAgainst reports whether a recorded brute force from ip counts
+// against it (HeldAgainstSource).
+func bruteForceHeldAgainst(t *testing.T, ip string) bool {
+	t.Helper()
+	FlushThreats()
+	for _, th := range GetSecurityThreatsLite(t.Context(), 1000, 0, nil) {
+		if th.Type == typeBruteForce && th.SourceIP == ip && th.HeldAgainstSource() {
+			return true
+		}
+	}
+	return false
+}
