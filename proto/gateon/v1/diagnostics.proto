@@ -85,6 +85,12 @@ message ReputationSyncPayload {
   double score = 2;
   int32 violation_count = 3;
   repeated string history = 4;
+  // offenders are the addresses whose threats lowered the score, at most two
+  // (ADR 0079), so a peer refuses the address that earned a score before its
+  // network, as the node that recorded it does. Empty when the sender could
+  // name none, and from a peer older than the field: either way the receiver
+  // reads the score as everyone's on the network, as every score was before.
+  repeated string offenders = 5;
 }
 
 message GraphEdgeSyncPayload {
