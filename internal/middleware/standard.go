@@ -45,6 +45,9 @@ func Fingerprinting() Middleware {
 func EntryPoint(epID, epLabel string, isMgmt bool) Middleware {
 	hTrust := RealIP(true)
 	hNoTrust := RealIP(false)
+	// Once, not per request: the name is the same for every request on the
+	// entrypoint, and concatenating it per request allocated per request.
+	routeName := entrypointRoutePrefix + epLabel
 
 	return func(next http.Handler) http.Handler {
 		nextTrust := hTrust(next)
@@ -55,7 +58,7 @@ func EntryPoint(epID, epLabel string, isMgmt bool) Middleware {
 			rs := RequestStatePool.Get().(*request.RequestState)
 			rs.Reset()
 			rs.EntryPointID = epID
-			rs.RouteName = "gateon-" + epLabel
+			rs.RouteName = routeName
 			rs.IsManagement = isMgmt
 			rs.TEntrypoint = time.Now().UnixNano()
 			// The listener's stream decision, for the matched route to set
@@ -64,11 +67,11 @@ func EntryPoint(epID, epLabel string, isMgmt bool) Middleware {
 			defer RequestStatePool.Put(rs)
 
 			// 2. Handle Request ID
-			id := r.Header.Get("X-Request-ID")
+			id := r.Header.Get(request.HeaderRequestID)
 			if id == "" {
 				id = request.GenerateID()
 			}
-			w.Header().Set("X-Request-ID", id)
+			w.Header().Set(request.HeaderRequestID, id)
 			rs.RequestID = id
 
 			// 3. Resolve Real IP, Country and Proto (Consolidated logic)
@@ -158,6 +161,13 @@ func populateFingerprints(r *http.Request, rs *request.RequestState) {
 
 	rs.JA4 = ja4
 	if rs.JA4H == "" {
+		if ja4 == "" {
+			// Plaintext, or no fingerprint from the handshake: JA4+ is "_"
+			// and JA4H, so both come out of one string instead of two.
+			rs.JA4Plus = telemetry.GenerateJA4HPlus(r)
+			rs.JA4H = rs.JA4Plus[1:]
+			return
+		}
 		rs.JA4H = telemetry.GetCachedJA4H(r)
 	}
 	if rs.JA4Plus == "" {
@@ -379,34 +389,49 @@ func EntrypointMetrics(epLabel string) Middleware {
 	return MetricsWithService(entrypointRoutePrefix+epLabel, "")
 }
 
-// inFlightGauge is the gauge a request is in while this instance serves it:
-// the entrypoint's own family for the entrypoint's instance, so a request a
-// route is serving is not in gateon_requests_in_flight twice.
-func inFlightGauge(route, entrypoint string, isEntrypoint bool) prometheus.Gauge {
-	if isEntrypoint {
-		return telemetry.EntrypointRequestsInFlight.WithLabelValues(entrypoint)
-	}
-	return telemetry.RequestsInFlight.WithLabelValues(route)
-}
-
-// routeSample is what recordRouteSeries needs from one finished request.
+// routeSample is what routeSeries.record needs from one finished request.
 type routeSample struct {
-	route, service, method, status string
+	method, status string
 	// bytesIn and bytesOut include a baseline of 256 and 200 bytes for the
 	// request line and headers, and the response headers.
 	bytesIn, bytesOut int64
 	duration, ttfb    time.Duration
 }
 
-// recordRouteSeries records a request in the per-route families: requests,
-// duration, bytes in and out, and time to first byte.
-func recordRouteSeries(s routeSample) {
-	telemetry.RequestsTotal.WithLabelValues(s.route, s.service, s.method, s.status).Inc()
-	telemetry.RequestDurationSeconds.WithLabelValues(s.route, s.service, s.method).Observe(s.duration.Seconds())
-	telemetry.RequestBytesTotal.WithLabelValues(s.route, "in").Add(float64(s.bytesIn))
-	telemetry.RequestBytesTotal.WithLabelValues(s.route, "out").Add(float64(s.bytesOut))
+// routeSeries is the per-route metric families a Metrics middleware records
+// into, with the children whose labels are the route's alone -- in flight,
+// bytes in and out, time to first byte -- resolved once when the route is
+// built rather than hashed out of their vectors on every request. The
+// children whose labels vary with the request, method and status, are
+// resolved per request. Nothing resets or deletes these vectors, so a
+// resolved child stays the one the vector reports.
+type routeSeries struct {
+	route, service    string
+	inFlight          prometheus.Gauge
+	bytesIn, bytesOut prometheus.Counter
+	ttfb              prometheus.Observer
+}
+
+func newRouteSeries(route, service string) *routeSeries {
+	return &routeSeries{
+		route:    route,
+		service:  service,
+		inFlight: telemetry.RequestsInFlight.WithLabelValues(route),
+		bytesIn:  telemetry.RequestBytesTotal.WithLabelValues(route, "in"),
+		bytesOut: telemetry.RequestBytesTotal.WithLabelValues(route, "out"),
+		ttfb:     telemetry.TTFBSeconds.WithLabelValues(route),
+	}
+}
+
+// record records a request in the per-route families: requests, duration,
+// bytes in and out, and time to first byte.
+func (rs *routeSeries) record(s routeSample) {
+	telemetry.RequestsTotal.WithLabelValues(rs.route, rs.service, s.method, s.status).Inc()
+	telemetry.RequestDurationSeconds.WithLabelValues(rs.route, rs.service, s.method).Observe(s.duration.Seconds())
+	rs.bytesIn.Add(float64(s.bytesIn))
+	rs.bytesOut.Add(float64(s.bytesOut))
 	if s.ttfb > 0 {
-		telemetry.TTFBSeconds.WithLabelValues(s.route).Observe(s.ttfb.Seconds())
+		rs.ttfb.Observe(s.ttfb.Seconds())
 	}
 }
 
@@ -417,6 +442,19 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 	// The entrypoint's instance (EntrypointMetrics) records a request in the
 	// per-route families only when no route did (ADR 0061).
 	entrypoint, isEntrypoint := strings.CutPrefix(routeID, entrypointRoutePrefix)
+	// The series whose labels are known here, resolved here. A middleware with
+	// no route of its own labels by the request's route name and resolves per
+	// request.
+	var fixed *routeSeries
+	var epInFlight prometheus.Gauge
+	var epDuration prometheus.Observer
+	if routeID != "" {
+		fixed = newRouteSeries(routeID, serviceID)
+	}
+	if isEntrypoint {
+		epInFlight = telemetry.EntrypointRequestsInFlight.WithLabelValues(entrypoint)
+		epDuration = telemetry.EntrypointRequestDurationSeconds.WithLabelValues(entrypoint)
+	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if ShouldSkipMetrics(r) {
@@ -426,14 +464,19 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 			// Use explicit routeID if provided, otherwise fallback to context.
 			activeRouteID := routeID
 			rs := GetRequestState(r)
+			series := fixed
 			if activeRouteID == "" {
 				activeRouteID = GetRouteName(r)
+				series = newRouteSeries(activeRouteID, serviceID)
 			}
 
 			start := time.Now()
 
 			// Track in-flight requests
-			inFlight := inFlightGauge(activeRouteID, entrypoint, isEntrypoint)
+			inFlight := series.inFlight
+			if isEntrypoint {
+				inFlight = epInFlight
+			}
 			inFlight.Inc()
 			defer inFlight.Dec()
 
@@ -647,13 +690,13 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 		skipTrace:
 			if isEntrypoint {
 				telemetry.EntrypointRequestsTotal.WithLabelValues(entrypoint, statusStr).Inc()
-				telemetry.EntrypointRequestDurationSeconds.WithLabelValues(entrypoint).Observe(duration.Seconds())
+				epDuration.Observe(duration.Seconds())
 			}
 			// The per-route families: a route's metrics always record; the
 			// entrypoint's only a request no route recorded.
 			if !isEntrypoint || once {
-				recordRouteSeries(routeSample{
-					route: activeRouteID, service: serviceID, method: methodLabel, status: statusStr,
+				series.record(routeSample{
+					method: methodLabel, status: statusStr,
 					bytesIn: reqInSize + 256, bytesOut: respOutSize + 200, duration: duration, ttfb: sw.TTFB(),
 				})
 			}
@@ -826,11 +869,11 @@ func HostFilter(host string) Middleware {
 func RequestID() Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			id := r.Header.Get("X-Request-ID")
+			id := r.Header.Get(request.HeaderRequestID)
 			if id == "" {
 				id = request.GenerateID()
 			}
-			w.Header().Set("X-Request-ID", id)
+			w.Header().Set(request.HeaderRequestID, id)
 
 			if rs := GetRequestState(r); rs != nil {
 				rs.RequestID = id

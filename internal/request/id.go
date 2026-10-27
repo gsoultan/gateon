@@ -27,8 +27,14 @@ func WithID(ctx context.Context, id string) context.Context {
 	return context.WithValue(ctx, idKey, id)
 }
 
-// GenerateID creates a new unique request ID.
-// It is optimized to use a stack-allocated buffer.
+// HeaderRequestID is the request id header in its canonical spelling. The
+// header functions canonicalize whatever spelling they are given, so "X-Request-ID"
+// reaches the wire as this, and giving them this spelling to begin with spares
+// an allocation on every request.
+const HeaderRequestID = "X-Request-Id"
+
+// GenerateID creates a new unique request ID: "req-" and sixteen hex digits,
+// built in stack buffers so the string is the only allocation.
 func GenerateID() string {
 	var b [8]byte
 	_, _ = rand.Read(b[:])

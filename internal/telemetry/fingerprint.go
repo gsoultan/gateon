@@ -10,7 +10,6 @@ import (
 	"encoding/hex"
 	"io"
 	"net/http"
-	"strings"
 	"sync"
 
 	"github.com/gsoultan/gateon/internal/request"
@@ -25,11 +24,6 @@ const (
 )
 
 var (
-	builderPool = sync.Pool{
-		New: func() any {
-			return &strings.Builder{}
-		},
-	}
 	fingerprintPool = sync.Pool{
 		New: func() any {
 			return &ClientFingerprint{
@@ -265,6 +259,26 @@ func lowerASCII2(s string) (byte, byte) {
 // a client varies per request (ADR 0024). It cannot import this package, so
 // TestReputationIdentityFollowsTheJA4HLayout is what fails if the two drift.
 func GenerateJA4H(r *http.Request) string {
+	var out [ja4hLen]byte
+	appendJA4H(out[:], r)
+	return string(out[:])
+}
+
+// ja4hLen is the length of a JA4H: 10 prefix bytes, '_', then 12 hex bytes.
+const ja4hLen = 23
+
+// GenerateJA4HPlus is the JA4+ of a request with no JA4 -- "_" and its JA4H
+// -- in one string, so the entrypoint, which keeps both, allocates once
+// rather than once for each. The JA4H is the result from its second byte.
+func GenerateJA4HPlus(r *http.Request) string {
+	var out [ja4hLen + 1]byte
+	out[0] = '_'
+	appendJA4H(out[1:], r)
+	return string(out[:])
+}
+
+// appendJA4H writes r's JA4H into out, which holds ja4hLen bytes.
+func appendJA4H(out []byte, r *http.Request) {
 	m0, m1 := lowerASCII2(r.Method)
 
 	var v0, v1 byte = '1', '1'
@@ -297,8 +311,6 @@ func GenerateJA4H(r *http.Request) string {
 
 	mask, count := ja4hHeaderMask(r.Header)
 
-	// 10 prefix bytes, '_', then 12 hex bytes.
-	var out [23]byte
 	out[0], out[1] = m0, m1
 	out[2], out[3] = v0, v1
 	out[4], out[5] = cookieChar, refererChar
@@ -313,6 +325,4 @@ func GenerateJA4H(r *http.Request) string {
 	out[8], out[9] = a0, a1
 	out[10] = '_'
 	copy(out[11:], ja4hHeaderHash[mask])
-
-	return string(out[:])
 }

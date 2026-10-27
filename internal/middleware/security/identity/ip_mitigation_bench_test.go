@@ -4,6 +4,7 @@
 package identity
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"net/http"
@@ -26,7 +27,7 @@ func BenchmarkIPMitigation(b *testing.B) {
 	if err := telemetry.InitPathStatsStore(filepath.Join(b.TempDir(), "bench.db"), 1); err != nil {
 		b.Fatal(err)
 	}
-	b.Cleanup(func() { _ = telemetry.ClosePathStatsStore(b.Context()) })
+	b.Cleanup(func() { _ = telemetry.ClosePathStatsStore(context.Background()) })
 	b.Cleanup(func() { reputation.Publish(nil) })
 
 	loaded := reputation.NewIPReputationStore(&gateonv1.IPReputationConfig{Enabled: true})

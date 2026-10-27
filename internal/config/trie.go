@@ -118,21 +118,24 @@ func (t *PathTrie) Lookup(path string) []*gateonv1.Route {
 		return curr.allExact
 	}
 
-	parts := strings.Split(path, "/")
-	lastNode := curr
-	for _, part := range parts {
-		if part == "" {
-			continue
+	// Segment by segment off the path itself: splitting it first allocated
+	// a slice of segments on every request, to read each one once.
+	for rest := path; ; {
+		part, after, more := strings.Cut(rest, "/")
+		if part != "" {
+			next := curr.children[part]
+			if next == nil {
+				// We stop here; only prefix matches from this node and ancestors apply.
+				return curr.allPrefix
+			}
+			curr = next
 		}
-		next := curr.children[part]
-		if next == nil {
-			// We stop here; only prefix matches from this node and ancestors apply.
-			return curr.allPrefix
+		if !more {
+			break
 		}
-		curr = next
-		lastNode = curr
+		rest = after
 	}
 
 	// We matched the path exactly to a node.
-	return lastNode.allExact
+	return curr.allExact
 }

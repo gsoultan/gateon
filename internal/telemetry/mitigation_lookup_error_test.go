@@ -38,6 +38,9 @@ func breakTable(t *testing.T, table string) (restore func()) {
 // dataplane F3). An error is now never cached: the next lookup after recovery
 // reads the block (ADR 0043).
 func TestAnAddressLookupThatFailsIsNotCachedAsNotShunned(t *testing.T) {
+	// The read after recovery must not depend on the runner's speed: see
+	// TestANotShunnedAnswerIsReadAgainOnceItAgesOut.
+	t.Setenv(envBlockLookupTimeout, "1m")
 	freshStore(t)
 	const ip = "198.51.100.77"
 	if err := MarkIPMitigated(ip, "operator block"); err != nil {
@@ -72,6 +75,12 @@ func TestAKnownShunStaysEnforcedDuringAnOutage(t *testing.T) {
 // written by another node -- or straight to the database -- is enforced here
 // once the answer ages out.
 func TestANotShunnedAnswerIsReadAgainOnceItAgesOut(t *testing.T) {
+	// An answer aged out of the stale window makes the request wait for the
+	// database under the tier's deadline (100 ms). A lookup that times out
+	// is never cached and answers "not shunned" (ADR 0054), which on a CI
+	// runner slow enough is what this test saw, as its stale-window sibling
+	// did before it got the same deadline (PR #32, CI).
+	t.Setenv(envBlockLookupTimeout, "1m")
 	freshStore(t)
 	const ip = "198.51.100.79"
 	if IsIPMitigated(ip) {

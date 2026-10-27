@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gsoultan/gateon/internal/telemetry"
 	"go.opentelemetry.io/otel"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
@@ -23,7 +24,11 @@ func TestSpanURLCarriesNoQueryCredentials(t *testing.T) {
 	rec := tracetest.NewSpanRecorder()
 	prev := otel.GetTracerProvider()
 	otel.SetTracerProvider(sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(rec)))
-	t.Cleanup(func() { otel.SetTracerProvider(prev) })
+	telemetry.SetTracingEnabled(true)
+	t.Cleanup(func() {
+		telemetry.SetTracingEnabled(false)
+		otel.SetTracerProvider(prev)
+	})
 
 	const secret = "tok-5f2c9d1e"
 	h := Telemetry("otel-url-test")(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {}))

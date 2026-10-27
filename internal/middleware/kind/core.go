@@ -361,9 +361,14 @@ func RealIP(trustCloudflare bool) Middleware {
 			}
 
 			// Maintain the original port if present in RemoteAddr, as some components
-			// (like PROXY protocol generation) expect a host:port format.
-			if _, port, err := net.SplitHostPort(r.RemoteAddr); err == nil {
-				r.RemoteAddr = net.JoinHostPort(clientIP, port)
+			// (like PROXY protocol generation) expect a host:port format. Left as
+			// it is when the client is the peer -- every request not behind a
+			// trusted proxy -- since rejoining it would only allocate the same
+			// address again.
+			if host, port, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+				if host != clientIP {
+					r.RemoteAddr = net.JoinHostPort(clientIP, port)
+				}
 			} else {
 				// Fallback if RemoteAddr was just an IP or malformed
 				r.RemoteAddr = clientIP

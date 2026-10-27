@@ -5,6 +5,7 @@ package telemetry
 
 import (
 	"cmp"
+	"log/slog"
 	"math"
 	"net"
 	"net/http"
@@ -173,15 +174,22 @@ func init() {
 	recommendationCache, _ = lru.NewARC(10000) // Buffer for request-specific recommendations
 }
 
+// recommendationsRegistered counts recommendations ever registered. Until the
+// first, GetRecommendation answers without the cache: a lookup boxes its key
+// and takes the cache's lock, twice on every request -- once for the span,
+// once for the trace -- and most gateways never register one.
+var recommendationsRegistered atomic.Uint64
+
 func RegisterRecommendation(requestID, recommendation string) {
 	if requestID == "" || recommendation == "" || recommendationCache == nil {
 		return
 	}
+	recommendationsRegistered.Add(1)
 	recommendationCache.Add(requestID, recommendation)
 }
 
 func GetRecommendation(requestID string) string {
-	if requestID == "" || recommendationCache == nil {
+	if requestID == "" || recommendationCache == nil || recommendationsRegistered.Load() == 0 {
 		return ""
 	}
 	if val, ok := recommendationCache.Get(requestID); ok {
@@ -296,10 +304,16 @@ func ReputationScoreFor(fingerprint, clientIP string) float64 {
 		if clientIP != "" && !r.appliesTo(clientIP) {
 			return neutralReputationScore
 		}
-		logger.L.LogDebug("Reputation cache HIT", "fingerprint", fingerprint, "score", r.Score)
+		// Behind the level check: the arguments are boxed before the call,
+		// so an unconditional debug line allocated on every request.
+		if logger.L.IsEnabled(slog.LevelDebug) {
+			logger.L.LogDebug("Reputation cache HIT", "fingerprint", fingerprint, "score", r.Score)
+		}
 		return r.Score
 	}
-	logger.L.LogDebug("Reputation cache MISS", "fingerprint", fingerprint)
+	if logger.L.IsEnabled(slog.LevelDebug) {
+		logger.L.LogDebug("Reputation cache MISS", "fingerprint", fingerprint)
+	}
 	return 100.0
 }
 

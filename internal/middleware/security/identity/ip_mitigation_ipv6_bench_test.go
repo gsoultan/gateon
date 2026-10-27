@@ -4,6 +4,7 @@
 package identity
 
 import (
+	"context"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -20,7 +21,7 @@ func BenchmarkIPMitigationIPv6(b *testing.B) {
 	if err := telemetry.InitPathStatsStore(filepath.Join(b.TempDir(), "bench.db"), 1); err != nil {
 		b.Fatal(err)
 	}
-	b.Cleanup(func() { _ = telemetry.ClosePathStatsStore(b.Context()) })
+	b.Cleanup(func() { _ = telemetry.ClosePathStatsStore(context.Background()) })
 	h := IPMitigation()(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }))
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/orders?page=2", nil)
 	req.RemoteAddr = net.JoinHostPort("2001:db8:1:2:3:4:5:6", "51234")

@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sync/atomic"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
@@ -16,12 +17,40 @@ import (
 	semconv "go.opentelemetry.io/otel/semconv/v1.24.0"
 )
 
-// InitTracer initializes an OTLP exporter, and configures the corresponding trace provider.
+// tracingEnabled is whether spans go anywhere: set by InitTracer when an OTLP
+// endpoint is configured, read by the request path to decide whether to start
+// one at all.
+var tracingEnabled atomic.Bool
+
+// TracingEnabled reports whether a span started for a request reaches a
+// collector. Without an OTLP endpoint there is no provider, and the request
+// path starts no span: with one installed and nothing reading it, every
+// request paid a recording span -- 3.6µs, 2.4 KB and 12 allocations, more than
+// the rest of the infrastructure chain -- to produce an id the entrypoint had
+// already generated.
+func TracingEnabled() bool {
+	return tracingEnabled.Load()
+}
+
+// SetTracingEnabled is for a test that installs a tracer provider of its own
+// and wants the request path to start spans for it; InitTracer sets it for
+// the gateway.
+func SetTracingEnabled(enabled bool) {
+	tracingEnabled.Store(enabled)
+}
+
+// InitTracer configures an OTLP exporter and its trace provider when
+// OTEL_EXPORTER_OTLP_ENDPOINT names a collector. Without one it installs
+// nothing and the global provider stays the no-op: request ids come from the
+// entrypoint (request.GenerateID), not from a span.
 func InitTracer(serviceName string) (func(context.Context) error, error) {
 	ctx := context.Background()
 
 	endpoint := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
-	var tracerProvider *sdktrace.TracerProvider
+	if endpoint == "" {
+		tracingEnabled.Store(false)
+		return func(context.Context) error { return nil }, nil
+	}
 
 	res, err := resource.New(ctx,
 		resource.WithAttributes(
@@ -32,29 +61,21 @@ func InitTracer(serviceName string) (func(context.Context) error, error) {
 		return nil, fmt.Errorf("failed to create resource: %w", err)
 	}
 
-	if endpoint == "" {
-		// If no endpoint is provided, we still create a provider to generate unique IDs
-		// for internal telemetry and diagnostics, even if we don't export to OTLP.
-		tracerProvider = sdktrace.NewTracerProvider(
-			sdktrace.WithResource(res),
-			sdktrace.WithSampler(sdktrace.AlwaysSample()),
-		)
-	} else {
-		traceExporter, err := otlptracehttp.New(ctx, otlptracehttp.WithEndpoint(endpoint), otlptracehttp.WithInsecure())
-		if err != nil {
-			return nil, fmt.Errorf("failed to create trace exporter: %w", err)
-		}
-
-		bsp := sdktrace.NewBatchSpanProcessor(traceExporter)
-		tracerProvider = sdktrace.NewTracerProvider(
-			sdktrace.WithSampler(sdktrace.AlwaysSample()),
-			sdktrace.WithResource(res),
-			sdktrace.WithSpanProcessor(bsp),
-		)
+	traceExporter, err := otlptracehttp.New(ctx, otlptracehttp.WithEndpoint(endpoint), otlptracehttp.WithInsecure())
+	if err != nil {
+		return nil, fmt.Errorf("failed to create trace exporter: %w", err)
 	}
+
+	bsp := sdktrace.NewBatchSpanProcessor(traceExporter)
+	tracerProvider := sdktrace.NewTracerProvider(
+		sdktrace.WithSampler(sdktrace.AlwaysSample()),
+		sdktrace.WithResource(res),
+		sdktrace.WithSpanProcessor(bsp),
+	)
 
 	otel.SetTracerProvider(tracerProvider)
 	otel.SetTextMapPropagator(propagation.TraceContext{})
+	tracingEnabled.Store(true)
 
 	return tracerProvider.Shutdown, nil
 }
