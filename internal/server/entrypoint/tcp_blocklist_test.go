@@ -157,6 +157,47 @@ func TestAShunnedAddressIsRefusedByEveryTCPEntrypoint(t *testing.T) {
 	}
 }
 
+// closeCounts is a connection that, the moment it is closed, counts the
+// ip_mitigation threats its client has on record.
+type closeCounts struct {
+	peerConn
+	count   func() int
+	atClose int
+	closed  bool
+}
+
+func (c *closeCounts) Close() error {
+	if !c.closed {
+		c.closed, c.atClose = true, c.count()
+	}
+	return nil
+}
+
+// TestATCPRefusalIsRecordedBeforeTheConnectionCloses: the close is what the
+// refused client observes, so by then the refusal must be on record. It was
+// recorded after: a client, or a test, that saw the close and read the store
+// at once could find nothing there, which is how the tcp-only case of
+// TestAShunnedAddressIsRefusedByEveryTCPEntrypoint flaked in CI -- that path
+// serves the next connection fast enough to flush before the record was sent.
+func TestATCPRefusalIsRecordedBeforeTheConnectionCloses(t *testing.T) {
+	const shunned = "198.51.100.63"
+	withTelemetryStore(t)
+	s := &tcpServer{ep: &gateonv1.EntryPoint{Id: "blocklist-order"}, blocked: func(string) bool { return true }}
+	c := &closeCounts{
+		peerConn: peerConn{peer: &net.TCPAddr{IP: net.ParseIP(shunned), Port: 40000}},
+		count:    func() int { return refusalsRecordedFor(t, shunned) },
+	}
+	if !s.refuseBlocked(c) {
+		t.Fatalf("a connection from shunned %s was not refused", shunned)
+	}
+	if !c.closed {
+		t.Fatal("the refused connection was not closed")
+	}
+	if c.atClose != 1 {
+		t.Errorf("%d ip_mitigation threats were on record for %s when its connection closed, want 1", c.atClose, shunned)
+	}
+}
+
 // echoed writes line on c and fails the test unless it comes back.
 func echoed(t *testing.T, c net.Conn, line string) net.Conn {
 	t.Helper()
