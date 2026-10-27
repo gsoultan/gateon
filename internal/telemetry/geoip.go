@@ -61,6 +61,11 @@ var (
 
 const publicIPCacheTTL = 1 * time.Hour
 
+// maxPublicIPReplyBytes bounds what is read from a public-IP provider. An
+// IPv6 address with a zone is under 64 bytes; a provider that says more is
+// not answering the question.
+const maxPublicIPReplyBytes = 128
+
 // GetPublicIP returns the server's public IP address by querying multiple providers.
 func GetPublicIP(ctx context.Context) string {
 	publicIPCacheMu.RLock()
@@ -100,7 +105,10 @@ func GetPublicIP(ctx context.Context) string {
 			continue
 		}
 
-		body, err := io.ReadAll(resp.Body)
+		// The answer is one address: 45 bytes at most. Anything past that
+		// bound is not an address, and reading it all in would make the
+		// gateway's memory a function of what a public endpoint chose to send.
+		body, err := io.ReadAll(io.LimitReader(resp.Body, maxPublicIPReplyBytes))
 		_ = resp.Body.Close()
 		if err != nil {
 			continue
@@ -477,6 +485,33 @@ func DownloadGeoIP(licenseKey string) error {
 // point the downloader at a local address.
 var geoIPDownloadURL = "https://download.maxmind.com/app/geoip_download"
 
+// The bounds on one edition's download. It went through http.Get, which has no
+// timeout of any kind: a MaxMind endpoint, or whatever a hijacked DNS answer
+// put in its place, that accepted the connection and never answered held the
+// update worker -- and the /v1/geoip/update request that asked for it -- for
+// the life of the process. Variables so a test can shorten them.
+var (
+	// geoIPResponseHeaderTimeout is how long the server has to start
+	// answering once the request is sent.
+	geoIPResponseHeaderTimeout = 30 * time.Second
+	// geoIPDownloadTimeout bounds the whole download. The largest edition is
+	// tens of megabytes; this is generous for the slowest link worth serving.
+	geoIPDownloadTimeout = 10 * time.Minute
+)
+
+// geoIPDownloadClient is an HTTP client for one download, bounded by the two
+// timeouts above. Built per download rather than kept: downloads are rare,
+// and a transport kept between them would hold its idle connections.
+func geoIPDownloadClient() *http.Client {
+	transport, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		return &http.Client{Timeout: geoIPDownloadTimeout}
+	}
+	transport = transport.Clone()
+	transport.ResponseHeaderTimeout = geoIPResponseHeaderTimeout
+	return &http.Client{Timeout: geoIPDownloadTimeout, Transport: transport}
+}
+
 // downloadGeoIPEdition downloads a single MaxMind edition, extracts the embedded
 // .mmdb file to its destination and reloads the associated reader.
 func downloadGeoIPEdition(licenseKey string, edition geoIPEdition) error {
@@ -493,7 +528,9 @@ func downloadGeoIPEdition(licenseKey string, edition geoIPEdition) error {
 	// endpoint. The licence key -- from global config, or typed into the
 	// settings card by an operator with write access -- is query-encoded, so it
 	// cannot change them.
-	resp, err := http.Get(downloadURL)
+	client := geoIPDownloadClient()
+	defer client.CloseIdleConnections()
+	resp, err := client.Get(downloadURL)
 	if err != nil {
 		// A transport failure is a *url.Error whose message embeds the full
 		// URL, and the URL carries the licence key. The worker logs this error
