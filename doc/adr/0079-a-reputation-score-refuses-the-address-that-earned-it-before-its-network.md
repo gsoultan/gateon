@@ -79,5 +79,16 @@ the same way this does, by counting offenders, not bystanders.
   sync payload carries no addresses. Adding them is a proto change
   (`ReputationSyncPayload`) for a later change; until then a cluster is as
   wide as before, and no wider.
+
+  > **Amended 2026-10-27.** `ReputationSyncPayload` now carries `offenders`
+  > (field 5), so a peer narrows a score as the node that recorded it does. A
+  > payload that names none -- one lowered with no address, or one from a node
+  > that predates the field -- is still read as everyone's, as is one naming
+  > anything that is not an address or more addresses than a score keeps: a
+  > bad entry widens a score, never narrows it. A peer merges the offenders it
+  > is sent whether or not it keeps the sender's score, so two gateways each
+  > catching a different address of one class on one network refuse the
+  > network, as one gateway seeing both does. A release clears the offenders,
+  > so one named before it does not count towards the second.
 - `TestReputationScopeSeparatesNetworksNotUsers` now documents both halves of
   the rule.

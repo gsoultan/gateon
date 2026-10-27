@@ -9,6 +9,7 @@ import (
 	"math"
 	"net"
 	"net/http"
+	"net/netip"
 	"os"
 	"slices"
 	"sync"
@@ -20,6 +21,7 @@ import (
 	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/security/mitigation"
 	"github.com/gsoultan/gateon/internal/telemetry/repid"
+	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 	lru "github.com/hashicorp/golang-lru"
 )
 
@@ -416,8 +418,45 @@ func decreaseReputation(fingerprint, sourceIP string, penalty float64, reason st
 	// than shun. Every automatic shun now goes through ShunAutomatically, and
 	// the detectors that shun call it themselves (ADR 0031).
 
-	// Broadcast the update to the cluster via Gossip.
-	BroadcastReputation(fingerprint, r.Score, r.ViolationCount, r.History)
+	// Broadcast the update to the cluster via Gossip, with the addresses that
+	// earned it, so a peer narrows it as this node does (ADR 0079).
+	broadcastReputation(&gateonv1.ReputationSyncPayload{
+		Fingerprint:    fingerprint,
+		Score:          r.Score,
+		ViolationCount: int32(r.ViolationCount),
+		History:        r.History,
+		Offenders:      r.namedOffenders(),
+	})
+}
+
+// namedOffenders is what the score tells a peer about who earned it: its
+// offenders, or none when an address it was lowered by went unnamed, which a
+// peer reads as everyone's -- as it reads a payload from a node that predates
+// the field.
+func (r *Reputation) namedOffenders() []string {
+	if r.OffendersUnknown {
+		return nil
+	}
+	return r.Offenders
+}
+
+// mergeRemoteOffenders adds the addresses a peer named for a score it lowered
+// to those this node holds, so the score refuses the network once the
+// cluster as a whole has seen two offenders, as one node does on seeing two.
+// It merges whether or not the peer's score is the one kept: two nodes each
+// lowering the score for a different address would otherwise each keep their
+// own, equal, single-address score, and a class attacking from two addresses
+// on one network would never be the network's record because each address
+// reached a different gateway. A peer that names none -- it could not, or it
+// predates the field -- names everyone.
+func (r *Reputation) mergeRemoteOffenders(offenders []string) {
+	if len(offenders) == 0 {
+		r.OffendersUnknown = true
+		return
+	}
+	for _, ip := range offenders {
+		r.noteOffender(ip)
+	}
 }
 
 // ApplyRemoteReputation updates a score from a gossip message without re-broadcasting.
@@ -477,11 +516,42 @@ func sanitiseRemoteReputation(score float64, violations int, history []string) (
 	return score, violations, history
 }
 
+// sanitiseRemoteOffenders keeps a peer's offenders only if every one is an
+// address and there are no more of them than a score keeps. Anything else is
+// read as naming nobody, which refuses the network: a corrupted entry must
+// widen a score, never narrow it onto an address no client has.
+func sanitiseRemoteOffenders(offenders []string) []string {
+	if len(offenders) > maxReputationOffenders {
+		return nil
+	}
+	for _, ip := range offenders {
+		if _, err := netip.ParseAddr(ip); err != nil {
+			return nil
+		}
+	}
+	return offenders
+}
+
+// ApplyRemoteReputation applies a peer's score that names no offending
+// address, which is read as everyone's on the network.
 func ApplyRemoteReputation(fingerprint string, score float64, violations int, history []string) {
+	applyRemoteReputation(&gateonv1.ReputationSyncPayload{
+		Fingerprint:    fingerprint,
+		Score:          score,
+		ViolationCount: int32(violations),
+		History:        history,
+	})
+}
+
+// applyRemoteReputation updates a score from a gossip payload without
+// re-broadcasting it.
+func applyRemoteReputation(p *gateonv1.ReputationSyncPayload) {
+	fingerprint := p.GetFingerprint()
 	if fingerprint == "" {
 		return
 	}
-	score, violations, history = sanitiseRemoteReputation(score, violations, history)
+	score, violations, history := sanitiseRemoteReputation(p.GetScore(), int(p.GetViolationCount()), p.GetHistory())
+	offenders := sanitiseRemoteOffenders(p.GetOffenders())
 
 	shard := getRepShard(fingerprint)
 	shard.mu.Lock()
@@ -505,24 +575,27 @@ func ApplyRemoteReputation(fingerprint string, score float64, violations int, hi
 			r.ViolationCount = violations
 			r.History = history
 			r.LastEvent = time.Now()
-			// A peer's score names no address (the sync payload carries
-			// none), so it is read as everyone's on the network, as every
-			// score was before ADR 0079.
-			if score < neutralReputationScore {
-				r.LastViolation = r.LastEvent
-				r.OffendersUnknown = true
-			}
+		}
+		if score >= neutralReputationScore {
+			// A release is a clean slate: offenders named before it must
+			// not count towards the second that refuses the network.
+			r.Offenders = r.Offenders[:0]
+			r.OffendersUnknown = false
+		} else {
+			// A peer only sends a lowered score when a threat lowered it.
+			r.LastViolation = time.Now()
+			r.mergeRemoteOffenders(offenders)
 		}
 	} else {
 		r = &Reputation{
-			Score:            score,
-			ViolationCount:   violations,
-			RecoveryRate:     1.0 / (1.0 + float64(violations)/5.0),
-			History:          history,
-			LastEvent:        time.Now(),
-			LastViolation:    time.Now(),
-			OffendersUnknown: true,
+			Score:          score,
+			ViolationCount: violations,
+			RecoveryRate:   1.0 / (1.0 + float64(violations)/5.0),
+			History:        history,
+			LastEvent:      time.Now(),
+			LastViolation:  time.Now(),
 		}
+		r.mergeRemoteOffenders(offenders)
 	}
 
 	shard.cache.Add(fingerprint, r)
