@@ -128,7 +128,7 @@ func Pow(difficulty int, threshold float64, secret string, routeID string) kind.
 			// served because someone else's score is bad is a false positive that
 			// costs every user of that browser a round trip.
 			if pc.exempt(r) ||
-				!threatExceeds(telemetry.GetReputationScore(telemetry.GetReputationID(r)), threshold) {
+				!threatExceeds(telemetry.ReputationScoreOf(r), threshold) {
 				next.ServeHTTP(w, r)
 				return
 			}

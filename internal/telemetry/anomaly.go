@@ -132,7 +132,7 @@ func (ad *AnomalyDetector) checkBruteForce(ctx context.Context, now time.Time) {
 			if rate > 0.8 {
 				// Shun for a critical threat.
 				severity = "critical"
-				action = ad.shun(s.IP, details)
+				action = ad.shun(ctx, s.IP, details)
 			} else {
 				action = ad.throttle(s.IP, 1*time.Second, "Anomaly detection: brute force") // Limit to 1 req/sec
 			}
@@ -165,32 +165,49 @@ func (ad *AnomalyDetector) checkExploitScanning(ctx context.Context, now time.Ti
 		thresholdRate := 0.1 * (1.0 / ad.config.Sensitivity)
 		absoluteThreshold := 5.0 * (1.0 / ad.config.Sensitivity)
 
-		if (blockRate > thresholdRate && s.WafBlocks > absoluteThreshold) || s.WafBlocks > absoluteThreshold*10 {
-			logger.L.LogWarn("ANOMALY DETECTED: High rate of WAF blocks detected from IP",
-				"ip", s.IP,
-				"waf_blocks", s.WafBlocks,
-				"block_rate", fmt.Sprintf("%.2f%%", blockRate*100))
-
-			details := fmt.Sprintf("High rate of WAF blocks: %.0f blocks", s.WafBlocks)
-			severity, score, action := severityHigh, math.Min(100, s.WafBlocks*5), ""
-			if blockRate > 0.5 && s.WafBlocks > absoluteThreshold*5 {
-				severity, score = "critical", math.Min(100, s.WafBlocks*10)
-				action = ad.shun(s.IP, details)
-			} else {
-				action = ad.throttle(s.IP, 500*time.Millisecond, "Anomaly detection: exploit scanning") // Limit to 2 req/sec
-			}
-			RecordSecurityThreat(SecurityThreat{
-				ID:          fmt.Sprintf("anomaly-exploit-%s-%d", s.IP, now.Unix()),
-				Type:        "exploit_scan",
-				SourceIP:    s.IP,
-				Score:       score,
-				Details:     details,
-				Time:        now,
-				Category:    "exploit_scanning",
-				Severity:    severity,
-				ActionTaken: action,
-			})
+		scanning := blockRate > thresholdRate && s.WafBlocks > absoluteThreshold
+		if !scanning && s.WafBlocks <= absoluteThreshold*10 {
+			continue
 		}
+		logger.L.LogWarn("ANOMALY DETECTED: High rate of WAF blocks detected from IP",
+			"ip", s.IP,
+			"waf_blocks", s.WafBlocks,
+			"block_rate", fmt.Sprintf("%.2f%%", blockRate*100))
+
+		details := fmt.Sprintf("High rate of WAF blocks: %.0f blocks", s.WafBlocks)
+		severity, score, action := severityHigh, math.Min(100, s.WafBlocks*5), ""
+		switch {
+		case !scanning:
+			// Many blocks that are a small share of what the address sends.
+			// An address that sends that much is an office, a CGNAT pool or
+			// a VPN exit, and a block rate under the bar is one client of it
+			// attacking while the rest browse: the WAF refuses each attack
+			// as it arrives, and limiting the address limits the rest. The
+			// count used to throttle it in the kernel on its own, as the
+			// harm rule the analysis engine applies (harmMinAttackShare)
+			// never would. Recorded for the operator and held against
+			// nobody (ADR 0059), as a detection a control let through is.
+			details = fmt.Sprintf("%s, %.1f%% of the address's requests: a shared address, not a scanner",
+				details, blockRate*100)
+			action = ActionFlagged
+		case blockRate > 0.5 && s.WafBlocks > absoluteThreshold*5:
+			severity, score = "critical", math.Min(100, s.WafBlocks*10)
+			action = ad.shun(ctx, s.IP, details)
+		default:
+			action = ad.throttle(s.IP, 500*time.Millisecond, "Anomaly detection: exploit scanning") // Limit to 2 req/sec
+		}
+		RecordSecurityThreat(SecurityThreat{
+			ID:          fmt.Sprintf("anomaly-exploit-%s-%d", s.IP, now.Unix()),
+			Type:        "exploit_scan",
+			SourceIP:    s.IP,
+			Score:       score,
+			Details:     details,
+			Time:        now,
+			Category:    "exploit_scanning",
+			Severity:    severity,
+			ActionTaken: action,
+			Observed:    !scanning,
+		})
 	}
 }
 
@@ -211,8 +228,8 @@ func (ad *AnomalyDetector) checkExploitScanning(ctx context.Context, now time.Ti
 // an address that comes back soon after. An address the operator allowlisted
 // or released within the hold is flagged instead of blocked, as the other
 // automatic paths treat them.
-func (ad *AnomalyDetector) shun(ip, reason string) string {
-	res, err := ShunAutomatically(ip, "Anomaly detection: "+reason)
+func (ad *AnomalyDetector) shun(ctx context.Context, ip, reason string) string {
+	res, err := ShunAutomaticallyContext(ctx, ip, "Anomaly detection: "+reason)
 	if err != nil {
 		logger.L.LogError("anomaly shun did not persist; the source is not blocked", "ip", ip, "error", err)
 		return ActionDetected

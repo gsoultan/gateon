@@ -5,6 +5,7 @@ package middleware
 
 import (
 	"bytes"
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -139,7 +140,7 @@ func TestRecognitionMiddlewares(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "gateon_recognition_test.db")
 
 	_ = telemetry.InitPathStatsStore(dbPath, 1)
-	defer telemetry.ClosePathStatsStore(t.Context())
+	defer telemetry.ClosePathStatsStore(context.Background())
 
 	var capturedThreats []telemetry.SecurityThreat
 	var mu sync.Mutex
