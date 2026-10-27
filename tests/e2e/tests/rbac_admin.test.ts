@@ -15,18 +15,18 @@ test.describe('RBAC: Administrator', () => {
 
   test('can see everything and manage users', async ({ page }) => {
     await page.goto('/', { timeout: 60000 });
-    await expect(page.getByText(/System Health/i)).toBeVisible({ timeout: 30000 });
+    await expect(page.getByText('Traffic now', { exact: true })).toBeVisible({ timeout: 30000 });
     
-    await page.goto('/users', { timeout: 60000 });
-    await expect(page.getByRole('heading', { name: 'User Management', exact: false })).toBeVisible({ timeout: 30000 });
+    await page.goto('/access', { timeout: 60000 });
+    await expect(page.getByRole('heading', { name: 'Access', exact: true })).toBeVisible({ timeout: 30000 });
     await expect(page.getByRole('button', { name: /Add User/i })).toBeVisible({ timeout: 20000 });
   });
 
   test('can manage WAF rules', async ({ page }) => {
-    await page.goto('/security-center', { timeout: 60000 });
-    await expect(page.getByText(/Security Hub/i).first()).toBeVisible({ timeout: 30000 });
+    await page.goto('/security', { timeout: 60000 });
+    await expect(page.getByRole('heading', { name: 'Security', level: 2 })).toBeVisible({ timeout: 30000 });
     
-    await page.getByRole('tab', { name: /WAF Rules/i }).click();
+    await page.getByRole('tab', { name: 'Rules' }).click();
     // Enabled, not visible: the button renders for every role and is disabled
     // for a viewer (rbac_viewer.test.ts), so visibility cannot tell "can
     // manage" from "cannot".

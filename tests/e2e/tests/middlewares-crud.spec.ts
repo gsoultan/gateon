@@ -74,19 +74,21 @@ test.describe('Middlewares', () => {
     playwright,
   }) => {
     await expectHeader(request, undefined, 'the route carries the header before any middleware exists');
-    await page.goto('/middlewares');
+    await page.goto('/policies');
 
-    // Create: Header Manipulation, one response header, from the form.
-    await page.getByRole('button', { name: 'Add Middleware' }).click();
-    const create = page.getByRole('dialog', { name: 'Add Middleware' });
-    await create.getByLabel('Friendly Name').fill(NAME);
-    await create.getByLabel('Type').and(page.locator('input')).click();
-    await page.getByRole('option', { name: 'Header Manipulation', exact: true }).click();
+    // Create: Headers, one response header, from the form. A new policy
+    // starts at the catalog; picking a type opens its form.
+    await page.getByRole('button', { name: 'Add policy' }).click();
+    const catalog = page.getByRole('dialog', { name: 'Choose a policy' });
+    await catalog.getByRole('tab', { name: 'Headers and paths' }).click();
+    await catalog.getByRole('button', { name: /^Headers Add, set or remove/ }).click();
+    const create = page.getByRole('dialog', { name: 'Add policy' });
+    await create.getByLabel('Name', { exact: true }).fill(NAME);
     await create.getByRole('button', { name: 'Add Set Response Headers' }).click();
     await create.getByPlaceholder('X-Header').last().fill(HEADER);
     await create.getByPlaceholder('Value').last().fill('from-the-dashboard');
     const created = waitForSave(page);
-    await create.getByRole('button', { name: 'Save Middleware' }).click();
+    await create.getByRole('button', { name: 'Save policy' }).click();
     const createdRes = await created;
     expect(createdRes.status(), `PUT /v1/middlewares: ${await createdRes.text()}`).toBe(200);
     const saved = (await createdRes.json()) as { id: string; type: string; config: Record<string, string> };
@@ -94,7 +96,7 @@ test.describe('Middlewares', () => {
     expect(saved.type).toBe('headers');
     expect(saved.config).toEqual({ [`set_response_${HEADER}`]: 'from-the-dashboard' });
     await expect(page.getByText('The middleware configuration has been updated.')).toBeVisible();
-    await page.getByPlaceholder('Search middlewares...').fill(NAME);
+    await page.getByPlaceholder('Search policies...').fill(NAME);
     const row = page.getByRole('row').filter({ hasText: middlewareId });
     await expect(row).toContainText(NAME);
     await expect(row).toContainText('headers');
@@ -116,17 +118,17 @@ test.describe('Middlewares', () => {
 
     // Edit the value; the route follows.
     await page.getByRole('button', { name: `Edit middleware ${NAME}` }).click();
-    const edit = page.getByRole('dialog', { name: 'Edit Middleware' });
+    const edit = page.getByRole('dialog', { name: 'Edit policy' });
     await expect(edit.getByPlaceholder('X-Header').last()).toHaveValue(HEADER);
     await edit.getByPlaceholder('Value').last().fill('edited-in-the-dashboard');
     const edited = waitForSave(page);
-    await edit.getByRole('button', { name: 'Save Middleware' }).click();
+    await edit.getByRole('button', { name: 'Save policy' }).click();
     expect((await edited).status()).toBe(200);
     await expectHeader(request, 'edited-in-the-dashboard', 'the route kept the old header after the edit');
 
     // Delete: the confirmation names it and the route that uses it.
     await page.getByRole('button', { name: `Delete middleware ${NAME}` }).click();
-    const confirm = page.getByRole('dialog', { name: 'Delete Middleware' });
+    const confirm = page.getByRole('dialog', { name: 'Delete policy' });
     await expect(confirm).toContainText(`Delete "${NAME}"?`);
     await expect(confirm).toContainText('Used by 1 route:');
     await expect(confirm).toContainText(ROUTE);

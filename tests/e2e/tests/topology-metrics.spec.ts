@@ -49,8 +49,9 @@ test.describe('Topology', () => {
   });
 
   test("draws the gateway's routes, services and their backend", async ({ page }) => {
-    await page.goto('/topology');
-    await expect(page.getByRole('heading', { name: 'Traffic Topology' })).toBeVisible();
+    // The map is a tab of the Overview.
+    await page.goto('/?tab=map');
+    await expect(page.getByRole('tab', { name: 'Map' })).toHaveAttribute('aria-selected', 'true');
     // The spec's own route and service, and a fixture route with its service.
     await expect(page.getByText(ROUTE_NAME, { exact: true })).toBeVisible();
     await expect(page.getByText(SERVICE_NAME, { exact: true })).toBeVisible();
@@ -62,8 +63,8 @@ test.describe('Topology', () => {
     await page.route('**/v1/routes?*', (route) =>
       route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"route store unavailable"}' }),
     );
-    await page.goto('/topology');
-    const failed = page.getByRole('alert').filter({ hasText: "Couldn't load the topology" });
+    await page.goto('/?tab=map');
+    const failed = page.getByRole('alert').filter({ hasText: "Couldn't load the map" });
     await expect(failed, 'a failed load was drawn as an empty graph').toBeVisible({ timeout: 15_000 });
     await expect(failed).toContainText('route store unavailable');
     await expect(page.getByText('Test Route', { exact: true })).toHaveCount(0);
@@ -97,7 +98,7 @@ test.describe('Metrics', () => {
       await route.fulfill({ response: res, json: snap });
     });
     await page.goto('/metrics-dashboard');
-    await expect(page.getByRole('heading', { name: 'Metrics Dashboard' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Metrics', level: 2 })).toBeVisible();
 
     // Inside the Golden Signals card: the per-route table further down has an
     // "Error Rate" column of its own.
@@ -121,6 +122,6 @@ test.describe('Metrics', () => {
       route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"metrics unavailable"}' }),
     );
     await page.goto('/metrics-dashboard');
-    await expect(page.getByText(/Failed to load metrics/)).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByRole('alert').filter({ hasText: 'The metrics could not be loaded' })).toBeVisible({ timeout: 15_000 });
   });
 });

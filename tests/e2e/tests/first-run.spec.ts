@@ -32,14 +32,13 @@ test('the wizard tests the database it is given, and saves the one it submits', 
   await expect(page).toHaveURL(/\/setup$/);
 
   // The setup token the gateway wrote when it started: what the operator has
-  // and a passer-by on the management port does not. Then the account, then
-  // Security, whose PASETO secret the wizard generates.
+  // and a passer-by on the management port does not. Then the account; the
+  // next step is Storage, with the management and logging databases together.
   const tokenFile = path.join(dataDir, 'setup-token');
   await page.getByRole('textbox', { name: 'Setup token' }).fill(fs.readFileSync(tokenFile, 'utf8').trim());
   await page.getByRole('textbox', { name: 'Username' }).fill(admin);
   await page.getByRole('textbox', { name: 'Password', exact: true }).fill(password);
   await page.getByRole('textbox', { name: 'Confirm', exact: true }).fill(password);
-  await page.getByRole('button', { name: 'Next' }).click();
   await page.getByRole('button', { name: 'Next' }).click();
 
   // An address with no Postgres behind it gets the one message the wizard gives
@@ -57,13 +56,11 @@ test('the wizard tests the database it is given, and saves the one it submits', 
   expect(await testConnection(page)).toBe(200);
   await expect(page.getByText('Connection successful')).toBeVisible();
 
-  await page.getByRole('button', { name: 'Next' }).click(); // tests it again, then Logging
-  await page.getByRole('button', { name: 'Next' }).click(); // logs kept with it, then API
+  await page.getByRole('button', { name: 'Next' }).click(); // tests it again, logs kept with it, then Finish
   await page.getByRole('textbox', { name: 'Bind Address' }).fill('127.0.0.1');
-  await page.getByRole('button', { name: 'Next' }).click(); // Review
 
   const setup = page.waitForResponse((r) => r.url().endsWith('/gateon.v1.ApiService/Setup'));
-  await page.getByRole('button', { name: 'Complete System Setup' }).click();
+  await page.getByRole('button', { name: 'Finish setup' }).click();
   expect((await setup).status()).toBe(200);
   await expect(page).toHaveURL(/\/login$/, { timeout: 15_000 });
 
@@ -78,5 +75,5 @@ test('the wizard tests the database it is given, and saves the one it submits', 
   await page.getByPlaceholder('Enter your username').fill(admin);
   await page.getByPlaceholder('••••••••').fill(password);
   await page.getByRole('button', { name: /Continue to Dashboard/i }).click();
-  await expect(page.getByRole('heading', { name: /System Overview/i })).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByRole('heading', { name: /^Overview$/ })).toBeVisible({ timeout: 60_000 });
 });

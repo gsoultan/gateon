@@ -40,7 +40,8 @@ async function openAuthorities(page: Page) {
   const loaded = page.waitForResponse((r) => new URL(r.url()).pathname === '/v1/global' && r.request().method() === 'GET');
   await page.goto('/client-authorities');
   expect((await loaded).status()).toBe(200);
-  await expect(page.getByRole('heading', { name: 'Client Authorities', level: 2 })).toBeVisible();
+  // Client CAs are a tab of TLS; the old address still opens them.
+  await expect(page.getByRole('tab', { name: 'Client CAs' })).toHaveAttribute('aria-selected', 'true');
 }
 
 async function saveTls(page: Page, click: () => Promise<void>): Promise<TlsBody> {

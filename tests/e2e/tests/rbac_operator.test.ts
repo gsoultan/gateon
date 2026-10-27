@@ -15,13 +15,13 @@ test.describe('RBAC: Operator', () => {
 
   test('can see dashboards and metrics', async ({ page }) => {
     await page.goto('/', { timeout: 60000 });
-    await expect(page.getByText(/System Health/i)).toBeVisible({ timeout: 30000 });
-    await expect(page.getByText(/TRAFFIC METRICS/i)).toBeVisible({ timeout: 20000 });
+    await expect(page.getByText('Traffic now', { exact: true })).toBeVisible({ timeout: 30000 });
+    await expect(page.getByText('Needs attention', { exact: true })).toBeVisible({ timeout: 20000 });
   });
 
-  test('can see security hub', async ({ page }) => {
-    await page.goto('/security-center', { timeout: 60000 });
-    await expect(page.getByText(/Security Hub/i).first()).toBeVisible({ timeout: 30000 });
+  test('can see the Security page', async ({ page }) => {
+    await page.goto('/security', { timeout: 60000 });
+    await expect(page.getByRole('heading', { name: 'Security', level: 2 })).toBeVisible({ timeout: 30000 });
   });
 
   test('can see logs', async ({ page }) => {
@@ -49,20 +49,20 @@ test.describe('RBAC: Operator', () => {
     await expect(page.getByText(/Only an administrator can change this/).first()).toBeVisible();
 
     const saved = page.waitForResponse((r) => new URL(r.url()).pathname === '/v1/global' && r.request().method() === 'PUT');
-    await page.getByRole('button', { name: 'Save Gateway Config' }).click();
+    await page.getByRole('button', { name: 'Save Global Configuration' }).click();
     const res = await saved;
     expect(res.status(), `an operator's unchanged save: ${await res.text()}`).toBe(200);
   });
 
   test('can manage WAF rules but NOT users', async ({ page }) => {
-    await page.goto('/security-center', { timeout: 60000 });
-    await page.getByRole('tab', { name: /WAF Rules/i }).click();
+    await page.goto('/security', { timeout: 60000 });
+    await page.getByRole('tab', { name: 'Rules' }).click();
     // Enabled, not visible: the button renders for every role and is disabled
     // for a viewer (rbac_viewer.test.ts), so visibility cannot tell "can
     // manage" from "cannot".
     await expect(page.getByRole('button', { name: /Add Rule/i })).toBeEnabled({ timeout: 20000 });
 
-    await page.goto('/users', { timeout: 60000 });
+    await page.goto('/access', { timeout: 60000 });
     await expect(page.getByText(/Access Denied/i)).toBeVisible({ timeout: 30000 });
   });
 });

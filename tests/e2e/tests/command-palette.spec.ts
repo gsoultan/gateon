@@ -31,28 +31,28 @@ async function openPalette(page: Page, at = '/'): Promise<{ palette: Locator; se
 test.describe('Command palette', () => {
   test('typing narrows the commands, and Enter goes to the page', async ({ page }) => {
     const { palette, search } = await openPalette(page);
-    await search.fill('path metrics');
+    await search.fill('metrics');
     await expect(palette.getByRole('button')).toHaveCount(1);
-    await expect(palette.getByRole('button', { name: 'Path Metrics /path-metrics' })).toBeVisible();
+    await expect(palette.getByRole('button', { name: 'Metrics /metrics-dashboard' })).toBeVisible();
 
     await search.press('Enter');
-    await expect(page).toHaveURL(/\/path-metrics$/);
-    await expect(page.getByRole('heading', { name: 'Path Metrics', level: 2 })).toBeVisible();
+    await expect(page).toHaveURL(/\/metrics-dashboard$/);
+    await expect(page.getByRole('heading', { name: 'Metrics', level: 2 })).toBeVisible();
     await expect(palette, 'the palette stayed open after running a command').toBeHidden();
   });
 
   test('keywords match, the arrow keys choose, nothing found says so, and Escape closes', async ({ page }) => {
     const { palette, search } = await openPalette(page);
-    // "waf" is a keyword of the Security Hub, not part of its name.
+    // "waf" is a keyword of Security, not part of its name.
     await search.fill('waf');
-    await expect(palette.getByRole('button', { name: 'Security Hub /security-center' })).toBeVisible();
+    await expect(palette.getByRole('button', { name: 'Security /security' })).toBeVisible();
 
-    // Two matches, in navigation order: Audit Logs, then Logs.
+    // Two matches, in navigation order: Logs, then Audit log.
     await search.fill('logs');
-    await expect(palette.getByRole('button')).toHaveText([/^Audit Logs/, /^Logs/]);
+    await expect(palette.getByRole('button')).toHaveText([/^Logs/, /^Audit log/]);
     await search.press('ArrowDown');
     await search.press('Enter');
-    await expect(page, 'ArrowDown then Enter did not run the second command').toHaveURL(/\/logs$/);
+    await expect(page, 'ArrowDown then Enter did not run the second command').toHaveURL(/\/audit-logs$/);
 
     await page.keyboard.press('Control+k');
     await expect(palette).toBeVisible();
@@ -77,17 +77,18 @@ test.describe('Command palette', () => {
     await expect(html).toHaveAttribute('data-mantine-color-scheme', 'light');
   });
 
-  test('Users is offered to an administrator', async ({ page }) => {
+  test('Access is offered to an administrator', async ({ page }) => {
     const { palette, search } = await openPalette(page);
+    // "users" is a keyword of Access, where users and API tokens live.
     await search.fill('users');
-    await expect(palette.getByRole('button', { name: 'Users /users' })).toBeVisible();
+    await expect(palette.getByRole('button', { name: 'Access /access' })).toBeVisible();
   });
 });
 
 test.describe('Command palette as an operator', () => {
   test.use({ storageState: path.resolve(__dirname, '.auth/operator.json') });
 
-  test('Users is not offered to an operator', async ({ page }) => {
+  test('Access is not offered to an operator', async ({ page }) => {
     const { palette, search } = await openPalette(page);
     await search.fill('users');
     await expect(palette.getByText('No matching commands')).toBeVisible();

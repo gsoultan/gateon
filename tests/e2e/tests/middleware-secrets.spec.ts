@@ -113,16 +113,16 @@ test.describe('Middleware secrets are write-only', () => {
     await expectStatus(playwright, undefined, 401, 'the route lets a request without credentials through');
 
     const read = recordResponses(page);
-    await page.goto('/middlewares');
-    await page.getByPlaceholder('Search middlewares...').fill(NAME);
+    await page.goto('/policies');
+    await page.getByPlaceholder('Search policies...').fill(NAME);
     await page.getByRole('button', { name: `Edit middleware ${NAME}` }).click();
-    const edit = page.getByRole('dialog', { name: 'Edit Middleware' });
+    const edit = page.getByRole('dialog', { name: 'Edit policy' });
     await expect(edit.getByText('Stored')).toHaveCount(2);
     await expect(edit.getByLabel('Username').first()).toHaveValue('alice');
 
-    await edit.getByLabel('Friendly Name').fill(`${NAME} edited`);
+    await edit.getByLabel('Name', { exact: true }).fill(`${NAME} edited`);
     const saving = page.waitForResponse((r) => new URL(r.url()).pathname === '/v1/middlewares' && r.request().method() === 'PUT');
-    await edit.getByRole('button', { name: 'Save Middleware' }).click();
+    await edit.getByRole('button', { name: 'Save policy' }).click();
     const saved = await saving;
     expect(saved.status(), `PUT /v1/middlewares: ${await saved.text()}`).toBe(200);
     const sent = saved.request().postDataJSON() as { config: Record<string, string> };

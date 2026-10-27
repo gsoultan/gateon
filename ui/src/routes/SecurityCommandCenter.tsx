@@ -58,7 +58,7 @@ import { resolveTrafficRangeBounds, DAY_MS } from '../utils/dashboard';
 import type { TrafficRangePreset } from '../utils/dashboard';
 
 const SECURITY_TABS = ["posture", "threats", "blocks", "rules"] as const;
-const THREAT_VIEWS = ["live", "anomalies", "trends", "archive"] as const;
+const THREAT_VIEWS = ["live", "anomalies", "history", "trends", "archive"] as const;
 
 const TREND_RANGE_OPTIONS = [
   { value: 'last24h', label: 'Last 24 hours' },
@@ -420,6 +420,7 @@ export default function SecurityCommandCenter() {
                   data={[
                     { value: "live", label: "Live" },
                     { value: "anomalies", label: "Anomalies" },
+                    { value: "history", label: "History" },
                     { value: "trends", label: "Trends" },
                     { value: "archive", label: "Archive" },
                   ]}
@@ -439,6 +440,7 @@ export default function SecurityCommandCenter() {
               </Group>
               {threatView === "live" && <ThreatExplorerTab view="detected" />}
               {threatView === "anomalies" && <AnomalyEngineTab />}
+              {threatView === "history" && <ThreatExplorerTab view="all" />}
               {threatView === "trends" && (
                 <AnalyticsTab 
                   metrics={metrics ?? null}

@@ -4,7 +4,7 @@
 import { test, expect, type APIRequestContext } from '@playwright/test';
 
 /**
- * The Circuit Breaker page: every route's targets with their circuit state,
+ * Each target's circuit, on the Services page: every service's targets with their circuit state,
  * request and error counts, the CLOSED / OPEN / HALF-OPEN totals, and the
  * timeline of state changes.
  *
@@ -98,42 +98,40 @@ test.describe('Circuit Breaker', () => {
       await api.dispose();
     }
 
-    await page.goto('/circuit-breaker');
-    await expect(page.getByRole('heading', { name: 'Circuit Breaker', level: 2 })).toBeVisible();
+    await page.goto('/services');
+    await expect(page.getByRole('heading', { name: 'Services', level: 2 })).toBeVisible();
 
-    const targetRow = (url: string) =>
-      page.getByRole('row').filter({ hasText: ROUTE_NAME }).filter({ has: page.getByRole('cell', { name: url, exact: true }) });
-    const dead = targetRow(DEAD);
-    const live = targetRow(LIVE);
-    // One health-check interval, and a page refresh after it.
-    await expect(dead, 'the target nothing listens on was never marked OPEN').toContainText('OPEN', { timeout: 60_000 });
-    await expect(live).toContainText('CLOSED');
-    // Columns: route, target, state, requests, errors.
+    // The service's row sums its targets up, and opening it shows each one's
+    // circuit. One health-check interval, and a stats refresh after it.
+    const service = page.getByRole('row').filter({ hasText: SERVICE }).first();
+    await expect(service, 'the service with one dead target of two does not read 1 of 2').toContainText('1 of 2', { timeout: 60_000 });
+    await service.getByRole('button', { name: 'Show targets' }).click();
+    const target = (url: string) => page.locator('.mantine-Group-root').filter({ has: page.getByText(url, { exact: true }) }).last();
+    const dead = target(DEAD);
+    const live = target(LIVE);
+    await expect(dead, 'the target nothing listens on was never marked Down').toContainText('Down', { timeout: 60_000 });
+    await expect(live).toContainText('Up');
+    // The chip names the gateway's counts for the target.
     await expect
-      .poll(async () => Number(await dead.getByRole('cell').nth(4).innerText()), {
-        message: 'the page does not show the errors the gateway counted on the dead target',
-        timeout: 15_000,
-      })
+      .poll(
+        async () => {
+          const label = (await dead.getByLabel(/^Down:/).getAttribute('aria-label')) ?? '';
+          return Number(/(\d+) errors/.exec(label)?.[1] ?? 0);
+        },
+        {
+          message: 'the chip does not carry the errors the gateway counted on the dead target',
+          timeout: 15_000,
+        },
+      )
       .toBeGreaterThanOrEqual(counted);
-
-    // The OPEN total: the card's label, its number, "Failing targets".
-    const openCount = page.locator('.mantine-Paper-root').filter({ hasText: 'Failing targets' }).locator('p').nth(1);
-    await expect.poll(async () => Number(await openCount.innerText()), { timeout: 30_000 }).toBeGreaterThanOrEqual(1);
 
     const event = page
       .getByRole('row')
       .filter({ has: page.getByRole('cell', { name: DEAD, exact: true }) })
       .filter({ hasText: 'health check' });
-    await expect(event.first(), 'the timeline has no event for the target going down').toContainText('OPEN', {
+    await expect(event.first(), 'the circuit events have no entry for the target going down').toContainText('Down', {
       timeout: 15_000,
     });
-
-    // Only open circuits under the Open filter.
-    // The label names the input and its listbox; the input is the one to click.
-    await page.getByLabel('Filter by state').and(page.locator('input')).click();
-    await page.getByRole('option', { name: 'Open', exact: true }).click();
-    await expect(dead).toHaveCount(1);
-    await expect(live, 'the Open filter kept a CLOSED target').toHaveCount(0);
   });
 });
 
@@ -141,8 +139,8 @@ test.describe('Circuit Breaker', () => {
  * A circuit breaker made in the dashboard (there was no way to make one there),
  * on a route whose only target accepts TCP -- so its health check passes and
  * the health check alone would say CLOSED -- but answers no HTTP, so every
- * request fails. The breaker opens, and the page's row for the target says
- * OPEN: it used to say CLOSED while the route refused everything with 503.
+ * request fails. The breaker opens, and the target's chip under its service says
+ * Down: it used to say CLOSED while the route refused everything with 503.
  */
 const ECHO = 'http://127.0.0.1:8084'; // tcp_backend: echoes bytes, speaks no HTTP
 const CB_SERVICE = `cb-mw-e2e-svc-${stamp}`;
@@ -182,16 +180,17 @@ test.describe('Circuit Breaker middleware from the dashboard', () => {
   });
 
   test('is created in the editor, opens on failures, and its route reads OPEN', async ({ page, request, playwright }) => {
-    await page.goto('/middlewares');
-    await page.getByRole('button', { name: 'Add Middleware' }).click();
-    const create = page.getByRole('dialog', { name: 'Add Middleware' });
-    await create.getByLabel('Friendly Name').fill(CB_NAME);
-    await create.getByLabel('Type').and(page.locator('input')).click();
-    await page.getByRole('option', { name: 'Circuit Breaker', exact: true }).click();
+    await page.goto('/policies');
+    await page.getByRole('button', { name: 'Add policy' }).click();
+    // A new policy starts at the catalog; picking a type opens its form.
+    const catalog = page.getByRole('dialog', { name: 'Choose a policy' });
+    await catalog.getByRole('button', { name: /^Circuit breaker/ }).click();
+    const create = page.getByRole('dialog', { name: 'Add policy' });
+    await create.getByLabel('Name', { exact: true }).fill(CB_NAME);
     await create.getByLabel('Minimum Requests').fill('3');
     await create.getByLabel('Sleep Window', { exact: true }).fill('1h');
     const saved = page.waitForResponse((r) => new URL(r.url()).pathname === '/v1/middlewares' && r.request().method() === 'PUT');
-    await create.getByRole('button', { name: 'Save Middleware' }).click();
+    await create.getByRole('button', { name: 'Save policy' }).click();
     const res = await saved;
     expect(res.status(), `PUT /v1/middlewares: ${await res.text()}`).toBe(200);
     const mw = (await res.json()) as { id: string; type: string; config: Record<string, string> };
@@ -219,8 +218,9 @@ test.describe('Circuit Breaker middleware from the dashboard', () => {
       await api.dispose();
     }
 
-    await page.goto('/circuit-breaker');
-    const row = page.getByRole('row').filter({ hasText: CB_ROUTE_NAME }).filter({ has: page.getByRole('cell', { name: ECHO, exact: true }) });
-    await expect(row, 'the target behind an open breaker does not read OPEN').toContainText('OPEN', { timeout: 30_000 });
+    await page.goto('/services');
+    await page.getByRole('row').filter({ hasText: CB_SERVICE }).first().getByRole('button', { name: 'Show targets' }).click();
+    const target = page.locator('.mantine-Group-root').filter({ has: page.getByText(ECHO, { exact: true }) }).last();
+    await expect(target, 'the target behind an open breaker does not read Down').toContainText('Down', { timeout: 30_000 });
   });
 });

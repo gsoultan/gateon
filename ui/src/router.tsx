@@ -196,8 +196,13 @@ const docsRoute = createRoute({
 const securityRoute = createRoute({
   getParentRoute: () => authenticatedRoute,
   path: "/security",
-  validateSearch: (search: Record<string, unknown>): { tab?: string } => ({
+  // The open tab, the Threats tab's view and whether the advisory panel is
+  // open, so a link or a reload lands on the same view.
+  validateSearch: (search: Record<string, unknown>): { tab?: string; view?: string; advisory?: string } => ({
     tab: asSearchString(search.tab),
+    view: asSearchString(search.view),
+    // "1" comes back from the URL as the number 1, so it is read as text.
+    advisory: search.advisory == null ? undefined : String(search.advisory),
   }),
   component: () => <SecurityCommandCenter />,
 });

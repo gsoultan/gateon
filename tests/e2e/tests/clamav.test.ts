@@ -16,8 +16,8 @@ test.describe('ClamAV Security E2E', () => {
   });
 
   test.beforeEach(async ({ page }) => {
-    await page.goto('/security-center', { waitUntil: 'networkidle' });
-    await expect(page.getByText(/Security Hub/i).first()).toBeVisible({ timeout: 20000 });
+    await page.goto('/security', { waitUntil: 'networkidle' });
+    await expect(page.getByRole('heading', { name: 'Security', level: 2 })).toBeVisible({ timeout: 20000 });
   });
 
 

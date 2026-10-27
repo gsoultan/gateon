@@ -37,5 +37,5 @@ test('a browser sign-in gets the session only as the HttpOnly cookie', async ({ 
   expect(session?.httpOnly, 'gateon_session is readable by script').toBe(true);
 
   // The dashboard signs in on the cookie alone.
-  await expect(page.getByRole('heading', { name: /System Overview/i })).toBeVisible({ timeout: 60000 });
+  await expect(page.getByRole('heading', { name: /^Overview$/ })).toBeVisible({ timeout: 60000 });
 });

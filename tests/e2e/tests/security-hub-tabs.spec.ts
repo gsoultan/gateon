@@ -4,18 +4,20 @@
 import { test, expect, type Page } from '@playwright/test';
 
 /**
- * The Security Hub tabs no spec opened: Incidents, Analytics & Trends and AI
- * Advisory. Each is checked against the gateway's own answer -- what the page
- * renders has to be what the endpoint returned -- and against a failing
- * endpoint. Incidents and attack sources are traffic-derived, so each gets one
- * source that is markup, which has to render as text.
+ * The Security views no spec opened: the incidents under Blocks, the trends
+ * under Threats and the AI Advisory panel. Each is checked against the
+ * gateway's own answer -- what the page renders has to be what the endpoint
+ * returned -- and against a failing endpoint. Incidents and attack sources are
+ * traffic-derived, so each gets one source that is markup, which has to render
+ * as text.
  */
 
 const HOSTILE = '<img src=x onerror=alert(1)>';
 
-async function openTab(page: Page, tab: RegExp) {
-  await page.goto('/security-center');
-  await page.getByRole('tab', { name: tab }).click();
+/** Opens the Security page at one of its views; each is named in the URL. */
+async function openTab(page: Page, view: 'incidents' | 'trends' | 'advisory') {
+  const search = { incidents: '?tab=blocks', trends: '?tab=threats&view=trends', advisory: '?advisory=1' }[view];
+  await page.goto(`/security${search}`);
 }
 
 function trapDialogs(page: Page): string[] {
@@ -27,11 +29,11 @@ function trapDialogs(page: Page): string[] {
   return dialogs;
 }
 
-test.describe('Security Hub: Incidents', () => {
+test.describe('Security: incidents under Blocks', () => {
   test("shows the gateway's incident totals and its posture", async ({ page }) => {
     const incidents = page.waitForResponse((r) => new URL(r.url()).pathname === '/v1/security/incidents');
     const posture = page.waitForResponse((r) => new URL(r.url()).pathname === '/v1/security/posture');
-    await openTab(page, /^Incidents$/);
+    await openTab(page, 'incidents');
     const inc = await incidents;
     expect(inc.status(), 'GET /v1/security/incidents').toBe(200);
     const body = (await inc.json()) as { totalSeen?: number; retained?: number; incidents?: unknown[] };
@@ -52,15 +54,15 @@ test.describe('Security Hub: Incidents', () => {
     await page.route('**/v1/security/posture', (route) =>
       route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"posture unavailable"}' }),
     );
-    await openTab(page, /^Incidents$/);
+    await openTab(page, 'incidents');
     await expect(page.getByText('The protection status could not be loaded.')).toBeVisible({ timeout: 15_000 });
   });
 });
 
-test.describe('Security Hub: Overview posture', () => {
+test.describe('Security: posture', () => {
   test("shows the gateway's posture percentage, not one computed from traffic", async ({ page }) => {
     const posture = page.waitForResponse((r) => new URL(r.url()).pathname === '/v1/security/posture');
-    await page.goto('/security-center');
+    await page.goto('/security');
     const pos = (await (await posture).json()) as Posture;
     expect(pos.score.controls.reduce((sum, c) => sum + c.weight, 0), 'control weights').toBe(100);
     const card = page.locator('.mantine-Card-root').filter({ hasText: 'Security Posture' });
@@ -89,7 +91,7 @@ function expectedWafLabel(pos: Posture): string {
   return `Blocking on ${r.enforcing} of ${r.total}`;
 }
 
-test.describe('Security Hub: Incidents list', () => {
+test.describe('Security: incidents list', () => {
 
   test('an incident is listed with its signals, techniques and score, and its source as text', async ({ page }) => {
     const dialogs = trapDialogs(page);
@@ -119,7 +121,7 @@ test.describe('Security Hub: Incidents list', () => {
         }),
       }),
     );
-    await openTab(page, /^Incidents$/);
+    await openTab(page, 'incidents');
     await expect(page.getByText('7 total · 1 retained')).toBeVisible();
     const row = page.getByRole('row').filter({ hasText: 'T1190' });
     await expect(row).toContainText('critical');
@@ -137,13 +139,13 @@ test.describe('Security Hub: Incidents list', () => {
     await page.route('**/v1/security/incidents*', (route) =>
       route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"correlator unavailable"}' }),
     );
-    await openTab(page, /^Incidents$/);
+    await openTab(page, 'incidents');
     await expect(page.getByText('Failed to load incidents.')).toBeVisible({ timeout: 15_000 });
     await expect(page.getByText('No correlated incidents')).toHaveCount(0);
   });
 });
 
-test.describe('Security Hub: Analytics & Trends', () => {
+test.describe('Security: trends', () => {
   test("lists the snapshot's top attack sources, and a source that is markup as text", async ({ page }) => {
     const dialogs = trapDialogs(page);
     // Pushed snapshots would replace the one below; hold the stream.
@@ -161,7 +163,7 @@ test.describe('Security Hub: Analytics & Trends', () => {
       await route.fulfill({ response: res, json: snap });
     });
 
-    await openTab(page, /Analytics & Trends/);
+    await openTab(page, 'trends');
     const sources = page.locator('.mantine-Card-root').filter({ has: page.getByRole('heading', { name: 'Top Attack Sources' }) });
     await expect(sources.getByRole('row')).toHaveCount(served.length);
     const hostile = sources.getByRole('row').filter({ hasText: HOSTILE });
@@ -175,12 +177,12 @@ test.describe('Security Hub: Analytics & Trends', () => {
   });
 });
 
-test.describe('Security Hub: AI Advisory', () => {
+test.describe('Security: AI Advisory', () => {
   test("renders the gateway's analysis: its summary and every recommendation", async ({ page }) => {
     const analysed = page.waitForResponse(
       (r) => new URL(r.url()).pathname === '/v1/AnalyzeConfig' && r.request().method() === 'POST',
     );
-    await openTab(page, /AI Advisory/);
+    await openTab(page, 'advisory');
     const res = await analysed;
     expect(res.status(), 'POST /v1/AnalyzeConfig').toBe(200);
     const body = (await res.json()) as { summary: string; insights: { title: string; severity: string; recommendation: string }[] };
@@ -201,7 +203,7 @@ test.describe('Security Hub: AI Advisory', () => {
     await page.route('**/v1/AnalyzeConfig', (route) =>
       route.fulfill({ status: 500, contentType: 'text/html', body: '<h1>stack trace: panic at analyzer.go:42</h1>' }),
     );
-    await openTab(page, /AI Advisory/);
+    await openTab(page, 'advisory');
     const alert = page.getByRole('alert').filter({ hasText: 'Analysis Error' });
     await expect(alert).toBeVisible();
     await expect(alert).toContainText('The analysis could not be completed. Try again in a moment.');
