@@ -265,7 +265,7 @@ func TestBotManagementAsTheDashboardSavesItChallenges(t *testing.T) {
 // cap and reads the resulting threat off the live feed the Security Hub uses.
 func TestFileSecurityFilesItsBlocksAgainstItsRoute(t *testing.T) {
 	dir := t.TempDir()
-	_ = telemetry.ClosePathStatsStore(t.Context())
+	_ = telemetry.ClosePathStatsStore(context.Background())
 	if err := telemetry.InitPathStatsStore("sqlite://"+filepath.Join(dir, "telemetry.db"), 7); err != nil {
 		t.Fatalf("InitPathStatsStore: %v", err)
 	}

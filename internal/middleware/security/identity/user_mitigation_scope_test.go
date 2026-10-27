@@ -35,7 +35,7 @@ const (
 func scopeTestStore(t *testing.T) {
 	t.Helper()
 	t.Setenv("GATEON_TRACE_DIR", filepath.Join(t.TempDir(), "traces"))
-	_ = telemetry.ClosePathStatsStore(t.Context())
+	_ = telemetry.ClosePathStatsStore(context.Background())
 	if err := telemetry.InitPathStatsStore(filepath.Join(t.TempDir(), "telemetry.db"), 1); err != nil {
 		t.Fatalf("init telemetry store: %v", err)
 	}

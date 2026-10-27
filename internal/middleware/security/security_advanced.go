@@ -159,7 +159,7 @@ func Tarpit(baseDelay, maxDelay time.Duration, scoreThreshold float64) kind.Midd
 			}
 			// Scoped to the network: delaying every user of a browser because one
 			// of them behaved badly is a latency penalty applied to bystanders.
-			reputation := telemetry.GetReputationScore(telemetry.GetReputationID(r))
+			reputation := telemetry.ReputationScoreOf(r)
 			threatScore := 100.0 - reputation
 
 			if threatScore >= scoreThreshold {

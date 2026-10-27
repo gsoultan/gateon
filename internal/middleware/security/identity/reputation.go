@@ -42,8 +42,10 @@ func (h *reputationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// client's network, never the class alone. See repid.For:
 	// JA4+ describes the software making the request, not the party making it,
 	// so a 403 keyed on it refuses every user of that browser everywhere.
+	// And as it applies to this address: a score one other address alone
+	// earned is that address's, not its neighbours' (ADR 0079).
 	repID := telemetry.GetReputationID(r)
-	reputation := telemetry.GetReputationScore(repID)
+	reputation := telemetry.ReputationScoreFor(repID, clientIP)
 
 	// Cache reputation in request state for downstream middlewares (like WAF)
 	if rs := request.GetRequestState(r); rs != nil {

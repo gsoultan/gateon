@@ -57,6 +57,91 @@ type Reputation struct {
 	ViolationCount int
 	RecoveryRate   float64  // Points recovered per hour
 	History        []string // Brief history of violation types
+
+	// LastViolation is when the score last fell. LastEvent moves on every
+	// recovery as well, so on a network that never goes quiet it was never a
+	// day old and the violation count never reset; see recover.
+	LastViolation time.Time
+
+	// Offenders are the addresses whose threats lowered the score, at most
+	// maxReputationOffenders of them: enough to tell one address from more
+	// than one, which is all appliesTo asks. OffendersUnknown marks a score
+	// lowered with no address to name -- a peer's, or a caller's that had
+	// none -- which is read as everyone's.
+	Offenders        []string
+	OffendersUnknown bool
+}
+
+// maxReputationOffenders is how many offending addresses a score names. One
+// address is a client; two is a client rotating addresses or a network with
+// more than one bad actor, and either way the network's. The exact count past
+// two changes nothing, so it is not kept.
+const maxReputationOffenders = 2
+
+// appliesTo reports whether the score refuses clientIP: whether clientIP is
+// among the addresses that earned it, or the score was earned by more than one
+// address, or by one nobody could name.
+//
+// A score is kept for a browser class on a /24 or /64 (repid.For), so that an
+// attacker changing address within their network keeps their record. The same
+// key is an office NAT, a campus, a CGNAT pool or a VPN exit, where it is
+// thousands of clients of one browser build; and two WAF blocks took it to
+// zero, so one of those clients tripping a rule twice refused every other on
+// every route for hours. The identity stays shared -- the record is the
+// network's, and a second address lowering it refuses the network, as before
+// -- but a score one address alone earned is that address's to answer for
+// (ADR 0079).
+func (r *Reputation) appliesTo(clientIP string) bool {
+	if r.OffendersUnknown || len(r.Offenders) >= maxReputationOffenders || len(r.Offenders) == 0 {
+		return true
+	}
+	return r.Offenders[0] == clientIP
+}
+
+// noteOffender records sourceIP among the addresses that lowered the score.
+func (r *Reputation) noteOffender(sourceIP string) {
+	if sourceIP == "" {
+		r.OffendersUnknown = true
+		return
+	}
+	if len(r.Offenders) >= maxReputationOffenders || slices.Contains(r.Offenders, sourceIP) {
+		return
+	}
+	r.Offenders = append(r.Offenders, sourceIP)
+}
+
+// recover applies the idle-time recovery at now, under the shard's write lock.
+//
+// The score recovers once the identity has been quiet for an hour, by its
+// rate for every hour since. The violation count, which raises every later
+// penalty and slows the rate, resets a day after the last violation -- not a
+// day after the last recovery, which is what LastEvent is once recovery has
+// run. Keyed on LastEvent, a network that sent requests every hour had its
+// count reset never: each recovery moved LastEvent, so it was never a day old,
+// and the count only grew. On a busy shared network every block cost more
+// than the last and recovered slower, until any single block zeroed the score
+// for good.
+func (r *Reputation) recover(now time.Time) {
+	rate := r.RecoveryRate
+	if rate <= 0 {
+		rate = 1.0
+	}
+	elapsed := now.Sub(r.LastEvent).Hours()
+	if elapsed <= 1 {
+		return
+	}
+	r.Score = math.Min(neutralReputationScore, r.Score+(elapsed*rate))
+	lastViolation := r.LastViolation
+	if lastViolation.IsZero() {
+		lastViolation = r.LastEvent
+	}
+	if now.Sub(lastViolation).Hours() > 24 {
+		r.ViolationCount = 0
+		r.RecoveryRate = 1.0
+		r.Offenders = r.Offenders[:0]
+		r.OffendersUnknown = false
+	}
+	r.LastEvent = now
 }
 
 const (
@@ -141,6 +226,13 @@ func getRepShard(fingerprint string) *reputationShard {
 // between the two, so another goroutine may have evicted it or applied the same
 // recovery already.
 func GetReputation(fingerprint string) float64 {
+	return ReputationFor(fingerprint, "")
+}
+
+// ReputationFor is GetReputation as it applies to clientIP: the neutral score
+// when the identity's score was earned by one other address alone
+// (Reputation.appliesTo). An empty clientIP reads the identity's own score.
+func ReputationFor(fingerprint, clientIP string) float64 {
 	if fingerprint == "" {
 		return 100 // Unknown
 	}
@@ -154,18 +246,21 @@ func GetReputation(fingerprint string) float64 {
 	}
 	r := val.(*Reputation)
 	score := r.Score
+	if clientIP != "" && !r.appliesTo(clientIP) {
+		score = neutralReputationScore
+	}
 	needsRecovery := time.Since(r.LastEvent).Hours() > 1
 	shard.mu.RUnlock()
 
 	if !needsRecovery {
 		return score
 	}
-	return recoverReputation(shard, fingerprint)
+	return recoverReputation(shard, fingerprint, clientIP)
 }
 
 // recoverReputation applies the idle-time score recovery under the write lock.
 // Split out so the hot path above stays a single read-locked lookup.
-func recoverReputation(shard *reputationShard, fingerprint string) float64 {
+func recoverReputation(shard *reputationShard, fingerprint, clientIP string) float64 {
 	shard.mu.Lock()
 	defer shard.mu.Unlock()
 
@@ -174,28 +269,25 @@ func recoverReputation(shard *reputationShard, fingerprint string) float64 {
 		return 100
 	}
 	r := val.(*Reputation)
-
-	// Gradually recover reputation over time.
-	// Base rate is 1.0, but decreases as violations increase (adaptive recovery).
-	rate := r.RecoveryRate
-	if rate <= 0 {
-		rate = 1.0
-	}
-
-	elapsed := time.Since(r.LastEvent).Hours()
-	if elapsed > 1 {
-		r.Score = math.Min(100, r.Score+(elapsed*rate))
-		// Reset violation count if no events for a long time
-		if elapsed > 24 {
-			r.ViolationCount = 0
-		}
-		r.LastEvent = time.Now()
+	r.recover(time.Now())
+	if clientIP != "" && !r.appliesTo(clientIP) {
+		return neutralReputationScore
 	}
 	return r.Score
 }
 
 // GetReputationScore returns the current score for a fingerprint.
 func GetReputationScore(fingerprint string) float64 {
+	return ReputationScoreFor(fingerprint, "")
+}
+
+// ReputationScoreFor is GetReputationScore as it applies to clientIP: the
+// neutral score when the identity's score was earned by one other address
+// alone (Reputation.appliesTo). An empty clientIP reads the identity's own
+// score. Every control that refuses, delays or challenges a request on its
+// score reads it this way (ReputationScoreOf); the dashboard and the metrics
+// read the identity's.
+func ReputationScoreFor(fingerprint, clientIP string) float64 {
 	if fingerprint == "" {
 		return 100.0
 	}
@@ -208,18 +300,33 @@ func GetReputationScore(fingerprint string) float64 {
 	defer shard.mu.RUnlock()
 
 	if val, ok := shard.cache.Peek(fingerprint); ok {
-		score := val.(*Reputation).Score
+		r := val.(*Reputation)
+		if clientIP != "" && !r.appliesTo(clientIP) {
+			return neutralReputationScore
+		}
 		// Behind the level check: the arguments are boxed before the call,
 		// so an unconditional debug line allocated on every request.
 		if logger.L.IsEnabled(slog.LevelDebug) {
-			logger.L.LogDebug("Reputation cache HIT", "fingerprint", fingerprint, "score", score)
+			logger.L.LogDebug("Reputation cache HIT", "fingerprint", fingerprint, "score", r.Score)
 		}
-		return score
+		return r.Score
 	}
 	if logger.L.IsEnabled(slog.LevelDebug) {
 		logger.L.LogDebug("Reputation cache MISS", "fingerprint", fingerprint)
 	}
 	return 100.0
+}
+
+// ReputationScoreOf is the score a request is judged by: its reputation
+// identity's (GetReputationID), as it applies to its resolved address.
+func ReputationScoreOf(r *http.Request) float64 {
+	return ReputationScoreFor(GetReputationID(r), ClientIPOf(r))
+}
+
+// ReputationOf is ReputationScoreOf with the idle-time recovery applied, for
+// the controls that read the score on every request (GetReputation).
+func ReputationOf(r *http.Request) float64 {
+	return ReputationFor(GetReputationID(r), ClientIPOf(r))
 }
 
 // DecreaseReputationOf lowers the score the class of fingerprint holds on
@@ -238,12 +345,19 @@ func DecreaseReputationOf(fingerprint, sourceIP string, penalty float64, reason 
 	if mitigation.IsAllowlisted(sourceIP) {
 		return
 	}
-	DecreaseReputation(repid.For(fingerprint, sourceIP), penalty, reason)
+	decreaseReputation(repid.For(fingerprint, sourceIP), sourceIP, penalty, reason)
 }
 
 // DecreaseReputation lowers the score kept under an identity: a repid.For key.
-// A threat moves one through DecreaseReputationOf, which applies the allowlist.
+// A threat moves one through DecreaseReputationOf, which applies the allowlist
+// and names the address, so that the score refuses that address before it
+// refuses the network; a score lowered here names none and refuses everyone
+// on it.
 func DecreaseReputation(fingerprint string, penalty float64, reason string) {
+	decreaseReputation(fingerprint, "", penalty, reason)
+}
+
+func decreaseReputation(fingerprint, sourceIP string, penalty float64, reason string) {
 	if fingerprint == "" || (os.Getenv("GATEON_TEST") != "" && os.Getenv("GATEON_ENABLE_TEST_REPUTATION") == "") {
 		return
 	}
@@ -259,6 +373,8 @@ func DecreaseReputation(fingerprint string, penalty float64, reason string) {
 	}
 
 	r.ViolationCount++
+	r.LastViolation = time.Now()
+	r.noteOffender(sourceIP)
 	// 10MB limit for reputation history to avoid unbounded memory growth.
 	if reason != "" {
 		r.History = append(r.History, reason)
@@ -389,14 +505,23 @@ func ApplyRemoteReputation(fingerprint string, score float64, violations int, hi
 			r.ViolationCount = violations
 			r.History = history
 			r.LastEvent = time.Now()
+			// A peer's score names no address (the sync payload carries
+			// none), so it is read as everyone's on the network, as every
+			// score was before ADR 0079.
+			if score < neutralReputationScore {
+				r.LastViolation = r.LastEvent
+				r.OffendersUnknown = true
+			}
 		}
 	} else {
 		r = &Reputation{
-			Score:          score,
-			ViolationCount: violations,
-			RecoveryRate:   1.0 / (1.0 + float64(violations)/5.0),
-			History:        history,
-			LastEvent:      time.Now(),
+			Score:            score,
+			ViolationCount:   violations,
+			RecoveryRate:     1.0 / (1.0 + float64(violations)/5.0),
+			History:          history,
+			LastEvent:        time.Now(),
+			LastViolation:    time.Now(),
+			OffendersUnknown: true,
 		}
 	}
 
@@ -502,19 +627,7 @@ func UpdateReputationMetrics() {
 		for k := range shard.dirty {
 			if val, ok := shard.cache.Get(k); ok {
 				r := val.(*Reputation)
-				// Check for recovery
-				rate := r.RecoveryRate
-				if rate <= 0 {
-					rate = 1.0
-				}
-				elapsed := time.Since(r.LastEvent).Hours()
-				if elapsed > 1 {
-					r.Score = math.Min(100, r.Score+(elapsed*rate))
-					if elapsed > 24 {
-						r.ViolationCount = 0
-					}
-					r.LastEvent = time.Now()
-				}
+				r.recover(time.Now())
 
 				if r.Score >= 100 {
 					delete(shard.dirty, k)

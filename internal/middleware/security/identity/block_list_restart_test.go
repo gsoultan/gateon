@@ -23,7 +23,7 @@ func TestBlocksWrittenBeforeARestartAreRefusedWithTheDatabaseHung(t *testing.T) 
 	t.Setenv("GATEON_TRACE_DIR", filepath.Join(t.TempDir(), "traces"))
 	path := filepath.Join(t.TempDir(), "telemetry.db")
 	open := func() {
-		_ = telemetry.ClosePathStatsStore(t.Context())
+		_ = telemetry.ClosePathStatsStore(context.Background())
 		if err := telemetry.InitPathStatsStore(path, 1); err != nil {
 			t.Fatalf("init telemetry store: %v", err)
 		}

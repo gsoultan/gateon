@@ -14,9 +14,11 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/gsoultan/gateon/internal/config"
@@ -378,14 +380,31 @@ type tcpServer struct {
 
 // serve accepts until l is closed. A connection past the limit is closed at
 // once, so the loop never waits for a slot.
+//
+// Only a closed listener ends the loop. It used to return on any error from
+// Accept, and close the listener on its way out -- so when the process ran
+// out of file descriptors, which a connection flood reaches at the default
+// ulimit on the 2-core target, accept(2) failed with EMFILE once and the
+// entrypoint accepted nothing again for the life of the process, while every
+// other listener in it carried on. net/http's Serve backs off and retries a
+// temporary error; this does the same, from 5ms doubling to a second.
 func (s *tcpServer) serve(l net.Listener) {
 	defer l.Close()
+	var retry time.Duration
 	for {
 		conn, err := l.Accept()
 		if err != nil {
 			telemetry.GlobalDiagnostics.RecordEPError(s.ep.Id, err.Error())
-			return
+			if !transientAcceptError(err) {
+				return
+			}
+			retry = nextAcceptRetry(retry)
+			logger.L.LogWarn("TCP entrypoint accept failed; retrying",
+				"ep", s.ep.Id, "error", err, "retry_in", retry.String())
+			time.Sleep(retry)
+			continue
 		}
+		retry = 0
 		switch s.conns.add(conn) {
 		case refusedClosing:
 			_ = conn.Close()
@@ -398,10 +417,55 @@ func (s *tcpServer) serve(l net.Listener) {
 			lease := s.lease(conn)
 			s.wg.Go(func() {
 				defer lease.releaseUnlessHandedOff()
+				defer s.recoverConn(conn)
 				s.handle(conn, lease)
 			})
 		}
 	}
+}
+
+// transientAcceptError reports whether an Accept failure is one the next
+// Accept may not repeat: the process, or the system, out of file descriptors,
+// or a connection reset or aborted between the kernel's queue and ours. A
+// closed listener, or anything else, is final.
+func transientAcceptError(err error) bool {
+	if errors.Is(err, net.ErrClosed) {
+		return false
+	}
+	for _, e := range []error{syscall.EMFILE, syscall.ENFILE, syscall.ECONNABORTED, syscall.ECONNRESET} {
+		if errors.Is(err, e) {
+			return true
+		}
+	}
+	var ne net.Error
+	return errors.As(err, &ne) && ne.Timeout()
+}
+
+// nextAcceptRetry is the wait before the next Accept after one failed: net/http's
+// ladder, 5ms doubling to a second.
+func nextAcceptRetry(last time.Duration) time.Duration {
+	const first, ceiling = 5 * time.Millisecond, time.Second
+	if last == 0 {
+		return first
+	}
+	return min(last*2, ceiling)
+}
+
+// recoverConn is what stands between a panic serving one connection and the
+// end of the process. Each admitted connection is served on a goroutine of its
+// own, and a panic there -- in protocol detection, in a PROXY header, in the
+// proxy -- took the process with it, and every other connection on every
+// listener. net/http recovers a handler's panic, logs it with its stack and
+// closes that one connection; this does the same. The panic is still a bug,
+// and the log line says where.
+func (s *tcpServer) recoverConn(c net.Conn) {
+	r := recover()
+	if r == nil {
+		return
+	}
+	_ = c.Close()
+	logger.L.LogError("panic serving a TCP entrypoint connection; the connection is closed",
+		"ep", s.ep.Id, "remote", c.RemoteAddr().String(), "panic", r, "stack", string(debug.Stack()))
 }
 
 // handle serves one admitted connection: inspected on a plaintext

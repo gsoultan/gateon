@@ -241,7 +241,7 @@ func (rl *LocalRateLimiter) Handler(keyFunc func(*http.Request) string) func(htt
 			// so this used to tighten the limit for every client running the same
 			// browser as one bad actor -- a throttle applied to bystanders, and a
 			// cheaper attack than exhausting the limit honestly.
-			reputation := telemetry.GetReputation(telemetry.GetReputationID(r))
+			reputation := telemetry.ReputationOf(r)
 
 			limiter := rl.getLimiter(key, reputation)
 			if !limiter.Allow() {
@@ -378,7 +378,7 @@ func (rl *RedisRateLimiter) Handler(keyFunc func(*http.Request) string) func(htt
 			// so this used to tighten the limit for every client running the same
 			// browser as one bad actor -- a throttle applied to bystanders, and a
 			// cheaper attack than exhausting the limit honestly.
-			reputation := telemetry.GetReputation(telemetry.GetReputationID(r))
+			reputation := telemetry.ReputationOf(r)
 			adjLimit := int(float64(rl.rate+rl.burst) * (reputation * 0.01))
 			if adjLimit < 1 {
 				adjLimit = 1

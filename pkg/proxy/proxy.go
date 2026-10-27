@@ -377,6 +377,15 @@ func (h *ProxyHandler) rewriteRequest(pr *httputil.ProxyRequest, state *targetSt
 		return
 	}
 
+	// The gateway vouches for the headers below by setting them from what it
+	// observed. Each Set replaces only the canonical spelling, so first drop
+	// any underscore or dot alias the client sent: a backend that folds
+	// separators (PHP/CGI, WSGI, nginx) would otherwise read X_Real_IP or
+	// X_Forwarded_For as the gateway's value (CVE-2026-88879 class). Cheap on
+	// ordinary hyphenated headers -- the scan only folds a key that carries a
+	// '_' or '.'.
+	request.StripHeaderAliases(pr.Out.Header, gatewayAssertedHeaders...)
+
 	// 1. Copy essential headers and set forward headers
 	pr.Out.URL.Scheme = targetURL.Scheme
 	pr.Out.URL.Host = targetURL.Host
@@ -447,6 +456,23 @@ func (h *ProxyHandler) rewriteRequest(pr *httputil.ProxyRequest, state *targetSt
 // gatewayJA4Header is where the proxy tells a backend the client's HTTP
 // fingerprint.
 const gatewayJA4Header = kind.HeaderGatewayJA4
+
+// gatewayAssertedHeaders are the request headers the gateway sets from what it
+// observed, so a client-supplied alias of any of them must be stripped before
+// the request reaches a backend that folds header-name separators. X-Gateon-
+// Reputation and X-Gateon-Fingerprint are set by the WAF earlier in the chain;
+// they are listed here because the one place that sees the fully assembled
+// outbound request is this rewrite.
+var gatewayAssertedHeaders = []string{
+	"X-Real-IP",
+	"X-Forwarded-For",
+	"X-Forwarded-Host",
+	"X-Forwarded-Proto",
+	"X-Forwarded-Ssl",
+	gatewayJA4Header,
+	"X-Gateon-Reputation",
+	"X-Gateon-Fingerprint",
+}
 
 // setGatewayJA4 sets gatewayJA4Header from the fingerprint the gateway
 // computed, after removing any the client sent. The value is the gateway's to

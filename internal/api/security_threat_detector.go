@@ -271,7 +271,7 @@ func (d *SecurityThreatDetector) detectCoordinatedSequences(ctx context.Context,
 		}
 
 		// Suspicious paths in the sequence
-		suspiciousInSig := false
+		suspiciousInSig, trapInSig := false, false
 		var sigPaths []string
 		for _, h := range sig {
 			p, ok := data.PathMap[h]
@@ -285,6 +285,7 @@ func (d *SecurityThreatDetector) detectCoordinatedSequences(ctx context.Context,
 			}
 			for _, hp := range patterns.HoneypotPaths {
 				if lp == strings.ToLower(hp) {
+					trapInSig = true
 					score += 200
 					reasons = append(reasons, "contains honeypot path")
 					break
@@ -295,6 +296,18 @@ func (d *SecurityThreatDetector) detectCoordinatedSequences(ctx context.Context,
 		if suspiciousInSig {
 			score += 50
 			reasons = append(reasons, "contains suspicious paths")
+		}
+
+		// A crowd is not a campaign. Identical browsers following one flow
+		// is what a push notification, a newsletter or a sale produces: the
+		// same app on the same phones, through the same three pages, from
+		// addresses that are only a small share of a busy site's. Low
+		// identifier entropy multiplies the score; it is never the evidence.
+		// The sequence has to show what a campaign leaves behind -- a
+		// probed or trapped path, or members whose traffic mostly fails or
+		// was caught attacking (clusterHarm) -- or it is not reported.
+		if !suspiciousInSig && !trapInSig && !clusterHarm(data, slices.Collect(maps.Keys(stats.IPs))) {
+			continue
 		}
 
 		// Final detection threshold
@@ -363,7 +376,13 @@ func (d *SecurityThreatDetector) detectSharedBehavioralClusters(ctx context.Cont
 	}
 
 	for sig, ips := range signatures {
-		if len(ips) >= 4 {
+		// Every visitor of a single-page application requests the same
+		// handful of assets and endpoints, so four of them share a footprint
+		// by design. A distributed scan shares one too, and it is told apart
+		// by what the footprint did: a scan's requests fail, or were caught
+		// (clusterHarm). Without that this reported any four visitors of a
+		// SPA as a campaign and recommended blocking them.
+		if len(ips) >= 4 && clusterHarm(data, ips) {
 			pathCount := strings.Count(sig, "|") + 1
 			anomaly := &gateonv1.Anomaly{
 				Type:           "coordinated_attack",
@@ -383,6 +402,31 @@ func (d *SecurityThreatDetector) detectSharedBehavioralClusters(ctx context.Cont
 		}
 	}
 	return anomalies
+}
+
+// clusterHarm reports whether a set of addresses, taken together, show the harm
+// a campaign leaves: most of their traffic failing, in enough volume to be a
+// scan, or attacks the request path caught (attackEvidenceWeight). The bars
+// are harmEvidence's, pooled over the members: one member of a distributed
+// scan sends too little to qualify alone, which is the point of distributing
+// it, and the pool is what the scan adds up to. A member the window holds no
+// traces for weighs nothing.
+func clusterHarm(data *DiagnosticData, ips []string) bool {
+	var failures, attack, requests float64
+	for _, ip := range ips {
+		st := data.IPStats[ip]
+		if st == nil {
+			continue
+		}
+		failures += float64(st.Failures())
+		attack += st.AttackEvidence
+		requests += st.estimatedRequests(data.TraceSampleRate)
+	}
+	if requests <= 0 {
+		return false
+	}
+	return (failures >= harmMinFailures && failures/requests >= harmMinFailureShare) ||
+		(attack >= harmMinAttackWeight && attack/requests >= harmMinAttackShare)
 }
 
 func (d *SecurityThreatDetector) detectImpossibleTravel(ctx context.Context, data *DiagnosticData) []*gateonv1.Anomaly {
