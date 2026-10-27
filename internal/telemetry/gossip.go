@@ -109,7 +109,7 @@ func (d *ReputationDelegate) NotifyMsg(msg []byte) {
 		var payload gateonv1.ReputationSyncPayload
 		if err := json.Unmarshal(msg, &payload); err == nil {
 			// Apply the received reputation update locally.
-			ApplyRemoteReputation(payload.Fingerprint, payload.Score, int(payload.ViolationCount), payload.History)
+			applyRemoteReputation(&payload)
 		}
 	} else if _, ok := raw["source_node"]; ok {
 		var payload gateonv1.GraphEdgeSyncPayload
@@ -289,16 +289,21 @@ func joinGossipPeers(list *memberlist.Memberlist, peers []string) {
 	logger.L.LogInfo("Joined gossip cluster", "reached", reached, "configured", len(peers))
 }
 
+// BroadcastReputation gossips a score that names no offending address: a
+// release, or one a caller lowered with none to name. A peer reads it as
+// everyone's on the network.
 func BroadcastReputation(fingerprint string, score float64, violations int, history []string) {
-	if gossipManager == nil {
-		return
-	}
-
-	payload := &gateonv1.ReputationSyncPayload{
+	broadcastReputation(&gateonv1.ReputationSyncPayload{
 		Fingerprint:    fingerprint,
 		Score:          score,
 		ViolationCount: int32(violations),
 		History:        history,
+	})
+}
+
+func broadcastReputation(payload *gateonv1.ReputationSyncPayload) {
+	if gossipManager == nil {
+		return
 	}
 
 	data, err := json.Marshal(payload)
@@ -307,7 +312,7 @@ func BroadcastReputation(fingerprint string, score float64, violations int, hist
 	}
 
 	// Named by the identity, so a newer score replaces one still queued.
-	gossipManager.delegate.enqueue(fingerprint, data)
+	gossipManager.delegate.enqueue(payload.Fingerprint, data)
 }
 
 func GetGossipStatus() *gateonv1.GossipStatus {
