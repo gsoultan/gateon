@@ -11,7 +11,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { notifications } from "@mantine/notifications";
 import type { ListRoutesResponse, Route } from "../types/gateon";
 import { withRouteDisabled } from "../utils/routeCache";
-import { FormDrawer, PageHeader, useCreateFromLink } from "../components/layout";
+import { FloatingAction, FormDrawer, PageHeader, useCreateFromLink } from "../components/layout";
 
 const RouteForm = lazy(() => import("../components/RouteForm"));
 const RouteList = lazy(() => import("../components/RouteList"));
@@ -178,6 +178,8 @@ export default function RoutesPage() {
           readOnly={!canWrite}
         />
       </Suspense>
+
+      {canWrite && <FloatingAction label="New route" onClick={handleCreate} />}
 
       <FormDrawer
         opened={opened}

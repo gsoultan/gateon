@@ -13,7 +13,7 @@ import { useIsMobile } from "../hooks/useMobile";
 import { useAuthStore } from "../store/useAuthStore";
 import { usePreferencesStore } from "../store/usePreferencesStore";
 import { CommandPaletteProvider } from "./CommandPalette";
-import { AppHeader, AppNavbar, layoutClasses as classes, navSections } from "./layout";
+import { AppHeader, AppNavbar, MobileTabBar, layoutClasses as classes, navSections } from "./layout";
 
 const NAVBAR_WIDTH = 248;
 const NAVBAR_COLLAPSED_WIDTH = 72;
@@ -49,6 +49,7 @@ export function Shell() {
           breakpoint: "sm",
           collapsed: { mobile: !mobileOpened },
         }}
+        footer={{ height: 60, collapsed: !isMobile }}
         padding={{ base: "md", md: "xl" }}
         classNames={{ header: classes.header, navbar: classes.navbar, main: classes.main }}
       >
@@ -73,6 +74,12 @@ export function Shell() {
         <AppShell.Navbar>
           <AppNavbar sections={sections} expanded={expanded} isMobile={isMobile} version={status?.version} />
         </AppShell.Navbar>
+
+        {isMobile && (
+          <AppShell.Footer className={classes.mobileBar}>
+            <MobileTabBar onMore={toggleMobile} />
+          </AppShell.Footer>
+        )}
 
         <AppShell.Main id="main-content">
           <div className={classes.content}>

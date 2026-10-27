@@ -52,7 +52,7 @@ import {
   withoutRetiredKeys,
 } from "../components/MiddlewareConfig/middlewareConfigProblems";
 import { QueryError } from "../components/QueryError";
-import { FieldGrid, PageHeader } from "../components/layout";
+import { FieldGrid, FloatingAction, PageHeader } from "../components/layout";
 import { Term } from "../components/status";
 
 export default function MiddlewaresPage() {
@@ -378,6 +378,8 @@ export default function MiddlewaresPage() {
           </Group>
         )}
       </Card>
+
+      {canWrite && <FloatingAction label="New policy" onClick={startAdd} />}
 
       <Modal
         opened={opened}

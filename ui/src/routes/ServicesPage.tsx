@@ -14,7 +14,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { notifications } from '@mantine/notifications'
 import { QueryError } from "../components/QueryError";
 import { ConfirmDeleteModal } from "../components/ConfirmDelete";
-import { FormDrawer, PageHeader, useCreateFromLink } from "../components/layout";
+import { FloatingAction, FormDrawer, PageHeader, useCreateFromLink } from "../components/layout";
 import { StatusChip, circuitState, ratioState } from "../components/status";
 import { useAllRouteStats } from "../hooks/useRouteStats";
 import { CircuitEvents } from "../components/Services/CircuitEvents";
@@ -376,6 +376,8 @@ export default function ServicesPage() {
           )}
         </Stack>
       </Card>
+
+      {canWrite && <FloatingAction label="New service" onClick={handleCreate} />}
 
       <CircuitEvents />
 

@@ -47,7 +47,7 @@ import { EntryPointForm } from "../components/EntryPointForm";
 import type { EntryPoint } from "../types/gateon";
 import { QueryError } from "../components/QueryError";
 import { ConfirmDeleteModal } from "../components/ConfirmDelete";
-import { FormDrawer, PageHeader } from "../components/layout";
+import { FloatingAction, FormDrawer, PageHeader } from "../components/layout";
 import { Term } from "../components/status";
 
 export default function EntryPointsPage() {
@@ -442,6 +442,8 @@ export default function EntryPointsPage() {
         onCancel={() => setPendingDelete(null)}
         onConfirm={() => pendingDelete && deleteMutation.mutate(pendingDelete.id)}
       />
+
+      {canWrite && <FloatingAction label="New listener" onClick={handleCreate} />}
 
       <FormDrawer
         opened={opened}
