@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
 // SPDX-License-Identifier: MIT
 
-import { Card, Title, Text, Stack, TextInput, NumberInput, Button, Group, Divider, Switch, Alert, Select, TagsInput } from "@mantine/core";
+import { Card, Title, Text, Stack, TextInput, NumberInput, Group, Divider, Switch, Alert, Select, TagsInput } from "@mantine/core";
 import { IconCheck, IconCpu, IconAlertTriangle } from "@tabler/icons-react";
 import type { EbpfConfig } from "../../../types/gateon";
 import { useNetworkInterfaces } from "../../../hooks/useNetworkInterfaces";
@@ -12,15 +12,12 @@ interface EbpfSettingsCardProps {
   ebpf: EbpfConfig | undefined;
   onChange: (ebpf: EbpfConfig) => void;
   disabled: boolean;
-  canEdit: boolean;
-  saving: boolean;
-  onSave: () => void;
 }
 
 // Kernel offload: XDP/TC programs, port knocking and the kernel-level
 // management allowlist. The interface list and attach status are polled only
 // while this card is showing.
-export function EbpfSettingsCard({ ebpf, onChange, disabled, canEdit, saving, onSave }: EbpfSettingsCardProps) {
+export function EbpfSettingsCard({ ebpf, onChange, disabled }: EbpfSettingsCardProps) {
   const { data: netInfo, isError: netInfoError } = useNetworkInterfaces();
   // The kernel-side management allowlist and port knocking, and switching off
   // or moving the programs that carry them, are administrator-only (ADR 0040);
@@ -187,13 +184,6 @@ export function EbpfSettingsCard({ ebpf, onChange, disabled, canEdit, saving, on
                   up empty, kernel filtering stays off rather than locking everyone out.
                 </Alert>
               </>
-            )}
-            {canEdit && (
-              <Group justify="flex-end" mt="md">
-                <Button onClick={onSave} loading={saving} size="sm">
-                  Save eBPF Settings
-                </Button>
-              </Group>
             )}
           </Stack>
         )}

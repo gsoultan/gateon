@@ -7,6 +7,6 @@ export { PageHeader } from "./PageHeader";
 export { FieldGrid, FormSection } from "./FormSection";
 export { FormDrawer, type FormDrawerWidth } from "./FormDrawer";
 export { FormActions } from "./FormActions";
-export { CREATE_SEARCH, useCreateFromLink } from "./createLink";
+export { CREATE_SEARCH, linkSearch, useCreateFromLink } from "./createLink";
 export { isActivePath, navSections, type NavItem, type NavSection } from "./navigation";
 export { default as layoutClasses } from "./layout.module.css";

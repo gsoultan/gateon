@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
 // SPDX-License-Identifier: MIT
 
-import { Card, Title, Text, Stack, TextInput, NumberInput, Button, Group, Switch } from "@mantine/core";
+import { Card, Title, Text, Stack, TextInput, NumberInput, Group, Switch } from "@mantine/core";
 import { IconServer } from "@tabler/icons-react";
 import type { HaConfig } from "../../../types/gateon";
 
@@ -9,13 +9,10 @@ interface HighAvailabilityCardProps {
   ha: HaConfig | undefined;
   onChange: (ha: HaConfig) => void;
   disabled: boolean;
-  canEdit: boolean;
-  saving: boolean;
-  onSave: () => void;
 }
 
 // Active-passive failover between gateways sharing a virtual IP.
-export function HighAvailabilityCard({ ha, onChange, disabled, canEdit, saving, onSave }: HighAvailabilityCardProps) {
+export function HighAvailabilityCard({ ha, onChange, disabled }: HighAvailabilityCardProps) {
   return (
     <Card withBorder shadow="sm" radius="md">
       <Stack gap="md">
@@ -78,13 +75,6 @@ export function HighAvailabilityCard({ ha, onChange, disabled, canEdit, saving, 
               onChange={(e) => onChange({...ha!, virtualIps: e.currentTarget.value.split(",").map(s => s.trim()).filter(Boolean)})}
               disabled={disabled}
             />
-            {canEdit && (
-              <Group justify="flex-end" mt="md">
-                <Button onClick={onSave} loading={saving} size="sm">
-                  Save HA Settings
-                </Button>
-              </Group>
-            )}
           </Stack>
         )}
       </Stack>

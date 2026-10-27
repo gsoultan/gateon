@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 import { useEffect, useMemo, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { EFFECTIVE_WAF_QUERY_KEY } from "../../../hooks/useEffectiveWaf";
 import { notifications } from "@mantine/notifications";
 import { IconShieldCheck, IconX } from "@tabler/icons-react";
 import { usePermissions } from "../../../hooks/usePermissions";
@@ -135,7 +137,7 @@ function useClamavLifecycle() {
 // used to replace log and transport outright, so applying one and saving
 // reset every retention period, the trace archive settings and the
 // transport timeouts it never mentioned to their defaults.
-function withPreset(config: GlobalConfig, preset: SettingsPreset): GlobalConfig {
+export function withPreset(config: GlobalConfig, preset: SettingsPreset): GlobalConfig {
   const tls = config.tls || { enabled: false };
   const redis = config.redis || { enabled: false };
   const otel = config.otel || { enabled: false };
@@ -215,6 +217,7 @@ export function useSettingsState(): SettingsState {
   const [savedOk, setSavedOk] = useState(false);
   const [generalSavedOk, setGeneralSavedOk] = useState(false);
   const clamav = useClamavLifecycle();
+  const queryClient = useQueryClient();
 
   useEffect(() => {
     // Fetch current global config
@@ -269,6 +272,9 @@ export function useSettingsState(): SettingsState {
       if (!res.ok) throw new Error(getApiErrorMessage(new Error(await res.text())) || `HTTP ${res.status}`);
       setSavedConfig(config);
       setSavedOk(true);
+      // What the running WAF does can change with any save; the WAF card
+      // used to do this itself from its own Save button.
+      await queryClient.invalidateQueries({ queryKey: EFFECTIVE_WAF_QUERY_KEY });
     } catch (e: unknown) {
       setError(errorMessage(e) || "Failed to save configuration");
     } finally {

@@ -2,35 +2,29 @@
 // SPDX-License-Identifier: MIT
 
 import { Stack } from "@mantine/core";
-import { PresetsCard } from "../PresetsCard";
+import { SettingsEntry } from "../AppliesChip";
 import { GatewayConfigCard } from "../gateway/GatewayConfigCard";
 import { PerformanceEnvCard } from "../gateway/PerformanceEnvCard";
-import { TraceArchiveSettingsCard } from "../../Traces/TraceArchiveSettingsCard";
-import { ThreatArchiveSettingsCard } from "../ThreatArchiveSettingsCard";
+import { PresetsCard } from "../PresetsCard";
 import type { SettingsTabProps } from "./settingsState";
 
-// Server-wide settings: TLS, Redis, transport, telemetry, the management API,
-// logging and retention, and the presets that fill them.
+// TLS, transports, the management API and sign-in; the presets that set
+// several of them at once; and the environment the process was started with.
 export default function GatewayTab({ settings }: SettingsTabProps) {
   const { config, setConfig, formDisabled } = settings;
   return (
     <Stack gap="xl">
-      <PresetsCard disabled={formDisabled} onApply={settings.applyPreset} />
+      <SettingsEntry id="presets" applies="now">
+        <PresetsCard config={config} disabled={formDisabled} onApply={settings.applyPreset} />
+      </SettingsEntry>
 
-      <GatewayConfigCard
-        config={config}
-        onChange={setConfig}
-        disabled={formDisabled}
-        canEdit={settings.canEditGlobal}
-        saving={settings.saving}
-        onSave={settings.saveGatewayConfig}
-      />
+      <SettingsEntry id="gateway" applies="connections">
+        <GatewayConfigCard config={config} onChange={setConfig} disabled={formDisabled} />
+      </SettingsEntry>
 
-      <PerformanceEnvCard />
-
-      <TraceArchiveSettingsCard config={config} onChange={setConfig} disabled={formDisabled} />
-
-      <ThreatArchiveSettingsCard config={config} onChange={setConfig} disabled={formDisabled} />
+      <SettingsEntry id="environment" applies="restart">
+        <PerformanceEnvCard />
+      </SettingsEntry>
     </Stack>
   );
 }
