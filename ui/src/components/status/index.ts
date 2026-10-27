@@ -4,3 +4,4 @@
 export { StatusChip } from "./StatusChip";
 export { STATUS_CHIP, circuitState, ratioState, wafModeState, type StatusState } from "./statusState";
 export { Term } from "./Term";
+export { StatTile } from "./StatTile";
