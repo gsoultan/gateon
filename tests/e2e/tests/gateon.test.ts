@@ -23,28 +23,28 @@ test.describe('Gateon Comprehensive E2E', () => {
     };
 
     await navigate('/');
-    await expect(page.getByText(/System Health/i)).toBeVisible({ timeout: 30000 });
-    await expect(page.getByText(/TRAFFIC METRICS/i)).toBeVisible();
+    await expect(page.getByText('Traffic now', { exact: true })).toBeVisible({ timeout: 30000 });
+    await expect(page.getByText('Needs attention', { exact: true })).toBeVisible();
 
-    // Security Hub
-    console.log('Navigating to Security Hub...');
+    // Security
+    console.log('Navigating to Security...');
     try {
-        await page.getByRole('link', { name: /Security Hub/i }).click();
-        await expect(page.getByText(/Security Hub/i).first()).toBeVisible({ timeout: 40000 });
+        await page.getByRole('link', { name: 'Security', exact: true }).click();
+        await expect(page.getByRole('heading', { name: 'Security', level: 2 })).toBeVisible({ timeout: 40000 });
     } catch (e) {
-        console.warn('Security Hub Navigation via click failed, trying goto...');
-        await page.goto('/security-center', { waitUntil: 'domcontentloaded', timeout: 40000 });
-        await expect(page.getByText(/Security Hub/i).first()).toBeVisible({ timeout: 20000 });
+        console.warn('Security navigation via click failed, trying goto...');
+        await page.goto('/security', { waitUntil: 'domcontentloaded', timeout: 40000 });
+        await expect(page.getByRole('heading', { name: 'Security', level: 2 })).toBeVisible({ timeout: 20000 });
     }
     
     // Diagnostics
     console.log('Navigating to Diagnostics...');
     try {
         await page.getByRole('link', { name: /Diagnostics/i }).click();
-        await expect(page.getByText(/Diagnostics & Connectivity/i).first()).toBeVisible({ timeout: 30000 });
+        await expect(page.getByRole('heading', { name: 'Diagnostics', level: 2 })).toBeVisible({ timeout: 30000 });
     } catch (e) {
         await navigate('/diagnostics');
-        await expect(page.getByText(/Diagnostics & Connectivity/i).first()).toBeVisible({ timeout: 20000 });
+        await expect(page.getByRole('heading', { name: 'Diagnostics', level: 2 })).toBeVisible({ timeout: 20000 });
     }
 
     // Traces
@@ -117,8 +117,8 @@ test.describe('Gateon Comprehensive E2E', () => {
     const xssResp = await request.get('http://localhost:8081/test?q=<script>alert(1)</script>');
     expect(xssResp.status()).toBe(403);
 
-    // Verify threats appear in Security Hub
-    await page.goto('/security-center');
+    // Verify threats appear on the Security page
+    await page.goto('/security?tab=threats');
     await page.reload();
     // We expect some threats to be logged. Depending on how fast they are processed
     // it might take a few seconds.
@@ -156,7 +156,8 @@ test.describe('Gateon Comprehensive E2E', () => {
   });
 
   test('Dashboard Realtime and Accuracy', async ({ page, request }) => {
-    // The "Requests / 24h" card shows the metrics snapshot: fetched once when
+    // The "Requests / 24h" card, on the Metrics page's Traffic tab, shows the
+    // metrics snapshot: fetched once when
     // the page loads, then pushed over /v1/watch on every telemetry refresh.
     // This used to check that a chart surface existed, which it does with no
     // traffic at all, so it passed whether or not anything on the page moved.
@@ -164,7 +165,7 @@ test.describe('Gateon Comprehensive E2E', () => {
     // loaded.
     const firstSnapshot = page.waitForResponse(
       (r) => r.url().includes('/v1/diag/metrics') && r.request().method() === 'GET');
-    await page.goto('/', { waitUntil: 'load' });
+    await page.goto('/metrics-dashboard?tab=traffic', { waitUntil: 'load' });
     const loaded = Number((await (await firstSnapshot).json()).goldenSignals?.requestsToday ?? 0);
     const card = page.getByText('Requests / 24h', { exact: true })
       .locator('xpath=following-sibling::*[1]');

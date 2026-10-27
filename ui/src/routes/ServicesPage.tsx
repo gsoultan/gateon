@@ -14,7 +14,11 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { notifications } from '@mantine/notifications'
 import { QueryError } from "../components/QueryError";
 import { ConfirmDeleteModal } from "../components/ConfirmDelete";
-import { FormDrawer, PageHeader, useCreateFromLink } from "../components/layout";
+import { FloatingAction, FormDrawer, PageHeader, useCreateFromLink } from "../components/layout";
+import { StatusChip, circuitState, ratioState } from "../components/status";
+import { useAllRouteStats } from "../hooks/useRouteStats";
+import { CircuitEvents } from "../components/Services/CircuitEvents";
+import type { TargetStats } from "../types/gateon";
 
 export default function ServicesPage() {
   const { canWrite } = usePermissions()
@@ -34,6 +38,13 @@ export default function ServicesPage() {
       return next
     })
   }
+
+  // Every route's target stats, keyed by target URL: a service's targets are
+  // reached through the routes that name it, and the circuit the gateway keeps
+  // per target is what the Circuit Breaker page used to show on its own.
+  const { data: routeStats } = useAllRouteStats()
+  const statsByUrl = new Map<string, TargetStats>()
+  for (const targets of Object.values(routeStats ?? {})) for (const t of targets) statsByUrl.set(t.url, t)
 
   const { data, isLoading, isError, error, refetch } = useServices({
     page: page - 1,
@@ -227,7 +238,7 @@ export default function ServicesPage() {
                   <Table.Th>Service</Table.Th>
                   <Table.Th>Targets</Table.Th>
                   <Table.Th>Policy</Table.Th>
-                  <Table.Th>Health</Table.Th>
+                  <Table.Th>Status</Table.Th>
                   <Table.Th w={80}>Actions</Table.Th>
                 </Table.Tr>
               </Table.Thead>
@@ -256,6 +267,9 @@ export default function ServicesPage() {
                   const isExpanded = expandedIds.has(s.id);
                   const firstTarget = targets[0]?.url || '';
                   const hasMore = targets.length > 1;
+                  const known = targets.map((t: { url: string }) => statsByUrl.get(t.url)).filter((t): t is TargetStats => !!t);
+                  const up = known.filter((t) => t.alive && t.circuitState !== 'open').length;
+                  const health = known.length === 0 ? ratioState(undefined, undefined) : ratioState(up, known.length);
                   return (
                     <Fragment key={s.id}>
                       <Table.Tr>
@@ -265,7 +279,7 @@ export default function ServicesPage() {
                               variant="subtle"
                               size="sm"
                               onClick={() => toggleExpand(s.id)}
-                              style={{ visibility: hasMore ? 'visible' : 'hidden' }}
+                              aria-label={isExpanded ? 'Hide targets' : 'Show targets'}
                             >
                               {isExpanded ? <IconChevronDown size={14} /> : <IconChevronRight size={14} />}
                             </ActionIcon>
@@ -297,7 +311,11 @@ export default function ServicesPage() {
                           </Text>
                         </Table.Td>
                         <Table.Td>
-                          <Text size="xs" c="dimmed">{s.healthCheckPath || '—'}</Text>
+                          <StatusChip
+                            state={health.state}
+                            label={health.label}
+                            reason={known.length === 0 ? 'No route sends traffic here yet' : `${up} of ${known.length} targets taking traffic`}
+                          />
                         </Table.Td>
                         <Table.Td>
                           {canWrite && (
@@ -316,19 +334,24 @@ export default function ServicesPage() {
                           )}
                         </Table.Td>
                       </Table.Tr>
-                      {isExpanded && hasMore && (
+                      {isExpanded && (
                         <Table.Tr>
-                          <Table.Td colSpan={6} py="xs" style={{ backgroundColor: 'var(--mantine-color-dark-7)' }}>
+                          <Table.Td colSpan={6} py="xs" style={{ backgroundColor: 'var(--mantine-color-default-hover)' }}>
                             <Stack gap={6} pl="md">
-                              <Text size="xs" fw={600} c="dimmed">All targets</Text>
-                              {targets.map((t: any, i: number) => (
-                                <Group key={i} gap="sm">
-                                  <Text size="xs" ff="monospace" c="dimmed">
-                                    {t.url}
-                                  </Text>
-                                  <Badge variant="outline" size="xs">weight {t.weight}</Badge>
-                                </Group>
-                              ))}
+                              <Text size="xs" fw={600} c="dimmed">Targets</Text>
+                              {targets.map((t: { url: string; weight?: number }, i: number) => {
+                                const st = statsByUrl.get(t.url);
+                                const circuit = st ? (st.alive || st.circuitState === 'open' ? circuitState(st.circuitState ?? 'closed') : { state: 'down' as const, label: 'Down' }) : { state: 'unknown' as const, label: 'Unknown' };
+                                return (
+                                  <Group key={i} gap="sm" wrap="nowrap">
+                                    <Text size="xs" ff="monospace" c="dimmed" style={{ minWidth: 0 }} truncate>
+                                      {t.url}
+                                    </Text>
+                                    <Badge variant="outline" size="xs">weight {t.weight}</Badge>
+                                    <StatusChip state={circuit.state} label={circuit.label} size="xs" reason={st ? `${st.requestCount} requests, ${st.errorCount} errors, ${st.activeConn} open` : 'No traffic has reached this target through a route yet'} />
+                                  </Group>
+                                );
+                              })}
                             </Stack>
                           </Table.Td>
                         </Table.Tr>
@@ -353,6 +376,10 @@ export default function ServicesPage() {
           )}
         </Stack>
       </Card>
+
+      {canWrite && <FloatingAction label="New service" onClick={handleCreate} />}
+
+      <CircuitEvents />
 
       <ConfirmDeleteModal
         target={pendingDelete ? { kind: 'service', name: pendingDelete.name || pendingDelete.id, id: pendingDelete.id } : null}

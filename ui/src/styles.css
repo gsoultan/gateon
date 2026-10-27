@@ -127,3 +127,20 @@ body {
     padding: var(--mantine-spacing-sm) !important;
   }
 }
+
+/* A finger is wider than a pointer: on a touch screen every control is at
+   least 44 px tall, the size a thumb hits reliably. */
+@media (pointer: coarse) {
+  .mantine-Button-root:not([data-size^="compact"]),
+  .mantine-ActionIcon-root,
+  .mantine-NavLink-root,
+  .mantine-Tabs-tab,
+  .mantine-Menu-item,
+  .mantine-Checkbox-input,
+  .mantine-Switch-track {
+    min-height: 44px;
+  }
+  .mantine-ActionIcon-root {
+    min-width: 44px;
+  }
+}

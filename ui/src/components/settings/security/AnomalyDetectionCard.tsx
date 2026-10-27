@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
 // SPDX-License-Identifier: MIT
 
-import { Card, Title, Text, Stack, NumberInput, Button, Group, Switch } from "@mantine/core";
+import { Card, Title, Text, Stack, NumberInput, Group, Switch } from "@mantine/core";
 import { IconActivity } from "@tabler/icons-react";
 import type { AnomalyDetectionConfig } from "../../../types/gateon";
 
@@ -9,13 +9,10 @@ interface AnomalyDetectionCardProps {
   anomalyDetection: AnomalyDetectionConfig | undefined;
   onChange: (anomalyDetection: AnomalyDetectionConfig) => void;
   disabled: boolean;
-  canEdit: boolean;
-  saving: boolean;
-  onSave: () => void;
 }
 
 // In-process detection of unusual traffic patterns.
-export function AnomalyDetectionCard({ anomalyDetection, onChange, disabled, canEdit, saving, onSave }: AnomalyDetectionCardProps) {
+export function AnomalyDetectionCard({ anomalyDetection, onChange, disabled }: AnomalyDetectionCardProps) {
   return (
     <Card withBorder shadow="sm" radius="md">
       <Stack gap="md">
@@ -74,13 +71,6 @@ export function AnomalyDetectionCard({ anomalyDetection, onChange, disabled, can
                 disabled={disabled}
               />
             </Group>
-            {canEdit && (
-              <Group justify="flex-end" mt="md">
-                <Button onClick={onSave} loading={saving} size="sm">
-                  Save Anomaly Settings
-                </Button>
-              </Group>
-            )}
           </Stack>
         )}
       </Stack>

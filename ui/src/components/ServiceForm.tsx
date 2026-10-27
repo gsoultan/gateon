@@ -567,7 +567,13 @@ export function ServiceForm({
 
         <Divider />
 
-        <FormSection title="Health checks" description="How the gateway decides a target can take traffic.">
+        <FormSection
+          title="Health checks"
+          description="How the gateway decides a target can take traffic."
+          collapsible
+          defaultOpen={!!(initialData?.healthCheckPath || initialData?.healthCheckType)}
+          summary={initialData?.healthCheckPath ? `Probing ${initialData.healthCheckPath}` : "Detected from the protocol"}
+        >
           <form.Subscribe
             selector={(s) => s.values.backendType}
             children={(backendType) =>
@@ -810,7 +816,13 @@ export function ServiceForm({
 
         <Divider />
 
-        <FormSection title="Backend TLS" description="Client certificates the gateway presents to these targets.">
+        <FormSection
+          title="Backend TLS"
+          description="Client certificates the gateway presents to these targets."
+          collapsible
+          defaultOpen={!!initialData?.tlsClientConfig?.enabled}
+          summary={initialData?.tlsClientConfig?.enabled ? "Client certificate on" : "Off"}
+        >
           <Paper withBorder p="md" radius="md">
             <Stack gap="md">
               <Group justify="space-between" align="center">

@@ -26,9 +26,6 @@ const render = () =>
           waf={{ enabled: true, paranoiaLevel: 1, categories: { sqli: false } }}
           onChange={() => {}}
           disabled={false}
-          canEdit
-          saving={false}
-          onSave={() => {}}
           status={undefined}
           installing={false}
           uninstalling={false}

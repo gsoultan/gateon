@@ -20,28 +20,22 @@ import { RouteErrorComponent, RouteFallback } from "./components/ErrorBoundary";
 import { useAuthStore } from "./store/useAuthStore";
 import { asSearchString } from "./hooks/useUrlFilters";
 import { apiFetch, restoreSessionFromCookie } from "./hooks/http";
+import { LEGACY_PATHS } from "./components/layout/legacyPaths";
 
 const Dashboard = lazy(() => import("./routes/Dashboard"));
 const RoutesPage = lazy(() => import("./routes/RoutesPage"));
 const ServicesPage = lazy(() => import("./routes/ServicesPage"));
 const LogsPage = lazy(() => import("./routes/LogsPage"));
-const PathMetricsPage = lazy(() => import("./routes/PathMetricsPage"));
-const CertificatesPage = lazy(() => import("./routes/CertificatesPage"));
-const ClientAuthoritiesPage = lazy(() => import("./routes/ClientAuthoritiesPage"));
 const EntryPointsPage = lazy(() => import("./routes/EntryPointsPage"));
 const MiddlewaresPage = lazy(() => import("./routes/MiddlewaresPage"));
-const TLSOptionsPage = lazy(() => import("./routes/TLSOptionsPage"));
 const SettingsPage = lazy(() => import("./routes/SettingsPage"));
 const ProfilePage = lazy(() => import("./routes/ProfilePage"));
-const UsersPage = lazy(() => import("./routes/UsersPage"));
-const ApiTokensPage = lazy(() => import("./routes/ApiTokensPage"));
-const CircuitBreakerPage = lazy(() => import("./routes/CircuitBreakerPage"));
 const DocsPage = lazy(() => import("./routes/DocsPage"));
 const LoginPage = lazy(() => import("./routes/LoginPage"));
 const SetupPage = lazy(() => import("./routes/SetupPage"));
-const TopologyPage = lazy(() => import("./routes/TopologyPage"));
 const SecurityCommandCenter = lazy(() => import("./routes/SecurityCommandCenter"));
-const ClamAVPage = lazy(() => import("./routes/ClamAVPage"));
+const TLSPage = lazy(() => import("./routes/TLSPage"));
+const AccessPage = lazy(() => import("./routes/AccessPage"));
 const TracesPage = lazy(() => import("./routes/TracesPage"));
 const MetricsPage = lazy(() => import("./routes/MetricsPage"));
 const DiagnosticsPage = lazy(() => import("./routes/DiagnosticsPage"));
@@ -134,6 +128,11 @@ const authenticatedRoute = createRoute({
 const indexRoute = createRoute({
   getParentRoute: () => authenticatedRoute,
   path: "/",
+  // The Overview's open tab (Map holds the topology graph), so /topology
+  // bookmarks and a reload land on it.
+  validateSearch: (search: Record<string, unknown>): { tab?: string } => ({
+    tab: asSearchString(search.tab),
+  }),
   component: () => <Dashboard />,
 });
 
@@ -156,40 +155,16 @@ const logsRoute = createRoute({
   component: () => <LogsPage />,
 });
 
-const pathMetricsRoute = createRoute({
+const listenersRoute = createRoute({
   getParentRoute: () => authenticatedRoute,
-  path: "/path-metrics",
-  component: () => <PathMetricsPage />,
-});
-
-const certificatesRoute = createRoute({
-  getParentRoute: () => authenticatedRoute,
-  path: "/certificates",
-  component: () => <CertificatesPage />,
-});
-
-const clientAuthoritiesRoute = createRoute({
-  getParentRoute: () => authenticatedRoute,
-  path: "/client-authorities",
-  component: () => <ClientAuthoritiesPage />,
-});
-
-const entryPointsRoute = createRoute({
-  getParentRoute: () => authenticatedRoute,
-  path: "/entryPoints",
+  path: "/listeners",
   component: () => <EntryPointsPage />,
 });
 
-const middlewaresRoute = createRoute({
+const policiesRoute = createRoute({
   getParentRoute: () => authenticatedRoute,
-  path: "/middlewares",
+  path: "/policies",
   component: () => <MiddlewaresPage />,
-});
-
-const tlsOptionsRoute = createRoute({
-  getParentRoute: () => authenticatedRoute,
-  path: "/tls-options",
-  component: () => <TLSOptionsPage />,
 });
 
 const settingsRoute = createRoute({
@@ -197,8 +172,11 @@ const settingsRoute = createRoute({
   path: "/settings",
   // The open tab, so a link can land on the card it names and a reload keeps
   // it; SettingsPage treats anything it does not know as General.
-  validateSearch: (search: Record<string, unknown>): { tab?: string } => ({
+  validateSearch: (search: Record<string, unknown>): { tab?: string; section?: string; q?: string } => ({
     tab: asSearchString(search.tab),
+    // The setting row a link points at, and the search box's text.
+    section: asSearchString(search.section),
+    q: asSearchString(search.q),
   }),
   component: () => <SettingsPage />,
 });
@@ -209,50 +187,63 @@ const profileRoute = createRoute({
   component: () => <ProfilePage />,
 });
 
-const usersRoute = createRoute({
-  getParentRoute: () => authenticatedRoute,
-  path: "/users",
-  component: () => <UsersPage />,
-});
-
-const apiTokensRoute = createRoute({
-  getParentRoute: () => authenticatedRoute,
-  path: "/api-tokens",
-  component: () => <ApiTokensPage />,
-});
-
-const circuitBreakerRoute = createRoute({
-  getParentRoute: () => authenticatedRoute,
-  path: "/circuit-breaker",
-  component: () => <CircuitBreakerPage />,
-});
-
 const docsRoute = createRoute({
   getParentRoute: () => authenticatedRoute,
   path: "/docs",
   component: () => <DocsPage />,
 });
 
-const topologyRoute = createRoute({
+const securityRoute = createRoute({
   getParentRoute: () => authenticatedRoute,
-  path: "/topology",
-  component: () => <TopologyPage />,
-});
-
-const securityCommandCenterRoute = createRoute({
-  getParentRoute: () => authenticatedRoute,
-  path: "/security-center",
+  path: "/security",
+  // The open tab, the Threats tab's view and whether the advisory panel is
+  // open, so a link or a reload lands on the same view.
+  validateSearch: (search: Record<string, unknown>): { tab?: string; view?: string; advisory?: string } => ({
+    tab: asSearchString(search.tab),
+    view: asSearchString(search.view),
+    // "1" comes back from the URL as the number 1, so it is read as text.
+    advisory: search.advisory == null ? undefined : String(search.advisory),
+  }),
   component: () => <SecurityCommandCenter />,
 });
 
-// The route exists whether or not ClamAV is installed. Only the nav entry is
-// conditional: a bookmark, or the link in a "malware protection degraded"
-// alert, has to land somewhere that explains itself and offers the install.
-const clamavRoute = createRoute({
+// Certificates, client CAs and TLS profiles are three tabs of one page; the
+// three old pages redirect to their tab.
+const tlsRoute = createRoute({
   getParentRoute: () => authenticatedRoute,
-  path: "/clamav",
-  component: () => <ClamAVPage />,
+  path: "/tls",
+  validateSearch: (search: Record<string, unknown>): { tab?: string } => ({
+    tab: asSearchString(search.tab),
+  }),
+  component: () => <TLSPage />,
 });
+
+// Users and API tokens, for administrators.
+const accessRoute = createRoute({
+  getParentRoute: () => authenticatedRoute,
+  path: "/access",
+  validateSearch: (search: Record<string, unknown>): { tab?: string } => ({
+    tab: asSearchString(search.tab),
+  }),
+  component: () => <AccessPage />,
+});
+
+// Every path the redesign retired or renamed still answers: it redirects to
+// the page that replaced it, keeping the search and adding the tab the old
+// page became, so bookmarks, alert links and the docs keep working.
+const legacyRoutes = Object.entries(LEGACY_PATHS).map(([from, target]) =>
+  createRoute({
+    getParentRoute: () => authenticatedRoute,
+    path: from,
+    beforeLoad: ({ search }) => {
+      throw redirect({
+        to: target.to,
+        search: { ...(search as Record<string, unknown>), ...target.search },
+        replace: true,
+      });
+    },
+  }),
+);
 
 const tracesRoute = createRoute({
   getParentRoute: () => authenticatedRoute,
@@ -277,6 +268,9 @@ const tracesRoute = createRoute({
 const metricsRoute = createRoute({
   getParentRoute: () => authenticatedRoute,
   path: "/metrics-dashboard",
+  validateSearch: (search: Record<string, unknown>): { tab?: string } => ({
+    tab: asSearchString(search.tab),
+  }),
   component: () => <MetricsPage />,
 });
 
@@ -302,26 +296,20 @@ const routeTree = rootRoute.addChildren([
     indexRoute,
     routesRoute,
     servicesRoute,
+    listenersRoute,
+    policiesRoute,
+    securityRoute,
+    tlsRoute,
     logsRoute,
-    pathMetricsRoute,
-    circuitBreakerRoute,
-    docsRoute,
-    certificatesRoute,
-    clientAuthoritiesRoute,
-    entryPointsRoute,
-    middlewaresRoute,
-    tlsOptionsRoute,
-    settingsRoute,
-    profileRoute,
-    usersRoute,
-    apiTokensRoute,
-    topologyRoute,
-    securityCommandCenterRoute,
-    clamavRoute,
     tracesRoute,
     metricsRoute,
-    diagnosticsRoute,
+    settingsRoute,
+    accessRoute,
     auditLogsRoute,
+    diagnosticsRoute,
+    profileRoute,
+    docsRoute,
+    ...legacyRoutes,
   ]),
 ]);
 

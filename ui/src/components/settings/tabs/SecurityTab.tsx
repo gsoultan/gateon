@@ -2,63 +2,53 @@
 // SPDX-License-Identifier: MIT
 
 import { Stack } from "@mantine/core";
-import { AccessControlCard } from "../security/AccessControlCard";
-import { WafSettingsCard } from "../security/WafSettingsCard";
-import { AnomalyDetectionCard } from "../security/AnomalyDetectionCard";
+import { SettingsEntry } from "../AppliesChip";
 import { GeoIPSettingsCard } from "../GeoIPSettingsCard";
+import { AccessControlCard } from "../security/AccessControlCard";
+import { AnomalyDetectionCard } from "../security/AnomalyDetectionCard";
+import { WafSettingsCard } from "../security/WafSettingsCard";
 import { SecurityAdvancedSettingsCard } from "../SecurityAdvancedSettingsCard";
-import { AlertingSettingsCard } from "../AlertingSettingsCard";
-import { AuditSettingsCard } from "../AuditSettingsCard";
-import { AISettingsCard } from "../AISettingsCard";
 import type { SettingsTabProps } from "./settingsState";
 
-// Access control, the global WAF, detection, GeoIP, advanced protections,
-// alerting, the forensic audit log and the AI provider that narrates the
-// advisory.
+// Access control, the global WAF and the malware scanner inside it,
+// detection, GeoIP and the advanced protections. Every card here applies
+// when saved: the WAF cache and the routes are rebuilt on the save.
 export default function SecurityTab({ settings }: SettingsTabProps) {
-  const { config, setConfig, formDisabled, canEditGlobal, saving, saveGatewayConfig } = settings;
+  const { config, setConfig, formDisabled } = settings;
   return (
     <Stack gap="xl">
-      <AccessControlCard />
+      <SettingsEntry id="access" applies="now">
+        <AccessControlCard />
+      </SettingsEntry>
 
-      <WafSettingsCard
-        waf={config.waf}
-        onChange={(waf) => setConfig({ ...config, waf })}
-        disabled={formDisabled}
-        canEdit={canEditGlobal}
-        saving={saving}
-        onSave={saveGatewayConfig}
-        status={settings.status}
-        installing={settings.installing}
-        uninstalling={settings.uninstalling}
-        onInstall={settings.installClamav}
-        onUninstall={settings.uninstallClamav}
-      />
+      <SettingsEntry id="waf" applies="now">
+        <WafSettingsCard
+          waf={config.waf}
+          onChange={(waf) => setConfig({ ...config, waf })}
+          disabled={formDisabled}
+          status={settings.status}
+          installing={settings.installing}
+          uninstalling={settings.uninstalling}
+          onInstall={settings.installClamav}
+          onUninstall={settings.uninstallClamav}
+        />
+      </SettingsEntry>
 
-      <AnomalyDetectionCard
-        anomalyDetection={config.anomalyDetection}
-        onChange={(anomalyDetection) => setConfig({ ...config, anomalyDetection })}
-        disabled={formDisabled}
-        canEdit={canEditGlobal}
-        saving={saving}
-        onSave={saveGatewayConfig}
-      />
+      <SettingsEntry id="anomaly" applies="now">
+        <AnomalyDetectionCard
+          anomalyDetection={config.anomalyDetection}
+          onChange={(anomalyDetection) => setConfig({ ...config, anomalyDetection })}
+          disabled={formDisabled}
+        />
+      </SettingsEntry>
 
-      <GeoIPSettingsCard
-        config={config.geoip || {}}
-        onChange={(geoip) => setConfig({ ...config, geoip })}
-        onSave={saveGatewayConfig}
-        saving={saving}
-        disabled={formDisabled}
-      />
+      <SettingsEntry id="geoip" applies="now">
+        <GeoIPSettingsCard config={config.geoip || {}} onChange={(geoip) => setConfig({ ...config, geoip })} disabled={formDisabled} />
+      </SettingsEntry>
 
-      <SecurityAdvancedSettingsCard config={config} onChange={setConfig} disabled={formDisabled} />
-
-      <AlertingSettingsCard config={config} onChange={setConfig} disabled={formDisabled} />
-
-      <AuditSettingsCard config={config} onChange={setConfig} disabled={formDisabled} />
-
-      <AISettingsCard config={config} onChange={setConfig} disabled={formDisabled} />
+      <SettingsEntry id="advanced" applies="now">
+        <SecurityAdvancedSettingsCard config={config} onChange={setConfig} disabled={formDisabled} />
+      </SettingsEntry>
     </Stack>
   );
 }

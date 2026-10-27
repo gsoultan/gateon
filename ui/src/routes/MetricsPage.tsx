@@ -22,6 +22,7 @@ import {
   Alert,
   Select,
   Button,
+  Tabs,
 } from "@mantine/core";
 import {
   IconActivity,
@@ -47,7 +48,7 @@ import {
 } from "@tabler/icons-react";
 import { useMetricsSnapshot } from "../hooks/useMetricsSnapshot";
 import { useTableDensity } from "../hooks/useTableDensity";
-import React, { useMemo, useState } from "react";
+import React, { lazy, Suspense, useMemo, useState } from "react";
 import { formatBytes as formatBytesGlobal, formatCompact as formatNumberGlobal, safeToFixed, safeToLocaleString } from "../utils/format";
 import type {
   GoldenSignals,
@@ -59,6 +60,7 @@ import type {
   LabeledCount,
 } from "../types/metrics";
 import { PageHeader } from "../components/layout";
+import { useUrlFilters } from "../hooks/useUrlFilters";
 
 // Use the global formatters where possible, or hardened locals
 function formatBytes(bytes: number | undefined | null): string {
@@ -541,7 +543,7 @@ function MiddlewareMetricsSection({ mw }: { mw: MiddlewareMetrics }) {
             Performance Middleware
           </Title>
         </Group>
-        <Anchor component={Link} to="/security-center" size="xs" fw={600}>
+        <Anchor component={Link} to="/security" size="xs" fw={600}>
           Security counters are in the Security Hub funnel
         </Anchor>
       </Group>
@@ -970,14 +972,35 @@ function MetricsSkeleton() {
 
 // --- Main Page ---
 
+const PathStatsTable = lazy(() => import("../components/PathStatsTable").then((m) => ({ default: m.PathStatsTable })));
+const TrafficTab = lazy(() => import("../components/Metrics/TrafficTab"));
+
+const METRICS_TABS = ["golden", "routes", "paths", "backends", "traffic"] as const;
+type MetricsTab = (typeof METRICS_TABS)[number];
+const asMetricsTab = (v: string | undefined): MetricsTab => METRICS_TABS.find((t) => t === v) ?? "golden";
+
+const TAB_FALLBACK = <Skeleton height={320} radius="md" />;
+
+/**
+ * One page for every number: golden signals, routes, paths, backends and the
+ * traffic breakdown that used to be the home page. Each tab is a chunk of its
+ * own, so the first tab is not slowed by the charting library the last one
+ * needs.
+ */
 export default function MetricsPage() {
   const { data, isLoading, error } = useMetricsSnapshot();
+  const [filters, setFilters] = useUrlFilters<{ tab: string }>();
+  const tab = asMetricsTab(filters.tab);
+  const showTab = (next: string | null) => {
+    const value = asMetricsTab(next ?? undefined);
+    setFilters({ tab: value === "golden" ? undefined : value });
+  };
 
   return (
     <Stack gap="lg">
       <PageHeader
-        title="Metrics Dashboard"
-        description="Real-time Prometheus metrics — golden signals, per-route breakdown, middleware counters, TLS certificates, and system health."
+        title="Metrics"
+        description="Golden signals, per-route and per-path numbers, backend health, and where the traffic goes."
         actions={
           <Badge variant="dot" color={isLoading ? "yellow" : "green"} size="lg">
             {isLoading ? "Loading..." : "Live"}
@@ -987,30 +1010,57 @@ export default function MetricsPage() {
 
       {error && (
         <Alert color="red" icon={<IconAlertTriangle size={16} />} radius="md">
-          Failed to load metrics: {error.message}
+          The metrics could not be loaded. {error.message}
         </Alert>
       )}
 
-      {isLoading && !data ? (
-        <MetricsSkeleton />
-      ) : data ? (
-        <Stack gap="lg">
-          {data.goldenSignals && <GoldenSignalsSection gs={data.goldenSignals} />}
+      <Tabs value={tab} onChange={showTab} keepMounted={false}>
+        <Tabs.List>
+          <Tabs.Tab value="golden">Golden signals</Tabs.Tab>
+          <Tabs.Tab value="routes">Routes</Tabs.Tab>
+          <Tabs.Tab value="paths">Paths</Tabs.Tab>
+          <Tabs.Tab value="backends">Backends</Tabs.Tab>
+          <Tabs.Tab value="traffic">Traffic</Tabs.Tab>
+        </Tabs.List>
 
-          <SimpleGrid cols={{ base: 1, md: 2 }}>
-            {data.goldenSignals && <LatencyPercentilesCard gs={data.goldenSignals} />}
-            {data.system && <SystemMetricsSection sys={data.system} />}
-          </SimpleGrid>
-
-          <RouteMetricsSection routes={data.routeMetrics} />
-          {data.middleware && <MiddlewareMetricsSection mw={data.middleware} />}
-
-          <SimpleGrid cols={{ base: 1, md: 2 }}>
-            {data.tlsCertificates && <TLSCertificatesSection certs={data.tlsCertificates} />}
-            {data.targets && <TargetHealthSection targets={data.targets} />}
-          </SimpleGrid>
-        </Stack>
-      ) : null}
+        <Tabs.Panel value="golden" pt="lg">
+          {isLoading && !data ? (
+            <MetricsSkeleton />
+          ) : data ? (
+            <Stack gap="lg">
+              {data.goldenSignals && <GoldenSignalsSection gs={data.goldenSignals} />}
+              <SimpleGrid cols={{ base: 1, md: 2 }}>
+                {data.goldenSignals && <LatencyPercentilesCard gs={data.goldenSignals} />}
+                {data.system && <SystemMetricsSection sys={data.system} />}
+              </SimpleGrid>
+              {data.middleware && <MiddlewareMetricsSection mw={data.middleware} />}
+            </Stack>
+          ) : null}
+        </Tabs.Panel>
+        <Tabs.Panel value="routes" pt="lg">
+          {isLoading && !data ? <MetricsSkeleton /> : data ? <RouteMetricsSection routes={data.routeMetrics} /> : null}
+        </Tabs.Panel>
+        <Tabs.Panel value="paths" pt="lg">
+          <Suspense fallback={TAB_FALLBACK}>
+            <PathStatsTable />
+          </Suspense>
+        </Tabs.Panel>
+        <Tabs.Panel value="backends" pt="lg">
+          {isLoading && !data ? (
+            <MetricsSkeleton />
+          ) : data ? (
+            <SimpleGrid cols={{ base: 1, md: 2 }}>
+              {data.targets && <TargetHealthSection targets={data.targets} />}
+              {data.tlsCertificates && <TLSCertificatesSection certs={data.tlsCertificates} />}
+            </SimpleGrid>
+          ) : null}
+        </Tabs.Panel>
+        <Tabs.Panel value="traffic" pt="lg">
+          <Suspense fallback={TAB_FALLBACK}>
+            <TrafficTab />
+          </Suspense>
+        </Tabs.Panel>
+      </Tabs>
     </Stack>
   );
 }

@@ -97,13 +97,13 @@ export function RoutingConfig({ form, entryPointOptions }: RoutingConfigProps) {
         name="entrypoints"
         children={(field: any) => (
           <MultiSelect
-            label="EntryPoints"
-            description="Restrict this route to specific addresses (optional)"
+            label="Listeners"
+            description="Listen on these addresses only (optional; the default is every listener)"
             data={entryPointOptions}
             value={field.state.value}
             onBlur={field.handleBlur}
             onChange={(v) => field.handleChange(v)}
-            placeholder="Select EntryPoints"
+            placeholder="Select listeners"
             searchable
             clearable
           />

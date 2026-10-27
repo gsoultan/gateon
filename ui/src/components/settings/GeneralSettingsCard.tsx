@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
 // SPDX-License-Identifier: MIT
 
-import { Card, Title, Text, Stack, TextInput, NumberInput, Button, Group, Divider, Paper } from "@mantine/core";
+import { Card, Title, Text, Stack, TextInput, NumberInput, Group, Divider, Paper } from "@mantine/core";
 import { IconAdjustments } from "@tabler/icons-react";
 
 interface GeneralSettingsCardProps {
@@ -30,10 +30,10 @@ export function GeneralSettingsCard({
           </Paper>
           <div>
             <Title order={4} fw={700}>
-              General Settings
+              Dashboard connection
             </Title>
             <Text c="dimmed" size="xs">
-              Configure UI behavior and connection to the gateway.
+              Where this dashboard reads the gateway from, and how often. Kept in this browser as soon as you leave the field.
             </Text>
           </div>
         </Group>
@@ -45,6 +45,7 @@ export function GeneralSettingsCard({
             placeholder="http://localhost:8080"
             value={apiUrlDraft}
             onChange={(e) => setApiUrlDraft(e.currentTarget.value)}
+            onBlur={onSave}
             radius="md"
           />
           <NumberInput
@@ -56,19 +57,15 @@ export function GeneralSettingsCard({
             onChange={(val) =>
               setRefreshIntervalDraft(typeof val === "number" ? val : 10)
             }
+            onBlur={onSave}
             radius="md"
           />
         </Stack>
-        <Group justify="flex-end" mt="md" gap="sm">
-          {generalSavedOk && (
-            <Text size="sm" c="green" fw={500}>
-              Saved
-            </Text>
-          )}
-          <Button onClick={onSave} radius="md" px="xl">
-            Save Settings
-          </Button>
-        </Group>
+        {generalSavedOk && (
+          <Text size="sm" c="green" fw={500}>
+            Saved
+          </Text>
+        )}
       </Stack>
     </Card>
   );

@@ -10,20 +10,15 @@ import {
   IconServer,
   IconTerminal2,
   IconSettings,
-  IconActivity,
   IconCertificate,
   IconShieldCheck,
-  IconShieldLock,
-  IconLockAccess,
   IconSettingsAutomation,
   IconUsers,
   IconAccessPoint,
   IconSun,
   IconMoon,
   IconDeviceDesktop,
-  IconCircuitSwitchClosed,
   IconBook2,
-  IconNetwork,
   IconTimeline,
   IconChartBar,
   IconStethoscope,
@@ -42,28 +37,25 @@ interface NavSpec {
   to: string;
   icon: Command["icon"];
   keywords?: string[];
+  adminOnly?: boolean;
 }
 
 const navSpecs: NavSpec[] = [
-  { label: "Dashboard", to: "/", icon: IconDashboard, keywords: ["home", "overview"] },
-  { label: "Topology", to: "/topology", icon: IconNetwork, keywords: ["graph", "map"] },
-  { label: "Traces", to: "/traces", icon: IconTimeline },
+  { label: "Overview", to: "/", icon: IconDashboard, keywords: ["home", "dashboard", "map", "topology"] },
   { label: "Routes", to: "/routes", icon: IconRoute },
-  { label: "Services", to: "/services", icon: IconServer },
-  { label: "Metrics", to: "/metrics-dashboard", icon: IconChartBar },
-  { label: "Path Metrics", to: "/path-metrics", icon: IconActivity },
-  { label: "Circuit Breaker", to: "/circuit-breaker", icon: IconCircuitSwitchClosed },
-  { label: "EntryPoints", to: "/entryPoints", icon: IconAccessPoint },
-  { label: "Security Hub", to: "/security-center", icon: IconShieldCheck, keywords: ["waf", "threats"] },
-  { label: "Audit Logs", to: "/audit-logs", icon: IconTimeline },
-  { label: "Certificates", to: "/certificates", icon: IconCertificate, keywords: ["tls", "ssl"] },
-  { label: "Client Authorities", to: "/client-authorities", icon: IconShieldLock },
-  { label: "TLS Options", to: "/tls-options", icon: IconLockAccess },
-  { label: "Middlewares", to: "/middlewares", icon: IconSettingsAutomation },
-  { label: "Docs", to: "/docs", icon: IconBook2, keywords: ["help", "documentation"] },
-  { label: "Diagnostics", to: "/diagnostics", icon: IconStethoscope },
+  { label: "Services", to: "/services", icon: IconServer, keywords: ["backends", "circuit breaker"] },
+  { label: "Listeners", to: "/listeners", icon: IconAccessPoint, keywords: ["entrypoints", "ports"] },
+  { label: "Policies", to: "/policies", icon: IconSettingsAutomation, keywords: ["middlewares"] },
+  { label: "Security", to: "/security", icon: IconShieldCheck, keywords: ["waf", "threats", "blocks", "rules"] },
+  { label: "TLS", to: "/tls", icon: IconCertificate, keywords: ["certificates", "ssl", "client ca", "profiles"] },
   { label: "Logs", to: "/logs", icon: IconTerminal2, keywords: ["live"] },
+  { label: "Traces", to: "/traces", icon: IconTimeline },
+  { label: "Metrics", to: "/metrics-dashboard", icon: IconChartBar, keywords: ["paths", "golden signals"] },
   { label: "Settings", to: "/settings", icon: IconSettings },
+  { label: "Access", to: "/access", icon: IconUsers, keywords: ["users", "api tokens", "rbac"], adminOnly: true },
+  { label: "Audit log", to: "/audit-logs", icon: IconTimeline },
+  { label: "Diagnostics", to: "/diagnostics", icon: IconStethoscope },
+  { label: "Docs", to: "/docs", icon: IconBook2, keywords: ["help", "documentation"] },
   { label: "Profile", to: "/profile", icon: IconUser, keywords: ["account"] },
 ];
 
@@ -86,7 +78,7 @@ export function useCommands(close: () => void): Command[] {
     };
 
     const navCommands: Command[] = navSpecs
-      .filter((spec) => spec.to !== "/users" || role === "admin")
+      .filter((spec) => !spec.adminOnly || role === "admin")
       .map((spec) => ({
         id: `nav:${spec.to}`,
         label: spec.label,
@@ -97,17 +89,6 @@ export function useCommands(close: () => void): Command[] {
         perform: go(spec.to),
       }));
 
-    if (role === "admin") {
-      navCommands.push({
-        id: "nav:/users",
-        label: "Users",
-        description: "/users",
-        group: "Navigation",
-        icon: IconUsers,
-        keywords: ["accounts", "rbac"],
-        perform: go("/users"),
-      });
-    }
 
     const actionCommands: Command[] = [
       {

@@ -13,7 +13,9 @@ import { ConfirmDeleteModal } from '../components/ConfirmDelete'
 import { AdminOnlyNote } from '../components/settings/adminOnly/AdminOnlyNote'
 import { PageHeader } from "../components/layout";
 
-export default function ClientAuthoritiesPage() {
+// embedded: rendered as a tab of a page that already has a title, so only
+// the description and the actions are shown.
+export default function ClientAuthoritiesPage({ embedded = false }: { embedded?: boolean } = {}) {
   const { canUploadCerts: canWriteCerts, canChangeSecurityBoundary } = usePermissions()
   // The CAs a client certificate is trusted from are administrator-only (ADR
   // 0040): the gateway refuses an operator's change to them.
@@ -174,8 +176,9 @@ export default function ClientAuthoritiesPage() {
   return (
     <Stack gap="xl">
       <PageHeader
-        title="Client Authorities"
-        description="Manage trusted Root CAs for mTLS client authentication."
+        title="Client CAs"
+        variant={embedded ? "section" : "page"}
+        description="Root CAs the gateway trusts when a route asks clients for a certificate (clientAuthority in the API)."
         actions={
           canUploadCerts && (
             <Button leftSection={<IconPlus size={16} />} onClick={startAdd} disabled={!canEdit}>Add CA</Button>

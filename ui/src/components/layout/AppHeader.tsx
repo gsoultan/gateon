@@ -12,33 +12,21 @@ import {
   Text,
   Tooltip,
   UnstyledButton,
-  useMantineColorScheme,
 } from "@mantine/core";
 import { Link } from "@tanstack/react-router";
 import {
-  IconCheck,
-  IconDeviceDesktop,
+  IconBook2,
   IconLayoutSidebarLeftCollapse,
   IconLayoutSidebarLeftExpand,
   IconLogout,
-  IconMoon,
   IconRefresh,
-  IconSun,
   IconUser,
 } from "@tabler/icons-react";
 import { CommandSearchButton } from "../CommandPalette/CommandSearchButton";
 import { ConnectionStatus } from "../ConnectionStatus";
-import { GlobalHealthBar } from "../GlobalHealthBar";
+import { AttentionBadge } from "../Overview/AttentionBadge";
 import { SIGN_OUT_SCOPE } from "../signOut";
 import classes from "./layout.module.css";
-
-type Scheme = "light" | "dark" | "auto";
-
-const SCHEMES: { value: Scheme; label: string; icon: typeof IconSun }[] = [
-  { value: "light", label: "Light", icon: IconSun },
-  { value: "dark", label: "Dark", icon: IconMoon },
-  { value: "auto", label: "Follow system", icon: IconDeviceDesktop },
-];
 
 const ROLE_COLOR: Record<string, string> = { admin: "red", operator: "blue" };
 
@@ -53,35 +41,6 @@ interface AppHeaderProps {
   refreshing: boolean;
   onRefresh: () => void;
   onSignOut: () => void;
-}
-
-function ThemeMenu() {
-  const { colorScheme, setColorScheme } = useMantineColorScheme();
-  const Current = SCHEMES.find((s) => s.value === colorScheme)?.icon ?? IconDeviceDesktop;
-  return (
-    <Menu width={200} position="bottom-end">
-      <Menu.Target>
-        <Tooltip label="Theme">
-          <ActionIcon variant="subtle" color="gray" size="lg" aria-label="Change color scheme">
-            <Current size={19} stroke={1.6} />
-          </ActionIcon>
-        </Tooltip>
-      </Menu.Target>
-      <Menu.Dropdown>
-        <Menu.Label>Appearance</Menu.Label>
-        {SCHEMES.map(({ value, label, icon: Icon }) => (
-          <Menu.Item
-            key={value}
-            leftSection={<Icon size={16} stroke={1.6} />}
-            rightSection={colorScheme === value ? <IconCheck size={14} /> : null}
-            onClick={() => setColorScheme(value)}
-          >
-            {label}
-          </Menu.Item>
-        ))}
-      </Menu.Dropdown>
-    </Menu>
-  );
 }
 
 function AccountMenu({ username, role, version, onSignOut }: Pick<AppHeaderProps, "username" | "role" | "version" | "onSignOut">) {
@@ -127,6 +86,34 @@ function AccountMenu({ username, role, version, onSignOut }: Pick<AppHeaderProps
   );
 }
 
+/**
+ * The status dot and, behind it, the one action that belongs to it. Refresh
+ * used to be a button of its own in the header; it is a thing you do when the
+ * status looks wrong, so it lives on the status.
+ */
+function StatusMenu({ refreshing, onRefresh }: Pick<AppHeaderProps, "refreshing" | "onRefresh">) {
+  return (
+    <Menu width={220} position="bottom-end">
+      <Menu.Target>
+        <UnstyledButton aria-label="Connection status and refresh">
+          <ConnectionStatus />
+        </UnstyledButton>
+      </Menu.Target>
+      <Menu.Dropdown>
+        <Menu.Item leftSection={<IconRefresh size={16} stroke={1.6} />} onClick={onRefresh} disabled={refreshing}>
+          {refreshing ? "Refreshing…" : "Refresh status"}
+        </Menu.Item>
+      </Menu.Dropdown>
+    </Menu>
+  );
+}
+
+/**
+ * Logo, search, the attention badge, the status dot, docs and the account.
+ * The four count pills, the Refresh button and the Display button are gone:
+ * counts nobody acts on from the header, Refresh moved into the status dot's
+ * menu, and the colour scheme is set in Settings › General.
+ */
 export function AppHeader(props: AppHeaderProps) {
   const { mobileOpened, onToggleMobile, sidebarExpanded, onToggleSidebar, refreshing, onRefresh } = props;
   return (
@@ -145,7 +132,7 @@ export function AppHeader(props: AppHeaderProps) {
             {sidebarExpanded ? <IconLayoutSidebarLeftCollapse size={19} stroke={1.6} /> : <IconLayoutSidebarLeftExpand size={19} stroke={1.6} />}
           </ActionIcon>
         </Tooltip>
-        <Link to="/" className={classes.brand} aria-label="Gateon dashboard">
+        <Link to="/" className={classes.brand} aria-label="Gateon overview">
           <img src="/gateon-logo.svg" alt="" width={26} height={26} style={{ display: "block" }} />
           <span className={classes.brandName}>GATEON</span>
         </Link>
@@ -155,20 +142,13 @@ export function AppHeader(props: AppHeaderProps) {
         <Box visibleFrom="sm">
           <CommandSearchButton />
         </Box>
-        <Box visibleFrom="lg">
-          <GlobalHealthBar />
-        </Box>
-        <Box visibleFrom="md">
-          <ConnectionStatus />
-        </Box>
-        <Group gap={4} wrap="nowrap">
-          <Tooltip label="Refresh status">
-            <ActionIcon variant="subtle" color="gray" size="lg" onClick={onRefresh} loading={refreshing} aria-label="Refresh status">
-              <IconRefresh size={19} stroke={1.6} />
-            </ActionIcon>
-          </Tooltip>
-          <ThemeMenu />
-        </Group>
+        <AttentionBadge />
+        <StatusMenu refreshing={refreshing} onRefresh={onRefresh} />
+        <Tooltip label="Docs">
+          <ActionIcon component={Link} to="/docs" variant="subtle" color="gray" size="lg" aria-label="Docs">
+            <IconBook2 size={19} stroke={1.6} />
+          </ActionIcon>
+        </Tooltip>
         <AccountMenu {...props} />
       </Group>
     </Group>

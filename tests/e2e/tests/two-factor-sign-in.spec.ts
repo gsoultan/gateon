@@ -66,7 +66,7 @@ async function submitCode(page: Page, code: string, button: RegExp) {
 }
 
 async function expectSignedInWithoutStoredChallenge(page: Page) {
-  await expect(page.getByRole('heading', { name: /System Overview/i })).toBeVisible({ timeout: 60000 });
+  await expect(page.getByRole('heading', { name: /^Overview$/ })).toBeVisible({ timeout: 60000 });
   const stored = await page.evaluate(() => JSON.stringify({ ...localStorage }) + JSON.stringify({ ...sessionStorage }));
   expect(stored, 'a token reached web storage').not.toContain('v4.local.');
 }

@@ -1,10 +1,10 @@
 // Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
 // SPDX-License-Identifier: MIT
 
-import { Card, Title, Text, Stack, Textarea, NumberInput, Button, Group, Divider, Switch, Select, MultiSelect, TagsInput, Badge, Alert, Loader, SimpleGrid } from "@mantine/core";
+import { Box, Card, Title, Text, Stack, NumberInput, Group, Divider, Switch, Select, MultiSelect, TagsInput, Badge, Alert, Loader, SimpleGrid } from "@mantine/core";
 import { IconShieldLock } from "@tabler/icons-react";
-import { useQueryClient, type UseQueryResult } from "@tanstack/react-query";
-import { EFFECTIVE_WAF_QUERY_KEY, useEffectiveWaf, type EffectiveWafView } from "../../../hooks/useEffectiveWaf";
+import type { UseQueryResult } from "@tanstack/react-query";
+import { useEffectiveWaf, type EffectiveWafView } from "../../../hooks/useEffectiveWaf";
 import type { StatusResponse, WafConfig } from "../../../types/gateon";
 import { WAF_APP_PROFILES } from "../../../types/gateon";
 import { ClamAVSection } from "./ClamAVSection";
@@ -17,9 +17,6 @@ interface WafSettingsCardProps {
   waf: WafConfig | undefined;
   onChange: (waf: WafConfig) => void;
   disabled: boolean;
-  canEdit: boolean;
-  saving: boolean;
-  onSave: () => void | Promise<void>;
   status: StatusResponse | undefined;
   installing: boolean;
   uninstalling: boolean;
@@ -33,9 +30,6 @@ export function WafSettingsCard({
   waf,
   onChange,
   disabled,
-  canEdit,
-  saving,
-  onSave,
   status,
   installing,
   uninstalling,
@@ -47,11 +41,6 @@ export function WafSettingsCard({
   // What the running WAF does, from the gateway: the tier can drop a family
   // whose switch is on, so the switches alone do not say what runs.
   const effective = useEffectiveWaf();
-  const queryClient = useQueryClient();
-  const save = async () => {
-    await onSave();
-    await queryClient.invalidateQueries({ queryKey: EFFECTIVE_WAF_QUERY_KEY });
-  };
   return (
     <Card withBorder shadow="sm" radius="md">
       <Stack gap="md">
@@ -244,42 +233,22 @@ export function WafSettingsCard({
                   disabled={disabled}
                 />
 
-                <ClamAVSection
-                  waf={waf}
-                  onChange={onChange}
-                  disabled={disabled}
-                  status={status}
-                  installing={installing}
-                  uninstalling={uninstalling}
-                  onInstall={onInstall}
-                  onUninstall={onUninstall}
-                />
+                <Box id="malware" style={{ scrollMarginTop: 80 }}>
+                  <ClamAVSection
+                    waf={waf}
+                    onChange={onChange}
+                    disabled={disabled}
+                    status={status}
+                    installing={installing}
+                    uninstalling={uninstalling}
+                    onInstall={onInstall}
+                    onUninstall={onUninstall}
+                  />
+                </Box>
 
                 <BotManagementSection waf={waf} onChange={onChange} disabled={disabled} />
               </>
 
-            <Textarea
-              label="Custom Global Directives (not executed)"
-              description="Kept so an upgrade does not lose them. The current engine does not parse SecLang, so nothing here is enforced — re-author these as rules under WAF Rules."
-              placeholder="SecRule ARGS 'foo' 'id:1,deny,status:403'"
-              value={waf.customDirectives || ""}
-              onChange={(e) =>
-                onChange({
-                  ...waf!,
-                  customDirectives: e.currentTarget.value,
-                })
-              }
-              disabled={disabled}
-              minRows={4}
-              autosize
-            />
-            {canEdit && (
-              <Group justify="flex-end" mt="md">
-                <Button onClick={save} loading={saving} size="sm">
-                  Save WAF Settings
-                </Button>
-              </Group>
-            )}
           </Stack>
         )}
       </Stack>

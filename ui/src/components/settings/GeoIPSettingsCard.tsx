@@ -40,12 +40,10 @@ interface GeoIPStatus {
 interface GeoIPSettingsCardProps {
   config: GeoIPConfig;
   onChange: (config: GeoIPConfig) => void;
-  onSave?: () => void | Promise<void>;
-  saving?: boolean;
   disabled?: boolean;
 }
 
-export function GeoIPSettingsCard({ config, onChange, onSave, saving, disabled }: GeoIPSettingsCardProps) {
+export function GeoIPSettingsCard({ config, onChange, disabled }: GeoIPSettingsCardProps) {
   const [status, setStatus] = useState<GeoIPStatus | null>(null);
   const [loading, setLoading] = useState(false);
   const [updating, setUpdating] = useState(false);
@@ -378,22 +376,6 @@ export function GeoIPSettingsCard({ config, onChange, onSave, saving, disabled }
             hidePickedOptions
           />
 
-          {onSave && (
-            <Group justify="flex-end" mt="md">
-              <Button
-                onClick={async () => {
-                  await onSave();
-                  // What the lists now do depends on what was saved.
-                  await fetchStatus();
-                }}
-                loading={saving}
-                size="sm"
-                disabled={disabled}
-              >
-                Save GeoIP Settings
-              </Button>
-            </Group>
-          )}
         </Stack>
       </Stack>
     </Card>

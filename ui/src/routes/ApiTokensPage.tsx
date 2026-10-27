@@ -46,7 +46,9 @@ import { PageHeader } from "../components/layout";
  * issues to a machine. /metrics used to accept only a user's eight-hour
  * session, so a scraper needed an account and a script signing it in again.
  */
-export default function ApiTokensPage() {
+// embedded: rendered as a tab of a page that already has a title, so only
+// the description and the actions are shown.
+export default function ApiTokensPage({ embedded = false }: { embedded?: boolean } = {}) {
   const isAdmin = useAuthStore((s) => s.user?.role === "admin");
   if (!isAdmin) {
     return (
@@ -59,10 +61,10 @@ export default function ApiTokensPage() {
       </Center>
     );
   }
-  return <TokensView />;
+  return <TokensView embedded={embedded} />;
 }
 
-function TokensView() {
+function TokensView({ embedded }: { embedded: boolean }) {
   const { data, isLoading, isError, error, refetch } = useApiTokens();
   const queryClient = useQueryClient();
   const [creating, setCreating] = useState(false);
@@ -90,6 +92,7 @@ function TokensView() {
     <Stack gap="lg">
       <PageHeader
         title="API tokens"
+        variant={embedded ? "section" : "page"}
         description={'Credentials for machines. A token with "Read metrics" lets a scraper read /metrics and nothing else; it is never a dashboard session.'}
         actions={
           <Button leftSection={<IconPlus size={16} />} onClick={() => setCreating(true)}>

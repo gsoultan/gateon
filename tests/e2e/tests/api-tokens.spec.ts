@@ -38,8 +38,9 @@ test.describe('API tokens', () => {
     page,
     playwright,
   }) => {
+    // Tokens are a tab of Access; the old address still opens them.
     await page.goto('/api-tokens');
-    await expect(page.getByRole('heading', { name: 'API tokens' })).toBeVisible();
+    await expect(page.getByRole('tab', { name: 'API tokens' })).toHaveAttribute('aria-selected', 'true');
 
     await page.getByRole('button', { name: 'Create token' }).click();
     const create = page.getByRole('dialog', { name: 'Create API token' });

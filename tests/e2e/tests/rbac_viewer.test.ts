@@ -15,21 +15,21 @@ test.describe('RBAC: Viewer', () => {
 
   test('can see dashboards and metrics', async ({ page }) => {
     await page.goto('/', { timeout: 60000 });
-    await expect(page.getByText(/System Health/i)).toBeVisible({ timeout: 30000 });
+    await expect(page.getByText('Traffic now', { exact: true })).toBeVisible({ timeout: 30000 });
   });
 
   test('can see security hub', async ({ page }) => {
-    await page.goto('/security-center', { timeout: 60000 });
-    await expect(page.getByText(/Security Hub/i).first()).toBeVisible({ timeout: 30000 });
+    await page.goto('/security', { timeout: 60000 });
+    await expect(page.getByRole('heading', { name: 'Security', level: 2 })).toBeVisible({ timeout: 30000 });
   });
 
   test('cannot manage WAF rules or users', async ({ page }) => {
-    await page.goto('/security-center', { timeout: 60000 });
-    await page.getByRole('tab', { name: /WAF Rules/i }).click();
+    await page.goto('/security', { timeout: 60000 });
+    await page.getByRole('tab', { name: 'Rules' }).click();
     // For Viewer, Add Rule button should be disabled
     await expect(page.getByRole('button', { name: /Add Rule/i })).toBeDisabled({ timeout: 20000 });
 
-    await page.goto('/users', { timeout: 60000 });
+    await page.goto('/access', { timeout: 60000 });
     await expect(page.getByText(/Access Denied/i)).toBeVisible({ timeout: 30000 });
   });
 });

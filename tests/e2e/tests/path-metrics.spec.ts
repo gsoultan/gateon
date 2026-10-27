@@ -23,7 +23,7 @@ async function openPathMetrics(page: Page): Promise<void> {
   const loaded = page.waitForResponse(
     (r) => new URL(r.url()).pathname === '/v1/diag/path-stats' && r.request().method() === 'GET',
   );
-  await page.goto('/path-metrics');
+  await page.goto('/metrics-dashboard?tab=paths');
   expect((await loaded).status(), 'GET /v1/diag/path-stats').toBe(200);
 }
 
@@ -106,7 +106,7 @@ test.describe('Path Metrics', () => {
     await page.route('**/v1/diag/path-stats', (route) =>
       route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"path statistics are unavailable"}' }),
     );
-    await page.goto('/path-metrics');
+    await page.goto('/metrics-dashboard?tab=paths');
 
     const failed = page.getByRole('alert').filter({ hasText: "Couldn't load path metrics" });
     await expect(failed, 'a failed load was shown as an empty one').toBeVisible();

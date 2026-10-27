@@ -13,7 +13,6 @@ import {
   Tooltip,
   ScrollArea,
   Modal,
-  Select,
   ActionIcon,
   Badge,
   Code,
@@ -46,13 +45,15 @@ import { useMiddlewares, useMiddlewareRoutes, apiFetch, getApiErrorMessage } fro
 import { usePermissions } from "../hooks/usePermissions";
 import { useTableDensity } from "../hooks/useTableDensity";
 import { MiddlewareConfigEditor } from "../components/MiddlewareConfig";
-import { middlewareTypeSelectData } from "../components/MiddlewareConfig/middlewareTypes";
+import { policyType } from "../components/MiddlewareConfig/middlewareTypes";
+import { PolicyCatalog } from "../components/MiddlewareConfig/PolicyCatalog";
 import {
   middlewareConfigProblem,
   withoutRetiredKeys,
 } from "../components/MiddlewareConfig/middlewareConfigProblems";
 import { QueryError } from "../components/QueryError";
-import { FieldGrid, PageHeader } from "../components/layout";
+import { FieldGrid, FloatingAction, PageHeader } from "../components/layout";
+import { Term } from "../components/status";
 
 export default function MiddlewaresPage() {
   const { canWrite } = usePermissions();
@@ -62,6 +63,8 @@ export default function MiddlewaresPage() {
   const [opened, { open, close }] = useDisclosure(false);
   const [deleteTarget, setDeleteTarget] = useState<Middleware | null>(null);
   const [editingMW, setEditingMW] = useState<Middleware | null>(null);
+  // The catalog shows first for a new policy; an existing one opens on its editor.
+  const [pickingType, setPickingType] = useState(false);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const pageSize = 10;
@@ -88,7 +91,7 @@ export default function MiddlewaresPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["middlewares"] });
       notifications.show({
-        title: "Middleware Saved",
+        title: "Policy saved",
         message: "The middleware configuration has been updated.",
         color: "green",
         icon: <IconCheck size={18} />,
@@ -97,7 +100,7 @@ export default function MiddlewaresPage() {
     },
     onError: (err: unknown) => {
       notifications.show({
-        title: "Error Saving Middleware",
+        title: "The policy was not saved",
         message: getApiErrorMessage(err),
         color: "red",
       });
@@ -119,14 +122,14 @@ export default function MiddlewaresPage() {
       queryClient.invalidateQueries({ queryKey: ["middlewares"] });
       setDeleteTarget(null);
       notifications.show({
-        title: "Middleware Deleted",
+        title: "Policy deleted",
         message: "The middleware has been removed.",
         color: "blue",
       });
     },
     onError: (err: unknown) => {
       notifications.show({
-        title: "Error Deleting Middleware",
+        title: "The policy was not deleted",
         message: getApiErrorMessage(err),
         color: "red",
       });
@@ -134,12 +137,14 @@ export default function MiddlewaresPage() {
   });
 
   const startAdd = () => {
-    setEditingMW({ id: "", name: "", type: "ratelimit", config: {} });
+    setEditingMW({ id: "", name: "", type: "", config: {} });
+    setPickingType(true);
     open();
   };
 
   const startEdit = (mw: Middleware) => {
     setEditingMW({ ...mw });
+    setPickingType(false);
     open();
   };
 
@@ -159,12 +164,12 @@ export default function MiddlewaresPage() {
   return (
     <Stack gap="xl">
       <PageHeader
-        title={<>Middlewares ({totalCount})</>}
-        description="Define reusable middleware policies for your routes."
+        title="Policies"
+        description={<>Reusable rules you attach to routes: limits, access, protection, headers, traffic shaping (a <Term of="policy" /> is called a middleware in the API and config).</>}
         actions={
           <Group wrap={isMobile ? "wrap" : "nowrap"} style={{ flex: isMobile ? "1 1 100%" : "none" }}>
             <TextInput
-              placeholder="Search middlewares..."
+              placeholder="Search policies..."
               leftSection={<IconSearch size={16} />}
               size="xs"
               w={isMobile ? "100%" : 250}
@@ -181,7 +186,7 @@ export default function MiddlewaresPage() {
                 onClick={startAdd}
                 fullWidth={isMobile}
               >
-                Add Middleware
+                Add policy
               </Button>
             )}
           </Group>
@@ -374,17 +379,28 @@ export default function MiddlewaresPage() {
         )}
       </Card>
 
+      {canWrite && <FloatingAction label="New policy" onClick={startAdd} />}
+
       <Modal
         opened={opened}
         onClose={close}
-        title={editingMW?.id ? "Edit Middleware" : "Add Middleware"}
+        title={pickingType ? "Choose a policy" : editingMW?.id ? "Edit policy" : "Add policy"}
         radius="lg"
         size="lg"
       >
+        {pickingType ? (
+          <PolicyCatalog
+            value={editingMW?.type || undefined}
+            onPick={(type) => {
+              if (editingMW) setEditingMW({ ...editingMW, type, config: editingMW.type === type ? editingMW.config : {} });
+              setPickingType(false);
+            }}
+          />
+        ) : (
         <Stack gap="md">
           <FieldGrid>
             <TextInput
-              label="Friendly Name"
+              label="Name"
               placeholder="Global Rate Limit"
               value={editingMW?.name || ""}
               onChange={(e) =>
@@ -393,16 +409,19 @@ export default function MiddlewaresPage() {
               }
             />
 
-            <Select
-              label="Type"
-              data={middlewareTypeSelectData()}
-              searchable
-              value={editingMW?.type || "ratelimit"}
-              onChange={(val) =>
-                editingMW &&
-                setEditingMW({ ...editingMW, type: val || "ratelimit" })
-              }
-            />
+            <Stack gap={4}>
+              <Text size="sm" fw={500}>
+                Type
+              </Text>
+              <Group gap="xs">
+                <Badge variant="light" size="lg" radius="sm" tt="none">
+                  {policyType(editingMW?.type)?.label ?? editingMW?.type ?? "Not chosen"}
+                </Badge>
+                <Button variant="subtle" size="compact-sm" onClick={() => setPickingType(true)}>
+                  Change
+                </Button>
+              </Group>
+            </Stack>
           </FieldGrid>
 
           <Tabs defaultValue="config" variant="pills" radius="md">
@@ -509,16 +528,17 @@ export default function MiddlewaresPage() {
               loading={mutation.isPending}
               disabled={!editingMW?.name || !!configProblem}
             >
-              Save Middleware
+              Save policy
             </Button>
           </Group>
         </Stack>
+        )}
       </Modal>
 
       <Modal
         opened={!!deleteTarget}
         onClose={() => setDeleteTarget(null)}
-        title="Delete Middleware"
+        title="Delete policy"
         radius="lg"
       >
         <Stack gap="md">

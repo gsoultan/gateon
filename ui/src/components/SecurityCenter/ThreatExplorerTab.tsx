@@ -80,11 +80,17 @@ function LiftsIn({ expiresAt }: { expiresAt: string }) {
   );
 }
 
-export function ThreatExplorerTab() {
+export type ThreatView = "detected" | "mitigated" | "all";
+
+/**
+ * With `view`, the tab shows one list and hides its own pills: the Security
+ * page's Threats tab is the detected list, its Blocks tab the mitigated one.
+ */
+export function ThreatExplorerTab({ view }: { view?: ThreatView } = {}) {
   const { canWrite } = usePermissions();
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<string | null>("all");
-  const [mitigatedFilter, setMitigatedFilter] = useState<string | null>("detected");
+  const [mitigatedFilter, setMitigatedFilter] = useState<string | null>(view ?? "detected");
   const [mitigationSubTab, setMitigationSubTab] = useState<string | null>("user");
   const [page, setPage] = useState(1);
 
@@ -314,11 +320,13 @@ export function ThreatExplorerTab() {
     <Stack gap="md">
       <Group justify="space-between" align="flex-end" wrap="wrap" gap="md">
         <Tabs value={mitigatedFilter} onChange={setMitigatedFilter} variant="pills" radius="md">
+          {!view && (
           <Tabs.List className="scrollable-tabs-list">
             <Tabs.Tab value="detected" leftSection={<IconAlertTriangle size={16} />}>Active Threats</Tabs.Tab>
             <Tabs.Tab value="mitigated" leftSection={<IconShieldCheck size={16} />}>Mitigated ({totalMitigations})</Tabs.Tab>
             <Tabs.Tab value="all">Historical Logs</Tabs.Tab>
           </Tabs.List>
+          )}
         </Tabs>
 
         {mitigatedFilter === "mitigated" && (

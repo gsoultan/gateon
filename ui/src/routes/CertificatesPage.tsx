@@ -13,7 +13,9 @@ import { useGlobalConfigDraft } from '../hooks/useGlobalConfigDraft'
 import { ConfirmDeleteModal } from '../components/ConfirmDelete'
 import { PageHeader } from "../components/layout";
 
-export default function CertificatesPage() {
+// embedded: rendered as a tab of a page that already has a title, so only
+// the description and the actions are shown.
+export default function CertificatesPage({ embedded = false }: { embedded?: boolean } = {}) {
   const { canUploadCerts } = usePermissions()
   const isMobile = useIsMobile()
   // Nothing may be saved until the gateway's config has been read: see
@@ -174,6 +176,7 @@ export default function CertificatesPage() {
     <Stack gap="xl">
       <PageHeader
         title="Certificates"
+        variant={embedded ? "section" : "page"}
         description="Manage SSL/TLS certificates for your domains."
         actions={
           canUploadCerts && (

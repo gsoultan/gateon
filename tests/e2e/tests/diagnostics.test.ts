@@ -9,8 +9,8 @@ import { execSync } from 'child_process';
  * are surfaced in the Security Hub, not on the diagnostics page.
  */
 async function gotoAnomalyEngine(page: any) {
-  await page.goto('/security-center', { waitUntil: 'load' });
-  await page.getByRole('tab', { name: /Anomaly Engine/i }).click();
+  // Anomalies are a view of the Threats tab, named in the URL.
+  await page.goto('/security?tab=threats&view=anomalies', { waitUntil: 'load' });
 }
 
 // AnomalyAnalysisEngine.Analyze drops every loopback-sourced trace before any
@@ -89,7 +89,7 @@ test.describe('Gateon Diagnostics E2E', () => {
     
     // Requirement: Superfast load (e.g. < 3s for first load)
     expect(loadTime).toBeLessThan(3000);
-    await expect(page.getByText(/Diagnostics & Connectivity/i).first()).toBeVisible({ timeout: 20000 });
+    await expect(page.getByRole('heading', { name: 'Diagnostics', level: 2 })).toBeVisible({ timeout: 20000 });
 
     // 2. Trigger Anomalies
     console.log('Triggering security threats...');

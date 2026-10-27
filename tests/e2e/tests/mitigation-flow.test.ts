@@ -11,8 +11,8 @@ import { test, expect } from '@playwright/test';
  * through the hub's Anomaly Engine tab.
  */
 async function gotoAnomalyEngine(page: any) {
-  await page.goto('/security-center', { waitUntil: 'load' });
-  await page.getByRole('tab', { name: /Anomaly Engine/i }).click();
+  // Anomalies are a view of the Threats tab, named in the URL.
+  await page.goto('/security?tab=threats&view=anomalies', { waitUntil: 'load' });
 }
 
 // telemetry.RecordSecurityThreat drops anything whose source is loopback, on
@@ -41,8 +41,9 @@ test.describe('Threat Mitigation E2E Flow', () => {
         expect(sqliResp.status()).toBe(403);
     }
 
-    // 2. Go to Security Center -> Threat Explorer
-    await page.goto('/security-center', { waitUntil: 'load' });
+    // 2. Go to Security -> Threats -> History: a blocked threat is a mitigated
+    // one, so the live view does not list it; History lists every one.
+    await page.goto('/security?tab=threats&view=history', { waitUntil: 'load' });
     
     // Give it time to be recorded and for the UI to fetch it.
     await page.waitForTimeout(10000);

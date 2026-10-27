@@ -32,10 +32,11 @@ async function gotoSettingsLoaded(page: Page) {
   // The response has landed; give React the tick it needs to commit the state
   // derived from it before anything reads a control.
   await page.waitForTimeout(500);
-  // The WAF and the advanced protections are on the Security tab, which is not
-  // mounted until it is opened.
-  await page.getByRole('tab', { name: 'Security' }).click();
-  await expect(page.getByRole('tab', { name: 'Security' })).toHaveAttribute('aria-selected', 'true');
+  // The WAF and the advanced protections are in the Security section, which is
+  // not mounted until it is opened.
+  const security = page.getByRole('navigation', { name: 'Settings sections' }).getByRole('link', { name: /^Security/ });
+  await security.click();
+  await expect(security).toHaveAttribute('data-active', 'true');
 }
 
 /**
@@ -84,7 +85,7 @@ test.describe('Advanced Security & Global WAF E2E', () => {
             const isChecked = await wafSwitchInput.isChecked();
             if (isChecked) {
                 await wafSwitchLabel.click();
-                const saveWafBtn = page.getByRole('button', { name: 'Save WAF Settings' });
+                const saveWafBtn = page.getByRole('button', { name: 'Save Global Configuration' });
                 if (await saveWafBtn.isVisible()) {
                     await saveGlobalConfig(page, saveWafBtn);
                 }
@@ -149,7 +150,7 @@ test.describe('Advanced Security & Global WAF E2E', () => {
     // Set Anomaly Threshold to 1 for easy testing
     await thresholdInput.fill('1');
 
-    const saveBtn = page.getByRole('button', { name: 'Save WAF Settings' });
+    const saveBtn = page.getByRole('button', { name: 'Save Global Configuration' });
     await saveBtn.scrollIntoViewIfNeeded();
     await saveGlobalConfig(page, saveBtn);
 

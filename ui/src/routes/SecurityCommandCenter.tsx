@@ -3,10 +3,7 @@
 
 import React from 'react';
 import { 
-  Container, 
-  Grid, 
   Text,
-  Title, 
   Group, 
   Stack, 
   Badge, 
@@ -19,6 +16,8 @@ import {
   Select,
   Modal,
   PasswordInput,
+  Drawer,
+  SegmentedControl,
 } from '@mantine/core';
 import { 
   IconShieldCheck, 
@@ -29,14 +28,10 @@ import {
   IconTrash,
   IconBox, 
   IconChevronDown,
-  IconDashboard,
-  IconSearch,
-  IconActivity,
   IconBrain,
   IconAlertTriangle,
   IconCode,
-  IconRobot,
-  IconArchive
+  IconBan,
 } from '@tabler/icons-react';
 import { useGateonStatus, apiFetch, useMetricsSnapshot, installClamav, uninstallClamav } from '../hooks/useGateon';
 import { notifications } from '@mantine/notifications';
@@ -56,10 +51,14 @@ import { AIAdvisoryTab } from '../components/SecurityCenter/AIAdvisoryTab';
 import { WAFRulesTab } from '../components/SecurityCenter/WAFRulesTab';
 // The archive reads files most visits never open, so it loads with its tab.
 const ThreatArchiveTab = React.lazy(() => import('../components/SecurityCenter/ThreatArchiveTab'));
-import { TimeDisplay } from '../components/TimeDisplay';
+import { PageHeader } from "../components/layout";
+import { useUrlFilters } from "../hooks/useUrlFilters";
 import { getThreatColor } from '../utils/security';
 import { resolveTrafficRangeBounds, DAY_MS } from '../utils/dashboard';
 import type { TrafficRangePreset } from '../utils/dashboard';
+
+const SECURITY_TABS = ["posture", "threats", "blocks", "rules"] as const;
+const THREAT_VIEWS = ["live", "anomalies", "history", "trends", "archive"] as const;
 
 const TREND_RANGE_OPTIONS = [
   { value: 'last24h', label: 'Last 24 hours' },
@@ -82,6 +81,16 @@ export default function SecurityCommandCenter() {
   const [scanStatus, setScanStatus] = React.useState<DeepScanStatus | null>(null);
   const pollIntervalRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
   const [trendRange, setTrendRange] = React.useState<string>('last24h');
+  // The tab, the threats view and the advisory panel live in the URL, so the
+  // Overview's chips and the attention list can open the page at the right one.
+  const [filters, setFilters] = useUrlFilters<{ tab: string; view: string; advisory: string }>();
+  const tab = SECURITY_TABS.find((t) => t === filters.tab) ?? "posture";
+  const threatView = THREAT_VIEWS.find((v) => v === filters.view) ?? "live";
+  const advisoryOpen = filters.advisory === "1";
+  const showTab = (next: string | null) => {
+    const value = SECURITY_TABS.find((t) => t === next) ?? "posture";
+    setFilters({ tab: value === "posture" ? undefined : value, view: undefined });
+  };
   const [sudoOpened, setSudoOpened] = React.useState(false);
   const [pendingMode, setPendingMode] = React.useState<number | null>(null);
   const [sudoPassword, setSudoPassword] = React.useState("");
@@ -326,64 +335,43 @@ export default function SecurityCommandCenter() {
   }, [metrics, trendRange]);
 
   return (
-    <Container size="xl" py="md">
-      <Stack gap="xl">
-        {/* Header Section */}
-        <Paper p="xl" radius="md" withBorder style={{ 
-          background: 'linear-gradient(135deg, light-dark(var(--mantine-color-blue-0), var(--mantine-color-dark-8)) 0%, var(--mantine-color-body) 100%)',
-          borderLeft: '4px solid var(--mantine-color-blue-filled)'
-        }}>
-          <Grid align="center">
-            <Grid.Col span={{ base: 12, md: 8 }}>
-              <Stack gap="xs">
-                <Group gap="xs">
-                  <Badge variant="dot" color="blue" size="sm">Autonomous Defense Active</Badge>
-                  <TimeDisplay />
-                </Group>
-                <Title order={1} fw={900} style={{ letterSpacing: -1.5 }}>Security Hub</Title>
-                <Text size="lg" c="dimmed" maw={600}>
-                  Unified orchestration of kernel-level protection, behavioral analysis, and automated threat mitigation.
-                </Text>
+    <Stack gap="xl">
+        <PageHeader
+          title="Security"
+          description="What protects traffic right now, what was seen, what was done about it, and the rules behind it."
+          actions={
+            <Group gap="sm" wrap="wrap">
+              <Button variant="light" leftSection={<IconBrain size={16} />} onClick={() => setFilters({ advisory: "1" })}>
+                AI Advisory
+              </Button>
+              <Stack gap={2}>
+                <Button
+                  leftSection={scanning ? <Loader size={16} color="white" /> : <IconShieldCheck size={16} />}
+                  onClick={handleDeepScan}
+                  disabled={scanning || !status?.clamavInstalled || !canWrite}
+                >
+                  {scanning ? 'Scanning...' : 'Deep scan'}
+                </Button>
+                {scanStatus?.lastScan && !scanning && (
+                  <Text size="10px" c="dimmed" ta="right" fw={500}>
+                    Last scan: {safeFormatDate(scanStatus.lastScan, 'MMM d, HH:mm')}
+                  </Text>
+                )}
               </Stack>
-            </Grid.Col>
-            <Grid.Col span={{ base: 12, md: 4 }}>
-              <Group justify="flex-end">
-                {!isViewer && (
-                  <Button variant="white" color="blue" leftSection={<IconAdjustments size={16} />} component={Link} to="/settings">
-                    Orchestration Rules
-                  </Button>
-                )}
-                <Stack gap={2}>
-                  <Button 
-                    variant="filled" 
-                    color="blue" 
-                    leftSection={scanning ? <Loader size={16} color="white" /> : <IconShieldCheck size={16} />}
-                    onClick={handleDeepScan}
-                    disabled={scanning || !status?.clamavInstalled || !canWrite}
-                  >
-                    {scanning ? 'Scanning...' : 'Deep Scan'}
-                  </Button>
-                  {scanStatus?.lastScan && !scanning && (
-                    <Text size="10px" c="dimmed" ta="right" fw={500}>
-                      Last scan: {safeFormatDate(scanStatus.lastScan, 'MMM d, HH:mm')}
-                    </Text>
-                  )}
-                </Stack>
-                {status?.clamavInstalled && (
-                  <Button
-                    variant="subtle"
-                    color="red"
-                    leftSection={uninstalling ? <Loader size={16} color="red" /> : <IconTrash size={16} />}
-                    onClick={() => setConfirmUninstallOpened(true)}
-                    disabled={uninstalling || !canWrite}
-                  >
-                    Uninstall ClamAV
-                  </Button>
-                )}
-              </Group>
-            </Grid.Col>
-          </Grid>
-        </Paper>
+              {status?.clamavInstalled && (
+                <Button
+                  variant="subtle"
+                  color="red"
+                  leftSection={uninstalling ? <Loader size={16} color="red" /> : <IconTrash size={16} />}
+                  onClick={() => setConfirmUninstallOpened(true)}
+                  disabled={uninstalling || !canWrite}
+                >
+                  Uninstall ClamAV
+                </Button>
+              )}
+            </Group>
+          }
+        />
 
         {globalConfig?.waf?.malwareDetection && status && !status.clamavInstalled && (
           <Alert icon={<IconInfoCircle size="1rem" />} title="Malware Protection Degraded" color="red" variant="filled" radius="md">
@@ -407,19 +395,15 @@ export default function SecurityCommandCenter() {
           </Alert>
         )}
 
-        <Tabs defaultValue="overview" variant="pills" radius="md" keepMounted={false}>
-          <Tabs.List mb="lg" className="scrollable-tabs-list">
-            <Tabs.Tab value="overview" leftSection={<IconDashboard size={16} />}>Overview</Tabs.Tab>
-            <Tabs.Tab value="explorer" leftSection={<IconSearch size={16} />}>Threat Explorer</Tabs.Tab>
-            <Tabs.Tab value="anomalies" leftSection={<IconRobot size={16} />}>Anomaly Engine</Tabs.Tab>
-            <Tabs.Tab value="incidents" leftSection={<IconAlertTriangle size={16} />}>Incidents</Tabs.Tab>
-            <Tabs.Tab value="analytics" leftSection={<IconActivity size={16} />}>Analytics & Trends</Tabs.Tab>
-            <Tabs.Tab value="advisory" leftSection={<IconBrain size={16} />}>AI Advisory</Tabs.Tab>
-            <Tabs.Tab value="waf-rules" leftSection={<IconCode size={16} />}>WAF Rules</Tabs.Tab>
-            <Tabs.Tab value="archive" leftSection={<IconArchive size={16} />}>Archive</Tabs.Tab>
+        <Tabs value={tab} onChange={showTab} keepMounted={false}>
+          <Tabs.List mb="lg">
+            <Tabs.Tab value="posture" leftSection={<IconShieldCheck size={16} />}>Posture</Tabs.Tab>
+            <Tabs.Tab value="threats" leftSection={<IconAlertTriangle size={16} />}>Threats</Tabs.Tab>
+            <Tabs.Tab value="blocks" leftSection={<IconBan size={16} />}>Blocks</Tabs.Tab>
+            <Tabs.Tab value="rules" leftSection={<IconCode size={16} />}>Rules</Tabs.Tab>
           </Tabs.List>
 
-          <Tabs.Panel value="overview">
+          <Tabs.Panel value="posture">
             <OverviewTab 
               metrics={metrics ?? null}
               threatTypeData={threatTypeData}
@@ -427,55 +411,68 @@ export default function SecurityCommandCenter() {
             />
           </Tabs.Panel>
 
-          <Tabs.Panel value="explorer">
-            <ThreatExplorerTab />
+          <Tabs.Panel value="threats">
+            <Stack gap="md">
+              <Group justify="space-between" wrap="wrap">
+                <SegmentedControl
+                  value={threatView}
+                  onChange={(v) => setFilters({ view: v === "live" ? undefined : v })}
+                  data={[
+                    { value: "live", label: "Live" },
+                    { value: "anomalies", label: "Anomalies" },
+                    { value: "history", label: "History" },
+                    { value: "trends", label: "Trends" },
+                    { value: "archive", label: "Archive" },
+                  ]}
+                  aria-label="Which threats to show"
+                />
+                {threatView === "trends" && (
+                  <Select
+                    aria-label="Trend range"
+                    size="xs"
+                    w={170}
+                    data={TREND_RANGE_OPTIONS}
+                    value={trendRange}
+                    onChange={(value) => setTrendRange(value ?? 'last24h')}
+                    allowDeselect={false}
+                  />
+                )}
+              </Group>
+              {threatView === "live" && <ThreatExplorerTab view="detected" />}
+              {threatView === "anomalies" && <AnomalyEngineTab />}
+              {threatView === "history" && <ThreatExplorerTab view="all" />}
+              {threatView === "trends" && (
+                <AnalyticsTab 
+                  metrics={metrics ?? null}
+                  trendData={trendData}
+                  countryData={countryData}
+                  threatTypeData={threatTypeData}
+                  totalThreats={totalThreats}
+                />
+              )}
+              {threatView === "archive" && (
+                <React.Suspense fallback={<Loader m="xl" />}>
+                  <ThreatArchiveTab />
+                </React.Suspense>
+              )}
+            </Stack>
           </Tabs.Panel>
 
-          <Tabs.Panel value="anomalies">
-            <AnomalyEngineTab />
+          <Tabs.Panel value="blocks">
+            <Stack gap="xl">
+              <ThreatExplorerTab view="mitigated" />
+              <IncidentsTab />
+            </Stack>
           </Tabs.Panel>
 
-          <Tabs.Panel value="incidents">
-            <IncidentsTab />
-          </Tabs.Panel>
-
-          <Tabs.Panel value="analytics">
-            <Group justify="flex-end" mb="md">
-              <Select
-                label="Trend range"
-                size="xs"
-                w={170}
-                data={TREND_RANGE_OPTIONS}
-                value={trendRange}
-                onChange={(value) => setTrendRange(value ?? 'last24h')}
-                allowDeselect={false}
-              />
-            </Group>
-            <AnalyticsTab 
-              metrics={metrics ?? null}
-              trendData={trendData}
-              countryData={countryData}
-              threatTypeData={threatTypeData}
-              totalThreats={totalThreats}
-            />
-          </Tabs.Panel>
-
-          <Tabs.Panel value="advisory">
-            <AIAdvisoryTab />
-          </Tabs.Panel>
-
-          <Tabs.Panel value="waf-rules">
+          <Tabs.Panel value="rules">
             <WAFRulesTab />
           </Tabs.Panel>
-
-          <Tabs.Panel value="archive">
-            <React.Suspense fallback={<Loader m="xl" />}>
-              <ThreatArchiveTab />
-            </React.Suspense>
-          </Tabs.Panel>
         </Tabs>
-      </Stack>
 
+        <Drawer opened={advisoryOpen} onClose={() => setFilters({ advisory: undefined })} title="AI Advisory" position="right" size="xl" padding="lg">
+          <AIAdvisoryTab />
+        </Drawer>
       <Modal
         opened={confirmUninstallOpened}
         onClose={() => setConfirmUninstallOpened(false)}
@@ -535,7 +532,7 @@ export default function SecurityCommandCenter() {
           </Group>
         </Stack>
       </Modal>
-    </Container>
+    </Stack>
   );
 }
 

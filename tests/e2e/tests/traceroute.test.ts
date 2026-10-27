@@ -52,9 +52,8 @@ test.describe('TraceRoute E2E', () => {
     // rendered before it resolved.
     console.log('Opening the Security Hub threat explorer...');
     const gotoExplorer = async () => {
-      await page.goto('/security-center', { waitUntil: 'load' });
-      await page.getByRole('tab', { name: /Threat Explorer/i }).click();
-      await page.getByRole('tab', { name: /Historical Logs/i }).click();
+      // Every recorded threat, blocked or not: the History view of Threats.
+      await page.goto('/security?tab=threats&view=history', { waitUntil: 'load' });
       await page.waitForTimeout(2000);
     };
 

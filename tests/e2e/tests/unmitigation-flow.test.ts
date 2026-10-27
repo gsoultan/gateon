@@ -11,8 +11,8 @@ import { test, expect } from '@playwright/test';
  * through the hub's Anomaly Engine tab.
  */
 async function gotoAnomalyEngine(page: any) {
-  await page.goto('/security-center', { waitUntil: 'load' });
-  await page.getByRole('tab', { name: /Anomaly Engine/i }).click();
+  // Anomalies are a view of the Threats tab, named in the URL.
+  await page.goto('/security?tab=threats&view=anomalies', { waitUntil: 'load' });
 }
 
 // See mitigation-flow.test.ts: threats from a loopback source are dropped by
@@ -107,9 +107,14 @@ test.describe('Threat Unmitigation E2E Flow', () => {
     expect(before.status(), 'control request was refused before anything was mitigated')
       .toBe(200);
 
+    // Live threats are the Threats tab's first view; what has been blocked is
+    // the Blocks tab, which opens on the mitigated list.
     const gotoExplorer = async () => {
-      await page.goto('/security-center', { waitUntil: 'load' });
-      await page.getByRole('tab', { name: /Threat Explorer/i }).click();
+      await page.goto('/security?tab=threats', { waitUntil: 'load' });
+      await page.waitForTimeout(1500);
+    };
+    const gotoBlocks = async () => {
+      await page.goto('/security?tab=blocks', { waitUntil: 'load' });
       await page.waitForTimeout(1500);
     };
 
@@ -127,11 +132,10 @@ test.describe('Threat Unmitigation E2E Flow', () => {
       .toBe(403);
 
     // 3. Release it from the Mitigated tab.
-    await gotoExplorer();
-    // "IP Mitigations", because the Mitigated tab opens on User Mitigations and
+    await gotoBlocks();
+    // "IP Mitigations", because the mitigated list opens on User Mitigations and
     // this is an IP block — the sub-tab selects userMitigated vs ipMitigated in
     // the query, so the default view genuinely does not contain it.
-    await page.getByRole('tab', { name: /^Mitigated/ }).click();
     await page.getByRole('tab', { name: /IP Mitigations/i }).click();
     await page.waitForTimeout(2000);
 
@@ -150,11 +154,10 @@ test.describe('Threat Unmitigation E2E Flow', () => {
     // one JA4+, and the spec above earns a fingerprint mitigation on it, so a
     // 403 here would not tell us whether the IP release worked.
     await page.waitForTimeout(3000);
-    await gotoExplorer();
-    // "IP Mitigations", because the Mitigated tab opens on User Mitigations and
+    await gotoBlocks();
+    // "IP Mitigations", because the mitigated list opens on User Mitigations and
     // this is an IP block — the sub-tab selects userMitigated vs ipMitigated in
     // the query, so the default view genuinely does not contain it.
-    await page.getByRole('tab', { name: /^Mitigated/ }).click();
     await page.getByRole('tab', { name: /IP Mitigations/i }).click();
     await page.waitForTimeout(2000);
 

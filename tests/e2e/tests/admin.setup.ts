@@ -18,7 +18,7 @@ setup('authenticate admin', async ({ page }) => {
   await page.getByRole('button', { name: /Continue to Dashboard/i }).click();
 
   // Wait for dashboard to load
-  await expect(page.getByRole('heading', { name: /System Overview/i })).toBeVisible({ timeout: 60000 });
+  await expect(page.getByRole('heading', { name: /^Overview$/ })).toBeVisible({ timeout: 60000 });
 
   // The user persisted, and the session held only in the HttpOnly cookie.
   await expectSessionOnlyInCookie(page);

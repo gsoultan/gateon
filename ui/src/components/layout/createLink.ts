@@ -29,3 +29,18 @@ export function useCreateFromLink(canCreate: boolean, openCreate: () => void) {
     setSearch({ new: undefined });
   }, [requested, canCreate, openCreate, setSearch]);
 }
+
+/**
+ * The `search` prop for a Link whose destination is a string rather than a
+ * typed route, as every cross-page link here is. The router accepts a reducer
+ * there and runs it at navigation; its type for an unregistered router is
+ * unsatisfiable, so the reducer is handed over through the prop's own type.
+ */
+export function linkSearch(search?: Record<string, string>): true | undefined {
+  if (!search) return undefined;
+  const reduce = (prev: Record<string, unknown>) => ({ ...prev, ...search });
+  // `true` is the one member of the prop's union that every rendering of Link
+  // (typed, or polymorphic through a Mantine `component=`) agrees on; the
+  // router receives the reducer and never inspects the type.
+  return reduce as unknown as true;
+}

@@ -141,7 +141,7 @@ export default function AuditLogsPage() {
     <Container size="xl">
       <Stack gap="lg">
         <PageHeader
-          title="Forensic Audit Trail"
+          title="Audit log"
           description="Tamper-proof history of administrative actions and security blocks."
           actions={
             <Group>

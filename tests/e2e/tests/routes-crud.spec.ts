@@ -32,14 +32,11 @@ async function openRowMenu(page: Page, name: string) {
   await page.getByRole('button', { name: `Manage route ${name}` }).click();
 }
 
-/** Steps through the form from wherever it is to Review, and saves. */
+/** Saves the one-page form, whichever of its two button labels it shows. */
 async function finishForm(page: Page, drawerName: string) {
   const drawer = page.getByRole('dialog', { name: drawerName });
-  for (let i = 0; i < 3 && (await drawer.getByRole('button', { name: 'Next Step' }).count()) > 0; i++) {
-    await drawer.getByRole('button', { name: 'Next Step' }).click();
-  }
   const saved = waitForRouteSave(page);
-  await drawer.getByRole('button', { name: 'Save Route' }).click();
+  await drawer.getByRole('button', { name: /^(Save|Create) route$/ }).click();
   const res = await saved;
   expect(res.status(), `PUT /v1/routes: ${await res.text()}`).toBe(200);
   await expect(drawer).toBeHidden();
@@ -71,13 +68,12 @@ test.describe('Routes', () => {
     await create.getByLabel('Friendly Name').fill(NAME);
     await create.getByRole('button', { name: 'Add first condition' }).click();
     await create.getByLabel('Path prefix').fill(PREFIX);
-    await create.getByRole('button', { name: 'Next Step' }).click();
     await create.getByPlaceholder('Choose a service').click();
     await page.getByRole('option', { name: 'Mock Service (http)' }).click();
     const created = await finishForm(page, 'Create New Route');
     routeId = created.id;
     expect(created).toMatchObject({ name: NAME, rule: `PathPrefix(\`${PREFIX}\`)`, serviceId: 'mock-service' });
-    await expect(page.getByText(`Route ${routeId} has been successfully created/updated.`)).toBeVisible();
+    await expect(page.getByText('Route saved')).toBeVisible();
     await expectProxyStatus(request, 200, 'the created route does not serve its prefix');
 
     // Edit: a new name, the same route.

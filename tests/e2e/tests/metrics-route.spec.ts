@@ -34,7 +34,7 @@ test('the Metrics page survives a reload without a service worker', async ({ bro
 
     await page.goto(href!);
     await expect(
-      page.getByRole('heading', { name: 'Metrics Dashboard' }),
+      page.getByRole('heading', { name: 'Metrics', level: 2 }),
       `reloading ${href} did not render the Metrics page; the server answered that path itself`,
     ).toBeVisible({ timeout: 30000 });
   } finally {

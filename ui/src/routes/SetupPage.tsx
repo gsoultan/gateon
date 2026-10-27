@@ -23,6 +23,7 @@ import {
   Select,
   Checkbox,
   Container,
+  Divider,
 } from "@mantine/core";
 import { useForm } from "@mantine/form";
 import { useNavigate } from "@tanstack/react-router";
@@ -54,7 +55,7 @@ import {
 import { api } from "../services/client";
 import type { DatabaseConfig, SetupRequest } from "../types/gateon";
 
-const WIZARD_STEPS = 6; // Admin, Security, Database, Logging, Management, Review
+const WIZARD_STEPS = 3; // Account, Storage, Finish
 
 type DbFields = {
   useUrl: boolean;
@@ -178,9 +179,6 @@ export default function SetupPage() {
       form.validateField("adminUsername").hasError === false &&
       form.validateField("adminPassword").hasError === false &&
       form.validateField("confirmPassword").hasError === false;
-    const securityValid = form.validateField("pasetoSecret").hasError === false;
-    const managementValid = form.validateField("managementBind").hasError === false &&
-      form.validateField("managementPort").hasError === false;
 
     if (wizardStep === 0 && !adminValid) {
       form.validate();
@@ -189,11 +187,7 @@ export default function SetupPage() {
     if (wizardStep === 0) {
       await loadStatus();
     }
-    if (wizardStep === 1 && !keyFromEnv && !securityValid) {
-      form.validate();
-      return;
-    }
-    if (wizardStep === 2 && !dbConfigured) {
+    if (wizardStep === 1 && !dbConfigured) {
       // Database step: test connection before proceeding
       const db = buildDbPayload(managementDbFields());
       if (!db.ok) {
@@ -202,7 +196,7 @@ export default function SetupPage() {
       }
       if (!(await testDb(db.payload))) return;
     }
-    if (wizardStep === 3 && !dbConfigured && !form.values.loggingUseSame) {
+    if (wizardStep === 1 && !dbConfigured && !form.values.loggingUseSame) {
       // Logging step: test the dedicated logging database connection
       const db = buildDbPayload(loggingDbFields());
       if (!db.ok) {
@@ -210,10 +204,6 @@ export default function SetupPage() {
         return;
       }
       if (!(await testDb(db.payload))) return;
-    }
-    if (wizardStep === 4 && !managementValid) {
-      form.validate();
-      return;
     }
     setWizardStep((s) => Math.min(s + 1, WIZARD_STEPS - 1));
     setError(null);
@@ -344,12 +334,10 @@ export default function SetupPage() {
             </Title>
           </Group>
           <Badge size="lg" variant="light" color="indigo">
-            First Run Experience
+            First run
           </Badge>
           <Text c="dimmed" size="sm" ta="center" maw={520}>
-            You're just a few steps away from a high-performance, secure
-            networking environment. Configure your administrator access,
-            security keys and data store below.
+            Three steps: who signs in, where the gateway keeps its data, and a last look before it starts.
           </Text>
         </Stack>
 
@@ -470,64 +458,8 @@ export default function SetupPage() {
                 </Stack>
               </Stepper.Step>
 
-              <Stepper.Step label="Security">
-                <Stack gap="lg" mt="md">
-                  {keyFromEnv ? (
-                    <Alert color="blue" icon={<IconInfoCircle size={rem(18)} />} title="Session key from the environment">
-                      <Text size="sm">
-                        This gateway's session key comes from its environment (<Code>GATEON_SESSION_KEY</Code>).
-                        Setup keeps it, so no key is generated here. Every replica and every restart uses that key.
-                      </Text>
-                    </Alert>
-                  ) : (
-                  <Box>
-                    <Group justify="space-between" mb={10}>
-                      <Text size="xs" fw={700} c="dimmed" style={{ textTransform: 'uppercase', letterSpacing: 1 }}>
-                        Security Configuration
-                      </Text>
-                      <Tooltip label="Required for PASETO token encryption">
-                        <IconInfoCircle size={14} color="gray" />
-                      </Tooltip>
-                    </Group>
-                    <TextInput
-                      label="PASETO Secret Key"
-                      placeholder="Exactly 32 characters"
-                      required
-                      size="md"
-                      ff="monospace"
-                      rightSectionWidth={68}
-                      {...form.getInputProps("pasetoSecret")}
-                      rightSection={
-                        <Group gap={0}>
-                          <Tooltip label={clipboard.copied ? "Copied" : "Copy Secret"}>
-                            <ActionIcon
-                              onClick={() => clipboard.copy(form.values.pasetoSecret)}
-                              variant="subtle"
-                              color={clipboard.copied ? "teal" : "gray"}
-                            >
-                              {clipboard.copied ? <IconCheck size="1.1rem" /> : <IconCopy size="1.1rem" />}
-                            </ActionIcon>
-                          </Tooltip>
-                          <Tooltip label="Regenerate">
-                            <ActionIcon
-                              onClick={() => form.setFieldValue("pasetoSecret", generateRandomString(32))}
-                              variant="subtle"
-                            >
-                              <IconRefresh size="1.1rem" />
-                            </ActionIcon>
-                          </Tooltip>
-                        </Group>
-                      }
-                    />
-                    <Text size="xs" c="dimmed" mt={5}>
-                      This secret is used to encrypt your session tokens. Keep it safe.
-                    </Text>
-                  </Box>
-                  )}
-                </Stack>
-              </Stepper.Step>
 
-              <Stepper.Step label="Database">
+              <Stepper.Step label="Storage">
                 <Stack gap="lg" mt="md">
                   {status && dbConfigured ? (
                     <Alert
@@ -584,7 +516,7 @@ export default function SetupPage() {
                     ) : (
                       <SimpleGrid cols={{ base: 1, sm: 2 }} mt="md">
                         <TextInput label="Host" placeholder="127.0.0.1" {...form.getInputProps("dbHost")} />
-                        <TextInput label="Port" placeholder={form.values.databaseDriver === 'postgres' ? "5432" : "3306"} {...form.getInputProps("dbPort")} />
+                        <TextInput label="Port" placeholder="5432" {...form.getInputProps("dbPort")} />
                         <TextInput label="User" placeholder="gateon" {...form.getInputProps("dbUser")} />
                         <PasswordInput label="Password" placeholder="••••••••" {...form.getInputProps("dbPassword")} />
                         <TextInput label="Database" placeholder="gateon" {...form.getInputProps("dbName")} />
@@ -624,11 +556,7 @@ export default function SetupPage() {
                     </Group>
                   </Box>
                   )}
-                </Stack>
-              </Stepper.Step>
-
-              <Stepper.Step label="Logging">
-                <Stack gap="lg" mt="md">
+                  <Divider label="Where the logs go" labelPosition="left" />
                   {status && dbConfigured ? (
                     <Alert color="blue" icon={<IconInfoCircle size={rem(18)} />} title="Logging database already configured">
                       <Text size="sm">
@@ -642,9 +570,7 @@ export default function SetupPage() {
                       Logging Database
                     </Text>
                     <Text size="xs" c="dimmed" mb="md">
-                      Choose where audit and security logs are stored. By default they
-                      are kept in the management database, but you can isolate them in a
-                      dedicated database.
+                      Audit and security logs are kept in the database above unless you give them one of their own.
                     </Text>
                     <Checkbox
                       label="Use the same database as management"
@@ -686,7 +612,7 @@ export default function SetupPage() {
                         ) : (
                           <SimpleGrid cols={{ base: 1, sm: 2 }} mt="md">
                             <TextInput label="Host" placeholder="127.0.0.1" {...form.getInputProps("logDbHost")} />
-                            <TextInput label="Port" placeholder={form.values.loggingDriver === 'postgres' ? "5432" : "3306"} {...form.getInputProps("logDbPort")} />
+                            <TextInput label="Port" placeholder="5432" {...form.getInputProps("logDbPort")} />
                             <TextInput label="User" placeholder="gateon" {...form.getInputProps("logDbUser")} />
                             <PasswordInput label="Password" placeholder="••••••••" {...form.getInputProps("logDbPassword")} />
                             <TextInput label="Database" placeholder="gateonLogs" {...form.getInputProps("logDbName")} />
@@ -731,47 +657,10 @@ export default function SetupPage() {
                 </Stack>
               </Stepper.Step>
 
-              <Stepper.Step label="API">
-                <Stack gap="lg" mt="md">
-                  <Box>
-                    <Text size="xs" fw={700} c="dimmed" mb={10} style={{ textTransform: 'uppercase', letterSpacing: 1 }}>
-                      Management Entrypoint
-                    </Text>
-                    <Alert color="orange" icon={<IconAlertCircle size={rem(18)} />} mb="md">
-                      <Text size="sm" fw={500}>
-                        Be careful when changing these values.
-                      </Text>
-                      <Text size="xs" mt={4}>
-                        If you set an IP that you cannot reach, you will be locked out of the dashboard.
-                        Use <Code>0.0.0.0</Code> to allow access from any IP (recommended for initial remote setup).
-                        <Text fw={700} span> Note: Changes take effect after system restart.</Text>
-                      </Text>
-                    </Alert>
-                    <SimpleGrid cols={{ base: 1, sm: 2 }}>
-                      <TextInput
-                        label="Bind Address"
-                        placeholder="0.0.0.0 or admin.example.com"
-                        required
-                        size="md"
-                        leftSection={<IconServer size={rem(18)} stroke={1.5} />}
-                        {...form.getInputProps("managementBind")}
-                      />
-                      <TextInput
-                        label="Port"
-                        placeholder="8080"
-                        required
-                        size="md"
-                        {...form.getInputProps("managementPort")}
-                      />
-                    </SimpleGrid>
-                  </Box>
-                </Stack>
-              </Stepper.Step>
-
-              <Stepper.Step label="Confirm">
+              <Stepper.Step label="Finish">
                 <Stack gap="lg" mt="md">
                   <Text size="sm" c="dimmed">
-                    Review your configuration. global.json will be created when you confirm.
+                    What the gateway will be set up with. Its configuration file is written when you finish.
                   </Text>
                   <Paper p="md" withBorder radius="md" bg="light-dark(var(--mantine-color-gray-0), var(--mantine-color-dark-6))">
                     <Stack gap="xs">
@@ -819,8 +708,97 @@ export default function SetupPage() {
                       </Group>
                     </Stack>
                   </Paper>
+                  <Divider label="Session key" labelPosition="left" />
+                  {keyFromEnv ? (
+                    <Alert color="blue" icon={<IconInfoCircle size={rem(18)} />} title="Session key from the environment">
+                      <Text size="sm">
+                        This gateway's session key comes from its environment (<Code>GATEON_SESSION_KEY</Code>).
+                        Setup keeps it, so no key is generated here. Every replica and every restart uses that key.
+                      </Text>
+                    </Alert>
+                  ) : (
+                  <Box>
+                    <Group justify="space-between" mb={10}>
+                      <Text size="xs" fw={700} c="dimmed" style={{ textTransform: 'uppercase', letterSpacing: 1 }}>
+                        Security Configuration
+                      </Text>
+                      <Tooltip label="Required for PASETO token encryption">
+                        <IconInfoCircle size={14} color="gray" />
+                      </Tooltip>
+                    </Group>
+                    <TextInput
+                      label="PASETO Secret Key"
+                      placeholder="Exactly 32 characters"
+                      required
+                      size="md"
+                      ff="monospace"
+                      rightSectionWidth={68}
+                      {...form.getInputProps("pasetoSecret")}
+                      rightSection={
+                        <Group gap={0}>
+                          <Tooltip label={clipboard.copied ? "Copied" : "Copy Secret"}>
+                            <ActionIcon
+                              onClick={() => clipboard.copy(form.values.pasetoSecret)}
+                              variant="subtle"
+                              color={clipboard.copied ? "teal" : "gray"}
+                            >
+                              {clipboard.copied ? <IconCheck size="1.1rem" /> : <IconCopy size="1.1rem" />}
+                            </ActionIcon>
+                          </Tooltip>
+                          <Tooltip label="Regenerate">
+                            <ActionIcon
+                              onClick={() => form.setFieldValue("pasetoSecret", generateRandomString(32))}
+                              variant="subtle"
+                            >
+                              <IconRefresh size="1.1rem" />
+                            </ActionIcon>
+                          </Tooltip>
+                        </Group>
+                      }
+                    />
+                    <Text size="xs" c="dimmed" mt={5}>
+                      This secret is used to encrypt your session tokens. Keep it safe.
+                    </Text>
+                  </Box>
+                  )}
+                  <Divider label="Management address" labelPosition="left" />
+                  <Box>
+                    <Text size="xs" fw={700} c="dimmed" mb={10} style={{ textTransform: 'uppercase', letterSpacing: 1 }}>
+                      Management Entrypoint
+                    </Text>
+                    <Alert color="orange" icon={<IconAlertCircle size={rem(18)} />} mb="md">
+                      <Text size="sm" fw={500}>
+                        Be careful when changing these values.
+                      </Text>
+                      <Text size="xs" mt={4}>
+                        If you set an IP that you cannot reach, you will be locked out of the dashboard.
+                        Use <Code>0.0.0.0</Code> to allow access from any IP (recommended for initial remote setup).
+                        <Text fw={700} span> Note: Changes take effect after system restart.</Text>
+                      </Text>
+                    </Alert>
+                    <SimpleGrid cols={{ base: 1, sm: 2 }}>
+                      <TextInput
+                        label="Bind Address"
+                        placeholder="0.0.0.0 or admin.example.com"
+                        required
+                        size="md"
+                        leftSection={<IconServer size={rem(18)} stroke={1.5} />}
+                        {...form.getInputProps("managementBind")}
+                      />
+                      <TextInput
+                        label="Port"
+                        placeholder="8080"
+                        required
+                        size="md"
+                        {...form.getInputProps("managementPort")}
+                      />
+                    </SimpleGrid>
+                  </Box>
                 </Stack>
               </Stepper.Step>
+
+
+
             </Stepper>
 
             <Group justify="space-between" mt="xl">
@@ -851,7 +829,7 @@ export default function SetupPage() {
                   radius="md"
                   className="bg-indigo-600 hover:bg-indigo-700 transition-colors"
                 >
-                  Complete System Setup
+                  Finish setup
                 </Button>
               )}
             </Group>

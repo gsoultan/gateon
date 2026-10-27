@@ -19,8 +19,7 @@ const MARKER = `e2e-waf-marker-${stamp}`;
 type Playwright = { request: { newContext: (o: object) => Promise<APIRequestContext> } };
 
 async function openRules(page: Page) {
-  await page.goto('/security-center');
-  await page.getByRole('tab', { name: /WAF Rules/i }).click();
+  await page.goto('/security?tab=rules');
   await expect(page.getByRole('heading', { name: 'WAF Security Rules' })).toBeVisible();
 }
 
