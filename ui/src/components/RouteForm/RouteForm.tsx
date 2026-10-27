@@ -1,54 +1,30 @@
 // Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
 // SPDX-License-Identifier: MIT
 
-import { useState, useEffect } from "react";
-import {
-  Stack,
-  Group,
-  Button,
-  Text,
-  Stepper,
-  Code,
-  ScrollArea,
-  Paper,
-  Divider,
-  SegmentedControl,
-  Grid,
-} from "@mantine/core";
+import { useEffect, useMemo, useState } from "react";
+import { Button, Collapse, Divider, Group, Paper, Stack, Text } from "@mantine/core";
 import type { Route } from "../../types/gateon";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "@tanstack/react-form";
 import { notifications } from "@mantine/notifications";
-import {
-  useEntryPoints,
-  useMiddlewares,
-  useTLSOptions,
-  useCertificates,
-  useServices,
-  apiFetch,
-  getApiErrorMessage,
-} from "../../hooks/useGateon";
-import { useIsMobile } from "../../hooks/useMobile";
-import {
-  IconCheck,
-  IconServer,
-  IconShieldLock,
-  IconRoute,
-} from "@tabler/icons-react";
+import { useEntryPoints, useMiddlewares, useTLSOptions, useCertificates, useServices, apiFetch, getApiErrorMessage } from "../../hooks/useGateon";
+import { IconCheck, IconCode, IconRoute, IconServer, IconShieldLock } from "@tabler/icons-react";
+import { FormSection } from "../layout";
 import { RoutingConfig, UpstreamConfig, PipelineConfig, RoutePreview } from "./";
 import { formValuesToRoute, routeToFormValues } from "./routePayload";
+import { summarizeRoute } from "./routeSummary";
 
-export default function RouteForm({
-  onSuccess,
-  initialData,
-}: {
-  onSuccess?: () => void;
-  initialData?: Route | null;
-}) {
+/**
+ * One page: Match, Send to, Policies and TLS, in that order, with the route
+ * read back as a sentence at the top and the saved form as code at the foot.
+ * The four-step wizard it replaces hid the service behind a Next button and
+ * put the only Save on its last step; here every field is on screen and Save
+ * is enabled the moment the route is complete.
+ */
+export default function RouteForm({ onSuccess, initialData }: { onSuccess?: () => void; initialData?: Route | null }) {
   const queryClient = useQueryClient();
-  const [active, setActive] = useState(0);
+  const [showCode, setShowCode] = useState(false);
 
-  // Data for form selections
   const { data: epData } = useEntryPoints();
   const { data: mwData } = useMiddlewares();
   const { data: tlsOptData } = useTLSOptions();
@@ -68,19 +44,15 @@ export default function RouteForm({
     onSuccess: (savedRoute: Route) => {
       queryClient.invalidateQueries({ queryKey: ["routes"] });
       notifications.show({
-        title: "Route Saved",
-        message: `Route ${savedRoute.id} has been successfully created/updated.`,
+        title: "Route saved",
+        message: `${savedRoute.name || savedRoute.id} is in force.`,
         color: "green",
         icon: <IconCheck size={18} />,
       });
       onSuccess?.();
     },
     onError: (err: unknown) => {
-      notifications.show({
-        title: "Error Saving Route",
-        message: getApiErrorMessage(err),
-        color: "red",
-      });
+      notifications.show({ title: "The route was not saved", message: getApiErrorMessage(err), color: "red" });
     },
   });
 
@@ -94,10 +66,7 @@ export default function RouteForm({
       entrypoints: [] as string[],
       middlewares: [] as string[],
       serviceId: "",
-      tls: {
-        certificateIds: [] as string[],
-        optionId: "",
-      },
+      tls: { certificateIds: [] as string[], optionId: "" },
       disabled: false,
       streamMode: 0,
     } as Route,
@@ -123,50 +92,37 @@ export default function RouteForm({
     }
   }, [initialData, form]);
 
-  const nextStep = () =>
-    setActive((current) => (current < 3 ? current + 1 : current));
-  const prevStep = () =>
-    setActive((current) => (current > 0 ? current - 1 : current));
-
-  const isMobile = useIsMobile();
   const routeType = form.state.values.type;
-  const epOptionsAll = (epData?.entryPoints || []).map((ep) => ({
-    value: ep.id,
-    label: `${ep.name} (${ep.address})`,
-    type: ep.type,
-  }));
-  const epOptions = epOptionsAll.filter((ep) => {
-    if (routeType === "tcp") return ep.type === 2; // EntryPointType.TCP
-    if (routeType === "udp") return ep.type === 3; // EntryPointType.UDP
-    return ep.type !== 2 && ep.type !== 3; // HTTP/gRPC: exclude L4 entryPoints
-  }).map(({ value, label }) => ({ value, label }));
+  const epOptionsAll = (epData?.entryPoints || []).map((ep) => ({ value: ep.id, label: `${ep.name} (${ep.address})`, type: ep.type }));
+  const epOptions = epOptionsAll
+    .filter((ep) => {
+      if (routeType === "tcp") return ep.type === 2; // EntryPointType.TCP
+      if (routeType === "udp") return ep.type === 3; // EntryPointType.UDP
+      return ep.type !== 2 && ep.type !== 3; // HTTP/gRPC: exclude L4 listeners
+    })
+    .map(({ value, label }) => ({ value, label }));
 
-  const mwOptions = (mwData?.middlewares || []).map((mw) => ({
-    value: mw.id,
-    label: `${mw.name} (${mw.type})`,
-  }));
+  const mwOptions = (mwData?.middlewares || []).map((mw) => ({ value: mw.id, label: `${mw.name} (${mw.type})` }));
 
-  const tlsOptOptions = ((tlsOptData as any)?.tlsOptions || (tlsOptData as any)?.options || []).map((opt: any) => ({
-    value: opt.id,
-    label: opt.name,
-  }));
+  const tlsOptOptions = ((tlsOptData as any)?.tlsOptions || (tlsOptData as any)?.options || []).map((opt: any) => ({ value: opt.id, label: opt.name }));
 
-  const certOptions = (certData?.certificates || []).map((c) => ({
-    value: c.id,
-    label: c.name,
-  }));
+  const certOptions = (certData?.certificates || []).map((c) => ({ value: c.id, label: c.name }));
 
   const serviceOptions = (serviceData?.services || [])
     .filter((s) => {
-      if (routeType === "tcp" || routeType === "udp") {
-        return (s.backendType || "http") === routeType;
-      }
+      if (routeType === "tcp" || routeType === "udp") return (s.backendType || "http") === routeType;
       return (s.backendType || "http") !== "tcp" && (s.backendType || "http") !== "udp";
     })
-    .map((s) => ({
-      value: s.id,
-      label: `${s.name} (${s.backendType || "http"})`,
-    }));
+    .map((s) => ({ value: s.id, label: `${s.name} (${s.backendType || "http"})` }));
+
+  const lookups = useMemo(
+    () => ({
+      listenerNames: new Map((epData?.entryPoints || []).map((ep) => [ep.id, ep.name || ep.address])),
+      serviceNames: new Map((serviceData?.services || []).map((s) => [s.id, s.name])),
+      policyNames: new Map((mwData?.middlewares || []).map((mw) => [mw.id, mw.name])),
+    }),
+    [epData?.entryPoints, serviceData?.services, mwData?.middlewares],
+  );
 
   return (
     <form
@@ -176,146 +132,59 @@ export default function RouteForm({
         form.handleSubmit();
       }}
     >
-      <Grid>
-        <Grid.Col span={{ base: 12, lg: 8 }}>
-          <Stack gap="lg">
-            <Paper withBorder p="lg" radius="lg">
-              <Stack gap="xl">
-                <Stepper
-                  active={active}
-                  onStepClick={setActive}
-                  allowNextStepsSelect={false}
-                  size="sm"
-                  orientation={isMobile ? "vertical" : "horizontal"}
-                >
-                  <Stepper.Step
-                    label={isMobile ? null : "Basics"}
-                    description={isMobile ? null : "ID, Type, Rule"}
-                    icon={<IconRoute size={18} />}
-                  >
-                    <RoutingConfig form={form} entryPointOptions={epOptions} />
-                  </Stepper.Step>
-
-                  <Stepper.Step
-                    label={isMobile ? null : "Upstream"}
-                    description={isMobile ? null : "Targets & Load Balancing"}
-                    icon={<IconServer size={18} />}
-                  >
-                    <UpstreamConfig form={form} serviceOptions={serviceOptions} />
-                  </Stepper.Step>
-
-                  <Stepper.Step
-                    label={isMobile ? null : "Security"}
-                    description={isMobile ? null : "Policies & TLS"}
-                    icon={<IconShieldLock size={18} />}
-                  >
-                    <PipelineConfig
-                      form={form}
-                      middlewareOptions={mwOptions}
-                      tlsOptOptions={tlsOptOptions}
-                      certOptions={certOptions}
-                    />
-                  </Stepper.Step>
-
-                  <Stepper.Step
-                    label={isMobile ? null : "Review"}
-                    description={isMobile ? null : "Confirm & Save"}
-                    icon={<IconCheck size={18} />}
-                  >
-                    <Stack gap="md" mt="xl" align="center" py="xl">
-                      <Paper p="md" radius="100%" bg="green.1" c="green.6">
-                        <IconCheck size={40} />
-                      </Paper>
-                      <Text size="lg" fw={800}>
-                        Configuration Ready
-                      </Text>
-                      <Text size="sm" c="dimmed" ta="center">
-                        Review the configuration preview on the right and save.
-                      </Text>
-                      <form.Subscribe
-                        selector={(state) => [
-                          state.values.name,
-                          state.values.rule,
-                          state.values.serviceId,
-                        ]}
-                        children={([name, rule, serviceId]) => {
-                          const type = form.state.values.type;
-                          const isL4 = type === "tcp" || type === "udp";
-                          const ruleOk = isL4 ? true : !!rule;
-                          return (
-                          <Button
-                            type="submit"
-                            size="md"
-                            radius="md"
-                            loading={mutation.isPending}
-                            disabled={!name || !ruleOk || !serviceId}
-                            w={200}
-                          >
-                            Save Route
-                          </Button>
-                          );
-                        }}
-                      />
-                    </Stack>
-                  </Stepper.Step>
-                </Stepper>
-
-                <Group justify="flex-end" mt="xl">
-                  {active !== 0 && (
-                    <Button variant="subtle" color="gray" onClick={prevStep}>
-                      Back
-                    </Button>
-                  )}
-                  {active < 3 && (
-                    <form.Subscribe
-                      selector={(state) => [
-                        state.values.name,
-                        state.values.rule,
-                        state.values.serviceId,
-                        state.values.type,
-                      ]}
-                      children={([name, rule, serviceId, type]) => {
-                        const isL4 = type === "tcp" || type === "udp";
-                        const ruleOk = isL4 ? true : !!rule;
-                        return (
-                        <Button
-                          onClick={nextStep}
-                          radius="md"
-                          px="xl"
-                          disabled={
-                            (active === 0 && (!name || !ruleOk || !type)) ||
-                            (active === 1 && !serviceId)
-                          }
-                        >
-                          Next Step
-                        </Button>
-                        );
-                      }}
-                    />
-                  )}
-                </Group>
-              </Stack>
+      <Stack gap="xl">
+        <form.Subscribe
+          selector={(state) => state.values}
+          children={(values) => (
+            <Paper withBorder p="md" radius="md" bg="var(--mantine-color-default-hover)">
+              <Text size="sm" aria-live="polite">
+                {summarizeRoute(values, lookups)}
+              </Text>
             </Paper>
-          </Stack>
-        </Grid.Col>
+          )}
+        />
 
-        <Grid.Col span={{ base: 12, lg: 4 }}>
-          <Paper
-            withBorder
-            p="lg"
-            radius="lg"
-            h="100%"
-            style={{ position: "sticky", top: "1rem" }}
-          >
+        <FormSection title="Match" description="What this route is called, and which requests on which listeners it takes." icon={<IconRoute size={18} />}>
+          <RoutingConfig form={form} entryPointOptions={epOptions} />
+        </FormSection>
+
+        <Divider />
+
+        <FormSection title="Send to" description="The service whose targets answer the matched requests." icon={<IconServer size={18} />}>
+          <UpstreamConfig form={form} serviceOptions={serviceOptions} />
+        </FormSection>
+
+        <Divider />
+
+        <FormSection title="Policies and TLS" description="What runs on each request before the service sees it, and the certificate the route serves." icon={<IconShieldLock size={18} />}>
+          <PipelineConfig form={form} middlewareOptions={mwOptions} tlsOptOptions={tlsOptOptions} certOptions={certOptions} />
+        </FormSection>
+
+        <Divider />
+
+        <Stack gap="sm">
+          <Group justify="space-between">
+            <Button variant="subtle" color="gray" leftSection={<IconCode size={16} />} onClick={() => setShowCode((v) => !v)} aria-expanded={showCode}>
+              {showCode ? "Hide code" : "View as code"}
+            </Button>
             <form.Subscribe
-              selector={(state) => state.values}
-              children={(values) => (
-                <RoutePreview values={values} height="calc(100vh - 400px)" />
-              )}
+              selector={(state) => [state.values.name, state.values.rule, state.values.serviceId, state.values.type]}
+              children={([name, rule, serviceId, type]) => {
+                const isL4 = type === "tcp" || type === "udp";
+                const ruleOk = isL4 ? true : !!rule;
+                return (
+                  <Button type="submit" loading={mutation.isPending} disabled={!name || !ruleOk || !serviceId}>
+                    {initialData?.id ? "Save route" : "Create route"}
+                  </Button>
+                );
+              }}
             />
-          </Paper>
-        </Grid.Col>
-      </Grid>
+          </Group>
+          <Collapse expanded={showCode}>
+            <form.Subscribe selector={(state) => state.values} children={(values) => <RoutePreview values={values} height={320} />} />
+          </Collapse>
+        </Stack>
+      </Stack>
     </form>
   );
 }

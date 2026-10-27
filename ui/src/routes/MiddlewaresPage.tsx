@@ -13,7 +13,6 @@ import {
   Tooltip,
   ScrollArea,
   Modal,
-  Select,
   ActionIcon,
   Badge,
   Code,
@@ -46,7 +45,8 @@ import { useMiddlewares, useMiddlewareRoutes, apiFetch, getApiErrorMessage } fro
 import { usePermissions } from "../hooks/usePermissions";
 import { useTableDensity } from "../hooks/useTableDensity";
 import { MiddlewareConfigEditor } from "../components/MiddlewareConfig";
-import { middlewareTypeSelectData } from "../components/MiddlewareConfig/middlewareTypes";
+import { policyType } from "../components/MiddlewareConfig/middlewareTypes";
+import { PolicyCatalog } from "../components/MiddlewareConfig/PolicyCatalog";
 import {
   middlewareConfigProblem,
   withoutRetiredKeys,
@@ -63,6 +63,8 @@ export default function MiddlewaresPage() {
   const [opened, { open, close }] = useDisclosure(false);
   const [deleteTarget, setDeleteTarget] = useState<Middleware | null>(null);
   const [editingMW, setEditingMW] = useState<Middleware | null>(null);
+  // The catalog shows first for a new policy; an existing one opens on its editor.
+  const [pickingType, setPickingType] = useState(false);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const pageSize = 10;
@@ -135,12 +137,14 @@ export default function MiddlewaresPage() {
   });
 
   const startAdd = () => {
-    setEditingMW({ id: "", name: "", type: "ratelimit", config: {} });
+    setEditingMW({ id: "", name: "", type: "", config: {} });
+    setPickingType(true);
     open();
   };
 
   const startEdit = (mw: Middleware) => {
     setEditingMW({ ...mw });
+    setPickingType(false);
     open();
   };
 
@@ -378,14 +382,23 @@ export default function MiddlewaresPage() {
       <Modal
         opened={opened}
         onClose={close}
-        title={editingMW?.id ? "Edit policy" : "Add policy"}
+        title={pickingType ? "Choose a policy" : editingMW?.id ? "Edit policy" : "Add policy"}
         radius="lg"
         size="lg"
       >
+        {pickingType ? (
+          <PolicyCatalog
+            value={editingMW?.type || undefined}
+            onPick={(type) => {
+              if (editingMW) setEditingMW({ ...editingMW, type, config: editingMW.type === type ? editingMW.config : {} });
+              setPickingType(false);
+            }}
+          />
+        ) : (
         <Stack gap="md">
           <FieldGrid>
             <TextInput
-              label="Friendly Name"
+              label="Name"
               placeholder="Global Rate Limit"
               value={editingMW?.name || ""}
               onChange={(e) =>
@@ -394,16 +407,19 @@ export default function MiddlewaresPage() {
               }
             />
 
-            <Select
-              label="Type"
-              data={middlewareTypeSelectData()}
-              searchable
-              value={editingMW?.type || "ratelimit"}
-              onChange={(val) =>
-                editingMW &&
-                setEditingMW({ ...editingMW, type: val || "ratelimit" })
-              }
-            />
+            <Stack gap={4}>
+              <Text size="sm" fw={500}>
+                Type
+              </Text>
+              <Group gap="xs">
+                <Badge variant="light" size="lg" radius="sm" tt="none">
+                  {policyType(editingMW?.type)?.label ?? editingMW?.type ?? "Not chosen"}
+                </Badge>
+                <Button variant="subtle" size="compact-sm" onClick={() => setPickingType(true)}>
+                  Change
+                </Button>
+              </Group>
+            </Stack>
           </FieldGrid>
 
           <Tabs defaultValue="config" variant="pills" radius="md">
@@ -514,6 +530,7 @@ export default function MiddlewaresPage() {
             </Button>
           </Group>
         </Stack>
+        )}
       </Modal>
 
       <Modal

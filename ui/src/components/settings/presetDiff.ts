@@ -25,10 +25,10 @@ export function presetChanges(current: unknown, proposed: unknown, prefix = ""):
   // A section one side lacks is compared field by field, so a preset that
   // adds a section lists the fields it sets rather than one JSON blob.
   if ((isRecord(current) || current === undefined) && (isRecord(proposed) || proposed === undefined) && (isRecord(current) || isRecord(proposed))) {
-    current = current ?? {};
-    proposed = proposed ?? {};
-    const keys = [...new Set([...Object.keys(current), ...Object.keys(proposed)])].sort();
-    return keys.flatMap((k) => presetChanges(current[k], proposed[k], prefix ? `${prefix}.${k}` : k));
+    const before: Record<string, unknown> = current ?? {};
+    const after: Record<string, unknown> = proposed ?? {};
+    const keys = [...new Set([...Object.keys(before), ...Object.keys(after)])].sort();
+    return keys.flatMap((k) => presetChanges(before[k], after[k], prefix ? `${prefix}.${k}` : k));
   }
   if (Object.is(current, proposed) || JSON.stringify(current) === JSON.stringify(proposed)) return [];
   return [{ path: prefix || "(root)", from: show(current), to: show(proposed) }];
