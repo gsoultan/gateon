@@ -11,6 +11,20 @@ CONTAINER ?= docker
 LDFLAGS = -s -w -X main.Version=$(VERSION)
 GOBUILD = go build -v -ldflags="$(LDFLAGS)" -trimpath -tags=$(BUILD_TAGS)
 
+# Every `go run tool@version` below builds the tool with the toolchain that tool's
+# own go.mod asks for, not the one this project's go.mod asks for: outside the
+# module, Go only switches up from the local install. On a machine whose local
+# Go is older than go.mod, golangci-lint came out built with go1.26 and refused
+# the tree ("the Go language version (go1.26) used to build golangci-lint is
+# lower than the targeted Go version (1.27.3)"), so `make lint-new` failed for
+# everyone except CI, where setup-go installs the go.mod version as the local
+# one. Resolving the project toolchain once, inside the module, and exporting it
+# builds every tool with it. An explicit GOTOOLCHAIN in the environment wins.
+ifeq ($(origin GOTOOLCHAIN),undefined)
+GOTOOLCHAIN := $(shell go env GOVERSION)
+endif
+export GOTOOLCHAIN
+
 .PHONY: proto models build build-fips release deb test test-race bench clean vuln staticcheck gosec sec check-invariants check-config check-auth-nil check-coverage check-folders ebpf ebpf-docker pgo-profile docker
 
 ## proto: regenerate Go bindings from proto/gateon/v1/*.proto using buf
@@ -297,19 +311,26 @@ sec: vuln staticcheck gosec check-invariants check-config check-auth-nil check-f
 	go vet ./...
 
 ## lint: run golangci-lint over the whole tree (reports pre-existing debt too)
+##
+## Pinned rather than @latest for the reason the generators in go.mod's `tool`
+## block are: @latest made the gate whatever upstream tagged that morning, so a
+## new linter release could fail a PR for code it never touched, and two runs a
+## day apart were not the same check. Bump deliberately; CI uses this target.
+GOLANGCI_LINT_VERSION ?= v2.15.0
+GOLANGCI_LINT = go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
 lint:
-	go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest run ./...
+	$(GOLANGCI_LINT) run ./...
 
 ## lint-new: lint only code changed since LINT_BASE (default: origin/main).
 ##           This is the gate for new work — it ignores pre-existing findings.
 LINT_BASE ?= origin/main
 lint-new:
-	go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest run \
+	$(GOLANGCI_LINT) run \
 		--new-from-rev=$(LINT_BASE) --whole-files=false ./...
 
 ## lint-fix: apply the formatters (gofmt + goimports) via golangci-lint
 lint-fix:
-	go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest fmt ./...
+	$(GOLANGCI_LINT) fmt ./...
 
 ## clean: clean build artifacts
 clean:
