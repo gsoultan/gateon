@@ -68,12 +68,7 @@ func EntryPoint(epID, epLabel string, isMgmt bool) Middleware {
 			defer RequestStatePool.Put(rs)
 
 			// 2. Handle Request ID
-			id := r.Header.Get(request.HeaderRequestID)
-			if id == "" {
-				id = request.GenerateID()
-			}
-			w.Header().Set(request.HeaderRequestID, id)
-			rs.RequestID = id
+			rs.RequestID = assignRequestID(w, r)
 
 			// 3. Resolve Real IP, Country and Proto (Consolidated logic)
 			trustCloudflare := config.EffectiveTrustCloudflare()
@@ -131,6 +126,24 @@ func WithRequestState(epID, epLabel string, isMgmt bool) Middleware {
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
+}
+
+// assignRequestID returns the request's ID -- the one it carries, or a new
+// one -- having set it on the response.
+//
+// The value is assigned rather than Set: Set builds a one-element slice per
+// request, and these come from a batch (request.NewIDHeader). The key is
+// already canonical, which is all Set would add.
+func assignRequestID(w http.ResponseWriter, r *http.Request) string {
+	id := r.Header.Get(request.HeaderRequestID)
+	var value []string
+	if id == "" {
+		id, value = request.NewIDHeader()
+	} else {
+		value = request.IDHeaderValue(id)
+	}
+	w.Header()[request.HeaderRequestID] = value
+	return id
 }
 
 func populateFingerprints(r *http.Request, rs *request.RequestState) {

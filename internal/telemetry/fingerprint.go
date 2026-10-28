@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"sync"
+	"sync/atomic"
 
 	"github.com/gsoultan/gateon/internal/request"
 )
@@ -251,78 +252,155 @@ func lowerASCII2(s string) (byte, byte) {
 	}
 }
 
-// GenerateJA4H builds the JA4H fingerprint. Allocation-free apart from the
-// returned string, which is assembled in one pass rather than concatenated.
+// GenerateJA4H builds the JA4H fingerprint: the interned JA4H+ without its
+// leading "_" (see GenerateJA4HPlus), so it allocates only for a request the
+// table cannot hold.
 //
 // The layout is load-bearing beyond this package: repid cuts the reputation
 // class out of it by position, leaving out the method, cookie and referer bytes
 // a client varies per request (ADR 0024). It cannot import this package, so
 // TestReputationIdentityFollowsTheJA4HLayout is what fails if the two drift.
 func GenerateJA4H(r *http.Request) string {
-	var out [ja4hLen]byte
-	appendJA4H(out[:], r)
-	return string(out[:])
+	return GenerateJA4HPlus(r)[1:]
 }
 
 // ja4hLen is the length of a JA4H: 10 prefix bytes, '_', then 12 hex bytes.
 const ja4hLen = 23
 
 // GenerateJA4HPlus is the JA4+ of a request with no JA4 -- "_" and its JA4H
-// -- in one string, so the entrypoint, which keeps both, allocates once
-// rather than once for each. The JA4H is the result from its second byte.
+// -- in one string, so the entrypoint, which keeps both, has one string for
+// both. The JA4H is the result from its second byte.
+//
+// A JA4H is a function of eight bytes and a two-bit mask, and for the methods
+// and protocols real traffic uses the whole value space is 2,304 strings, so
+// each is built once, the first time a request produces it, and every later
+// request gets that string back (ja4hPlusTable). Anything outside the table --
+// an unlisted method, an unusual ALPN -- is built per request, as every request
+// was before, so a client choosing its method cannot grow the table.
 func GenerateJA4HPlus(r *http.Request) string {
-	var out [ja4hLen + 1]byte
-	out[0] = '_'
-	appendJA4H(out[1:], r)
-	return string(out[:])
-}
-
-// appendJA4H writes r's JA4H into out, which holds ja4hLen bytes.
-func appendJA4H(out []byte, r *http.Request) {
-	m0, m1 := lowerASCII2(r.Method)
-
-	var v0, v1 byte = '1', '1'
-	switch {
-	case r.ProtoMajor == 2:
-		v0, v1 = '2', '0'
-	case r.ProtoMajor == 3:
-		v0, v1 = '3', '0'
-	case r.ProtoMajor == 1 && r.ProtoMinor == 0:
-		v0, v1 = '1', '0'
-	}
-
-	cookieChar := byte('n')
-	if len(r.Header["Cookie"]) > 0 {
-		cookieChar = 'c'
-	}
-	refererChar := byte('n')
-	if len(r.Header["Referer"]) > 0 {
-		refererChar = 'r'
-	}
-
-	var a0, a1 byte = '0', '0'
-	if r.TLS != nil {
-		if p := r.TLS.NegotiatedProtocol; len(p) >= 2 {
-			a0, a1 = p[0], p[len(p)-1]
-		} else if len(p) == 1 {
-			a0, a1 = p[0], '0'
+	p := ja4hPartsOf(r)
+	slot := p.tableSlot()
+	if slot >= 0 {
+		if s := ja4hPlusTable[slot].Load(); s != nil {
+			return *s
 		}
 	}
+	var out [ja4hLen + 1]byte
+	out[0] = '_'
+	p.write(out[1:])
+	s := string(out[:])
+	if slot >= 0 {
+		// Two requests filling the same slot store equal strings; either
+		// one is right.
+		ja4hPlusTable[slot].Store(&s)
+	}
+	return s
+}
 
-	mask, count := ja4hHeaderMask(r.Header)
+// ja4hParts is everything a JA4H is built from.
+type ja4hParts struct {
+	m0, m1 byte // method, first two bytes, lower case
+	v0, v1 byte // HTTP version
+	cookie byte // 'c' or 'n'
+	refer  byte // 'r' or 'n'
+	a0, a1 byte // ALPN, first and last byte
+	mask   int  // ja4hHeaderMask
+	count  int
+}
 
-	out[0], out[1] = m0, m1
-	out[2], out[3] = v0, v1
-	out[4], out[5] = cookieChar, refererChar
+func ja4hPartsOf(r *http.Request) ja4hParts {
+	p := ja4hParts{v0: '1', v1: '1', cookie: 'n', refer: 'n', a0: '0', a1: '0'}
+	p.m0, p.m1 = lowerASCII2(r.Method)
 	switch {
-	case count < 10:
-		out[6], out[7] = '0', byte('0'+count)
-	case count < 100:
-		out[6], out[7] = byte('0'+count/10), byte('0'+count%10)
+	case r.ProtoMajor == 2:
+		p.v0, p.v1 = '2', '0'
+	case r.ProtoMajor == 3:
+		p.v0, p.v1 = '3', '0'
+	case r.ProtoMajor == 1 && r.ProtoMinor == 0:
+		p.v0, p.v1 = '1', '0'
+	}
+	if len(r.Header["Cookie"]) > 0 {
+		p.cookie = 'c'
+	}
+	if len(r.Header["Referer"]) > 0 {
+		p.refer = 'r'
+	}
+	if r.TLS != nil {
+		if a := r.TLS.NegotiatedProtocol; len(a) >= 2 {
+			p.a0, p.a1 = a[0], a[len(a)-1]
+		} else if len(a) == 1 {
+			p.a0, p.a1 = a[0], '0'
+		}
+	}
+	p.mask, p.count = ja4hHeaderMask(r.Header)
+	return p
+}
+
+// write puts the JA4H into out, which holds ja4hLen bytes.
+func (p ja4hParts) write(out []byte) {
+	out[0], out[1] = p.m0, p.m1
+	out[2], out[3] = p.v0, p.v1
+	out[4], out[5] = p.cookie, p.refer
+	switch {
+	case p.count < 10:
+		out[6], out[7] = '0', byte('0'+p.count)
+	case p.count < 100:
+		out[6], out[7] = byte('0'+p.count/10), byte('0'+p.count%10)
 	default:
 		out[6], out[7] = '9', '9'
 	}
-	out[8], out[9] = a0, a1
+	out[8], out[9] = p.a0, p.a1
 	out[10] = '_'
-	copy(out[11:], ja4hHeaderHash[mask])
+	copy(out[11:], ja4hHeaderHash[p.mask])
+}
+
+// ja4hMethods and ja4hALPNs are the method and ALPN byte pairs the table
+// holds: the methods of RFC 9110 and PATCH, and no ALPN (plaintext, or TLS
+// without one), h2, http/1.1 and h3.
+var (
+	ja4hMethods = [...][2]byte{{'g', 'e'}, {'p', 'o'}, {'p', 'u'}, {'d', 'e'}, {'p', 'a'}, {'h', 'e'}, {'o', 'p'}, {'c', 'o'}, {'t', 'r'}}
+	ja4hALPNs   = [...][2]byte{{'0', '0'}, {'h', '2'}, {'h', '1'}, {'h', '3'}}
+	ja4hVersion = [...][2]byte{{'1', '1'}, {'2', '0'}, {'3', '0'}, {'1', '0'}}
+)
+
+const ja4hTableSize = len(ja4hMethods) * len(ja4hVersion) * 2 * 2 * len(ja4hHeaderHash) * len(ja4hALPNs)
+
+// ja4hPlusTable holds each JA4H+ the table's methods and protocols can
+// produce, once seen. Its size is fixed -- 2,304 pointers, and at most that
+// many 24-byte strings -- whatever the traffic.
+var ja4hPlusTable [ja4hTableSize]atomic.Pointer[string]
+
+// tableSlot is p's index in ja4hPlusTable, or -1 if the table does not hold
+// it. Every byte write emits is part of the index, so two requests share a
+// slot only when they share a JA4H; the count is not, because the mask
+// determines it.
+func (p ja4hParts) tableSlot() int {
+	m := pairIndex(ja4hMethods[:], p.m0, p.m1)
+	v := pairIndex(ja4hVersion[:], p.v0, p.v1)
+	a := pairIndex(ja4hALPNs[:], p.a0, p.a1)
+	if m < 0 || v < 0 || a < 0 {
+		return -1
+	}
+	slot := m
+	slot = slot*len(ja4hVersion) + v
+	slot = slot*2 + boolIndex(p.cookie == 'c')
+	slot = slot*2 + boolIndex(p.refer == 'r')
+	slot = slot*len(ja4hHeaderHash) + p.mask
+	return slot*len(ja4hALPNs) + a
+}
+
+func pairIndex(pairs [][2]byte, b0, b1 byte) int {
+	for i, p := range pairs {
+		if p[0] == b0 && p[1] == b1 {
+			return i
+		}
+	}
+	return -1
+}
+
+func boolIndex(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }
