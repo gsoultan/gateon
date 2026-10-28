@@ -450,13 +450,14 @@ func addrIP(a net.Addr) string {
 // threat: it is counted on gateon_middleware_advanced_security_blocked_total
 // and listed in the Security Hub, where the operator who blocked the address
 // can see the block working. The record is dropped, never waited for, when the
-// store is behind.
+// store is behind. It is sent before the close, because the close is what the
+// refused client observes: closing first let a client that saw it, and read
+// the store at once, find no record of the refusal there yet.
 func (s *tcpServer) refuseBlocked(c net.Conn) bool {
 	ip := peerIP(c)
 	if !s.blocked(ip) {
 		return false
 	}
-	_ = c.Close()
 	telemetry.RecordSecurityThreat(telemetry.SecurityThreat{
 		Type:        "ip_mitigation",
 		SourceIP:    ip,
@@ -466,5 +467,6 @@ func (s *tcpServer) refuseBlocked(c net.Conn) bool {
 		Details: "Connection refused at TCP entrypoint " + s.ep.Id +
 			": the address is on the IP mitigation list or listed by an IP reputation feed",
 	})
+	_ = c.Close()
 	return true
 }
