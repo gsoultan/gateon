@@ -22,7 +22,7 @@ import (
 	"github.com/gsoultan/gateon/internal/security/mitigation"
 	"github.com/gsoultan/gateon/internal/telemetry/repid"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
-	lru "github.com/hashicorp/golang-lru"
+	arc "github.com/hashicorp/golang-lru/arc/v2"
 )
 
 // GetIPFingerprint returns the request's JA4+ fingerprint: the class half of
@@ -151,7 +151,7 @@ const (
 )
 
 type reputationShard struct {
-	cache *lru.ARCCache
+	cache *arc.ARCCache[string, *Reputation]
 	mu    sync.RWMutex
 	dirty map[string]struct{}
 }
@@ -159,7 +159,7 @@ type reputationShard struct {
 var (
 	repShards           []*reputationShard
 	lastMetricsUpdate   atomic.Int64 // Unix timestamp in seconds
-	recommendationCache *lru.ARCCache
+	recommendationCache *arc.ARCCache[string, string]
 )
 
 func init() {
@@ -167,13 +167,13 @@ func init() {
 	perShard := max(size/reputationShards, 1)
 	repShards = make([]*reputationShard, reputationShards)
 	for i := range reputationShards {
-		cache, _ := lru.NewARC(perShard)
+		cache, _ := arc.NewARC[string, *Reputation](perShard)
 		repShards[i] = &reputationShard{
 			cache: cache,
 			dirty: make(map[string]struct{}),
 		}
 	}
-	recommendationCache, _ = lru.NewARC(10000) // Buffer for request-specific recommendations
+	recommendationCache, _ = arc.NewARC[string, string](10000) // Buffer for request-specific recommendations
 }
 
 // recommendationsRegistered counts recommendations ever registered. Until the
@@ -194,10 +194,8 @@ func GetRecommendation(requestID string) string {
 	if requestID == "" || recommendationCache == nil || recommendationsRegistered.Load() == 0 {
 		return ""
 	}
-	if val, ok := recommendationCache.Get(requestID); ok {
-		return val.(string)
-	}
-	return ""
+	rec, _ := recommendationCache.Get(requestID)
+	return rec
 }
 
 func getRepShard(fingerprint string) *reputationShard {
@@ -241,12 +239,11 @@ func ReputationFor(fingerprint, clientIP string) float64 {
 	shard := getRepShard(fingerprint)
 
 	shard.mu.RLock()
-	val, ok := shard.cache.Peek(fingerprint)
+	r, ok := shard.cache.Peek(fingerprint)
 	if !ok {
 		shard.mu.RUnlock()
 		return 100 // Unknown/New client gets neutral score
 	}
-	r := val.(*Reputation)
 	score := r.Score
 	if clientIP != "" && !r.appliesTo(clientIP) {
 		score = neutralReputationScore
@@ -266,11 +263,10 @@ func recoverReputation(shard *reputationShard, fingerprint, clientIP string) flo
 	shard.mu.Lock()
 	defer shard.mu.Unlock()
 
-	val, ok := shard.cache.Get(fingerprint)
+	r, ok := shard.cache.Get(fingerprint)
 	if !ok {
 		return 100
 	}
-	r := val.(*Reputation)
 	r.recover(time.Now())
 	if clientIP != "" && !r.appliesTo(clientIP) {
 		return neutralReputationScore
@@ -301,8 +297,7 @@ func ReputationScoreFor(fingerprint, clientIP string) float64 {
 	shard.mu.RLock()
 	defer shard.mu.RUnlock()
 
-	if val, ok := shard.cache.Peek(fingerprint); ok {
-		r := val.(*Reputation)
+	if r, ok := shard.cache.Peek(fingerprint); ok {
 		if clientIP != "" && !r.appliesTo(clientIP) {
 			return neutralReputationScore
 		}
@@ -367,10 +362,8 @@ func decreaseReputation(fingerprint, sourceIP string, penalty float64, reason st
 	shard.mu.Lock()
 	defer shard.mu.Unlock()
 
-	var r *Reputation
-	if val, ok := shard.cache.Get(fingerprint); ok {
-		r = val.(*Reputation)
-	} else {
+	r, ok := shard.cache.Get(fingerprint)
+	if !ok {
 		r = &Reputation{Score: 100, ViolationCount: 0, RecoveryRate: 1.0, History: []string{}, LastEvent: time.Now()}
 	}
 
@@ -557,17 +550,11 @@ func applyRemoteReputation(p *gateonv1.ReputationSyncPayload) {
 	shard.mu.Lock()
 	defer shard.mu.Unlock()
 
-	var r *Reputation
-	if val, ok := shard.cache.Get(fingerprint); ok {
-		// Comma-ok rather than a bare assertion: this runs on the gossip
-		// delegate's goroutine, where a panic takes the cluster listener down
-		// rather than one request.
-		existing, isRep := val.(*Reputation)
-		if !isRep {
-			shard.cache.Remove(fingerprint)
-			return
-		}
-		r = existing
+	r, ok := shard.cache.Get(fingerprint)
+	if ok {
+		// The cache is typed, so there is no assertion here to panic on the
+		// gossip delegate's goroutine, where a panic takes the cluster
+		// listener down rather than one request.
 		// Only take the remote score if it's worse (lower) than ours,
 		// OR if it's a perfect score (manual reset).
 		if score < r.Score || score >= neutralReputationScore {
@@ -656,8 +643,8 @@ func ResetReputationClass(class string) int {
 	for _, shard := range repShards {
 		shard.mu.RLock()
 		for _, k := range shard.cache.Keys() {
-			if key, ok := k.(string); ok && key != class && repid.ClassOf(key) == stable {
-				keys = append(keys, key)
+			if k != class && repid.ClassOf(k) == stable {
+				keys = append(keys, k)
 			}
 		}
 		shard.mu.RUnlock()
@@ -698,8 +685,7 @@ func UpdateReputationMetrics() {
 		dirtySum := 0.0
 		dirtyCount := 0
 		for k := range shard.dirty {
-			if val, ok := shard.cache.Get(k); ok {
-				r := val.(*Reputation)
+			if r, ok := shard.cache.Get(k); ok {
 				r.recover(time.Now())
 
 				if r.Score >= 100 {
@@ -743,8 +729,7 @@ func GetWorstReputations(limit int) []ReputationRecord {
 	for _, shard := range repShards {
 		shard.mu.RLock()
 		for k := range shard.dirty {
-			if val, ok := shard.cache.Peek(k); ok {
-				r := val.(*Reputation)
+			if r, ok := shard.cache.Peek(k); ok {
 				dirtyRecords = append(dirtyRecords, ReputationRecord{
 					Fingerprint:    k,
 					Score:          r.Score,
@@ -775,16 +760,14 @@ func GetWorstReputations(limit int) []ReputationRecord {
 		}
 		shard.mu.RLock()
 		keys := shard.cache.Keys()
-		for _, k := range keys {
+		for _, fingerprint := range keys {
 			if len(res) >= limit {
 				break
 			}
-			fingerprint := k.(string)
 			if _, isDirty := shard.dirty[fingerprint]; isDirty {
 				continue
 			}
-			if val, ok := shard.cache.Peek(k); ok {
-				r := val.(*Reputation)
+			if r, ok := shard.cache.Peek(fingerprint); ok {
 				res = append(res, ReputationRecord{
 					Fingerprint:    fingerprint,
 					Score:          r.Score,

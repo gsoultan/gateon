@@ -101,7 +101,7 @@ func TestANewAddressIsDecidedWithinTheDeadlineWhenTheDatabaseHangs(t *testing.T)
 	if got := lookupErrors(mitigationLookupIP, lookupReasonTimeout) - before; got != 1 {
 		t.Fatalf("timeouts counted %v, want 1", got)
 	}
-	if _, cached := getStore().unmitigatedCache.Peek(ip); cached {
+	if _, cached := getStore().unmitigatedCache.Peek(addressCacheKey(ip)); cached {
 		t.Fatal("a lookup that timed out was cached as an answer")
 	}
 	decidedWithin(t, "the same address again", func() bool { return IsIPMitigated(ip) })

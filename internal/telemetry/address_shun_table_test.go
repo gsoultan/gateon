@@ -20,11 +20,7 @@ func resetAddressEvidence() {
 func addressClassCount(ip string) int {
 	addressEvidenceMu.Lock()
 	defer addressEvidenceMu.Unlock()
-	v, ok := addressEvidence.Get(ip)
-	if !ok {
-		return 0
-	}
-	s, ok := v.(*addressSightings)
+	s, ok := addressEvidence.Get(ip)
 	if !ok || s == nil {
 		return 0
 	}

@@ -165,10 +165,7 @@ func shouldMitigateFingerprint(key, sourceIP string, now time.Time) (bool, strin
 	fingerprintMu.Lock()
 	defer fingerprintMu.Unlock()
 
-	var s *fingerprintSighting
-	if v, ok := fingerprintSightings.Get(key); ok {
-		s, _ = v.(*fingerprintSighting)
-	}
+	s, _ := fingerprintSightings.Get(key)
 	if s == nil || now.Sub(s.since) > mitigationEvidenceWindow {
 		s = &fingerprintSighting{since: now, ips: make(map[string]struct{}, 1)}
 	}
@@ -234,11 +231,7 @@ func FingerprintBlastRadius(key string) (count int, atLeast bool) {
 	fingerprintMu.Lock()
 	defer fingerprintMu.Unlock()
 
-	v, ok := fingerprintSightings.Get(key)
-	if !ok {
-		return 0, false
-	}
-	s, ok := v.(*fingerprintSighting)
+	s, ok := fingerprintSightings.Get(key)
 	if !ok || s == nil {
 		return 0, false
 	}
@@ -397,10 +390,7 @@ func recordAddressEvidence(ip, class string, at time.Time) int {
 	addressEvidenceMu.Lock()
 	defer addressEvidenceMu.Unlock()
 
-	var s *addressSightings
-	if v, ok := addressEvidence.Get(ip); ok {
-		s, _ = v.(*addressSightings)
-	}
+	s, _ := addressEvidence.Get(ip)
 	if s == nil {
 		s = &addressSightings{}
 	}

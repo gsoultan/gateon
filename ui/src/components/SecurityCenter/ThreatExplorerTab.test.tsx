@@ -39,8 +39,13 @@ mock.module("../../services/client", () => ({ api: {} }));
 
 // Role comes from a zustand store, and zustand reads the store's *initial*
 // state as the server snapshot, so seeding it with setState is invisible to
-// renderToString. Grant write access at the hook instead.
+// renderToString. Grant write access at the hook instead. bun replaces the
+// module for the whole test process, not just this file, so every other export
+// is carried over: without them a settings test that runs after this one fails
+// to import ADMIN_ONLY_REASON, depending only on the order files are run in.
+const realPermissions = await import("../../hooks/usePermissions");
 mock.module("../../hooks/usePermissions", () => ({
+  ...realPermissions,
   usePermissions: () => ({
     canWrite: true,
     canManageUsers: true,

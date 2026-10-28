@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	lru "github.com/hashicorp/golang-lru"
+	arc "github.com/hashicorp/golang-lru/arc/v2"
 )
 
 type UserLocation struct {
@@ -21,13 +21,13 @@ type UserLocation struct {
 }
 
 var (
-	userLocationCache *lru.ARCCache
+	userLocationCache *arc.ARCCache[string, *UserLocation]
 	zerotrustMu       sync.Mutex
 )
 
 func init() {
 	size := cacheSizeFromEnv(envZeroTrustCacheSize, cacheNameZeroTrust, defaultZeroTrustCacheSize)
-	cache, _ := lru.NewARC(size)
+	cache, _ := arc.NewARC[string, *UserLocation](size)
 	userLocationCache = cache
 }
 
@@ -43,7 +43,7 @@ func CheckZeroTrust(userID string, currentFingerprint string, ip string, r *http
 	_, _, lat, lon := ResolveIPInfo(r.Context(), ip)
 	now := time.Now()
 
-	val, ok := userLocationCache.Get(userID)
+	last, ok := userLocationCache.Get(userID)
 	if !ok {
 		// First time seeing this user, just record and return
 		userLocationCache.Add(userID, &UserLocation{
@@ -54,8 +54,6 @@ func CheckZeroTrust(userID string, currentFingerprint string, ip string, r *http
 		})
 		return nil
 	}
-
-	last := val.(*UserLocation)
 
 	// 1. Impossible Travel Detection
 	if last.Lat != 0 && last.Lon != 0 && lat != 0 && lon != 0 {

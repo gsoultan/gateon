@@ -9,6 +9,7 @@ import (
 	"cmp"
 	"context"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -223,17 +224,20 @@ func AccessLogSampled(routeID string, sampleRate uint32) Middleware {
 					statusCode = http.StatusOK
 				}
 				duration := now.Sub(start)
-				logger.L.LogInfo("access log",
-					"host", origHost,
-					"method", origMethod,
-					"path", origPath,
-					"remote_addr", remoteAddr,
+				// Typed attributes: as variadic `any` arguments each string
+				// was boxed, six allocations a line on a line written per
+				// request.
+				logger.L.LogAttrs(r.Context(), slog.LevelInfo, "access log",
+					slog.String("host", origHost),
+					slog.String("method", origMethod),
+					slog.String("path", origPath),
+					slog.String("remote_addr", remoteAddr),
 					// The client as the entrypoint resolved it: behind a load
 					// balancer remote_addr is the balancer on every line.
-					"client", request.ClientAddr(r),
-					"status", statusCode,
-					"latency", duration,
-					"route", routeID)
+					slog.String("client", request.ClientAddr(r)),
+					slog.Int("status", statusCode),
+					slog.Duration("latency", duration),
+					slog.String("route", routeID))
 			}
 		})
 	}
@@ -624,67 +628,42 @@ func MetricsWithService(routeID, serviceID string) Middleware {
 					refused = rs.Refused
 				}
 
-				if recordDetailed {
-					telemetry.RecordTraceDetailed(
-						id,
-						method+" "+origPath,
-						activeRouteID,
-						serviceID,
-						float64(duration.Nanoseconds())/1e6,
-						start,
-						statusStr,
-						origPath,
-						clientIP,
-						fingerprint,
-						country,
-						r.UserAgent(),
-						method,
-						r.Referer(),
-						origHost+r.URL.RequestURI(),
-						ja4,
-						ja4h,
-						r.Header,
-						debug.RequestBody,
-						sw.Header(),
-						debug.ResponseBody,
-						recommendation,
-						reputation,
-						entrypointDelay,
-						routeDelay,
-						middlewareDelay,
-						serviceDelay,
-						refused,
-					)
-				} else {
-					telemetry.RecordTrace(
-						id,
-						method+" "+origPath,
-						activeRouteID,
-						serviceID,
-						float64(duration.Nanoseconds())/1e6,
-						start,
-						statusStr,
-						origPath,
-						clientIP,
-						fingerprint,
-						country,
-						r.UserAgent(),
-						method,
-						r.Referer(),
-						origHost+r.URL.RequestURI(),
-						ja4,
-						ja4h,
-						r.Header,
-						sw.Header(),
-						recommendation,
-						reputation,
-						entrypointDelay,
-						routeDelay,
-						middlewareDelay,
-						serviceDelay,
-						refused,
-					)
+				// OperationName and RequestURI are left to the store's
+				// goroutine: building them here was three allocations on
+				// every traced request.
+				t := telemetry.TraceInput{
+					ID:          id,
+					ServiceName: activeRouteID,
+					RouteID:     serviceID,
+					DurationMs:  float64(duration.Nanoseconds()) / 1e6,
+					Timestamp:   start,
+					Status:      statusStr,
+					Path:        origPath,
+					SourceIP:    clientIP,
+					Fingerprint: fingerprint,
+					CountryCode: country,
+					UserAgent:   r.UserAgent(),
+					Method:      method,
+					Referer:     r.Referer(),
+					URIHost:     origHost,
+					URL:         r.URL,
+					JA4:         ja4,
+					JA4H:        ja4h,
+
+					RequestHeader:   r.Header,
+					ResponseHeader:  sw.Header(),
+					Recommendation:  recommendation,
+					Reputation:      reputation,
+					EntrypointDelay: entrypointDelay,
+					RouteDelay:      routeDelay,
+					MiddlewareDelay: middlewareDelay,
+					ServiceDelay:    serviceDelay,
+					Refusal:         refused,
 				}
+				if recordDetailed {
+					t.RequestBody, t.ResponseBody = debug.RequestBody, debug.ResponseBody
+				}
+				telemetry.RecordRequestTrace(t)
 			}
 
 		skipTrace:

@@ -43,7 +43,7 @@ func BenchmarkIsIPMitigatedUncached(b *testing.B) {
 		s := getStore()
 		b.ReportAllocs()
 		for b.Loop() {
-			s.unmitigatedCache.Remove(ip)
+			s.unmitigatedCache.Remove(addressCacheKey(ip))
 			if IsIPMitigated(ip) {
 				b.Fatal("shunned")
 			}

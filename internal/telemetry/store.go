@@ -14,6 +14,8 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/netip"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -38,7 +40,7 @@ import (
 	"github.com/gsoultan/gateon/internal/telemetry/lookupgate"
 	"github.com/gsoultan/gateon/internal/telemetry/repid"
 	"github.com/gsoultan/gateon/internal/telemetry/tracebudget"
-	lru "github.com/hashicorp/golang-lru"
+	arc "github.com/hashicorp/golang-lru/arc/v2"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 )
@@ -140,8 +142,18 @@ func RedactHeaders(headers string) string {
 		sb.WriteByte('\n')
 		start += end + 1
 	}
+	// Most blocks hold no credential -- a response's nearly never does -- and
+	// come out as they went in. The comparison does not allocate; a copy of
+	// what the caller already holds would.
+	if bytesAre(sb.Bytes(), headers) {
+		return headers
+	}
 	return sb.String()
 }
+
+// bytesAre reports whether b holds s. The conversion inside a comparison is
+// one the compiler does without copying; Buffer.String would copy first.
+func bytesAre(b []byte, s string) bool { return string(b) == s }
 
 // writeRedactedHeaderLine writes one "Name: value" line of a header block with
 // its credential, if any, masked.
@@ -297,6 +309,88 @@ func CloneHeader(h map[string][]string) map[string][]string {
 	return h2
 }
 
+// headerPairs is a header set as a trace holds it until the store's goroutine
+// formats it: name, value, name, value. A header with several values has its
+// name once per value, its values adjacent and in order, and one with none is
+// its name and "". It is a snapshot, not a view: the strings are the header's
+// own, which nothing can change, and the slice is the trace's.
+type headerPairs []string
+
+// snapshotHeaders copies a request's and a response's headers for a trace,
+// both into one allocation. CloneHeader cost each set a map and a backing
+// array -- six allocations a trace for a browser's request -- to keep what
+// processTrace only ever walks once, in whatever order, to format it.
+//
+// An empty set is nil, which processTrace formats as nothing, as it did an
+// empty map.
+func snapshotHeaders(req, resp map[string][]string) (headerPairs, headerPairs) {
+	n, m := pairsLen(req), pairsLen(resp)
+	if n+m == 0 {
+		return nil, nil
+	}
+	buf := make([]string, 0, n+m)
+	// Capped, so an append past a set's own share -- a header added between
+	// the count and the copy -- reallocates rather than writes into the
+	// other's.
+	reqPairs := appendPairs(buf[:0:n], req)
+	respPairs := appendPairs(buf[n:n:n+m], resp)
+	return nilIfEmpty(reqPairs), nilIfEmpty(respPairs)
+}
+
+func pairsLen(h map[string][]string) int {
+	n := 0
+	for _, v := range h {
+		n += 2 * max(len(v), 1)
+	}
+	return n
+}
+
+func appendPairs(dst []string, h map[string][]string) []string {
+	for k, v := range h {
+		if len(v) == 0 {
+			dst = append(dst, k, "")
+			continue
+		}
+		for _, s := range v {
+			dst = append(dst, k, s)
+		}
+	}
+	return dst
+}
+
+func nilIfEmpty(p []string) headerPairs {
+	if len(p) == 0 {
+		return nil
+	}
+	return p
+}
+
+// format is the set as FormatHeaders writes a header map: one "Name: value"
+// line per header, several values joined with ", ", built in a pooled
+// buffer -- one allocation, the result.
+func (p headerPairs) format() string {
+	if len(p) == 0 {
+		return ""
+	}
+	sb := bufferPool.Get().(*bytes.Buffer)
+	sb.Reset()
+	defer bufferPool.Put(sb)
+	for i := 0; i+1 < len(p); i += 2 {
+		if i > 0 && p[i] == p[i-2] {
+			sb.WriteString(", ")
+		} else {
+			if i > 0 {
+				sb.WriteByte('\n')
+			}
+			sb.WriteString(p[i])
+			sb.WriteString(": ")
+		}
+		sb.WriteString(p[i+1])
+	}
+	sb.WriteByte('\n')
+	return sb.String()
+}
+
 // bufferPool holds the buffers FormatHeaders and RedactHeaders build into. A
 // bytes.Buffer, not a strings.Builder: Reset on a Builder drops its array, so a
 // pooled one grew from nothing on every use and the pool saved nothing.
@@ -361,13 +455,13 @@ var (
 	// produced attack evidence there and when each last did: the escalation to
 	// an IP shun (escalateAddress). map[IP]*addressSightings, ARC-bounded at
 	// maxEvidenceAddresses addresses of at most ipShunMinClasses classes each.
-	addressEvidence, _ = lru.NewARC(maxEvidenceAddresses)
+	addressEvidence, _ = arc.NewARC[string, *addressSightings](maxEvidenceAddresses)
 	addressEvidenceMu  sync.Mutex
 
 	// fingerprintSightings tracks, per JA4+, how many qualifying threats it has
 	// produced and how many distinct source addresses it has been seen from.
 	// map[Fingerprint]*fingerprintSighting, ARC-bounded like the map above.
-	fingerprintSightings, _ = lru.NewARC(10000)
+	fingerprintSightings, _ = arc.NewARC[string, *fingerprintSighting](10000)
 	fingerprintMu           sync.Mutex
 
 	tracePool = sync.Pool{
@@ -556,9 +650,16 @@ type TraceRecord struct {
 	// omitempty: absent is "", which is how every other trace reads.
 	Refusal string `json:"refusal,omitempty"`
 
-	// Internal fields for lazy formatting in background worker
-	rawReqHeader  map[string][]string
-	rawRespHeader map[string][]string
+	// The request's and response's headers as recorded, formatted on the
+	// store's goroutine (processTrace). One backing array holds both.
+	rawReqHeader  headerPairs
+	rawRespHeader headerPairs
+
+	// What processTrace derives OperationName and RequestURI from when the
+	// recorder left them to it (TraceInput).
+	deriveOperation, deriveURI bool
+	uriHost                    string
+	url                        url.URL
 }
 
 type SecurityThreat struct {
@@ -756,9 +857,9 @@ type pathStatsStore struct {
 	accessLogRetentionDays      atomic.Int32
 	securityThreatRetentionDays atomic.Int32
 	pruning                     atomic.Bool
-	scoreCache                  *lru.ARCCache
-	unmitigatedCache            *lru.ARCCache
-	userMitigationCache         *lru.ARCCache
+	scoreCache                  *arc.ARCCache[string, float64]
+	unmitigatedCache            *arc.ARCCache[enforcementKey, any]
+	userMitigationCache         *arc.ARCCache[string, any]
 	// lookups reads the block list on the request path under a deadline,
 	// one query per key and a bounded number in flight (ADR 0054).
 	lookups *blockLookups
@@ -922,13 +1023,13 @@ func initStore(databaseURL string, retentionDays int) error {
 	st.traceDir = pebbleDir
 	st.tracesPrunedThrough.Store(readPrunedThrough(pebbleDir))
 
-	if cache, err := lru.NewARC(cacheSizeFromEnv(envScoreCacheSize, cacheNameScore, defaultScoreCacheSize)); err == nil {
+	if cache, err := arc.NewARC[string, float64](cacheSizeFromEnv(envScoreCacheSize, cacheNameScore, defaultScoreCacheSize)); err == nil {
 		st.scoreCache = cache
 	}
-	if cache, err := lru.NewARC(cacheSizeFromEnv(envUnmitigatedCacheSize, cacheNameUnmitigated, defaultUnmitigatedCacheSize)); err == nil {
+	if cache, err := arc.NewARC[enforcementKey, any](cacheSizeFromEnv(envUnmitigatedCacheSize, cacheNameUnmitigated, defaultUnmitigatedCacheSize)); err == nil {
 		st.unmitigatedCache = cache
 	}
-	if cache, err := lru.NewARC(cacheSizeFromEnv(envUserMitigatedCacheSize, cacheNameUserMitigated, defaultUserMitigatedCacheSize)); err == nil {
+	if cache, err := arc.NewARC[string, any](cacheSizeFromEnv(envUserMitigatedCacheSize, cacheNameUserMitigated, defaultUserMitigatedCacheSize)); err == nil {
 		st.userMitigationCache = cache
 	}
 	st.lookups = newBlockLookups(st)
@@ -1431,6 +1532,13 @@ type statKey struct {
 // arrive many times per flush, and without this each arrival is its own Exec.
 func aggregateIncrements(batch []increment) map[statKey]*statCounters {
 	aggregated := make(map[statKey]*statCounters, len(batch))
+	// A batch is a few seconds of traffic and nearly always one day: its
+	// text is formatted when the day changes, not once per increment -- two
+	// per proxied request, a path's and a domain's.
+	var day string
+	var lastY int
+	var lastM time.Month
+	var lastD int
 	for _, inc := range batch {
 		at := inc.atTime.UTC()
 		bucket := 0
@@ -1438,7 +1546,10 @@ func aggregateIncrements(batch []increment) map[statKey]*statCounters {
 			// 30-minute buckets: hour*2 + minute/30, giving 0-47 across a day.
 			bucket = at.Hour()*2 + at.Minute()/30
 		}
-		key := statKey{at.Format("2006-01-02"), inc.host, inc.path, inc.isDomain, bucket}
+		if y, m, d := at.Date(); day == "" || y != lastY || m != lastM || d != lastD {
+			day, lastY, lastM, lastD = at.Format("2006-01-02"), y, m, d
+		}
+		key := statKey{day, inc.host, inc.path, inc.isDomain, bucket}
 
 		if c, ok := aggregated[key]; ok {
 			c.count++
@@ -1548,12 +1659,21 @@ func (s *pathStatsStore) flushTraces(traceBatch []*TraceRecord) []*TraceRecord {
 	// telemetry write path, once per flush, forever.
 	defer func() { _ = pb.Close() }()
 
+	// One buffer for the flush: Set copies the value into the batch, so each
+	// record is encoded over the last, where json.Marshal copied every one
+	// out of its own buffer. Encode's trailing newline is not stored, so the
+	// bytes are Marshal's.
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
 	for _, tr := range traceBatch {
+		buf.Reset()
+		if err := enc.Encode(tr); err != nil {
+			continue
+		}
 		// Timestamp is nanosecond-resolution and the ID is per-record, so the
 		// key is unique in practice; Pebble Set overwrites on the off chance it
 		// is not.
-		val, _ := json.Marshal(tr)
-		_ = pb.Set(makeTraceKey(tr.Timestamp, tr.ID), val, pebble.NoSync)
+		_ = pb.Set(makeTraceKey(tr.Timestamp, tr.ID), bytes.TrimSuffix(buf.Bytes(), []byte{'\n'}), pebble.NoSync)
 	}
 	if err := pb.Commit(pebble.Sync); err != nil {
 		logger.Default().LogError("pebble: trace batch commit failed", "error", err)
@@ -2123,15 +2243,16 @@ func recordTraceToStore(tr *TraceRecord) {
 
 func (s *pathStatsStore) processTrace(tr *TraceRecord) {
 	tr.ID = storableTraceID(tr.ID)
+	tr.deriveFields()
 
 	// Format headers lazily in the background
 	if tr.rawReqHeader != nil {
-		tr.RequestHeaders = FormatHeaders(tr.rawReqHeader)
-		tr.rawReqHeader = nil // Release map for GC
+		tr.RequestHeaders = tr.rawReqHeader.format()
+		tr.rawReqHeader = nil // Release for GC
 	}
 	if tr.rawRespHeader != nil {
-		tr.ResponseHeaders = FormatHeaders(tr.rawRespHeader)
-		tr.rawRespHeader = nil // Release map for GC
+		tr.ResponseHeaders = tr.rawRespHeader.format()
+		tr.rawRespHeader = nil // Release for GC
 	}
 
 	// Every trace passes here before it is stored, and so before the
@@ -2143,6 +2264,21 @@ func (s *pathStatsStore) processTrace(tr *TraceRecord) {
 	tr.Referer = redact.URI(tr.Referer)
 	tr.RequestBody = redact.Body(tr.RequestBody)
 	tr.ResponseBody = redact.Body(tr.ResponseBody)
+}
+
+// deriveFields builds what the recorder left to the store's goroutine
+// (TraceInput): the operation's name, and the request URI with the host it
+// was asked of. Before redaction, which reads the URI.
+func (tr *TraceRecord) deriveFields() {
+	if tr.deriveOperation {
+		tr.OperationName = tr.Method + " " + tr.Path
+		tr.deriveOperation = false
+	}
+	if tr.deriveURI {
+		tr.RequestURI = tr.uriHost + tr.url.RequestURI()
+		tr.Host = requestHost(tr.RequestURI)
+		tr.deriveURI, tr.uriHost, tr.url = false, "", url.URL{}
+	}
 }
 
 // RecordSecurityThreatWithJA4 is a helper that populates JA4 and JA4H from the request before recording.
@@ -2457,12 +2593,8 @@ func (s *pathStatsStore) processThreat(st *SecurityThreat) {
 	// (GetIPThreatScore). A threat not held against its source -- one a
 	// control let through, among others -- is no evidence towards it either.
 	if s.scoreCache != nil && st.HeldAgainstSource() {
-		current, ok := s.scoreCache.Get(st.SourceIP)
-		score := st.Score
-		if ok {
-			score += current.(float64)
-		}
-		s.scoreCache.Add(st.SourceIP, score)
+		current, _ := s.scoreCache.Get(st.SourceIP)
+		s.scoreCache.Add(st.SourceIP, current+st.Score)
 	}
 
 	// Scope the score to the network that earned it. Recording under the bare
@@ -2509,10 +2641,8 @@ func GetIPThreatScore(ip string) float64 {
 	if s == nil || s.scoreCache == nil {
 		return 0
 	}
-	if val, ok := s.scoreCache.Get(ip); ok {
-		return val.(float64)
-	}
-	return 0
+	score, _ := s.scoreCache.Get(ip)
+	return score
 }
 
 // IsIPUnmitigated reports whether an operator released ip within the release
@@ -2621,24 +2751,40 @@ func (s *pathStatsStore) cachedIPMitigation(ip string) (blocked, ok bool) {
 	return false, false
 }
 
+// enforcementKey is what unmitigatedCache keeps an answer under: an address
+// (addressCacheKey) or a fingerprint key an operator released (releaseKey).
+// A comparable struct rather than an interface, because the cache is read on
+// every request and an interface key boxed its string on every read.
+type enforcementKey struct {
+	// text is IPv4 text, text that parses as no address, or a fingerprint
+	// key. A fingerprint key is repid-scoped and so never an address's text.
+	text string
+	// v6 is an IPv6 address's /64, and zero for every other key.
+	v6 netip.Addr
+}
+
 // addressCacheKey is what the enforcement cache keeps ip's answer under:
 // repid.Address's key, in a form the request path builds without formatting
 // text -- plain IPv4 text as it is, and an IPv6 address as the netip.Addr of
-// its /64, which costs a parse and the one allocation the cache's interface
-// key cost already (ADR 0058). A v4-mapped address is its IPv4 text.
-func addressCacheKey(ip string) any {
+// its /64, which costs a parse and no allocation (ADR 0058). A v4-mapped
+// address is its IPv4 text.
+func addressCacheKey(ip string) enforcementKey {
 	if strings.IndexByte(ip, ':') < 0 {
-		return ip
+		return enforcementKey{text: ip}
 	}
 	a, ok := repid.Address(ip)
 	switch {
 	case !ok:
-		return ip
+		return enforcementKey{text: ip}
 	case a.Is4():
-		return a.String()
+		return enforcementKey{text: a.String()}
 	}
-	return a
+	return enforcementKey{v6: a}
 }
+
+// releaseKey is what the enforcement cache keeps an operator's release of a
+// fingerprint key under (MarkUserUnmitigated).
+func releaseKey(ja4plus string) enforcementKey { return enforcementKey{text: ja4plus} }
 
 // cachedIPAnswer reads what the cache holds for an address: whether it is
 // shunned, and how far the answer may be used without asking the database. A
@@ -2672,7 +2818,7 @@ func (s *pathStatsStore) lookupIPShun(ctx context.Context, ip string) (shunUntil
 	since := s.lookups.writes.Load()
 	until, err := s.readIPShunUntil(ctx, ip)
 	if err == nil {
-		s.lookups.keep(s.unmitigatedCache, addressCacheKey(ip), ipAnswerToCache(until), since)
+		keepAnswer(s.lookups, s.unmitigatedCache, addressCacheKey(ip), ipAnswerToCache(until), since)
 	}
 	return until, err
 }
@@ -3375,7 +3521,7 @@ func (s *pathStatsStore) cachedUserMitigation(ja4plus string) (blocked, ok bool)
 	}
 	// 1. An operator's release on this node overrides (MarkUserUnmitigated).
 	if s.unmitigatedCache != nil {
-		if _, released := s.unmitigatedCache.Get(ja4plus); released {
+		if _, released := s.unmitigatedCache.Get(releaseKey(ja4plus)); released {
 			return false, true
 		}
 	}
@@ -3435,7 +3581,7 @@ func (s *pathStatsStore) lookupUserBlock(ctx context.Context, key string) (bool,
 	since := s.lookups.writes.Load()
 	blocked, err := s.readUserMitigated(ctx, key)
 	if err == nil {
-		s.lookups.keep(s.userMitigationCache, key, userAnswerToCache(blocked), since)
+		keepAnswer(s.lookups, s.userMitigationCache, key, userAnswerToCache(blocked), since)
 	}
 	return blocked, err
 }
@@ -3516,11 +3662,11 @@ func (l *blockLookups) setTimeout(d time.Duration) {
 // touches the cache.
 func (l *blockLookups) noteWrite() { l.writes.Add(1) }
 
-// keep caches a lookup's answer -- unless a block or a release was written on
+// keepAnswer caches a lookup's answer -- unless a block or a release was written on
 // this node since the lookup began, which may have read the database before
 // it. Then the entry is dropped rather than kept over the write's own, and the
 // next request reads the database again. Rare: blocks are.
-func (l *blockLookups) keep(c *lru.ARCCache, key, answer any, since uint64) {
+func keepAnswer[K comparable](l *blockLookups, c *arc.ARCCache[K, any], key K, answer any, since uint64) {
 	if c == nil {
 		return
 	}
@@ -3956,7 +4102,7 @@ func MarkUserMitigated(ja4plus string, fpType string, reason string, category st
 	// the release override first, so one left in place outlived the new block
 	// and the fingerprint read as released until the entry was evicted.
 	if s.unmitigatedCache != nil {
-		s.unmitigatedCache.Remove(ja4plus)
+		s.unmitigatedCache.Remove(releaseKey(ja4plus))
 	}
 }
 
@@ -3982,7 +4128,7 @@ func MarkUserUnmitigated(ja4plus string) bool {
 	// 1. Populate high-priority override cache (Bypass all security for 24h)
 	s.lookups.noteWrite()
 	if s.unmitigatedCache != nil {
-		s.unmitigatedCache.Add(ja4plus, true)
+		s.unmitigatedCache.Add(releaseKey(ja4plus), true)
 	}
 
 	// 2. Replace a cached block with a bounded "not blocked".

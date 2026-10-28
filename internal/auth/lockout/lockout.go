@@ -32,7 +32,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/hashicorp/golang-lru/simplelru"
+	"github.com/hashicorp/golang-lru/v2/simplelru"
 )
 
 const (
@@ -83,15 +83,15 @@ type window struct {
 // hot path, and one mutex orders the two tables.
 type Tracker struct {
 	mu       sync.Mutex
-	pairs    *simplelru.LRU
-	accounts *simplelru.LRU
+	pairs    *simplelru.LRU[pairKey, *window]
+	accounts *simplelru.LRU[digest, *window]
 	now      func() time.Time
 }
 
 // New makes a Tracker with the given bounds; a bound below 1 is 1.
 func New(b Bounds) *Tracker {
-	pairs, _ := simplelru.NewLRU(max(b.Pairs, 1), nil)
-	accounts, _ := simplelru.NewLRU(max(b.Accounts, 1), nil)
+	pairs, _ := simplelru.NewLRU[pairKey, *window](max(b.Pairs, 1), nil)
+	accounts, _ := simplelru.NewLRU[digest, *window](max(b.Accounts, 1), nil)
 	return &Tracker{pairs: pairs, accounts: accounts, now: time.Now}
 }
 
@@ -129,10 +129,10 @@ func (t *Tracker) Check(account, source string) Decision {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	now := t.now()
-	if w := t.get(t.pairs, pair); w != nil && now.Before(w.lockedUntil) {
+	if w := get(t.pairs, pair); w != nil && now.Before(w.lockedUntil) {
 		return PairLocked
 	}
-	if w := t.get(t.accounts, acct); w != nil && now.Before(w.lockedUntil) {
+	if w := get(t.accounts, acct); w != nil && now.Before(w.lockedUntil) {
 		return UnderAttack
 	}
 	return Allow
@@ -144,8 +144,8 @@ func (t *Tracker) Fail(account, source string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	now := t.now()
-	t.count(t.pairs, pair, now, PairLimit, PairLock)
-	t.count(t.accounts, acct, now, AccountLimit, AccountWindow)
+	count(t.pairs, pair, now, PairLimit, PairLock)
+	count(t.accounts, acct, now, AccountLimit, AccountWindow)
 }
 
 // Renew keeps account under attack for another AccountWindow. It is called
@@ -155,7 +155,7 @@ func (t *Tracker) Renew(account string) {
 	acct := digestOf(account)
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if w := t.get(t.accounts, acct); w != nil {
+	if w := get(t.accounts, acct); w != nil {
 		w.lockedUntil = t.now().Add(AccountWindow)
 	}
 }
@@ -170,22 +170,15 @@ func (t *Tracker) Succeed(account, source string) {
 	t.pairs.Remove(pair)
 }
 
-func (t *Tracker) get(table *simplelru.LRU, key any) *window {
-	v, ok := table.Get(key)
-	if !ok {
-		return nil
-	}
-	w, ok := v.(*window)
-	if !ok {
-		return nil
-	}
+func get[K comparable](table *simplelru.LRU[K, *window], key K) *window {
+	w, _ := table.Get(key)
 	return w
 }
 
 // count adds a failure to key's window, starting a new window when the last
 // one is over, and locks it for lock once limit is reached.
-func (t *Tracker) count(table *simplelru.LRU, key any, now time.Time, limit int, lock time.Duration) {
-	w := t.get(table, key)
+func count[K comparable](table *simplelru.LRU[K, *window], key K, now time.Time, limit int, lock time.Duration) {
+	w := get(table, key)
 	if w == nil || (now.Sub(w.start) >= lock && !now.Before(w.lockedUntil)) {
 		w = &window{start: now}
 		table.Add(key, w)

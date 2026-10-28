@@ -5,6 +5,7 @@ package middleware
 
 import (
 	"bytes"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -146,4 +147,34 @@ func BenchmarkAccessLogCapAllow(b *testing.B) {
 			c.allow(now)
 		}
 	})
+}
+
+// BenchmarkAccessLogLine is what one written access-log line costs the
+// request that writes it: the middleware, the record and the production JSON
+// handler, into io.Discard so the syscall is not what is measured. The cap is
+// lifted so every iteration writes.
+func BenchmarkAccessLogLine(b *testing.B) {
+	b.Setenv(accessLogMaxPerSecondEnv, "0")
+	accessLogs = accessLogCap{}
+	b.Cleanup(func() { accessLogs = accessLogCap{} })
+	prevShim, prevDefault := logger.L, slog.Default()
+	logger.L = &logger.SlogShim{}
+	slog.SetDefault(slog.New(logger.NewHandler(io.Discard, slog.LevelInfo, true)))
+	b.Cleanup(func() {
+		logger.L = prevShim
+		slog.SetDefault(prevDefault)
+	})
+	h := AccessLogSampled("bench-route", 1)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	b.ReportAllocs()
+	for b.Loop() {
+		reqURL := *benchURL
+		req := &http.Request{
+			Method: http.MethodGet, URL: &reqURL, Proto: "HTTP/1.1", ProtoMajor: 1, ProtoMinor: 1,
+			Header: make(http.Header, 4), Host: benchURL.Host, RemoteAddr: "203.0.113.7:54321",
+			RequestURI: benchRequestURI, Body: http.NoBody,
+		}
+		h.ServeHTTP(&benchResponseWriter{header: make(http.Header, 4)}, req)
+	}
 }

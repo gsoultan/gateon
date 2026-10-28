@@ -120,7 +120,7 @@ func TestGetReputation_ResetsViolationsAfter24Hours(t *testing.T) {
 	if !ok {
 		t.Fatal("entry vanished")
 	}
-	if n := val.(*Reputation).ViolationCount; n != 0 {
+	if n := val.ViolationCount; n != 0 {
 		t.Fatalf("ViolationCount = %d, want 0 after 30 idle hours", n)
 	}
 }

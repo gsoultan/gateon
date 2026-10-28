@@ -105,25 +105,28 @@ func ageCachedAnswer(t *testing.T, key string, epochs int64) {
 	t.Helper()
 	s := getStore()
 	then := mitigationEpoch.Load() - epochs
-	for _, c := range []interface {
-		Peek(key any) (any, bool)
-		Add(key, value any)
-	}{s.unmitigatedCache, s.userMitigationCache} {
-		v, ok := c.Peek(key)
-		if !ok {
-			continue
-		}
-		switch v.(type) {
-		case notBlockedUntil:
-			c.Add(key, notBlockedUntil(then))
-		case blockedAt:
-			c.Add(key, blockedAt(then))
-		default:
-			t.Fatalf("cached answer for %s is %T, want one that ages", key, v)
-		}
+	if v, ok := s.unmitigatedCache.Peek(addressCacheKey(key)); ok {
+		s.unmitigatedCache.Add(addressCacheKey(key), agedAnswer(t, key, v, then))
+		return
+	}
+	if v, ok := s.userMitigationCache.Peek(key); ok {
+		s.userMitigationCache.Add(key, agedAnswer(t, key, v, then))
 		return
 	}
 	t.Fatalf("no cached answer for %s", key)
+}
+
+// agedAnswer is cached answer v as read at epoch then.
+func agedAnswer(t *testing.T, key string, v any, then int64) any {
+	t.Helper()
+	switch v.(type) {
+	case notBlockedUntil:
+		return notBlockedUntil(then)
+	case blockedAt:
+		return blockedAt(then)
+	}
+	t.Fatalf("cached answer for %s is %T, want one that ages", key, v)
+	return nil
 }
 
 // ageNegativeAnswers ages key's "not blocked" answer past the window in which

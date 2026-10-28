@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/hashicorp/golang-lru/simplelru"
+	"github.com/hashicorp/golang-lru/v2/simplelru"
 )
 
 // MaxSources is how many clients Sources keeps a bucket for. Its keys are
@@ -32,7 +32,7 @@ type bucket struct {
 // path, and one mutex orders the table.
 type Sources struct {
 	mu        sync.Mutex
-	buckets   *simplelru.LRU
+	buckets   *simplelru.LRU[netip.Prefix, *bucket]
 	perSecond float64
 	burst     float64
 	now       func() time.Time
@@ -42,7 +42,7 @@ type Sources struct {
 // client, perMinute of them at once; perMinute below 1 is 1.
 func NewSources(perMinute int) *Sources {
 	perMinute = max(perMinute, 1)
-	table, _ := simplelru.NewLRU(MaxSources, nil)
+	table, _ := simplelru.NewLRU[netip.Prefix, *bucket](MaxSources, nil)
 	return &Sources{
 		buckets:   table,
 		perSecond: float64(perMinute) / 60,
@@ -79,10 +79,8 @@ func (s *Sources) Take(addr string) (bool, time.Duration) {
 // bucketFor is key's bucket, a full one for a client not seen before (or
 // evicted since).
 func (s *Sources) bucketFor(key netip.Prefix, now time.Time) *bucket {
-	if v, ok := s.buckets.Get(key); ok {
-		if b, ok := v.(*bucket); ok {
-			return b
-		}
+	if b, ok := s.buckets.Get(key); ok && b != nil {
+		return b
 	}
 	b := &bucket{tokens: s.burst, last: now}
 	s.buckets.Add(key, b)

@@ -107,12 +107,11 @@ func TestViolationCountDecaysOnANetworkThatNeverGoesQuiet(t *testing.T) {
 
 	shard := getRepShard(fp)
 	shard.mu.RLock()
-	val, ok := shard.cache.Peek(fp)
+	r, ok := shard.cache.Peek(fp)
 	shard.mu.RUnlock()
 	if !ok {
 		t.Fatal("entry vanished")
 	}
-	r := val.(*Reputation)
 	if r.ViolationCount != 0 {
 		t.Fatalf("ViolationCount = %d a day and more after the last violation, want 0", r.ViolationCount)
 	}

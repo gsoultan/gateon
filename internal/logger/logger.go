@@ -207,6 +207,14 @@ func (s *SlogShim) LogDebug(msg string, args ...any) {
 	s.get().Debug(msg, args...)
 }
 
+// LogAttrs logs msg at level with typed attributes. Unlike the Log* methods it
+// boxes nothing: each argument to those is converted to an interface, which
+// allocates for every string, and a line written per request -- the access log
+// -- paid that once per field.
+func (s *SlogShim) LogAttrs(ctx context.Context, level slog.Level, msg string, attrs ...slog.Attr) {
+	s.get().LogAttrs(ctx, level, msg, attrs...)
+}
+
 func (s *SlogShim) IsEnabled(level slog.Level) bool {
 	if s == nil {
 		return false
@@ -345,26 +353,43 @@ func InitWithOptions(confLevel, format string, development, prod bool) error {
 // initInternal builds the handler. useJSON, rather than a "prod" flag, because
 // the encoding is now a decision the caller has already made.
 func initInternal(level slog.Level, useJSON bool) error {
-	opts := &slog.HandlerOptions{
-		Level: level,
-		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
-			if a.Key == slog.TimeKey && !a.Value.Time().IsZero() {
-				a.Value = slog.StringValue(a.Value.Time().Format(time.RFC3339))
-			}
-			return a
-		},
-	}
-	var handler slog.Handler
-	if useJSON {
-		handler = slog.NewJSONHandler(io.MultiWriter(os.Stdout, Broadcaster), opts)
-	} else {
-		handler = slog.NewTextHandler(io.MultiWriter(os.Stdout, Broadcaster), opts)
-	}
-	next := slog.New(handler)
+	next := slog.New(NewHandler(io.MultiWriter(os.Stdout, Broadcaster), level, useJSON))
 	// In place: rebinding L would race every goroutine already logging.
 	L.set(next)
 	slog.SetDefault(next)
 	return nil
+}
+
+// NewHandler is the handler Init installs, writing to w: JSON or text at
+// level, with the time as RFC 3339. Exported so a benchmark can price a log
+// line as production writes it rather than as slog's defaults would.
+func NewHandler(w io.Writer, level slog.Level, useJSON bool) slog.Handler {
+	opts := &slog.HandlerOptions{
+		Level: level,
+		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
+			switch {
+			case a.Key == slog.TimeKey:
+				// Kind first: Value.Time panics on anything else, and a
+				// caller's own attribute may be named "time".
+				if a.Value.Kind() == slog.KindTime && !a.Value.Time().IsZero() {
+					a.Value = slog.StringValue(a.Value.Time().Format(time.RFC3339))
+				}
+			case a.Key == slog.LevelKey && len(groups) == 0:
+				// With a ReplaceAttr installed, slog hands the level over as
+				// an Any, and the JSON handler then encodes it through
+				// encoding/json and reflection on every line. Its text is
+				// what that produced, and for the four levels a constant.
+				if l, ok := a.Value.Any().(slog.Level); ok {
+					a.Value = slog.StringValue(l.String())
+				}
+			}
+			return a
+		},
+	}
+	if useJSON {
+		return slog.NewJSONHandler(w, opts)
+	}
+	return slog.NewTextHandler(w, opts)
 }
 
 func Sync() {}
