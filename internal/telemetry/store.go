@@ -323,18 +323,24 @@ type headerPairs []string
 //
 // An empty set is nil, which processTrace formats as nothing, as it did an
 // empty map.
-func snapshotHeaders(req, resp map[string][]string) (headerPairs, headerPairs) {
+//
+// buf is the backing array to reuse, the record's own from its last trace;
+// the one used is returned for the record to keep, so a pooled record does not
+// allocate a snapshot per trace.
+func snapshotHeaders(buf []string, req, resp map[string][]string) (headerPairs, headerPairs, []string) {
 	n, m := pairsLen(req), pairsLen(resp)
 	if n+m == 0 {
-		return nil, nil
+		return nil, nil, buf
 	}
-	buf := make([]string, 0, n+m)
+	if cap(buf) < n+m {
+		buf = make([]string, 0, n+m)
+	}
 	// Capped, so an append past a set's own share -- a header added between
 	// the count and the copy -- reallocates rather than writes into the
 	// other's.
 	reqPairs := appendPairs(buf[:0:n], req)
 	respPairs := appendPairs(buf[n:n:n+m], resp)
-	return nilIfEmpty(reqPairs), nilIfEmpty(respPairs)
+	return nilIfEmpty(reqPairs), nilIfEmpty(respPairs), buf
 }
 
 func pairsLen(h map[string][]string) int {
@@ -473,8 +479,22 @@ func (tr *TraceRecord) Reset() {
 	if tr == nil {
 		return
 	}
-	*tr = TraceRecord{}
+	// The header snapshot's backing array stays with the record, emptied so
+	// the pool holds no header of a finished request, unless one unusually
+	// large set grew it past what is worth keeping.
+	buf := tr.headerBuf
+	if cap(buf) > maxPooledHeaderPairs {
+		buf = nil
+	}
+	clear(buf[:cap(buf)])
+	*tr = TraceRecord{headerBuf: buf[:0]}
 }
+
+// maxPooledHeaderPairs is the largest header snapshot buffer a pooled
+// TraceRecord keeps: 64 headers each way, 4 KiB of string headers. A browser's
+// request and response are well inside it; a larger one is allocated for that
+// trace and dropped with it.
+const maxPooledHeaderPairs = 256
 
 // GetTraceRecord returns a clean TraceRecord from the pool.
 func GetTraceRecord() *TraceRecord {
@@ -651,9 +671,13 @@ type TraceRecord struct {
 	Refusal string `json:"refusal,omitempty"`
 
 	// The request's and response's headers as recorded, formatted on the
-	// store's goroutine (processTrace). One backing array holds both.
+	// store's goroutine (processTrace). One backing array, headerBuf, holds
+	// both.
 	rawReqHeader  headerPairs
 	rawRespHeader headerPairs
+	// headerBuf is the backing array of the two above, kept across the
+	// record's trips through tracePool (Reset).
+	headerBuf []string
 
 	// What processTrace derives OperationName and RequestURI from when the
 	// recorder left them to it (TraceInput).

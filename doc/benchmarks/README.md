@@ -441,6 +441,45 @@ go test -tags=noebpf ./internal/server/ -run '^$' -bench GatewayChain -benchmem 
 go test -tags=noebpf ./internal/middleware/ -run '^$' -bench 'InfraChain|AccessLogLine' -benchmem -count 6
 ```
 
+## Request id, JA4H+ and the trace snapshot — 2026-10-28, linux/amd64, 4 vCPU Xeon (shared)
+
+The third pass, taking the eight objects the second left on the request
+goroutine. benchstat, n=6; `sec/op` is noise at this size on a shared host.
+
+| Benchmark | sec/op | B/op | allocs/op |
+| :-- | --: | --: | --: |
+| `GatewayChain/no-tracing` | ~ (p=0.59) | 3.54Ki → **3.34Ki (−6%)** | 31 → **27** |
+| `GatewayChain/tracing` | ~ (p=0.70) | 6.85Ki → **6.67Ki (−3%)** | 49 → **45** |
+
+- **The request id and its header value** are cut from a batch of eight
+  (`request.NewIDHeader`), one `crypto/rand` read and one string and one
+  slice per eight requests, taken from a `sync.Pool` so there is no lock. The
+  entrypoint assigns the value to the canonical key instead of calling
+  `Header.Set`, which built a one-element slice per request. Each value has
+  capacity one, so an append under the same name reallocates rather than
+  writing into another request's slot. What a retained id pins is bounded by
+  the batch: 160 bytes for an id, 128 for a header value.
+- **JA4H+** is a function of eight bytes and a two-bit mask. For the RFC 9110
+  methods and PATCH, and no ALPN, h2, http/1.1 or h3, that is 2,304 strings,
+  each built the first time a request produces it and returned after that from
+  a fixed table of atomic pointers. A method or ALPN outside the table is built
+  per request as before and never stored, so a client cannot grow or poison
+  the table. `TestJA4HPlusTableIsExact` checks every slot against a longhand
+  JA4H and that no two JA4Hs share a slot.
+- **The trace's header snapshot** reuses a backing array kept on the pooled
+  `TraceRecord`. `Reset` clears it so a pooled record holds no headers, and
+  drops one grown past 256 entries.
+
+What remains on the request goroutine: the request state in the context (two:
+the `valueCtx` and the `Request` copy `WithContext` makes), the reputation
+identity (one), and the response header map's first bucket (one), which
+belongs to whichever header is written first, and the proxy writes headers on
+every response anyway. The context pair cannot go without either pooling the
+context, where a goroutine that outlives its handler would see another
+request's cancellation, or reaching into `net/http`'s unexported fields. The
+reputation identity scopes a client class to its network, so it has unbounded
+cardinality and cannot be interned the way JA4H+ is.
+
 ## PGO
 
 `cmd/gateon/default.pgo` is committed and `go build ./cmd/gateon` applies it
