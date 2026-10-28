@@ -168,7 +168,8 @@ commit message. The verification stands on the paired measurement above.
 
 **What is left is not gateon's.** On the response path **82% of allocated bytes
 are inside `gwaf/internal/memz.Arena`** — 1.8 MiB reserved for a 256 KiB body —
-which remains open upstream. Gateon's own share of these paths has been paid.
+which was open upstream until gwaf v0.6.6 (below). Gateon's own share of these
+paths has been paid.
 
 Two things were tried and produced nothing measurable, recorded so they are not
 tried again:
@@ -196,7 +197,7 @@ What each one drives, because a number nobody can describe gets misquoted:
   itself, not a scan buffer.
 - **`WAFResponseText`** — the same 256 KiB as `text/html`, fully inspected. The
   1.765 MiB is ~7× the body, which is the number to attack first if response
-  inspection needs to get cheaper.
+  inspection needs to get cheaper. It was attacked, in gwaf v0.6.6 (below).
 
 Two caveats on reading these:
 
@@ -214,6 +215,50 @@ The `internal/middleware`, `pkg/proxy` and `internal/telemetry` numbers above ar
 from 2026-08-14/15 and were deliberately not re-recorded here — a baseline is
 only useful as a fixed reference, and rewriting it because a later run was
 noisier destroys the thing it exists for.
+
+### The response arena — gwaf v0.6.6, 2026-10-28, linux/amd64, 4 vCPU Xeon (shared)
+
+The 7× above was two things inside gwaf's transaction arena. `WriteResponseBody`
+appended chunk by chunk and the arena doubled its way up, so the copies made at
+each step summed to about twice the final capacity. Then `ProcessResponseBody`
+copied the finished body into the arena a second time to record it as a value,
+which needed room for two bodies and doubled the arena once more. gwaf v0.6.6
+records the body where it already lies and sizes the arena once from a declared
+`Content-Length`, which is a capacity hint only, bounded by the body limit,
+and never decides what is inspected.
+
+The same release closed two fail-open paths in that code: a response header
+added between two body chunks left the end of the body uninspected, and a body
+that fit the arena once but not twice was dropped without a value or a limit
+decision. Neither is reachable from gateon's own call pattern today (it adds
+every header before the first chunk, and its body limit sits well under the
+arena's), which is why no gateon test changes with this bump.
+
+The same `-count 6` run before and after the version bump, nothing else changed:
+
+| Benchmark | sec/op | B/op | allocs/op |
+| :-- | --: | --: | --: |
+| `WAFResponseText` | −7.47% (p=0.009) | 1809.5Ki → **536.1Ki (−70.37%)** | 58 → 56 |
+| `WAFResponseTextDeclaredLength` | −15.20% (p=0.004) | 1809.2Ki → **535.7Ki (−70.39%)** | 60 → 58 |
+| `WAFResponseBinary` | +7.93% (p=0.041) | 259.9Ki ~ | 52 ~ |
+| `WAFRequestWithInboundDLP` | ~ | 35.23Ki ~ | 561 ~ |
+| `WAFRequestWithoutInboundDLP` | ~ | 35.26Ki → 35.18Ki | 561 ~ |
+
+About half of the 536 KiB is gateon's own hold-back buffer, which holds the body
+itself; gwaf's share is now about 1× the body. Plaintext streams into gwaf one
+origin write at a time, and this benchmark's origin writes once, so both rows
+get a sized arena and match. A proxied origin arrives in 32 KiB copy-buffer
+pieces, and there the forwarded `Content-Length` is what keeps the arena from
+doubling: gwaf's own 32 KiB-chunk benchmark is 272 KiB with it and 520 KiB
+without, against 1.95 MiB before either. The `WAFResponseBinary` time is noise: that
+path never reaches the code that changed, its bytes and allocations are equal to
+the byte, and this machine moves ±10% between runs.
+
+Reproduce with:
+
+```sh
+go test ./internal/middleware/security/waf/ -run '^$' -bench WAF -benchmem -count 6
+```
 
 ## The reputation blocker — 2026-09-04, darwin/arm64, Apple M5 Pro
 
