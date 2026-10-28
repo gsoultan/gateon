@@ -6,6 +6,7 @@ package telemetry
 import (
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -41,7 +42,7 @@ func TestHeaderSnapshotFormatsAsFormatHeaders(t *testing.T) {
 		{"neither", nil, http.Header{}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			req, resp := snapshotHeaders(tc.req, tc.resp)
+			req, resp, _ := snapshotHeaders(nil, tc.req, tc.resp)
 			if got, want := sortedLines(req.format()), sortedLines(FormatHeaders(CloneHeader(tc.req))); !slices.Equal(got, want) {
 				t.Errorf("request block\n got %q\nwant %q", got, want)
 			}
@@ -58,11 +59,11 @@ func TestHeaderSnapshotFormatsAsFormatHeaders(t *testing.T) {
 func TestHeaderSnapshotIsOneAllocationAndACopy(t *testing.T) {
 	req := http.Header{"Accept": {"text/html", "*/*"}, "Cookie": {"a=1"}, "User-Agent": {"x"}}
 	resp := http.Header{"Content-Type": {"text/plain"}, "Server": {"gateon"}}
-	if n := testing.AllocsPerRun(100, func() { snapshotHeaders(req, resp) }); n != 1 {
+	if n := testing.AllocsPerRun(100, func() { snapshotHeaders(nil, req, resp) }); n != 1 {
 		t.Fatalf("snapshotHeaders allocated %v times, want 1", n)
 	}
 
-	reqPairs, respPairs := snapshotHeaders(req, resp)
+	reqPairs, respPairs, _ := snapshotHeaders(nil, req, resp)
 	want := respPairs.format()
 	req["Cookie"][0] = "changed"
 	if strings.Contains(reqPairs.format(), "changed") {
@@ -71,6 +72,51 @@ func TestHeaderSnapshotIsOneAllocationAndACopy(t *testing.T) {
 	_ = append(reqPairs, "X-Late", "1")
 	if got := respPairs.format(); got != want {
 		t.Fatalf("appending to the request's pairs wrote into the response's: %q", got)
+	}
+}
+
+// A pooled record keeps its snapshot's backing array, so the next trace it
+// carries snapshots without allocating; Reset empties the array, so a record
+// waiting in the pool holds none of a finished request's headers, and does not
+// keep one grown past maxPooledHeaderPairs.
+func TestTraceRecordReusesItsHeaderSnapshot(t *testing.T) {
+	req := http.Header{"Accept": {"text/html", "*/*"}, "Cookie": {"sid=secret"}, "User-Agent": {"x"}}
+	resp := http.Header{"Content-Type": {"text/plain"}, "Server": {"gateon"}}
+
+	tr := &TraceRecord{}
+	tr.rawReqHeader, tr.rawRespHeader, tr.headerBuf = snapshotHeaders(tr.headerBuf, req, resp)
+	tr.Reset()
+	if cap(tr.headerBuf) == 0 {
+		t.Fatal("Reset dropped the snapshot buffer")
+	}
+	for _, v := range tr.headerBuf[:cap(tr.headerBuf)] {
+		if v != "" {
+			t.Fatalf("a reset record still holds %q", v)
+		}
+	}
+	if tr.rawReqHeader != nil || tr.rawRespHeader != nil {
+		t.Fatal("Reset left the snapshot's pairs set")
+	}
+
+	if n := testing.AllocsPerRun(100, func() {
+		tr.rawReqHeader, tr.rawRespHeader, tr.headerBuf = snapshotHeaders(tr.headerBuf, req, resp)
+		tr.Reset()
+	}); n != 0 {
+		t.Fatalf("a reused record's snapshot allocated %v times, want 0", n)
+	}
+	reqPairs, _, _ := snapshotHeaders(tr.headerBuf, req, resp)
+	if got, want := sortedLines(reqPairs.format()), sortedLines(FormatHeaders(CloneHeader(req))); !slices.Equal(got, want) {
+		t.Fatalf("a reused buffer's block\n got %q\nwant %q", got, want)
+	}
+
+	big := http.Header{}
+	for i := range maxPooledHeaderPairs {
+		big["X-H"+strconv.Itoa(i)] = []string{"v"}
+	}
+	tr.rawReqHeader, tr.rawRespHeader, tr.headerBuf = snapshotHeaders(tr.headerBuf, big, nil)
+	tr.Reset()
+	if cap(tr.headerBuf) != 0 {
+		t.Fatalf("Reset kept a %d-slot buffer, past the %d bound", cap(tr.headerBuf), maxPooledHeaderPairs)
 	}
 }
 

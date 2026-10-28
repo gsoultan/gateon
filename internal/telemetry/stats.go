@@ -293,7 +293,7 @@ func RecordRequestTrace(t TraceInput) {
 	tr.JA4H = t.JA4H
 	tr.PasswordAuth = presentsPassword(t.RequestHeader)
 	tr.Refusal = t.Refusal.String()
-	tr.rawReqHeader, tr.rawRespHeader = snapshotHeaders(t.RequestHeader, t.ResponseHeader)
+	tr.rawReqHeader, tr.rawRespHeader, tr.headerBuf = snapshotHeaders(tr.headerBuf, t.RequestHeader, t.ResponseHeader)
 	tr.RequestBody = t.RequestBody
 	tr.ResponseBody = t.ResponseBody
 	tr.Recommendation = t.Recommendation
