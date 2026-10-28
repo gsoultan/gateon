@@ -12,7 +12,7 @@ import (
 
 	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/security/entropy"
-	lru "github.com/hashicorp/golang-lru"
+	arc "github.com/hashicorp/golang-lru/arc/v2"
 )
 
 const (
@@ -30,7 +30,7 @@ type BehaviorState struct {
 }
 
 type behaviorShard struct {
-	cache *lru.ARCCache
+	cache *arc.ARCCache[string, *BehaviorState]
 	mu    sync.Mutex
 }
 
@@ -43,7 +43,7 @@ func init() {
 	perShard := max(size/behaviorShards, 1)
 	shards = make([]*behaviorShard, behaviorShards)
 	for i := range behaviorShards {
-		cache, _ := lru.NewARC(perShard)
+		cache, _ := arc.NewARC[string, *BehaviorState](perShard)
 		shards[i] = &behaviorShard{
 			cache: cache,
 		}
@@ -105,10 +105,8 @@ func TrackBehaviorInternal(b *behaviorInc) {
 	path := b.path
 	now := b.time
 
-	var state *BehaviorState
-	if val, ok := shard.cache.Get(fingerprint); ok {
-		state = val.(*BehaviorState)
-	} else {
+	state, ok := shard.cache.Get(fingerprint)
+	if !ok {
 		state = &BehaviorState{
 			Sequence:    make([]string, 0, maxSequenceLen),
 			IATs:        make([]time.Duration, 0, maxIATsLen),

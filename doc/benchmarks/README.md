@@ -329,6 +329,73 @@ go test -tags=noebpf ./internal/server/ -run '^$' -bench GatewayChain -benchmem 
 go test -tags=noebpf ./internal/middleware/ -run '^$' -bench InfraChain -benchmem -count 8
 ```
 
+## Caches and encoding — 2026-10-28, linux/amd64, 4 vCPU Xeon (shared)
+
+The second pass over the proxied request path, taking up what the first left:
+the caches behind the mitigation and reputation checks, and the trace and
+access-log encoding. Same machine class and the same caveat: `sec/op` moves
+±10–30% between runs, so the allocation and byte columns are the evidence.
+
+| Benchmark | sec/op | B/op | allocs/op |
+| :-- | --: | --: | --: |
+| `GatewayChain/no-tracing` | 11.21µ → **10.08µ (−10%, p=0.004)** | 5.51Ki → **3.52Ki (−36%)** | 47 → **31** |
+| `GatewayChain/tracing` | ~ (p=0.18) | 8.82Ki → **6.88Ki (−22%)** | 67 → **49** |
+| `InfraChain_TraceAll` | ~ | 754 → **578** | 11 → **6** |
+| `InfraChain_TraceOff` | ~ | 578 | 6 |
+| `AccessLogLine` (new) | 3.74µ → **2.91µ (−22%)** | 842 → **728** | 15 → **7** |
+
+`GatewayChain` counts every goroutine's allocations, the trace store's
+included. Split by profile, per request:
+
+| | before | after |
+| :-- | --: | --: |
+| request goroutine, gateway's own | ~24 objects · ~2.0 KiB | **~8 · ~1.0 KiB** |
+| trace store goroutine | ~8 · ~2.5 KiB | **~7 · ~1.2 KiB** |
+| harness (request, recorder, stub backend) | 16 · 1.6 KiB | 16 · 1.6 KiB |
+
+What changed, in profile order:
+
+- **Typed caches.** Every cache was `golang-lru`'s untyped ARC, so each
+  `Get` on the enforcement path boxed its string key into an interface:
+  eight allocations a request across the IP shun, the fingerprint block and
+  release, and the two reputation reads. They are `golang-lru/arc/v2`
+  generics now, with the same ARC policy and the same bounds. The one cache
+  keyed by an address *or* a fingerprint (`unmitigatedCache`) takes a small
+  comparable struct, so an IPv6 /64 is still a `netip.Addr` and nothing is
+  formatted. The rest of the tree's LRUs moved to `golang-lru/v2` with them,
+  and the type assertions on their reads went too. v1 stays in the binary
+  through `go-immutable-radix`.
+- **One header snapshot.** A trace cloned its request and response headers
+  into two maps, about six allocations, to be walked once on the store's
+  goroutine. Both sets are now one `[]string` of name/value pairs, formatted
+  into the same text as before.
+- **Off the request goroutine.** The trace's operation name and request URI
+  were concatenated per traced request; the middleware hands over the method,
+  path, host and a copy of the URL, and the store builds them before it
+  redacts.
+- **Nothing copied that did not change.** `RedactHeaders` returns its input
+  when it masked nothing — nearly every response block; the day of a stats
+  increment is formatted when the day changes rather than twice a request;
+  a trace flush encodes into one buffer rather than one copy a record.
+- **The access-log line** was eight `any` arguments, six of them strings
+  boxed per line; it uses typed `slog` attributes. And with a `ReplaceAttr`
+  installed, slog hands the level over as an `Any`, which the JSON handler
+  encoded through `encoding/json` and reflection on every line; it is
+  rewritten to its (constant) name first. The same `ReplaceAttr` called
+  `Value.Time` without checking the kind, which panics on a caller's own
+  attribute named `time`; it checks now.
+
+What remains on the request goroutine: the request id (one string), the
+request state in the context (two), JA4H+ and the reputation identity (one
+each), the snapshot (one), and setting the id on the response header (two).
+
+Reproduce with:
+
+```sh
+go test -tags=noebpf ./internal/server/ -run '^$' -bench GatewayChain -benchmem -count 6
+go test -tags=noebpf ./internal/middleware/ -run '^$' -bench 'InfraChain|AccessLogLine' -benchmem -count 6
+```
+
 ## PGO
 
 `cmd/gateon/default.pgo` is committed and `go build ./cmd/gateon` applies it

@@ -20,13 +20,9 @@ func backdateReputation(t *testing.T, key string, d time.Duration) {
 	shard := getRepShard(key)
 	shard.mu.Lock()
 	defer shard.mu.Unlock()
-	val, ok := shard.cache.Peek(key)
+	r, ok := shard.cache.Peek(key)
 	if !ok {
 		t.Fatalf("setup: no reputation recorded for %s", key)
-	}
-	r, isRep := val.(*Reputation)
-	if !isRep {
-		t.Fatalf("setup: %s holds %T", key, val)
 	}
 	r.LastEvent = r.LastEvent.Add(-d)
 }

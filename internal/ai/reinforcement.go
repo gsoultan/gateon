@@ -12,7 +12,7 @@ import (
 	"github.com/gsoultan/gateon/internal/ebpf"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/security/mitigation"
-	lru "github.com/hashicorp/golang-lru"
+	lru "github.com/hashicorp/golang-lru/v2"
 )
 
 // IPState holds the reinforcement learning state for one kernel limit entry:
@@ -67,19 +67,17 @@ const (
 // however many addresses a host walks through in it.
 type ReinforcementLearningLimiter struct {
 	ebpf   ebpf.Manager
-	states *lru.Cache
+	states *lru.Cache[string, *IPState]
 	now    func() time.Time // injectable for tests
 }
 
 // NewReinforcementLearningLimiter creates a new RL-based rate limiter.
 func NewReinforcementLearningLimiter(ebpfMgr ebpf.Manager) *ReinforcementLearningLimiter {
 	capacity := config.CurrentTierDefaults().RLLimiterStates
-	cache, err := lru.NewWithEvict(capacity, func(key, value any) {
+	cache, err := lru.NewWithEvict(capacity, func(ip string, st *IPState) {
 		// An evicted IP loses its Go-side state, so nothing here would clear
 		// its kernel-side limit again. It is not stranded: the Holder leased it
 		// (ebpf.AdaptiveLimitLease), and with nobody renewing it, it lapses.
-		ip, _ := key.(string)
-		st, _ := value.(*IPState)
 		if ip == "" || st == nil {
 			return
 		}
@@ -89,7 +87,7 @@ func NewReinforcementLearningLimiter(ebpfMgr ebpf.Manager) *ReinforcementLearnin
 	})
 	if err != nil {
 		// Only returned for a non-positive size; fall back to the standard tier.
-		cache, _ = lru.New(config.DefaultsFor(config.TierStandard).RLLimiterStates)
+		cache, _ = lru.New[string, *IPState](config.DefaultsFor(config.TierStandard).RLLimiterStates)
 	}
 
 	return &ReinforcementLearningLimiter{
@@ -165,16 +163,12 @@ func limitReason(finding string, q float64) string {
 // necessarily the one left in the map. The race detector could not see it
 // because each goroutine held a different lock.
 func (rl *ReinforcementLearningLimiter) state(key string, now time.Time) *IPState {
-	if v, ok := rl.states.Get(key); ok {
-		if s, isState := v.(*IPState); isState && s != nil {
-			return s
-		}
+	if s, ok := rl.states.Get(key); ok && s != nil {
+		return s
 	}
 	state := &IPState{LastFeedback: now}
-	if prev, existed, _ := rl.states.PeekOrAdd(key, state); existed {
-		if s, isState := prev.(*IPState); isState && s != nil {
-			return s
-		}
+	if prev, existed, _ := rl.states.PeekOrAdd(key, state); existed && prev != nil {
+		return prev
 	}
 	return state
 }
@@ -189,12 +183,12 @@ func (rl *ReinforcementLearningLimiter) Forget(ip string) {
 	if !ok || rl.states == nil {
 		return
 	}
-	v, found := rl.states.Peek(key)
+	st, found := rl.states.Peek(key)
 	if !found {
 		return
 	}
 	rl.states.Remove(key)
-	if st, isState := v.(*IPState); isState && st != nil && st.isLimited() {
+	if st != nil && st.isLimited() {
 		rl.applyAdaptiveLimit(key, 0, true, "")
 	}
 }
@@ -276,17 +270,12 @@ func (rl *ReinforcementLearningLimiter) Sweep() {
 		return
 	}
 	cutoff := rl.now().Add(-idleStateTTL)
-	for _, key := range rl.states.Keys() {
-		ip, ok := key.(string)
+	for _, ip := range rl.states.Keys() {
+		st, ok := rl.states.Peek(ip)
 		if !ok {
 			continue
 		}
-		v, ok := rl.states.Peek(ip)
-		if !ok {
-			continue
-		}
-		st, ok := v.(*IPState)
-		if !ok || st == nil {
+		if st == nil {
 			rl.states.Remove(ip)
 			continue
 		}

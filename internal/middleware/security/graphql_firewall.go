@@ -15,13 +15,13 @@ import (
 
 	"github.com/gsoultan/gateon/internal/middleware/auth"
 	"github.com/gsoultan/gateon/internal/middleware/kind"
-	lru "github.com/hashicorp/golang-lru"
+	arc "github.com/hashicorp/golang-lru/arc/v2"
 	"github.com/vektah/gqlparser/v2/ast"
 	"github.com/vektah/gqlparser/v2/parser"
 )
 
 var (
-	graphqlQueryCache *lru.ARCCache
+	graphqlQueryCache *arc.ARCCache[string, queryAnalysis]
 	graphqlCacheOnce  sync.Once
 
 	graphqlBufferPool = sync.Pool{
@@ -114,7 +114,7 @@ func (fi *fragmentIndex) enter(name string) (ast.SelectionSet, func()) {
 
 func initGraphQLCache() {
 	graphqlCacheOnce.Do(func() {
-		graphqlQueryCache, _ = lru.NewARC(2048)
+		graphqlQueryCache, _ = arc.NewARC[string, queryAnalysis](2048)
 	})
 }
 
@@ -316,10 +316,8 @@ func readGraphQLQuery(buf *bytes.Buffer, w http.ResponseWriter, r *http.Request)
 // for a query, from cache when possible.
 func analyseGraphQLQuery(query string, cfg GraphQLFirewallConfig, w http.ResponseWriter) (queryAnalysis, bool) {
 	if graphqlQueryCache != nil {
-		if cached, ok := graphqlQueryCache.Get(query); ok {
-			if analysis, ok := cached.(queryAnalysis); ok {
-				return analysis, true
-			}
+		if analysis, ok := graphqlQueryCache.Get(query); ok {
+			return analysis, true
 		}
 	}
 

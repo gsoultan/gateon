@@ -21,7 +21,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	lru "github.com/hashicorp/golang-lru"
+	arc "github.com/hashicorp/golang-lru/arc/v2"
 	"github.com/oschwald/geoip2-golang"
 )
 
@@ -50,8 +50,8 @@ var (
 	geoMu     sync.RWMutex
 	geoDBPath string
 
-	countryCache *lru.ARCCache
-	asnCache     *lru.ARCCache
+	countryCache *arc.ARCCache[string, string]
+	asnCache     *arc.ARCCache[string, string]
 	geoCacheOnce sync.Once
 
 	publicIPCache   string
@@ -251,8 +251,8 @@ func ResolveIPInfoCustom(ctx context.Context, ipStr string, fastOnly bool) (coun
 
 func initGeoCaches() {
 	geoCacheOnce.Do(func() {
-		countryCache, _ = lru.NewARC(4096)
-		asnCache, _ = lru.NewARC(4096)
+		countryCache, _ = arc.NewARC[string, string](4096)
+		asnCache, _ = arc.NewARC[string, string](4096)
 	})
 }
 
@@ -261,8 +261,8 @@ func initGeoCaches() {
 func ResolveCountry(ipStr string) string {
 	initGeoCaches()
 	if countryCache != nil {
-		if val, ok := countryCache.Get(ipStr); ok {
-			return val.(string)
+		if code, ok := countryCache.Get(ipStr); ok {
+			return code
 		}
 	}
 
@@ -371,8 +371,8 @@ func InitGeoIPCountry(dbPath string) error {
 func ResolveASN(ipStr string) string {
 	initGeoCaches()
 	if asnCache != nil {
-		if val, ok := asnCache.Get(ipStr); ok {
-			return val.(string)
+		if res, ok := asnCache.Get(ipStr); ok {
+			return res
 		}
 	}
 

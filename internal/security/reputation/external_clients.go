@@ -10,7 +10,7 @@ import (
 	"net/http"
 	"time"
 
-	lru "github.com/hashicorp/golang-lru"
+	lru "github.com/hashicorp/golang-lru/v2"
 
 	"github.com/gsoultan/gateon/internal/logger"
 )
@@ -62,7 +62,7 @@ type cachedScore struct {
 // scoreCache is a bounded, expiring cache of provider answers, replacing a
 // sync.Map that was neither.
 type scoreCache struct {
-	lru *lru.Cache
+	lru *lru.Cache[string, cachedScore]
 	ttl time.Duration
 }
 
@@ -72,7 +72,7 @@ func newScoreCacheWithTTL(ttl time.Duration) *scoreCache {
 	// lru.New only errors on a non-positive size, and the size is a constant
 	// here. A nil cache still behaves correctly -- every lookup misses -- so
 	// this degrades to "no caching" rather than to a panic at startup.
-	c, err := lru.New(externalScoreCacheSize)
+	c, err := lru.New[string, cachedScore](externalScoreCacheSize)
 	if err != nil {
 		logger.L.LogError("reputation: external score cache disabled", "error", err)
 		return &scoreCache{ttl: ttl}
@@ -85,17 +85,10 @@ func (s *scoreCache) get(ip string) (int, bool) {
 	if s == nil || s.lru == nil {
 		return 0, false
 	}
-	v, ok := s.lru.Get(ip)
+	// Typed, so there is no assertion to panic on the analyser's goroutine:
+	// two of the three providers once read val.(int) from an untyped cache.
+	e, ok := s.lru.Get(ip)
 	if !ok {
-		return 0, false
-	}
-	// Comma-ok rather than a bare assertion: two of the three providers used
-	// val.(int) directly, which panics on the analyser's goroutine if the cache
-	// ever holds anything else. Treating an unexpected value as a miss costs
-	// one lookup.
-	e, isEntry := v.(cachedScore)
-	if !isEntry {
-		s.lru.Remove(ip)
 		return 0, false
 	}
 	if time.Since(e.fetchedAt) >= s.ttl {

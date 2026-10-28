@@ -138,19 +138,21 @@ func TestEscalateMitigationAccumulatesClassesPerIP(t *testing.T) {
 	}
 }
 
-// The value stored in the LRU is an interface value; a wrong-typed entry must
-// not panic the writer goroutine. The original code used a bare type assertion.
-func TestEscalateMitigationSurvivesWrongTypedCacheEntry(t *testing.T) {
+// An entry that holds no evidence record must not panic the writer goroutine.
+// The cache once held interface values and the original code used a bare type
+// assertion on them; the cache is typed now, so a nil record is the one shape
+// left that is not a usable one.
+func TestEscalateMitigationSurvivesNilCacheEntry(t *testing.T) {
 	resetAddressEvidence()
 	t.Cleanup(resetAddressEvidence)
 	const ip = "198.51.100.250"
 	addressEvidenceMu.Lock()
-	addressEvidence.Add(ip, "not an evidence record")
+	addressEvidence.Add(ip, nil)
 	addressEvidenceMu.Unlock()
 
 	defer func() {
 		if r := recover(); r != nil {
-			t.Fatalf("escalateMitigation panicked on a wrong-typed cache entry: %v", r)
+			t.Fatalf("escalateMitigation panicked on a nil cache entry: %v", r)
 		}
 	}()
 

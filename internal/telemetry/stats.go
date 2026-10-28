@@ -6,6 +6,7 @@ package telemetry
 import (
 	"context"
 	"math"
+	"net/url"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -225,91 +226,109 @@ func hasAuthScheme(value, scheme string) bool {
 	return len(value) > n+1 && value[n] == ' ' && strings.EqualFold(value[:n], scheme)
 }
 
-// refusalOf is the trace's Refusal for a recorder's optional refusal
+// firstRefusal is the trace's Refusal for a recorder's optional refusal
 // argument: why the gateway itself refused the request (request.Refusal),
 // which the recording site reads from the request state and nowhere else.
 // Absent, or more than one given, the first counts.
-func refusalOf(refusal []request.Refusal) string {
+func firstRefusal(refusal []request.Refusal) request.Refusal {
 	if len(refusal) == 0 {
-		return ""
+		return request.RefusalNone
 	}
-	return refusal[0].String()
+	return refusal[0]
+}
+
+// TraceInput is one request as a recorder hands it to the trace store,
+// passed by value: it is copied into a pooled record, and a pointer would send
+// it to the heap.
+//
+// OperationName and RequestURI are what they say when given. Left empty, they
+// are derived on the store's goroutine (processTrace), so the request does not
+// pay for building them: OperationName from Method and Path, and RequestURI
+// from URIHost and URL, which is copied when the trace is recorded.
+type TraceInput struct {
+	ID, OperationName, ServiceName, RouteID string
+	DurationMs                              float64
+	Timestamp                               time.Time
+	Status, Path, SourceIP, Fingerprint     string
+	CountryCode, UserAgent, Method, Referer string
+	RequestURI                              string
+	URIHost                                 string
+	URL                                     *url.URL
+	JA4, JA4H                               string
+	RequestHeader, ResponseHeader           map[string][]string
+	RequestBody, ResponseBody               string
+	Recommendation                          string
+	Reputation                              float64
+	EntrypointDelay, RouteDelay             float64
+	MiddlewareDelay, ServiceDelay           float64
+	Refusal                                 request.Refusal
+}
+
+// RecordRequestTrace records t. Its headers are snapshotted and its URL
+// copied before it returns, so the caller may let the request go.
+func RecordRequestTrace(t TraceInput) {
+	tr := GetTraceRecord()
+	tr.ID = t.ID
+	tr.OperationName = t.OperationName
+	tr.deriveOperation = t.OperationName == ""
+	tr.ServiceName = t.ServiceName
+	tr.RouteID = t.RouteID
+	tr.DurationMs = t.DurationMs
+	tr.Timestamp = t.Timestamp
+	tr.Status = t.Status
+	tr.Path = t.Path
+	tr.SourceIP = t.SourceIP
+	tr.Fingerprint = t.Fingerprint
+	tr.CountryCode = t.CountryCode
+	tr.UserAgent = t.UserAgent
+	tr.Method = t.Method
+	tr.Referer = t.Referer
+	tr.RequestURI = t.RequestURI
+	if t.RequestURI == "" && t.URL != nil {
+		tr.uriHost, tr.url, tr.deriveURI = t.URIHost, *t.URL, true
+	} else {
+		tr.Host = requestHost(t.RequestURI)
+	}
+	tr.JA4 = t.JA4
+	tr.JA4H = t.JA4H
+	tr.PasswordAuth = presentsPassword(t.RequestHeader)
+	tr.Refusal = t.Refusal.String()
+	tr.rawReqHeader, tr.rawRespHeader = snapshotHeaders(t.RequestHeader, t.ResponseHeader)
+	tr.RequestBody = t.RequestBody
+	tr.ResponseBody = t.ResponseBody
+	tr.Recommendation = t.Recommendation
+	if tr.Recommendation == "" {
+		tr.Recommendation = GetRecommendation(t.ID)
+	}
+	tr.Reputation = t.Reputation
+	tr.EntrypointDelay = t.EntrypointDelay
+	tr.RouteDelay = t.RouteDelay
+	tr.MiddlewareDelay = t.MiddlewareDelay
+	tr.ServiceDelay = t.ServiceDelay
+	recordTraceToStore(tr)
 }
 
 // RecordTrace records a trace for an operation. refusal, optional, is why
-// the gateway itself refused the request (see refusalOf).
+// the gateway itself refused the request (see firstRefusal).
 func RecordTrace(id, operationName, serviceName, routeID string, durationMs float64, timestamp time.Time, status, path, sourceIP, fingerprint, countryCode, userAgent, method, referer, requestURI, ja4, ja4h string, reqHeader, respHeader map[string][]string, recommendation string, reputation float64, entrypointDelay, routeDelay, middlewareDelay, serviceDelay float64, refusal ...request.Refusal) {
-	tr := GetTraceRecord()
-	tr.ID = id
-	tr.OperationName = operationName
-	tr.ServiceName = serviceName
-	tr.RouteID = routeID
-	tr.DurationMs = durationMs
-	tr.Timestamp = timestamp
-	tr.Status = status
-	tr.Path = path
-	tr.SourceIP = sourceIP
-	tr.Fingerprint = fingerprint
-	tr.CountryCode = countryCode
-	tr.UserAgent = userAgent
-	tr.Method = method
-	tr.Referer = referer
-	tr.RequestURI = requestURI
-	tr.Host = requestHost(requestURI)
-	tr.JA4 = ja4
-	tr.JA4H = ja4h
-	tr.PasswordAuth = presentsPassword(reqHeader)
-	tr.Refusal = refusalOf(refusal)
-	tr.rawReqHeader = CloneHeader(reqHeader)
-	tr.rawRespHeader = CloneHeader(respHeader)
-	if recommendation == "" {
-		recommendation = GetRecommendation(id)
-	}
-	tr.Recommendation = recommendation
-	tr.Reputation = reputation
-	tr.EntrypointDelay = entrypointDelay
-	tr.RouteDelay = routeDelay
-	tr.MiddlewareDelay = middlewareDelay
-	tr.ServiceDelay = serviceDelay
-	recordTraceToStore(tr)
+	RecordTraceDetailed(id, operationName, serviceName, routeID, durationMs, timestamp, status, path, sourceIP,
+		fingerprint, countryCode, userAgent, method, referer, requestURI, ja4, ja4h, reqHeader, "", respHeader, "",
+		recommendation, reputation, entrypointDelay, routeDelay, middlewareDelay, serviceDelay, refusal...)
 }
 
+// RecordTraceDetailed is RecordTrace with the request's and response's
+// bodies.
 func RecordTraceDetailed(id, operationName, serviceName, routeID string, durationMs float64, timestamp time.Time, status, path, sourceIP, fingerprint, countryCode, userAgent, method, referer, requestURI, ja4, ja4h string, reqHeader map[string][]string, reqBody string, respHeader map[string][]string, respBody, recommendation string, reputation float64, entrypointDelay, routeDelay, middlewareDelay, serviceDelay float64, refusal ...request.Refusal) {
-	tr := GetTraceRecord()
-	tr.ID = id
-	tr.OperationName = operationName
-	tr.ServiceName = serviceName
-	tr.RouteID = routeID
-	tr.DurationMs = durationMs
-	tr.Timestamp = timestamp
-	tr.Status = status
-	tr.Path = path
-	tr.SourceIP = sourceIP
-	tr.Fingerprint = fingerprint
-	tr.CountryCode = countryCode
-	tr.UserAgent = userAgent
-	tr.Method = method
-	tr.Referer = referer
-	tr.RequestURI = requestURI
-	tr.Host = requestHost(requestURI)
-	tr.JA4 = ja4
-	tr.JA4H = ja4h
-	tr.PasswordAuth = presentsPassword(reqHeader)
-	tr.Refusal = refusalOf(refusal)
-	tr.rawReqHeader = CloneHeader(reqHeader)
-	tr.RequestBody = reqBody
-	tr.rawRespHeader = CloneHeader(respHeader)
-	tr.ResponseBody = respBody
-	if recommendation == "" {
-		recommendation = GetRecommendation(id)
-	}
-	tr.Recommendation = recommendation
-	tr.Reputation = reputation
-	tr.EntrypointDelay = entrypointDelay
-	tr.RouteDelay = routeDelay
-	tr.MiddlewareDelay = middlewareDelay
-	tr.ServiceDelay = serviceDelay
-	recordTraceToStore(tr)
+	RecordRequestTrace(TraceInput{
+		ID: id, OperationName: operationName, ServiceName: serviceName, RouteID: routeID,
+		DurationMs: durationMs, Timestamp: timestamp, Status: status, Path: path, SourceIP: sourceIP,
+		Fingerprint: fingerprint, CountryCode: countryCode, UserAgent: userAgent, Method: method,
+		Referer: referer, RequestURI: requestURI, JA4: ja4, JA4H: ja4h,
+		RequestHeader: reqHeader, ResponseHeader: respHeader, RequestBody: reqBody, ResponseBody: respBody,
+		Recommendation: recommendation, Reputation: reputation, EntrypointDelay: entrypointDelay,
+		RouteDelay: routeDelay, MiddlewareDelay: middlewareDelay, ServiceDelay: serviceDelay,
+		Refusal: firstRefusal(refusal),
+	})
 }
 
 // ResetPathStats clears all in-memory path statistics. Primarily for testing.
