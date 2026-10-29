@@ -7,7 +7,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"testing"
 	"time"
 )
@@ -32,7 +31,7 @@ func (f *fakeThreatArchiver) Archive(_ context.Context, ts []*SecurityThreat) er
 func threatPruneStore(t *testing.T, expired int) *pathStatsStore {
 	t.Helper()
 	_ = ClosePathStatsStore(context.Background())
-	if err := InitPathStatsStore("sqlite://"+filepath.Join(t.TempDir(), "threat_prune.db"), 7); err != nil {
+	if err := InitPathStatsStore("sqlite://"+migratedSQLite(t, "threat_prune.db"), 7); err != nil {
 		t.Fatalf("init store: %v", err)
 	}
 	t.Cleanup(func() { _ = ClosePathStatsStore(context.Background()) })

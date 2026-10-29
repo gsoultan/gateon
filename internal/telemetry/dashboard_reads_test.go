@@ -6,7 +6,6 @@ package telemetry
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -68,7 +67,7 @@ func isolateDashboard(t *testing.T, threats int) {
 	}
 
 	_ = ClosePathStatsStore(context.Background())
-	if err := InitPathStatsStore("sqlite://"+filepath.Join(t.TempDir(), "dashboard.db"), 7); err != nil {
+	if err := InitPathStatsStore("sqlite://"+migratedSQLite(t, "dashboard.db"), 7); err != nil {
 		t.Fatalf("init store: %v", err)
 	}
 	t.Cleanup(func() { _ = ClosePathStatsStore(context.Background()) })
@@ -205,8 +204,13 @@ func TestAnotherPageOfThreatsReadsOnlyThatPage(t *testing.T) {
 // watched. Waking it on every request would turn a client polling the
 // snapshot into one refresh per request.
 func TestViewerWakesTheLoopOnlyAfterAQuietPeriod(t *testing.T) {
-	prev := lastSnapshot.Load()
-	t.Cleanup(func() { lastSnapshot.Store(prev) })
+	// NoteDashboardViewer stamps the demand clock as well; leaving it set
+	// would count as someone watching in whichever test runs next.
+	prev, prevDemand := lastSnapshot.Load(), dashboardDemandAt.Load()
+	t.Cleanup(func() {
+		lastSnapshot.Store(prev)
+		dashboardDemandAt.Store(prevDemand)
+	})
 	drain := func() bool {
 		select {
 		case <-snapshotWake:

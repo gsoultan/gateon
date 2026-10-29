@@ -6,7 +6,6 @@ package telemetry
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -27,7 +26,7 @@ import (
 // path table and "Requests Today" went blind on request.
 func TestOneRequestCannotAbortATrafficStatsFlush(t *testing.T) {
 	t.Run("sqlite", func(t *testing.T) {
-		assertFlushSurvivesHostileRequest(t, "sqlite://"+filepath.Join(t.TempDir(), "flush.db"))
+		assertFlushSurvivesHostileRequest(t, "sqlite://"+migratedSQLite(t, "flush.db"))
 	})
 	t.Run("postgres", func(t *testing.T) {
 		assertFlushSurvivesHostileRequest(t, testutil.PostgresDSN(t, "skipping the Postgres run"))
@@ -120,7 +119,7 @@ func TestDomainStatsRowsAreBoundedByDistinctHosts(t *testing.T) {
 // path table and "Requests Today" were empty from the first day.
 func TestTrafficStatsAccumulateAcrossFlushesOnEveryEngine(t *testing.T) {
 	t.Run("sqlite", func(t *testing.T) {
-		assertStatsAccumulate(t, "sqlite://"+filepath.Join(t.TempDir(), "accumulate.db"))
+		assertStatsAccumulate(t, "sqlite://"+migratedSQLite(t, "accumulate.db"))
 	})
 	t.Run("postgres", func(t *testing.T) {
 		assertStatsAccumulate(t, testutil.PostgresDSN(t, "skipping the Postgres run"))

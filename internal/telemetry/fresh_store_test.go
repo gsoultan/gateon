@@ -5,7 +5,6 @@ package telemetry
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
 )
 
@@ -32,7 +31,7 @@ func freshStore(t *testing.T) {
 	t.Helper()
 	ClosePathStatsStore(context.Background())
 
-	dbPath := filepath.Join(t.TempDir(), "telemetry_test.db")
+	dbPath := migratedSQLite(t, "telemetry_test.db")
 	if err := InitPathStatsStore(dbPath, 1); err != nil {
 		t.Fatalf("InitPathStatsStore: %v", err)
 	}

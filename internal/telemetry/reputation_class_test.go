@@ -7,7 +7,6 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -76,7 +75,7 @@ func TestReputationIdentityFollowsTheJA4HLayout(t *testing.T) {
 func TestAScoreRecordedFromOneRequestIsReadForTheNext(t *testing.T) {
 	t.Setenv("GATEON_ENABLE_TEST_REPUTATION", "1")
 	_ = telemetry.ClosePathStatsStore(context.Background())
-	if err := telemetry.InitPathStatsStore(filepath.Join(t.TempDir(), "reputation-class.db"), 1); err != nil {
+	if err := telemetry.InitPathStatsStore(telemetry.MigratedSQLite(t, "reputation-class.db"), 1); err != nil {
 		t.Fatalf("init telemetry store: %v", err)
 	}
 	t.Cleanup(func() { _ = telemetry.ClosePathStatsStore(context.Background()) })

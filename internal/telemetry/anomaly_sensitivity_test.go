@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -107,7 +106,7 @@ func newIsolatedAggregator() *LocalMetricsAggregator {
 func initAnomalyTestStore(t *testing.T) {
 	t.Helper()
 	_ = ClosePathStatsStore(context.Background())
-	if err := InitPathStatsStore(filepath.Join(t.TempDir(), "anomaly.db"), 1); err != nil {
+	if err := InitPathStatsStore(migratedSQLite(t, "anomaly.db"), 1); err != nil {
 		t.Fatalf("init telemetry store: %v", err)
 	}
 	t.Cleanup(func() { _ = ClosePathStatsStore(context.Background()) })

@@ -5,7 +5,6 @@ package telemetry
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -44,7 +43,7 @@ func recordDetectionAt(at time.Time) {
 // local wall clock in a timestamp without a zone.
 func TestTheAttackTrendHasABucketPerHourAndDay(t *testing.T) {
 	engines := map[string]func(t *testing.T) string{
-		"sqlite":   func(t *testing.T) string { return "sqlite://" + filepath.Join(t.TempDir(), "trend.db") },
+		"sqlite":   func(t *testing.T) string { return "sqlite://" + migratedSQLite(t, "trend.db") },
 		"postgres": func(t *testing.T) string { return testutil.PostgresDSN(t, "skipping the Postgres run") },
 	}
 	for name, dsn := range engines {

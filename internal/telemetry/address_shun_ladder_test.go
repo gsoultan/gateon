@@ -59,6 +59,37 @@ func TestAnAddressShunnedAgainSoonAfterItLapsesIsShunnedLonger(t *testing.T) {
 	})
 }
 
+// Ageing a shun keeps its length, however long the test took to get there.
+// The test above failed in CI's coverage run with 29m58s: the helper set the
+// start from the clock and moved the end from the row, so the seconds a slow
+// run spent between the two came off the length the ladder doubles. Here the
+// shun is written three seconds early, as such a run would leave it.
+func TestAgeingAShunKeepsItsLength(t *testing.T) {
+	onEachShunEngine(t, func(t *testing.T) {
+		const ip = "198.51.100.144"
+		if err := MarkIPMitigatedFor(ip, "test", 15*time.Minute); err != nil {
+			t.Fatal(err)
+		}
+		s := getStore()
+		var start, end time.Time
+		if err := s.db.QueryRow(s.dialect.Rebind(`SELECT mitigated_at, expires_at FROM ip_mitigations WHERE ip = ?`), ip).Scan(&start, &end); err != nil {
+			t.Fatal(err)
+		}
+		const layout = "2006-01-02 15:04:05"
+		early := func(at time.Time) string { return at.UTC().Add(-3 * time.Second).Format(layout) }
+		if _, err := s.db.Exec(s.dialect.Rebind(`UPDATE ip_mitigations SET mitigated_at = ?, expires_at = ? WHERE ip = ?`),
+			early(start), early(end), ip); err != nil {
+			t.Fatal(err)
+		}
+
+		ageIPShun(t, ip, 10*time.Minute)
+
+		if got := listedShunLength(t, ip); got != 15*time.Minute {
+			t.Errorf("a 15m shun aged by 10m lasts %v, want 15m: the helper ate the test's own running time", got)
+		}
+	})
+}
+
 // listedShunLength is how long ip's listed shun lasts, from the mitigation list.
 func listedShunLength(t *testing.T, ip string) time.Duration {
 	t.Helper()

@@ -7,7 +7,6 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -34,7 +33,7 @@ import (
 // it records is checked against the middleware every entrypoint carries.
 func TestAnomalyShunIsEnforced(t *testing.T) {
 	_ = telemetry.ClosePathStatsStore(context.Background())
-	if err := telemetry.InitPathStatsStore(filepath.Join(t.TempDir(), "anomaly.db"), 1); err != nil {
+	if err := telemetry.InitPathStatsStore(telemetry.MigratedSQLite(t, "anomaly.db"), 1); err != nil {
 		t.Fatalf("init telemetry store: %v", err)
 	}
 	t.Cleanup(func() { _ = telemetry.ClosePathStatsStore(context.Background()) })
@@ -93,7 +92,7 @@ func TestAnomalyShunIsEnforced(t *testing.T) {
 // there is none, so a gateway without one reported throttling it never did.
 func TestAnomalyThrottleIsNotClaimedWithoutAKernel(t *testing.T) {
 	_ = telemetry.ClosePathStatsStore(context.Background())
-	if err := telemetry.InitPathStatsStore(filepath.Join(t.TempDir(), "throttle.db"), 1); err != nil {
+	if err := telemetry.InitPathStatsStore(telemetry.MigratedSQLite(t, "throttle.db"), 1); err != nil {
 		t.Fatalf("init telemetry store: %v", err)
 	}
 	t.Cleanup(func() { _ = telemetry.ClosePathStatsStore(context.Background()) })

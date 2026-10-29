@@ -6,7 +6,6 @@ package telemetry
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -29,7 +28,7 @@ import (
 // it again: a restart.
 func onEachPreloadEngine(t *testing.T, test func(t *testing.T, url string)) {
 	t.Run("sqlite", func(t *testing.T) {
-		url := "sqlite://" + filepath.Join(t.TempDir(), "preload.db")
+		url := "sqlite://" + migratedSQLite(t, "preload.db")
 		openPreloadStore(t, url)
 		test(t, url)
 	})

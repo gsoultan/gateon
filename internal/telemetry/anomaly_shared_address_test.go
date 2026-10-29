@@ -7,7 +7,6 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -36,7 +35,7 @@ func (m *throttlingKernel) GetMapStats() (ebpf.MapStats, error) {
 func exploitThreats(t *testing.T, kernel ebpf.Manager, traffic func(agg *LocalMetricsAggregator)) map[string]SecurityThreat {
 	t.Helper()
 	_ = ClosePathStatsStore(context.Background())
-	if err := InitPathStatsStore(filepath.Join(t.TempDir(), "anomaly.db"), 1); err != nil {
+	if err := InitPathStatsStore(migratedSQLite(t, "anomaly.db"), 1); err != nil {
 		t.Fatalf("init telemetry store: %v", err)
 	}
 	t.Cleanup(func() { _ = ClosePathStatsStore(context.Background()) })

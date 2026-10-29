@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"testing"
 
 	"github.com/gsoultan/gateon/internal/middleware/security/identity"
@@ -34,7 +33,7 @@ import (
 // the attacker "released" and blocked nothing.
 func TestAutomaticIPShunAfterTheSourceHasBeenSeen(t *testing.T) {
 	_ = telemetry.ClosePathStatsStore(context.Background())
-	if err := telemetry.InitPathStatsStore(filepath.Join(t.TempDir(), "release-cache.db"), 1); err != nil {
+	if err := telemetry.InitPathStatsStore(telemetry.MigratedSQLite(t, "release-cache.db"), 1); err != nil {
 		t.Fatalf("init telemetry store: %v", err)
 	}
 	t.Cleanup(func() { _ = telemetry.ClosePathStatsStore(context.Background()) })

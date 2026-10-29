@@ -16,7 +16,7 @@ import (
 // SQLite always, Postgres when GATEON_TEST_POSTGRES_DSN names one.
 func blockLookupBackends(b *testing.B, run func(b *testing.B)) {
 	b.Run("sqlite", func(b *testing.B) {
-		openBenchStore(b, filepath.Join(b.TempDir(), "bench.db"))
+		openBenchStore(b, migratedSQLite(b, "bench.db"))
 		run(b)
 	})
 	b.Run("postgres", func(b *testing.B) {

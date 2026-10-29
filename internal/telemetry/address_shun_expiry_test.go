@@ -7,7 +7,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -24,7 +23,7 @@ import (
 // set, on Postgres: the expiry is compared in SQL, written once for both.
 func onEachShunEngine(t *testing.T, test func(t *testing.T)) {
 	t.Run("sqlite", func(t *testing.T) {
-		openShunStore(t, "sqlite://"+filepath.Join(t.TempDir(), "shun.db"))
+		openShunStore(t, "sqlite://"+migratedSQLite(t, "shun.db"))
 		test(t)
 	})
 	t.Run("postgres", func(t *testing.T) {
@@ -79,17 +78,27 @@ func attackFromClasses(ip, tag string, n int) {
 // ageIPShun moves ip's shun d into the past, as if it had been written d ago:
 // when it was written, and when it ends if it does, each shifted by d, so a
 // shun written with no real end is still in force afterwards.
+//
+// Both are moved from what the row holds. The start used to be set to the
+// clock at the time of the call less d, while the end was moved from the row,
+// so every second the test spent between writing the shun and ageing it was
+// taken off the shun's length: under -race or coverage a 15m shun came back
+// 14m59s long, and the ladder's doubled 30m read 29m58s.
 func ageIPShun(t *testing.T, ip string, d time.Duration) {
 	t.Helper()
 	s := getStore()
 	const layout = "2006-01-02 15:04:05"
-	past := time.Now().UTC().Add(-d).Format(layout)
+	var start, end sql.NullTime
+	err := s.db.QueryRow(s.dialect.Rebind(`SELECT mitigated_at, expires_at FROM ip_mitigations WHERE ip = ?`), ip).Scan(&start, &end)
+	if err != nil || !start.Valid {
+		t.Fatalf("read the shun of %s to age it: %v (written at %v)", ip, err, start)
+	}
+	past := start.Time.UTC().Add(-d).Format(layout)
 	if _, err := s.db.Exec(s.dialect.Rebind(`UPDATE ip_mitigations SET mitigated_at = ? WHERE ip = ?`), past, ip); err != nil {
 		t.Fatalf("age the shun: %v", err)
 	}
-	var end sql.NullTime
-	// No such column before the expiry existed: then there is no end to move.
-	if s.db.QueryRow(s.dialect.Rebind(`SELECT expires_at FROM ip_mitigations WHERE ip = ?`), ip).Scan(&end) == nil && end.Valid {
+	// A block that holds until released has no end to move.
+	if end.Valid {
 		moved := end.Time.UTC().Add(-d).Format(layout)
 		if _, err := s.db.Exec(s.dialect.Rebind(`UPDATE ip_mitigations SET expires_at = ? WHERE ip = ?`), moved, ip); err != nil {
 			t.Fatalf("age the shun's end: %v", err)
