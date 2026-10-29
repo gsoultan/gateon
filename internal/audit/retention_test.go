@@ -223,6 +223,7 @@ func TestArchiveLogs_LeavesNoFileWhenTheWriteFails(t *testing.T) {
 		t.Fatalf("setup: %v", err)
 	}
 	t.Cleanup(func() { _ = os.Chmod(archiveDir, 0o750) })
+	requireModeBitsEnforced(t, archiveDir)
 
 	if _, err := m.retireChunk(time.Now(), true); err == nil {
 		t.Fatal("retireChunk must fail when it cannot create the archive file")
@@ -332,4 +333,21 @@ func archivedIDs(t *testing.T, dataDir string) []string {
 		}
 	}
 	return ids
+}
+
+// requireModeBitsEnforced skips unless a write into dir is refused. Root, or
+// any process holding CAP_DAC_OVERRIDE, writes through a 0500 directory, so the
+// failure under test cannot be produced -- as in a container running as root.
+// It probes the directory instead of checking the uid, so the test still runs
+// wherever the mode bits hold, including CI's unprivileged `go test ./...`.
+func requireModeBitsEnforced(t *testing.T, dir string) {
+	t.Helper()
+	probe := filepath.Join(dir, ".probe")
+	f, err := os.Create(probe)
+	if err != nil {
+		return
+	}
+	_ = f.Close()
+	_ = os.Remove(probe)
+	t.Skipf("a read-only directory accepted a write (euid %d): this process bypasses file modes", os.Geteuid())
 }
