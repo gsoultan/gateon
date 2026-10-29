@@ -303,8 +303,20 @@ check-auth-nil:
 ##                 denominator reads as higher coverage. Running this on a Mac
 ##                 will print "rose" notes for those two; that is the platform
 ##                 talking, not progress.
+##
+##                 -race -shuffle=on so this is the same run as test-race rather
+##                 than a second, weaker one. CI ran the suite twice, under the
+##                 race detector and then again for coverage without it, so the
+##                 instrumented run never counted coverage and the coverage run
+##                 never looked for races. Timing bugs show on the slow run: the
+##                 Postgres shun-ageing flake fixed in PR #42 surfaced in the
+##                 coverage run because a test straddled a second boundary.
+##                 One run with both kinds of instrumentation is the slowest
+##                 and so the most likely to expose them, and it costs one pass
+##                 instead of two. With -race, -cover counts in atomic mode;
+##                 the statement percentages are the same as in set mode.
 check-coverage:
-	@go test -cover $$(go list ./... | grep -v 'cmd/gateon') | tee /dev/stderr | go run ./scripts/checkcoverage
+	@go test -race -shuffle=on -cover $$(go list ./... | grep -v 'cmd/gateon') | tee /dev/stderr | go run ./scripts/checkcoverage
 
 ## sec: run the full local security gate (vet + vuln + staticcheck + gosec + invariants)
 sec: vuln staticcheck gosec check-invariants check-config check-auth-nil check-folders
