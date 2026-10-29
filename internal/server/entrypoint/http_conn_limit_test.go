@@ -409,11 +409,18 @@ func (b *barrier) arrive(ctx context.Context) bool {
 
 // h2cClient speaks cleartext HTTP/2 with prior knowledge, over one connection
 // per host for as long as that connection has streams to spare.
+//
+// MaxConnsPerHost is what makes that "one". Without it, a request that finds
+// no connection free that instant starts a dial alongside its wait, and on a
+// loaded runner a burst of concurrent requests dialled one each while the
+// open HTTP/2 connection took all of them: TestHTTP2StreamsAreNotLimitedBy-
+// MaxConnections saw its streams served on one connection and the spare
+// dials refused by the limit, and failed CI on the refusals.
 func h2cClient(t *testing.T) *http.Client {
 	t.Helper()
 	p := new(http.Protocols)
 	p.SetUnencryptedHTTP2(true)
-	tr := &http.Transport{Protocols: p}
+	tr := &http.Transport{Protocols: p, MaxConnsPerHost: 1}
 	t.Cleanup(tr.CloseIdleConnections)
 	return &http.Client{Transport: tr, Timeout: sessionBound}
 }
