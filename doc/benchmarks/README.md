@@ -480,6 +480,48 @@ request's cancellation, or reaching into `net/http`'s unexported fields. The
 reputation identity scopes a client class to its network, so it has unbounded
 cardinality and cannot be interned the way JA4H+ is.
 
+## The trace store's goroutine — 2026-10-29, linux/amd64, 4 vCPU Xeon (shared)
+
+With `GATEON_TRACE_SAMPLE_RATE=0`, `GatewayChain` drops from 27 to 20
+allocations and from 45 to 37 with tracing, so recording a trace cost seven
+objects. None of them was on the request goroutine. A memory profile put all
+seven on the store's, in `processTrace` and `flushTraces`, which every trace at
+the default sampling passes through: three building the operation name and
+request URI (the name, `URL.RequestURI`, and that joined to the host), one per
+header block, one more for the request block once `RedactHeaders` had masked
+its cookie, and one in the JSON encoder.
+
+`BenchmarkProcessTrace` prices that goroutine's share on its own, for
+`GatewayChain`'s request. benchstat, n=8:
+
+| Benchmark | sec/op | B/op | allocs/op |
+| :-- | --: | --: | --: |
+| `ProcessTrace` | 2.142µ → 2.097µ (−2%) | 488 → **272 (−44%)** | 6 → **2** |
+| `GatewayChain/no-tracing` | ~ (p=0.08) | 3.31Ki → **3.13Ki (−5%)** | 27 → **23** |
+| `GatewayChain/tracing` | ~ (p=0.20) | 6.61Ki → **6.42Ki (−3%)** | 45 → **41** |
+
+- **The operation name and request URI** are written into one string and cut
+  from it. `requestURIParts` is `URL.RequestURI` in pieces, so the URI is
+  written once rather than built and then joined; `FuzzDeriveFields` holds both
+  fields to the old concatenation.
+- **Both header blocks** are one string, and a credential header's value is
+  written as the mask while the block is built, so `RedactHeaders` finds
+  nothing to change and returns the block it was given instead of building it
+  again. `RedactHeaders` still runs over both blocks and still decides what is
+  stored: `FuzzTraceHeadersRedactAsBefore` holds the stored text to what it was,
+  and the early mask can only remove text. A credential value carrying a line
+  break, which no wire parser accepts but a header map built in code can hold,
+  is now masked whole where it used to be split into a masked line and a plain
+  one.
+
+The remaining two are the stored strings themselves. The third, in
+`flushTraces`, is `encoding/json` boxing `Timestamp` (24 bytes) to call
+`IsZero` for `omitzero` (a value-receiver `IsZero` is called through an
+interface). Removing it means dropping `omitzero` or changing the field's
+type, either of which changes what stored traces encode for one object on a
+background goroutine, so it is left. Most of `ProcessTrace`'s 2µs is `RedactHeaders` reading
+each value for the shape of a token, which is the check, and stays.
+
 ## PGO
 
 `cmd/gateon/default.pgo` is committed and `go build ./cmd/gateon` applies it

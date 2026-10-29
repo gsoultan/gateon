@@ -381,8 +381,44 @@ func (p headerPairs) format() string {
 	sb := bufferPool.Get().(*bytes.Buffer)
 	sb.Reset()
 	defer bufferPool.Put(sb)
+	p.write(sb, false)
+	return sb.String()
+}
+
+// formatTraceHeaders is format for a trace's request and response sets,
+// written into one string the two blocks are cut from: one allocation where
+// format cost one per set.
+//
+// A credential header's value is written as redact.Mask, as RedactHeaders
+// would rewrite its line. RedactHeaders still runs over both blocks after
+// this and remains what decides redaction (processTrace); writing the mask
+// here only means a block that held a cookie is not built twice, once with
+// the value and once without. It can only remove text: a value is masked or
+// written as it was, and a credential header's later values, joined after
+// the first, are dropped with it.
+func formatTraceHeaders(req, resp headerPairs) (string, string) {
+	sb := bufferPool.Get().(*bytes.Buffer)
+	sb.Reset()
+	defer bufferPool.Put(sb)
+	req.write(sb, true)
+	n := sb.Len()
+	resp.write(sb, true)
+	s := sb.String()
+	return s[:n], s[n:]
+}
+
+// write writes p to sb as format returns it, with each credential header's
+// value replaced by redact.Mask if mask is set (formatTraceHeaders).
+func (p headerPairs) write(sb *bytes.Buffer, mask bool) {
+	if len(p) == 0 {
+		return
+	}
+	masked := false
 	for i := 0; i+1 < len(p); i += 2 {
 		if i > 0 && p[i] == p[i-2] {
+			if masked {
+				continue
+			}
 			sb.WriteString(", ")
 		} else {
 			if i > 0 {
@@ -390,11 +426,14 @@ func (p headerPairs) format() string {
 			}
 			sb.WriteString(p[i])
 			sb.WriteString(": ")
+			if masked = mask && headerKindOf(p[i]) == headerCredential; masked {
+				sb.WriteString(redact.Mask)
+				continue
+			}
 		}
 		sb.WriteString(p[i+1])
 	}
 	sb.WriteByte('\n')
-	return sb.String()
 }
 
 // bufferPool holds the buffers FormatHeaders and RedactHeaders build into. A
@@ -2270,13 +2309,9 @@ func (s *pathStatsStore) processTrace(tr *TraceRecord) {
 	tr.deriveFields()
 
 	// Format headers lazily in the background
-	if tr.rawReqHeader != nil {
-		tr.RequestHeaders = tr.rawReqHeader.format()
-		tr.rawReqHeader = nil // Release for GC
-	}
-	if tr.rawRespHeader != nil {
-		tr.ResponseHeaders = tr.rawRespHeader.format()
-		tr.rawRespHeader = nil // Release for GC
+	if tr.rawReqHeader != nil || tr.rawRespHeader != nil {
+		tr.RequestHeaders, tr.ResponseHeaders = formatTraceHeaders(tr.rawReqHeader, tr.rawRespHeader)
+		tr.rawReqHeader, tr.rawRespHeader = nil, nil // Release for GC
 	}
 
 	// Every trace passes here before it is stored, and so before the
@@ -2293,16 +2328,69 @@ func (s *pathStatsStore) processTrace(tr *TraceRecord) {
 // deriveFields builds what the recorder left to the store's goroutine
 // (TraceInput): the operation's name, and the request URI with the host it
 // was asked of. Before redaction, which reads the URI.
+//
+// Both are cut from one string. They were three -- the name, the URL's
+// request URI, and that joined to the host -- on every trace at the default
+// sampling. Sharing a backing array is safe because both live and die with
+// the record, and redaction replaces RequestURI rather than writing into it.
 func (tr *TraceRecord) deriveFields() {
+	if !tr.deriveOperation && !tr.deriveURI {
+		return
+	}
+	var path, query string
+	var hasQuery bool
+	n := 0
 	if tr.deriveOperation {
-		tr.OperationName = tr.Method + " " + tr.Path
+		n += len(tr.Method) + 1 + len(tr.Path)
+	}
+	if tr.deriveURI {
+		path, query, hasQuery = requestURIParts(&tr.url)
+		n += len(tr.uriHost) + len(path)
+		if hasQuery {
+			n += 1 + len(query)
+		}
+	}
+	var b strings.Builder
+	b.Grow(n)
+	if tr.deriveOperation {
+		b.WriteString(tr.Method)
+		b.WriteByte(' ')
+		b.WriteString(tr.Path)
+	}
+	opEnd := b.Len()
+	if tr.deriveURI {
+		b.WriteString(tr.uriHost)
+		b.WriteString(path)
+		if hasQuery {
+			b.WriteByte('?')
+			b.WriteString(query)
+		}
+	}
+	s := b.String()
+	if tr.deriveOperation {
+		tr.OperationName = s[:opEnd]
 		tr.deriveOperation = false
 	}
 	if tr.deriveURI {
-		tr.RequestURI = tr.uriHost + tr.url.RequestURI()
+		tr.RequestURI = s[opEnd:]
 		tr.Host = requestHost(tr.RequestURI)
 		tr.deriveURI, tr.uriHost, tr.url = false, "", url.URL{}
 	}
+}
+
+// requestURIParts is u.RequestURI() in pieces, so a caller can write it
+// without first building it: the escaped path, and the query with whether a
+// "?" precedes it. An opaque URL, which no server request carries, is the
+// whole of RequestURI as path.
+func requestURIParts(u *url.URL) (path, query string, hasQuery bool) {
+	if u.Opaque != "" {
+		return u.RequestURI(), "", false
+	}
+	path = u.EscapedPath()
+	if path == "" {
+		path = "/"
+	}
+	return path, u.RawQuery, u.ForceQuery || u.RawQuery != ""
 }
 
 // RecordSecurityThreatWithJA4 is a helper that populates JA4 and JA4H from the request before recording.
