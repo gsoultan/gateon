@@ -11,6 +11,7 @@ import (
 	"net"
 	"os"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -56,18 +57,21 @@ func requireRawSockets(t *testing.T) {
 	}
 }
 
-// newWirePair creates a veth pair with the receiving end addressed and both
-// ends up, and removes it when the test ends. Frames written to sender arrive
+// newWirePair creates a veth pair with the receiving end addressed for fam and
+// both ends up, and removes it when the test ends. Frames written to sender arrive
 // on receiver, where the programs attach.
 //
 // Both MACs are set at creation. A veth otherwise starts with a random one that
 // systemd-udevd replaces a few milliseconds later (MACAddressPolicy=persistent),
 // so a frame addressed to the MAC read at creation arrives for another host and
 // the stack drops it without counting it anywhere.
-func newWirePair(t *testing.T) (sender, receiver *net.Interface) {
+func newWirePair(t *testing.T, fam wireFamily) (sender, receiver *net.Interface) {
 	t.Helper()
 	requireBPFCapabilities(t)
 	requireRawSockets(t)
+	if fam.local.To4() == nil {
+		requireIPv6(t)
+	}
 
 	veth := &netlink.Veth{
 		LinkAttrs:        netlink.LinkAttrs{Name: "gtn-w0", HardwareAddr: net.HardwareAddr{0x02, 0, 0, 0, 0x18, 0x01}},
@@ -83,17 +87,15 @@ func newWirePair(t *testing.T) (sender, receiver *net.Interface) {
 	if err != nil {
 		t.Fatalf("resolve gtn-w1: %v", err)
 	}
-	for _, cidr := range []string{"198.18.0.2/24", "2001:db8:18::2/64"} {
-		addr, err := netlink.ParseAddr(cidr)
-		if err != nil {
-			t.Fatalf("parse address: %v", err)
-		}
-		// No duplicate address detection: a tentative IPv6 address accepts
-		// nothing for the second or so DAD takes.
-		addr.Flags = unix.IFA_F_NODAD
-		if err := netlink.AddrAdd(peer, addr); err != nil {
-			t.Fatalf("address gtn-w1 with %s: %v", cidr, err)
-		}
+	addr, err := netlink.ParseAddr(fam.cidr)
+	if err != nil {
+		t.Fatalf("parse address: %v", err)
+	}
+	// No duplicate address detection: a tentative IPv6 address accepts
+	// nothing for the second or so DAD takes.
+	addr.Flags = unix.IFA_F_NODAD
+	if err := netlink.AddrAdd(peer, addr); err != nil {
+		t.Fatalf("address gtn-w1 with %s: %v", fam.cidr, err)
 	}
 	for _, l := range []netlink.Link{veth, peer} {
 		if err := netlink.LinkSetUp(l); err != nil {
@@ -101,6 +103,23 @@ func newWirePair(t *testing.T) (sender, receiver *net.Interface) {
 		}
 	}
 	return resolveIface(t, "gtn-w0"), resolveIface(t, "gtn-w1")
+}
+
+// requireIPv6 skips when the kernel has no usable IPv6 stack: built without
+// it, booted with ipv6.disable=1 (no /proc/net/if_inet6), or with IPv6 off for
+// new interfaces (net.ipv6.conf.default.disable_ipv6=1), as in many
+// containers. Either way the veth cannot take an IPv6 address. It reads the
+// kernel's state rather than reacting to the address error, so a host that has
+// IPv6 and still fails to address the veth fails the test.
+func requireIPv6(t *testing.T) {
+	t.Helper()
+	if _, err := os.Stat("/proc/net/if_inet6"); err != nil {
+		t.Skipf("the kernel has no IPv6 stack: %v", err)
+	}
+	off, err := os.ReadFile("/proc/sys/net/ipv6/conf/default/disable_ipv6")
+	if err == nil && strings.TrimSpace(string(off)) == "1" {
+		t.Skip("IPv6 is disabled for new interfaces (net.ipv6.conf.default.disable_ipv6=1)")
+	}
 }
 
 func resolveIface(t *testing.T, name string) *net.Interface {
@@ -218,13 +237,14 @@ func udpFrame6(to, from *net.Interface, src net.IP, port int, payload string) []
 type wireFamily struct {
 	name                     string
 	network                  string // for net.ListenUDP
+	cidr                     string // the receiving end's address
 	local, shunned, sentinel net.IP
 	frame                    func(to, from *net.Interface, src net.IP, port int, payload string) []byte
 }
 
 var wireFamilies = []wireFamily{
-	{"IPv4", "udp4", wireLocal, wireShunned, wireSentinel, udpFrame},
-	{"IPv6", "udp6", wireLocal6, wireShunned6, wireSentinel6, udpFrame6},
+	{"IPv4", "udp4", "198.18.0.2/24", wireLocal, wireShunned, wireSentinel, udpFrame},
+	{"IPv6", "udp6", "2001:db8:18::2/64", wireLocal6, wireShunned6, wireSentinel6, udpFrame6},
 }
 
 // readUntil returns every payload the socket delivers up to and including
@@ -278,7 +298,7 @@ func TestWireShunDropsRealPacketsOnEachHook(t *testing.T) {
 	for _, hook := range hooks {
 		for _, fam := range wireFamilies {
 			t.Run(hook.name+"/"+fam.name, func(t *testing.T) {
-				sender, receiver := newWirePair(t)
+				sender, receiver := newWirePair(t, fam)
 				cfg := proto.Clone(hook.cfg).(*gateonv1.EbpfConfig)
 				cfg.Interface = receiver.Name
 				m := startOn(t, cfg, hook.modes)
