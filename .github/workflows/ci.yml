@@ -178,20 +178,29 @@ jobs:
       # proxy's health-check transport and the backend transports it is cloned
       # for (a shared tls.Config that net/http edits in place) sat in pkg/proxy
       # until a local race run found it.
-      - name: Test
+      #
+      # The coverage ratchet is the same run, not a second one. A ratchet on
+      # the tested surface, not a coverage target: every serious defect found
+      # in this codebase in 2026 came out of a package with no tests, so the
+      # gate refuses to let that surface shrink -- a package may not lose its
+      # tests, and may not fall more than a point below its recorded figure.
+      # Baseline in scripts/checkcoverage/baseline.txt. This job used to run
+      # the whole suite twice, raced and then covered, and the Postgres
+      # shun-ageing flake fixed in PR #42 surfaced only in the covered pass,
+      # the one without the race detector. One pass under both is slower than
+      # either alone, which is what shakes timing bugs out, and cheaper than
+      # the two together. pipefail keeps what the old Test step had: go test's
+      # own exit status fails the job, rather than resting on the ratchet
+      # recognising every shape of FAIL line in its input.
+      - name: Test (race, shuffled) and coverage ratchet
         env:
           GATEON_TEST_POSTGRES_DSN: postgres://gateon:gateon@localhost:5432/gateon_test?sslmode=disable
-        run: go test -race -shuffle=on ./...
+        run: make check-coverage SHELL=/bin/bash .SHELLFLAGS='-o pipefail -c'
 
-      # A ratchet on the tested surface, not a coverage target. Every serious
-      # defect found in this codebase in 2026 came out of a package with no
-      # tests, so the gate refuses to let that surface shrink: a package may not
-      # lose its tests, and may not fall more than a point below its recorded
-      # figure. Baseline in scripts/checkcoverage/baseline.txt.
-      - name: Coverage ratchet
-        env:
-          GATEON_TEST_POSTGRES_DSN: postgres://gateon:gateon@localhost:5432/gateon_test?sslmode=disable
-        run: make check-coverage
+      # check-coverage leaves cmd/gateon out (see the Makefile for the
+      # toolchain reason), so it still needs its own race run.
+      - name: Test cmd/gateon (race, shuffled)
+        run: go test -race -shuffle=on ./cmd/gateon
 
       - name: eBPF tests (need root)
         run: |
