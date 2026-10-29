@@ -6,7 +6,6 @@ package telemetry
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -26,7 +25,7 @@ import (
 // to their User-Agent. SQLite stores anything and never showed it.
 func TestThreatCarryingBytesPostgresRefusesIsStillRecorded(t *testing.T) {
 	t.Run("sqlite", func(t *testing.T) {
-		assertThreatWithHostileBytesRecorded(t, "sqlite://"+filepath.Join(t.TempDir(), "bytes.db"))
+		assertThreatWithHostileBytesRecorded(t, "sqlite://"+migratedSQLite(t, "bytes.db"))
 	})
 	t.Run("postgres", func(t *testing.T) {
 		assertThreatWithHostileBytesRecorded(t, testutil.PostgresDSN(t, "skipping the Postgres run"))

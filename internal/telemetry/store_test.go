@@ -6,7 +6,6 @@ package telemetry
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -17,7 +16,7 @@ import (
 )
 
 func TestTraceDuplicateInsertion(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "test_traces.db")
+	dbPath := migratedSQLite(t, "test_traces.db")
 
 	// Initialize store with SQLite
 	err := InitPathStatsStore("sqlite://"+dbPath, 1)
@@ -60,7 +59,7 @@ func TestTraceDuplicateInsertion(t *testing.T) {
 
 func TestSecurityTelemetryUpdates(t *testing.T) {
 	// Initialize store with a file for stability in tests
-	dbPath := filepath.Join(t.TempDir(), "gateon_telemetry_test.db")
+	dbPath := migratedSQLite(t, "gateon_telemetry_test.db")
 
 	_ = InitPathStatsStore(dbPath, 1)
 	defer func() {
@@ -141,7 +140,7 @@ func TestPruneRemovesExpiredStatsAndReclaimsDisk(t *testing.T) {
 	// Start from a clean singleton so this test owns the store.
 	_ = ClosePathStatsStore(context.Background())
 
-	dbPath := filepath.Join(t.TempDir(), "prune.db")
+	dbPath := migratedSQLite(t, "prune.db")
 	if err := InitPathStatsStore("sqlite://"+dbPath, 7); err != nil {
 		t.Fatalf("init store: %v", err)
 	}
@@ -190,7 +189,7 @@ func TestRestoreWAFBlockCounter(t *testing.T) {
 	// Own the singleton so persisted state is isolated to this test.
 	_ = ClosePathStatsStore(context.Background())
 
-	dbPath := filepath.Join(t.TempDir(), "waf_restore.db")
+	dbPath := migratedSQLite(t, "waf_restore.db")
 	if err := InitPathStatsStore("sqlite://"+dbPath, 7); err != nil {
 		t.Fatalf("init store: %v", err)
 	}
@@ -264,7 +263,7 @@ func TestGetMitigatedRolling24h(t *testing.T) {
 	// Own the singleton so the daily counters are isolated to this test.
 	_ = ClosePathStatsStore(ctx)
 
-	dbPath := filepath.Join(t.TempDir(), "mitigated_rolling.db")
+	dbPath := migratedSQLite(t, "mitigated_rolling.db")
 	if err := InitPathStatsStore("sqlite://"+dbPath, 7); err != nil {
 		t.Fatalf("init store: %v", err)
 	}
@@ -305,7 +304,7 @@ func TestGetTopThreatSources(t *testing.T) {
 	// Start fresh
 	_ = ClosePathStatsStore(context.Background())
 
-	dbPath := filepath.Join(t.TempDir(), "top_threats.db")
+	dbPath := migratedSQLite(t, "top_threats.db")
 	if err := InitPathStatsStore("sqlite://"+dbPath, 7); err != nil {
 		t.Fatalf("init store: %v", err)
 	}
@@ -380,7 +379,7 @@ func flushUntilTraceVisible(t *testing.T, id string) *TraceRecord {
 // intermediary it is addressed to.
 func TestRecordedTraceRedactsCredentialHeaders(t *testing.T) {
 	_ = ClosePathStatsStore(context.Background())
-	dbPath := filepath.Join(t.TempDir(), "redact.db")
+	dbPath := migratedSQLite(t, "redact.db")
 	if err := InitPathStatsStore("sqlite://"+dbPath, 1); err != nil {
 		t.Fatalf("init store: %v", err)
 	}
@@ -432,7 +431,7 @@ func TestRecordedTraceRedactsCredentialHeaders(t *testing.T) {
 // migration suite does.
 func TestManualUnmitigationIsVisible(t *testing.T) {
 	t.Run("sqlite", func(t *testing.T) {
-		assertManualUnmitigationVisible(t, "sqlite://"+filepath.Join(t.TempDir(), "unmitigate.db"))
+		assertManualUnmitigationVisible(t, "sqlite://"+migratedSQLite(t, "unmitigate.db"))
 	})
 	t.Run("postgres", func(t *testing.T) {
 		assertManualUnmitigationVisible(t, testutil.PostgresDSN(t, "skipping the Postgres run"))

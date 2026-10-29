@@ -5,7 +5,6 @@ package telemetry
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -18,7 +17,7 @@ import (
 // in-force filter, the prune) are written once for both.
 func onEachEngine(t *testing.T, test func(t *testing.T)) {
 	t.Run("sqlite", func(t *testing.T) {
-		openScopeStore(t, "sqlite://"+filepath.Join(t.TempDir(), "scope.db"))
+		openScopeStore(t, "sqlite://"+migratedSQLite(t, "scope.db"))
 		test(t)
 	})
 	t.Run("postgres", func(t *testing.T) {

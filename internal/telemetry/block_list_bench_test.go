@@ -5,7 +5,6 @@ package telemetry
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
 )
 
@@ -14,7 +13,7 @@ import (
 // 0058 an IPv6 client is keyed by its /64, which the cache key costs a parse.
 func BenchmarkIsIPMitigatedByFamily(b *testing.B) {
 	ClosePathStatsStore(context.Background())
-	if err := InitPathStatsStore(filepath.Join(b.TempDir(), "bench.db"), 1); err != nil {
+	if err := InitPathStatsStore(migratedSQLite(b, "bench.db"), 1); err != nil {
 		b.Fatal(err)
 	}
 	b.Cleanup(func() { ClosePathStatsStore(context.Background()) })

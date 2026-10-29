@@ -5,7 +5,6 @@ package telemetry
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
 	"time"
 )
@@ -18,7 +17,7 @@ import (
 // owns every audit delete; the telemetry prune must leave the table alone.
 func TestPruneLeavesAuditLogsToTheAuditManager(t *testing.T) {
 	_ = ClosePathStatsStore(context.Background())
-	dbPath := filepath.Join(t.TempDir(), "audit_handoff.db")
+	dbPath := migratedSQLite(t, "audit_handoff.db")
 	if err := InitPathStatsStore("sqlite://"+dbPath, 7); err != nil {
 		t.Fatalf("init store: %v", err)
 	}

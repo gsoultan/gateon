@@ -5,7 +5,6 @@ package telemetry
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
 )
 
@@ -13,7 +12,7 @@ import (
 // nearly every request gets: an address with no shun, answered from the cache.
 func BenchmarkIsIPMitigatedNotShunned(b *testing.B) {
 	ClosePathStatsStore(context.Background())
-	if err := InitPathStatsStore(filepath.Join(b.TempDir(), "bench.db"), 1); err != nil {
+	if err := InitPathStatsStore(migratedSQLite(b, "bench.db"), 1); err != nil {
 		b.Fatal(err)
 	}
 	b.Cleanup(func() { ClosePathStatsStore(context.Background()) })

@@ -6,7 +6,6 @@ package telemetry
 import (
 	"context"
 	"net/http"
-	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -23,7 +22,7 @@ import (
 // test inherits another's store or leaves one behind.
 func withStore(t *testing.T) {
 	t.Helper()
-	dbPath := filepath.Join(t.TempDir(), "getters.db")
+	dbPath := migratedSQLite(t, "getters.db")
 	if err := InitPathStatsStore("sqlite://"+dbPath, 7); err != nil {
 		t.Fatalf("InitPathStatsStore: %v", err)
 	}
