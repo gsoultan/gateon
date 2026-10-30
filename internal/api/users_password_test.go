@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/gsoultan/gateon/internal/auth"
+	"github.com/gsoultan/gateon/internal/db/dbtest"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
@@ -21,7 +22,7 @@ import (
 // hands ApiService.ChangePassword, which has no REST handler in front of it.
 func ownAccount(t *testing.T) (*ApiService, context.Context, string) {
 	t.Helper()
-	m, err := auth.NewManager(filepath.Join(t.TempDir(), "auth.db"), "0123456789abcdef0123456789abcdef", logger.Default())
+	m, err := auth.NewManager(dbtest.SQLite(t, filepath.Join(t.TempDir(), "auth.db")), "0123456789abcdef0123456789abcdef", logger.Default())
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}

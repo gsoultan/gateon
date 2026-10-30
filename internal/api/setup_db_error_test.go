@@ -13,6 +13,7 @@ import (
 
 	"github.com/gsoultan/gateon/internal/auth"
 	"github.com/gsoultan/gateon/internal/config"
+	"github.com/gsoultan/gateon/internal/db/dbtest"
 	"github.com/gsoultan/gateon/internal/logger"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
@@ -59,7 +60,7 @@ func (s lockedAtSetupCheck) IsSetupDone() bool {
 // caller's PASETO secret.
 func TestSetupStaysClosedWhenTheUserTableCannotBeRead(t *testing.T) {
 	tmp := t.TempDir()
-	dbPath := filepath.Join(tmp, "auth.db")
+	dbPath := dbtest.SQLite(t, filepath.Join(tmp, "auth.db"))
 	// busy_timeout(0) so a locked read fails now rather than after the
 	// production default of five seconds; the failure is the same one.
 	mgr, err := auth.NewManager("sqlite:"+dbPath+"?_pragma=busy_timeout(0)", strings.Repeat("k", 32), logger.Default())

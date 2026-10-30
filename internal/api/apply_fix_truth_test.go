@@ -31,7 +31,7 @@ func applyFixService(t *testing.T) (*ApiService, *config.RouteRegistry, *config.
 			t.Fatalf("seed route: %v", err)
 		}
 	}
-	if err := telemetry.InitPathStatsStore(filepath.Join(dir, "fix.db"), 1); err != nil {
+	if err := telemetry.InitPathStatsStore(telemetryDB(t, filepath.Join(dir, "fix.db")), 1); err != nil {
 		t.Fatalf("init telemetry store: %v", err)
 	}
 	t.Cleanup(func() { telemetry.ClosePathStatsStore(context.Background()) })

@@ -5,7 +5,6 @@ package api
 
 import (
 	"context"
-	"database/sql"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -13,6 +12,7 @@ import (
 	"github.com/gsoultan/gateon/internal/auth"
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/db"
+	"github.com/gsoultan/gateon/internal/db/dbtest"
 	"github.com/gsoultan/gateon/internal/middleware"
 	"github.com/gsoultan/gateon/internal/security/waf"
 	"github.com/gsoultan/gateon/internal/telemetry"
@@ -52,11 +52,9 @@ func newPermissionFixture(t *testing.T, corsOrigin string) permissionFixture {
 		RequestURI: "/search?q=x", TriggeredRules: "[942100]"})
 	telemetry.FlushThreats()
 
-	sqlDB, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "waf.db"))
+	sqlDB, dialect, err := db.Open("sqlite://" + dbtest.SQLite(t, filepath.Join(t.TempDir(), "waf.db")))
 	mustSeed(err)
 	t.Cleanup(func() { _ = sqlDB.Close() })
-	dialect := db.Dialect{Driver: db.DriverSQLite}
-	mustSeed(db.Migrate(sqlDB, dialect))
 	svc.WafExceptions = waf.NewExceptionStore(sqlDB, dialect)
 	return permissionFixture{svc: svc, routes: routes, mws: mws, globals: globals}
 }

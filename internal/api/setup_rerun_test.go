@@ -12,6 +12,7 @@ import (
 
 	"github.com/gsoultan/gateon/internal/auth"
 	"github.com/gsoultan/gateon/internal/config"
+	"github.com/gsoultan/gateon/internal/db/dbtest"
 	"github.com/gsoultan/gateon/internal/logger"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
@@ -29,7 +30,7 @@ import (
 // has saved settings with the field blank.
 func TestSetupRefusesToRunAgainOnceAnAdministratorExists(t *testing.T) {
 	tmp := t.TempDir()
-	mgr, err := auth.NewManager(filepath.Join(tmp, "auth.db"), strings.Repeat("k", 32), logger.Default())
+	mgr, err := auth.NewManager(dbtest.SQLite(t, filepath.Join(tmp, "auth.db")), strings.Repeat("k", 32), logger.Default())
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}

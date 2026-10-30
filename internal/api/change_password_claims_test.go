@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/gsoultan/gateon/internal/auth"
+	"github.com/gsoultan/gateon/internal/db/dbtest"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware"
 	mwauth "github.com/gsoultan/gateon/internal/middleware/auth"
@@ -85,7 +86,7 @@ func TestChangePasswordStillAllowsSelfAndAdmin(t *testing.T) {
 func newUsersTestService(t *testing.T) (*ApiService, string) {
 	t.Helper()
 	tmp := t.TempDir()
-	mgr, err := auth.NewManager(filepath.Join(tmp, "auth.db"), strings.Repeat("k", 32), logger.Default())
+	mgr, err := auth.NewManager(dbtest.SQLite(t, filepath.Join(tmp, "auth.db")), strings.Repeat("k", 32), logger.Default())
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
