@@ -32,10 +32,43 @@ const (
 	QueryPrunePathStats = "DELETE FROM path_stats WHERE day < ?"
 
 	// SQLitePragmas enables WAL mode and NORMAL synchronous for SQLite (no-op for other drivers).
-	// auto_vacuum=INCREMENTAL lets prune() reclaim freed pages via PRAGMA
-	// incremental_vacuum instead of growing the DB file unbounded.
-	SQLitePragmas        = "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA auto_vacuum=INCREMENTAL;"
-	QueryGetPathStatsWin = `SELECT host, path, SUM(req_count) AS rc, SUM(latency_sum_s) AS lsum, SUM(bytes_total) AS bsum
+	//
+	// auto_vacuum is deliberately NOT set here. SQLite fixes auto_vacuum in the
+	// database header the moment the file is created, and db.Open already bakes
+	// journal_mode(WAL) into the connection DSN, so by the time this statement
+	// runs the file exists with the default auto_vacuum=NONE and a plain
+	// `PRAGMA auto_vacuum=INCREMENTAL` here is silently a no-op -- which left
+	// PRAGMA incremental_vacuum (reclaimSQLDisk) reclaiming nothing and the DB
+	// growing unbounded on the request path. ensureIncrementalAutoVacuum sets it
+	// and, because the file already exists, runs the one VACUUM that actually
+	// rewrites the header. See TestAutoVacuumIsIncremental.
+	SQLitePragmas = "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;"
+
+	// QueryAutoVacuum reads the database's auto_vacuum mode (0=NONE, 1=FULL,
+	// 2=INCREMENTAL). The value lives in the file header, so it is the same on
+	// every connection in the pool once set.
+	QueryAutoVacuum = "PRAGMA auto_vacuum;"
+
+	// QuerySetIncrementalAutoVacuum requests INCREMENTAL auto_vacuum. On a
+	// database that already has pages it does not take effect until a VACUUM
+	// rewrites the file, which QueryVacuum does.
+	QuerySetIncrementalAutoVacuum = "PRAGMA auto_vacuum=INCREMENTAL;"
+
+	// QueryVacuum rewrites the whole database, which is what makes a changed
+	// auto_vacuum mode take effect on a non-empty file.
+	QueryVacuum = "VACUUM;"
+
+	// QueryIncrementalVacuum returns freed pages to the OS one result row per
+	// page; it must be driven through a drained Query, not Exec (see
+	// reclaimSQLDisk). It needs auto_vacuum=INCREMENTAL to do anything.
+	QueryIncrementalVacuum = "PRAGMA incremental_vacuum;"
+
+	// QueryWALCheckpointTruncate checkpoints the WAL and truncates it to zero.
+	QueryWALCheckpointTruncate = "PRAGMA wal_checkpoint(TRUNCATE);"
+
+	// autoVacuumIncremental is the PRAGMA auto_vacuum value for INCREMENTAL.
+	autoVacuumIncremental = 2
+	QueryGetPathStatsWin  = `SELECT host, path, SUM(req_count) AS rc, SUM(latency_sum_s) AS lsum, SUM(bytes_total) AS bsum
 		FROM path_stats
 		WHERE day >= ?
 		GROUP BY host, path`
