@@ -22,7 +22,7 @@ import (
 // duration_seconds blocks the address and records the expiry the request asked
 // for; the mitigation list reports it.
 func TestMitigateThreatRoundTripsAManualDuration(t *testing.T) {
-	if err := telemetry.InitPathStatsStore(filepath.Join(t.TempDir(), "mitigate.db"), 1); err != nil {
+	if err := telemetry.InitPathStatsStore(telemetryDB(t, filepath.Join(t.TempDir(), "mitigate.db")), 1); err != nil {
 		t.Fatalf("init telemetry store: %v", err)
 	}
 	t.Cleanup(func() { _ = telemetry.ClosePathStatsStore(context.Background()) })
@@ -60,7 +60,7 @@ func TestMitigateThreatRoundTripsAManualDuration(t *testing.T) {
 // TestMitigateThreatWithoutADurationIsOpenEnded: the default is unchanged -- a
 // manual block with no duration keeps no expiry and holds until released.
 func TestMitigateThreatWithoutADurationIsOpenEnded(t *testing.T) {
-	if err := telemetry.InitPathStatsStore(filepath.Join(t.TempDir(), "mitigate.db"), 1); err != nil {
+	if err := telemetry.InitPathStatsStore(telemetryDB(t, filepath.Join(t.TempDir(), "mitigate.db")), 1); err != nil {
 		t.Fatalf("init telemetry store: %v", err)
 	}
 	t.Cleanup(func() { _ = telemetry.ClosePathStatsStore(context.Background()) })

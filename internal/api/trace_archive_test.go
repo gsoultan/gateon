@@ -31,7 +31,7 @@ func openTraceStore(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("GATEON_TRACE_DIR", filepath.Join(dir, "pebble"))
 	_ = telemetry.ClosePathStatsStore(context.Background())
-	if err := telemetry.InitPathStatsStore(filepath.Join(dir, "telemetry.db"), 7); err != nil {
+	if err := telemetry.InitPathStatsStore(telemetryDB(t, filepath.Join(dir, "telemetry.db")), 7); err != nil {
 		t.Fatalf("InitPathStatsStore: %v", err)
 	}
 	t.Cleanup(func() { _ = telemetry.ClosePathStatsStore(context.Background()) })

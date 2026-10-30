@@ -46,7 +46,7 @@ func TestColdCacheDiagnosticsRunOnePass(t *testing.T) {
 	})
 
 	_ = telemetry.ClosePathStatsStore(ctx)
-	if err := telemetry.InitPathStatsStore(filepath.Join(dir, "traces.db"), 1); err != nil {
+	if err := telemetry.InitPathStatsStore(telemetryDB(t, filepath.Join(dir, "traces.db")), 1); err != nil {
 		t.Fatalf("init telemetry store: %v", err)
 	}
 	t.Cleanup(func() { _ = telemetry.ClosePathStatsStore(context.Background()) })

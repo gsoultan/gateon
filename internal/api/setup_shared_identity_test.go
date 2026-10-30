@@ -5,11 +5,8 @@ package api
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"fmt"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -20,7 +17,7 @@ import (
 
 	"github.com/gsoultan/gateon/internal/auth"
 	"github.com/gsoultan/gateon/internal/config"
-	"github.com/gsoultan/gateon/internal/db"
+	"github.com/gsoultan/gateon/internal/db/dbtest"
 	"github.com/gsoultan/gateon/internal/inits"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
@@ -118,10 +115,10 @@ func (p *pod) enrolSecondFactor(t *testing.T, id string) string {
 // factors.
 func TestPodsWithTheChartsIdentityAreOneGateway(t *testing.T) {
 	t.Run("sqlite", func(t *testing.T) {
-		checkPodsShareTheIdentity(t, filepath.Join(t.TempDir(), "shared.db"))
+		checkPodsShareTheIdentity(t, dbtest.SQLite(t, filepath.Join(t.TempDir(), "shared.db")))
 	})
 	t.Run("postgres", func(t *testing.T) {
-		checkPodsShareTheIdentity(t, scratchPostgres(t))
+		checkPodsShareTheIdentity(t, dbtest.Postgres(t))
 	})
 }
 
@@ -183,37 +180,4 @@ func assertStoredAsReferences(t *testing.T, path string) {
 			t.Errorf("global.json holds %q:\n%s", leaked, stored)
 		}
 	}
-}
-
-// scratchPostgres creates a database of this test's own on the server
-// GATEON_TEST_POSTGRES_DSN names, and drops it afterwards. Setup needs a
-// database with no administrator, which the module's shared one is not.
-func scratchPostgres(t *testing.T) string {
-	t.Helper()
-	dsn := os.Getenv("GATEON_TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("GATEON_TEST_POSTGRES_DSN not set")
-	}
-	u, err := url.Parse(dsn)
-	if err != nil || u.Scheme == "" {
-		t.Skipf("GATEON_TEST_POSTGRES_DSN is not a URL this test can derive a database from: %v", err)
-	}
-	admin, _, err := db.Open(dsn)
-	if err != nil {
-		t.Fatalf("open %s: %v", u.Redacted(), err)
-	}
-	t.Cleanup(func() { _ = admin.Close() })
-	suffix := make([]byte, 6)
-	_, _ = rand.Read(suffix)
-	name := "gateon_ops_n1_" + hex.EncodeToString(suffix)
-	if _, err := admin.Exec("CREATE DATABASE " + name); err != nil {
-		t.Skipf("cannot create a scratch database: %v", err)
-	}
-	t.Cleanup(func() {
-		if _, err := admin.Exec("DROP DATABASE IF EXISTS " + name + " WITH (FORCE)"); err != nil {
-			t.Logf("drop scratch database %s: %v", name, err)
-		}
-	})
-	u.Path = "/" + name
-	return u.String()
 }

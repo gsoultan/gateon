@@ -387,6 +387,7 @@ func TestApplyRecommendation(t *testing.T) {
 		// failure was swallowed, and the handler reported "blocked via
 		// middleware and shunned at XDP level" for an IP it had not recorded
 		// anywhere -- which this assertion accepted.
+		telemetryDB(t, filepath.Join(tmpDir, "block-ip.db"))
 		if err := telemetry.InitPathStatsStore(filepath.Join(tmpDir, "block-ip.db"), 1); err != nil {
 			t.Fatalf("init telemetry store: %v", err)
 		}
@@ -474,7 +475,7 @@ func TestRemoveMitigatedThreat(t *testing.T) {
 	// failure was swallowed, and the handler answered "removed successfully"
 	// for a row that still said mitigated -- which is the outcome
 	// MarkIPUnmitigated's own comment describes.
-	if err := telemetry.InitPathStatsStore(filepath.Join(t.TempDir(), "release.db"), 1); err != nil {
+	if err := telemetry.InitPathStatsStore(telemetryDB(t, filepath.Join(t.TempDir(), "release.db")), 1); err != nil {
 		t.Fatalf("init telemetry store: %v", err)
 	}
 	defer telemetry.ClosePathStatsStore(ctx)

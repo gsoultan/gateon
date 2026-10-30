@@ -185,7 +185,7 @@ func throttleTestService(t *testing.T) (*ApiService, *recordingLimiter) {
 	t.Helper()
 	dir := t.TempDir()
 	_ = telemetry.ClosePathStatsStore(context.Background())
-	if err := telemetry.InitPathStatsStore(filepath.Join(dir, "throttle.db"), 1); err != nil {
+	if err := telemetry.InitPathStatsStore(telemetryDB(t, filepath.Join(dir, "throttle.db")), 1); err != nil {
 		t.Fatalf("init telemetry store: %v", err)
 	}
 	t.Cleanup(func() { _ = telemetry.ClosePathStatsStore(context.Background()) })

@@ -149,7 +149,7 @@ func newMitigationTestService(t *testing.T) *ApiService {
 	t.Helper()
 
 	tmpDir := t.TempDir()
-	if err := telemetry.InitPathStatsStore(filepath.Join(tmpDir, "telemetry.db"), 1); err != nil {
+	if err := telemetry.InitPathStatsStore(telemetryDB(t, filepath.Join(tmpDir, "telemetry.db")), 1); err != nil {
 		t.Fatalf("InitPathStatsStore: %v", err)
 	}
 	t.Cleanup(func() {

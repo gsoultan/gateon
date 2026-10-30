@@ -21,7 +21,7 @@ import (
 // listed and takes effect if the exemption is lifted, but the answer says it is
 // not enforced, and why.
 func TestMitigateTellsTheTruthAboutAnExemptAddress(t *testing.T) {
-	if err := telemetry.InitPathStatsStore(filepath.Join(t.TempDir(), "mitigate.db"), 1); err != nil {
+	if err := telemetry.InitPathStatsStore(telemetryDB(t, filepath.Join(t.TempDir(), "mitigate.db")), 1); err != nil {
 		t.Fatalf("init telemetry store: %v", err)
 	}
 	// t.Context() is already cancelled when Cleanup runs, so closing with it

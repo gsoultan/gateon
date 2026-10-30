@@ -14,6 +14,7 @@ import (
 	"github.com/gsoultan/gateon/internal/auth"
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/db"
+	"github.com/gsoultan/gateon/internal/db/dbtest"
 	"github.com/gsoultan/gateon/internal/logger"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
@@ -36,8 +37,13 @@ func configuredGateway(t *testing.T, global string) (*ApiService, string) {
 		t.Fatal(err)
 	}
 	globals := config.NewGlobalRegistry(path)
-	mgr, err := auth.NewManager(db.AuthDatabaseURL(globals.Get(context.Background()).GetAuth()),
-		strings.Repeat("k", 32), logger.Default())
+	databaseURL := db.AuthDatabaseURL(globals.Get(context.Background()).GetAuth())
+	// The configured database is migrated before setup ever runs, so it starts
+	// from the template rather than migrating again here.
+	if file, ok := db.SQLiteFile(databaseURL); ok {
+		dbtest.SQLite(t, file)
+	}
+	mgr, err := auth.NewManager(databaseURL, strings.Repeat("k", 32), logger.Default())
 	if err != nil {
 		t.Fatalf("open the configured database: %v", err)
 	}

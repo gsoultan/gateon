@@ -15,6 +15,7 @@ import (
 
 	"github.com/gsoultan/gateon/internal/auth"
 	"github.com/gsoultan/gateon/internal/config"
+	"github.com/gsoultan/gateon/internal/db/dbtest"
 	"github.com/gsoultan/gateon/internal/logger"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
@@ -29,7 +30,7 @@ const (
 func sessionKeyFixture(t *testing.T) (*ApiService, *auth.Manager, string, string) {
 	t.Helper()
 	dir := t.TempDir()
-	m, err := auth.NewManager(filepath.Join(dir, "auth.db"), sessionKeyInForce, logger.Default())
+	m, err := auth.NewManager(dbtest.SQLite(t, filepath.Join(dir, "auth.db")), sessionKeyInForce, logger.Default())
 	if err != nil {
 		t.Fatal(err)
 	}
