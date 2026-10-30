@@ -179,3 +179,70 @@ jobs:
           GATEON_SOAK_TEST: "1"
           GATEON_SOAK_SECONDS: "45"
         run: go test -run 'TestSoakStability|TestGracefulDrain' -v -timeout 20m ./tests/e2e/
+
+  # The per-PR suite runs every test once under -race -shuffle=on. A timing bug
+  # that fails one run in a hundred gets one chance there, and when it does
+  # fire it lands on whichever PR happened to be running: the Postgres
+  # shun-ageing flake fixed in #42 first showed as a red coverage run on #39,
+  # and the h2c connection-count test failed about once in a hundred raced
+  # runs before #42 fixed it too. Three shuffled, raced passes a night give
+  # such a bug three more chances a day to show itself here, on main, where it
+  # blocks nobody's PR.
+  #
+  # Nightly and on demand only, not on merges: ci already ran the same suite
+  # once on that commit, and this job is roughly three of those.
+  race-repeat:
+    name: race-repeat
+    if: github.event_name != 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: gateon
+          POSTGRES_PASSWORD: gateon
+          POSTGRES_DB: gateon_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          check-latest: true
+
+      - name: Install eBPF build toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang llvm libbpf-dev libelf-dev linux-libc-dev
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Generate all artifacts
+        run: |
+          bun install --frozen-lockfile --cwd ui
+          go install tool
+          PATH=$PATH:$(go env GOPATH)/bin:$(pwd)/ui/node_modules/.bin buf generate
+          go generate ./...
+
+      # -count=3 also defeats the test cache, so a pass here is three real runs.
+      # -timeout is per test binary: three raced passes of internal/telemetry
+      # alone take minutes, and go test's ten-minute default would report a
+      # slow package as a hang. A failure prints the -test.shuffle seed that
+      # produced it; `go test -race -shuffle=<seed> -count=3 ./<pkg>` replays
+      # the same order.
+      - name: Test (race, shuffled, three passes)
+        env:
+          GATEON_TEST_POSTGRES_DSN: postgres://gateon:gateon@localhost:5432/gateon_test?sslmode=disable
+        run: go test -race -shuffle=on -count=3 -timeout 45m ./...

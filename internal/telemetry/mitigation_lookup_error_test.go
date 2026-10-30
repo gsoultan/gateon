@@ -101,8 +101,18 @@ func TestANotShunnedAnswerIsReadAgainOnceItAgesOut(t *testing.T) {
 // ageCachedAnswer rewrites key's cached answer -- "not blocked", or a
 // fingerprint block -- as one read epochs ago, which is what the passage of
 // that many mitigationEpochLength does.
+//
+// It first waits for the lookup that cached the answer to end. The gate
+// closes a lookup's done channel, which is all its caller waits for, before it
+// forgets the lookup, so for a moment after the answer is back the lookup is
+// still listed as in flight; a Refresh in that moment joins it rather than
+// starting one. Ageing the answer then left a stale answer whose refresh never
+// ran, and a race-repeat run on a busy CI runner hit exactly that: "the stale
+// answer was never read again". Real ageing takes a minute an epoch, which no
+// lookup outlives; this makes the rewrite honour the same order.
 func ageCachedAnswer(t *testing.T, key string, epochs int64) {
 	t.Helper()
+	WaitBlockLookupsForTest()
 	s := getStore()
 	then := mitigationEpoch.Load() - epochs
 	if v, ok := s.unmitigatedCache.Peek(addressCacheKey(key)); ok {

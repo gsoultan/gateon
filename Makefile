@@ -315,8 +315,15 @@ check-auth-nil:
 ##                 and so the most likely to expose them, and it costs one pass
 ##                 instead of two. With -race, -cover counts in atomic mode;
 ##                 the statement percentages are the same as in set mode.
+##
+##                 -timeout 20m because go test's default of ten minutes per
+##                 test binary is a limit nobody chose, and internal/api met it:
+##                 under -race and -cover on a CI runner it took 602 s and was
+##                 killed by the timeout inside a test that was still migrating
+##                 (366 s on a 4-core workstation). The suite under the slowest
+##                 instrumentation needs a ceiling set for it, not inherited.
 check-coverage:
-	@go test -race -shuffle=on -cover $$(go list ./... | grep -v 'cmd/gateon') | tee /dev/stderr | go run ./scripts/checkcoverage
+	@go test -race -shuffle=on -cover -timeout 20m $$(go list ./... | grep -v 'cmd/gateon') | tee /dev/stderr | go run ./scripts/checkcoverage
 
 ## sec: run the full local security gate (vet + vuln + staticcheck + gosec + invariants)
 sec: vuln staticcheck gosec check-invariants check-config check-auth-nil check-folders
