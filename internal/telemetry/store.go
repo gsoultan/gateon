@@ -1025,6 +1025,55 @@ func resolveTraceDir(databaseURL string, isSQLite bool) string {
 	return filepath.Join(filepath.Dir(dsn), "telemetry_pebble")
 }
 
+// ensureIncrementalAutoVacuum makes PRAGMA incremental_vacuum (reclaimSQLDisk)
+// able to return freed pages to the OS, by guaranteeing the database is in
+// auto_vacuum=INCREMENTAL mode.
+//
+// The subtlety this exists for: SQLite records auto_vacuum in the file header
+// at creation and will not change it on a database that already has pages
+// unless a VACUUM rewrites the file. db.Open opens the connection with
+// journal_mode(WAL) in the DSN, which materialises the file before any pragma
+// here runs, so a bare `PRAGMA auto_vacuum=INCREMENTAL` is accepted and ignored
+// -- leaving the store at the default NONE, where prune() deletes rows but the
+// file never shrinks. Over the retention window on a small host that is an
+// unbounded disk leak.
+//
+// So: request INCREMENTAL, then read it back. If it did not take -- which is
+// every existing database, and a freshly created one too because WAL ran first
+// -- run the one VACUUM that rewrites the header. On a fresh or small database
+// that VACUUM is cheap; on a large one it is a single startup cost paid once,
+// because the mode then persists. All statements run on one pooled connection
+// so the read-back reflects the write, and VACUUM (which cannot run inside a
+// transaction) is issued on its own.
+func ensureIncrementalAutoVacuum(ctx context.Context, database *sql.DB) error {
+	conn, err := database.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = conn.Close() }()
+
+	if _, err := conn.ExecContext(ctx, QuerySetIncrementalAutoVacuum); err != nil {
+		return err
+	}
+	var mode int
+	if err := conn.QueryRowContext(ctx, QueryAutoVacuum).Scan(&mode); err != nil {
+		return err
+	}
+	if mode == autoVacuumIncremental {
+		return nil
+	}
+	if _, err := conn.ExecContext(ctx, QueryVacuum); err != nil {
+		return err
+	}
+	if err := conn.QueryRowContext(ctx, QueryAutoVacuum).Scan(&mode); err != nil {
+		return err
+	}
+	if mode != autoVacuumIncremental {
+		return fmt.Errorf("auto_vacuum is %d after VACUUM, want %d (INCREMENTAL)", mode, autoVacuumIncremental)
+	}
+	return nil
+}
+
 func initStore(databaseURL string, retentionDays int) error {
 	database, dialect, err := db.Open(databaseURL)
 	if err != nil {
@@ -1035,6 +1084,10 @@ func initStore(databaseURL string, retentionDays int) error {
 		if _, err := database.Exec(SQLitePragmas); err != nil {
 			_ = database.Close()
 			return fmt.Errorf("sqlite pragmas: %w", err)
+		}
+		if err := ensureIncrementalAutoVacuum(context.Background(), database); err != nil {
+			_ = database.Close()
+			return fmt.Errorf("sqlite auto_vacuum: %w", err)
 		}
 	}
 
@@ -2188,18 +2241,41 @@ func (s *pathStatsStore) readExpiredThreats(ctx context.Context, cutoff time.Tim
 
 // reclaimSQLDisk returns the space freed by the SQLite deletes back to the OS.
 // It is a no-op for server databases (Postgres) which manage their own
-// vacuuming. incremental_vacuum needs auto_vacuum=INCREMENTAL (set in
-// SQLitePragmas); the WAL checkpoint truncates the write-ahead log file.
+// vacuuming. incremental_vacuum needs auto_vacuum=INCREMENTAL (ensured at init
+// by ensureIncrementalAutoVacuum); the WAL checkpoint truncates the
+// write-ahead log file.
+//
+// Both pragmas are driven through QueryContext with the rows drained, not
+// ExecContext. `PRAGMA incremental_vacuum` does its work one freed page per
+// result row, and modernc.org/sqlite only steps a row-returning statement as
+// its rows are read -- so ExecContext ran the statement without iterating and
+// reclaimed nothing, which is how prune() kept deleting rows while the file
+// never shrank. Draining the rows is what performs the reclaim. See
+// TestReclaimSQLDiskReturnsPagesToOS.
 func (s *pathStatsStore) reclaimSQLDisk(ctx context.Context) {
 	if s.dialect.Driver != db.DriverSQLite {
 		return
 	}
-	if _, err := s.db.ExecContext(ctx, "PRAGMA incremental_vacuum;"); err != nil {
+	if err := drainPragma(ctx, s.db, QueryIncrementalVacuum); err != nil {
 		logger.Default().LogError("sqlite: incremental_vacuum failed", "error", err)
 	}
-	if _, err := s.db.ExecContext(ctx, "PRAGMA wal_checkpoint(TRUNCATE);"); err != nil {
+	if err := drainPragma(ctx, s.db, QueryWALCheckpointTruncate); err != nil {
 		logger.Default().LogError("sqlite: wal_checkpoint failed", "error", err)
 	}
+}
+
+// drainPragma runs a row-returning PRAGMA and reads every row, which is what
+// makes modernc.org/sqlite actually execute it (see reclaimSQLDisk). The rows
+// themselves are a status summary the store does not need.
+func drainPragma(ctx context.Context, database *sql.DB, stmt string) error {
+	rows, err := database.QueryContext(ctx, stmt)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() { //nolint:revive // stepping the rows is the point; the values are a status summary
+	}
+	return rows.Err()
 }
 
 // ClosePathStatsStore stops background processing and closes the database.
