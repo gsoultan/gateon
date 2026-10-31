@@ -187,7 +187,12 @@ the longest test history:
    Routes that validate JSON bodies over 1 MiB need `max_body_bytes` on their
    `schema_validation` middleware, and sites with many concurrent large
    validated bodies may need `GATEON_SCHEMA_VALIDATION_MAX_LARGE_BODIES`
-   raised (ADR 0074).
+   raised (ADR 0074). Upload scanning (`file_security`) is sized by the
+   profile -- 2 scans of 16 MiB on `minimal`, 4 of 64 MiB on `standard` --
+   and a route taking larger or more concurrent uploads sets
+   `max_scan_bytes` / `max_concurrent_scans` on its own middleware, or
+   raises `GATEON_FILE_SCAN_MAX_MB` / `GATEON_FILE_SCAN_MAX_CONCURRENT`
+   for every route that sets none.
 2. **Health checks** with an explicit path and both a failure and a recovery
    threshold, so one bad probe does not drain a pool.
 3. **Rate limiting** per route, sized from real traffic, not guessed.
