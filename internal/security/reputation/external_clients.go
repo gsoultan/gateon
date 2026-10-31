@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"time"
 
@@ -46,11 +47,27 @@ const (
 	// timeout, so before this a provider that accepted a connection and never
 	// answered held the analyser for as long as the caller's context allowed.
 	externalRequestTimeout = 10 * time.Second
+
+	// externalResponseMaxBytes bounds a provider's response body. The timeout
+	// above bounds how long a provider may take, not how much it may send: a
+	// provider that answered with an endless body was decoded into memory for
+	// the whole of those ten seconds, on every lookup the analyser made. A real
+	// answer from any of the three is well under a kilobyte; 64 KiB is the
+	// same ceiling the OAuth2 introspection path applies to its provider.
+	externalResponseMaxBytes = 64 << 10
 )
 
 // externalHTTPClient is shared by the providers so connections are pooled
 // across lookups, and carries the timeout http.DefaultClient does not.
 var externalHTTPClient = &http.Client{Timeout: externalRequestTimeout}
+
+// decodeProviderResponse decodes a provider's JSON answer, reading at most
+// externalResponseMaxBytes of it. A body cut off at the ceiling fails to
+// decode, which is the right answer: a provider sending more than that is not
+// sending a reputation score, and the lookup errors rather than growing.
+func decodeProviderResponse(body io.Reader, v any) error {
+	return json.NewDecoder(io.LimitReader(body, externalResponseMaxBytes)).Decode(v)
+}
 
 // cachedScore pairs a provider's answer with when it was taken, so a bounded
 // cache cannot also be a permanent one.
@@ -173,7 +190,7 @@ func (c *AbuseIPDBClient) CheckIP(ctx context.Context, ip string) (int, error) {
 	}
 
 	var result AbuseIPDBResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := decodeProviderResponse(resp.Body, &result); err != nil {
 		return 0, err
 	}
 
@@ -236,7 +253,7 @@ func (c *VirusTotalClient) CheckIP(ctx context.Context, ip string) (int, error) 
 		} `json:"data"`
 	}
 
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := decodeProviderResponse(resp.Body, &result); err != nil {
 		return 0, err
 	}
 
@@ -304,7 +321,7 @@ func (c *AlienVaultClient) CheckIP(ctx context.Context, ip string) (int, error) 
 		} `json:"pulse_info"`
 	}
 
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := decodeProviderResponse(resp.Body, &result); err != nil {
 		return 0, err
 	}
 
