@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/dutchcoders/go-clamd"
+	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware/kind"
 	"github.com/gsoultan/gateon/internal/request"
@@ -27,10 +28,17 @@ import (
 )
 
 const (
-	defaultScanTimeout        = 30 * time.Second
-	defaultMaxConcurrentScans = 4
-	defaultMaxScanBytes       = 64 << 20 // 64 MiB
-	fileTypeHeaderSize        = 261      // bytes required by github.com/h2non/filetype
+	defaultScanTimeout = 30 * time.Second
+	fileTypeHeaderSize = 261 // bytes required by github.com/h2non/filetype
+
+	// The scanner's two memory bounds come from the resource profile when a
+	// route does not set them (TierDefaults.FileScanMaxConcurrent and
+	// FileScanMaxBytes); these override the profile's values. They used to be
+	// fixed at 4 scans of 64 MiB on every tier, which with the body and the
+	// part each buffered is about 512 MiB resident at the worst case -- a
+	// quarter of the 2 GB minimal target, for one middleware.
+	fileScanMaxConcurrentEnv = "GATEON_FILE_SCAN_MAX_CONCURRENT"
+	fileScanMaxMBEnv         = "GATEON_FILE_SCAN_MAX_MB"
 )
 
 var (
@@ -104,11 +112,14 @@ func (c FileSecurityConfig) withDefaults() FileSecurityConfig {
 	if c.ScanTimeout <= 0 {
 		c.ScanTimeout = defaultScanTimeout
 	}
-	if c.MaxConcurrentScans <= 0 {
-		c.MaxConcurrentScans = defaultMaxConcurrentScans
-	}
-	if c.MaxScanBytes <= 0 {
-		c.MaxScanBytes = defaultMaxScanBytes
+	if c.MaxConcurrentScans <= 0 || c.MaxScanBytes <= 0 {
+		tier := config.CurrentTierDefaults()
+		if c.MaxConcurrentScans <= 0 {
+			c.MaxConcurrentScans = int(envPositive(fileScanMaxConcurrentEnv, int64(tier.FileScanMaxConcurrent)))
+		}
+		if c.MaxScanBytes <= 0 {
+			c.MaxScanBytes = envPositive(fileScanMaxMBEnv, tier.FileScanMaxBytes>>20) << 20
+		}
 	}
 	return c
 }

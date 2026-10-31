@@ -190,6 +190,19 @@ type TierDefaults struct {
 	// switched off.
 	SchemaMaxLargeBodies int
 
+	// FileScanMaxConcurrent and FileScanMaxBytes size the upload scanner
+	// (file_security) on a route that sets neither max_concurrent_scans nor
+	// max_scan_bytes: how many uploads it buffers and scans at once, and the
+	// largest body it accepts (a larger one is refused with 413). A scan holds
+	// the whole body and then the part it is inspecting, so the worst case is
+	// about 2 x concurrent x bytes resident. These were fixed at 4 x 64 MiB on
+	// every tier -- ~512 MiB, a quarter of the minimal target's 2 GB, for one
+	// middleware -- so minimal is sized down; standard keeps exactly what every
+	// existing install already has. GATEON_FILE_SCAN_MAX_CONCURRENT and
+	// GATEON_FILE_SCAN_MAX_MB override; neither can be switched off.
+	FileScanMaxConcurrent int
+	FileScanMaxBytes      int64
+
 	// MaxHeaderBytes is the most request-header bytes an HTTP listener --
 	// every entrypoint and the management listener, over HTTP/1, HTTP/2 and
 	// HTTP/3 -- buffers for one request; a request past it is refused with 431
@@ -314,6 +327,8 @@ func DefaultsFor(tier Tier) TierDefaults {
 			CompressMaxBrotliEncoders:  8,
 			SchemaMaxBodyBytes:         1 << 20, // 1 MiB
 			SchemaMaxLargeBodies:       2,
+			FileScanMaxConcurrent:      2,
+			FileScanMaxBytes:           16 << 20, // 16 MiB; ~64 MiB resident at worst
 			MaxHeaderBytes:             32 << 10, // 32 KiB
 			StreamIdleTimeout:          2 * time.Minute,
 			StreamMaxLifetime:          time.Hour,
@@ -358,6 +373,8 @@ func DefaultsFor(tier Tier) TierDefaults {
 			CompressMaxBrotliEncoders:  128,
 			SchemaMaxBodyBytes:         4 << 20, // 4 MiB
 			SchemaMaxLargeBodies:       16,
+			FileScanMaxConcurrent:      8,
+			FileScanMaxBytes:           64 << 20, // 64 MiB; ~1 GiB resident at worst
 			MaxHeaderBytes:             64 << 10, // 64 KiB
 			StreamIdleTimeout:          10 * time.Minute,
 			StreamMaxLifetime:          12 * time.Hour,
@@ -402,6 +419,8 @@ func DefaultsFor(tier Tier) TierDefaults {
 			CompressMaxBrotliEncoders:  32,
 			SchemaMaxBodyBytes:         1 << 20, // 1 MiB
 			SchemaMaxLargeBodies:       8,
+			FileScanMaxConcurrent:      4,
+			FileScanMaxBytes:           64 << 20, // 64 MiB; unchanged from the old fixed default
 			MaxHeaderBytes:             32 << 10, // 32 KiB
 			StreamIdleTimeout:          5 * time.Minute,
 			StreamMaxLifetime:          4 * time.Hour,
