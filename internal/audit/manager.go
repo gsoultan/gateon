@@ -11,11 +11,13 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -662,8 +664,45 @@ func GetArchive(filename string) ([]byte, error) {
 	}
 	defer f.Close()
 
-	br := brotli.NewReader(f)
-	return io.ReadAll(br)
+	// Inflate no further than the ceiling. The archive is the gateway's own
+	// output, so this is not an attacker's bomb -- but retention writes one as
+	// large as a day of audit entries and the dashboard asks for it whole, so
+	// an unbounded inflate was a read sized by history rather than by anything
+	// the host budgeted. Past the ceiling the call fails: a prefix presented as
+	// the archive would be an audit record with its end missing.
+	limit := archiveDecodedLimit()
+	data, err := io.ReadAll(io.LimitReader(brotli.NewReader(f), limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > limit {
+		return nil, fmt.Errorf("%w: %s inflates past %d bytes (raise %s)",
+			errArchiveTooLarge, filename, limit, archiveMaxDecodedEnv)
+	}
+	return data, nil
+}
+
+// archiveMaxDecodedEnv overrides, in MiB, how far GetArchive will inflate one
+// archive; see archiveDecodedLimit.
+const archiveMaxDecodedEnv = "GATEON_AUDIT_ARCHIVE_MAX_DECODED_MB"
+
+// defaultArchiveDecodedBytes is the inflated size past which GetArchive
+// refuses. A day of audit entries on a busy install is tens of megabytes
+// inflated; 64 MiB leaves that room while keeping one dashboard request from
+// holding a disproportionate share of a 2 GB host.
+const defaultArchiveDecodedBytes = 64 << 20
+
+var errArchiveTooLarge = errors.New("audit: archive exceeds the decoded size limit")
+
+// archiveDecodedLimit returns the ceiling in bytes. A missing, malformed or
+// non-positive override keeps the default rather than lifting the bound.
+func archiveDecodedLimit() int64 {
+	if v := strings.TrimSpace(os.Getenv(archiveMaxDecodedEnv)); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
+			return n << 20
+		}
+	}
+	return defaultArchiveDecodedBytes
 }
 
 func GetLogsPaginated(ctx context.Context, page, pageSize int, search string) ([]AuditEntry, int, error) {
