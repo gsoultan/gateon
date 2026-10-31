@@ -6,6 +6,9 @@ package security
 import (
 	"fmt"
 	"net/http"
+	"os"
+	"strconv"
+	"strings"
 
 	"cel.dev/cel-go/cel"
 	"cel.dev/cel-go/common/types"
@@ -14,6 +17,43 @@ import (
 	"github.com/gsoultan/gateon/internal/middleware/auth"
 	"github.com/gsoultan/gateon/internal/middleware/kind"
 )
+
+const (
+	// policyCostLimitEnv overrides the CEL runtime cost ceiling applied to each
+	// rule evaluation. See policyCostLimit.
+	policyCostLimitEnv = "GATEON_POLICY_CEL_COST_LIMIT"
+	// defaultPolicyCostLimit bounds the CPU a single policy rule may spend on a
+	// single request. CEL "cost" is an operation count that tracks CPU (not
+	// memory): a rule that reads request.query or request.header -- collections
+	// whose size the client chooses -- can otherwise be amplified without limit
+	// by one request carrying thousands of values into a comprehension, and a
+	// nested comprehension makes that quadratic. Hitting the ceiling exits the
+	// evaluation with a "cost limit exceeded" error, which evalPolicyRule
+	// already treats as an unknown verdict and refuses, so the cost of a hostile
+	// request is bounded rather than paid. A benign rule costs on the order of
+	// hundreds of units, far below this. CLAUDE.md: "the WAF must never be the
+	// outage"; on a 2-core host one request must not be able to burn a core.
+	defaultPolicyCostLimit uint64 = 1_000_000
+	// policyInterruptCheckFrequency is how many comprehension iterations run
+	// between context-cancellation checks during ContextEval, so a request whose
+	// deadline fires mid-evaluation is abandoned rather than run to completion.
+	// The cost limit is the hard CPU bound; this makes a long-but-under-budget
+	// evaluation honour the request's own deadline as well.
+	policyInterruptCheckFrequency uint = 256
+)
+
+// policyCostLimit returns the per-rule CEL runtime cost ceiling, overridable
+// via GATEON_POLICY_CEL_COST_LIMIT. A missing, malformed or zero value falls
+// back to the default rather than disabling the bound: an unbounded policy
+// evaluator is the one state this must never silently enter.
+func policyCostLimit() uint64 {
+	if v := strings.TrimSpace(os.Getenv(policyCostLimitEnv)); v != "" {
+		if n, err := strconv.ParseUint(v, 10, 64); err == nil && n > 0 {
+			return n
+		}
+	}
+	return defaultPolicyCostLimit
+}
 
 // PolicyRule defines a single CEL-based policy rule.
 type PolicyRule struct {
@@ -45,13 +85,22 @@ func Policy(cfg PolicyConfig) (kind.Middleware, error) {
 		return nil, fmt.Errorf("failed to create CEL env: %w", err)
 	}
 
+	costLimit := policyCostLimit()
+
 	var compiledRules []compiledRule
 	for _, r := range cfg.Rules {
 		ast, iss := env.Compile(r.Expression)
 		if iss.Err() != nil {
 			return nil, fmt.Errorf("failed to compile expression %q: %w", r.Expression, iss.Err())
 		}
-		prg, err := env.Program(ast)
+		// CostLimit bounds the CPU this rule can spend on one request
+		// regardless of input size (the error it raises on overrun is handled
+		// as a refusal in evalPolicyRule); InterruptCheckFrequency makes a
+		// ContextEval honour the request deadline mid-comprehension.
+		prg, err := env.Program(ast,
+			cel.CostLimit(costLimit),
+			cel.InterruptCheckFrequency(policyInterruptCheckFrequency),
+		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create program for %q: %w", r.Expression, err)
 		}
@@ -103,7 +152,10 @@ func servePolicy(rules []compiledRule, next http.Handler, w http.ResponseWriter,
 // expression that fails to evaluate is a policy whose verdict is unknown, and
 // unknown is not permission.
 func evalPolicyRule(cr compiledRule, data map[string]any, w http.ResponseWriter, r *http.Request) bool {
-	out, _, err := cr.program.Eval(data)
+	// ContextEval, not Eval: the request's deadline (with the program's
+	// InterruptCheckFrequency) can cut off a runaway evaluation, and the cost
+	// limit the program carries still applies regardless of the context.
+	out, _, err := cr.program.ContextEval(r.Context(), data)
 	if err != nil {
 		// Logged, not returned: the error names the keys the rule reads and
 		// how, and it used to go to the client in the response body.
