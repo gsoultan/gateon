@@ -95,6 +95,14 @@ type ApiService struct {
 	// across REST, Connect and gRPC (ADR 0070).
 	advisoryOnce sync.Once
 	advisorySvc  *advisory.Service
+
+	// appliesOnChange is set when the global store reports every change it
+	// stores (config.GlobalRegistry does), so the running subsystems are
+	// reconfigured from that report, whoever wrote the change. Unset -- a bare
+	// literal, as the tests build one -- UpdateGlobalConfig applies its own.
+	appliesOnChange bool
+	// geoip loads the GeoIP databases a save names; nil is telemetry's.
+	geoip *geoipLoaders
 }
 
 // mlLowPowerHold is how long one report of CPU pressure keeps the ML engine in
@@ -363,6 +371,8 @@ func NewApiService(cfg ApiServiceConfig) *ApiService {
 		Throttles:           cfg.Throttles,
 		ManagementWorldOpen: cfg.ManagementWorldOpen,
 	}
+
+	s.applyEveryGlobalChange(cfg.Globals)
 
 	if cfg.IPReputation != nil {
 		s.IPReputation = cfg.IPReputation

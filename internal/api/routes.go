@@ -14,11 +14,30 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-func (s *ApiService) ListRoutes(ctx context.Context, _ *gateonv1.ListRoutesRequest) (*gateonv1.ListRoutesResponse, error) {
+// The bounds on a list request's paging, the REST handlers' too: page is what
+// a caller turns into an enormous offset, page_size into one enormous answer.
+const (
+	MaxListPage     int32 = 1_000_000
+	MaxListPageSize int32 = 1_000
+)
+
+// listPage clamps a requested page and page size to the bounds above. Zero
+// page_size is every item, as over REST.
+//
+// The Connect and gRPC list calls ignored page, page_size and search, always
+// answered with everything, and left total_count at zero -- so a client that
+// paged, as the dashboard does over REST, was told there was nothing to page.
+func listPage(page, size int32) (int32, int32) {
+	return min(max(page, 0), MaxListPage), min(max(size, 0), MaxListPageSize)
+}
+
+func (s *ApiService) ListRoutes(ctx context.Context, req *gateonv1.ListRoutesRequest) (*gateonv1.ListRoutesResponse, error) {
 	if s.Routes == nil {
 		return &gateonv1.ListRoutesResponse{Routes: nil}, nil
 	}
-	return &gateonv1.ListRoutesResponse{Routes: s.Routes.List(ctx)}, nil
+	page, size := listPage(req.GetPage(), req.GetPageSize())
+	routes, total := s.Routes.ListPaginated(ctx, page, size, req.GetSearch(), nil)
+	return &gateonv1.ListRoutesResponse{Routes: routes, TotalCount: total, Page: page, PageSize: size}, nil
 }
 
 func (s *ApiService) UpdateRoute(ctx context.Context, req *gateonv1.UpdateRouteRequest) (*gateonv1.UpdateRouteResponse, error) {

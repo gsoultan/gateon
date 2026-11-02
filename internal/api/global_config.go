@@ -177,8 +177,10 @@ func (s *ApiService) UpdateGlobalConfig(ctx context.Context, req *gateonv1.Updat
 		}
 		return &gateonv1.UpdateGlobalConfigResponse{Success: false}, err
 	}
-	//nolint:contextcheck // IP reputation's Reconfigure starts a feed refresh that outlives this request, on purpose.
-	s.applyGlobalConfig(req.Config)
+	if !s.appliesOnChange {
+		//nolint:contextcheck // IP reputation's Reconfigure starts a feed refresh that outlives this request, on purpose.
+		s.applyGlobalConfig(req.Config)
+	}
 	s.logAudit(ctx, "update", "global_config", "Updated global configuration")
 
 	return &gateonv1.UpdateGlobalConfigResponse{Success: true}, nil
@@ -259,11 +261,76 @@ func (s *ApiService) applyGlobalConfig(c *gateonv1.GlobalConfig) {
 			s.Invalidator.InvalidateTLS()
 		}
 	}
-	if g := c.Geoip; g != nil && g.Enabled && g.DbPath != "" {
-		_ = telemetry.InitGeoIP(g.DbPath)
-	}
+	s.loadGeoIPDatabases(c.Geoip)
 	if s.EbpfManager != nil && c.Ebpf != nil {
 		_ = s.EbpfManager.SetPortKnockingSequence(c.Ebpf.KnockingSequence)
+	}
+}
+
+// globalChangeSource is a global store that reports every change it stores.
+type globalChangeSource interface {
+	Subscribe(fn config.ConfigChangeFunc)
+}
+
+// applyEveryGlobalChange reconfigures the running subsystems on every change
+// the store reports, not only on the ones UpdateGlobalConfig makes.
+//
+// Only UpdateGlobalConfig applied a change. A GitOps sync, a fix applied from
+// Diagnostics, the ClamAV install mode and first-run setup all store through
+// the registry, and each left the WAF cache, the route chains, alerting, the
+// audit settings, IP reputation and GeoIP as they were: a WAF switched off in
+// the synced repository kept running until something else saved.
+func (s *ApiService) applyEveryGlobalChange(store config.GlobalConfigStore) {
+	src, ok := store.(globalChangeSource)
+	if !ok {
+		return
+	}
+	src.Subscribe(func(_, newCfg *gateonv1.GlobalConfig) {
+		if newCfg != nil {
+			s.applyGlobalConfig(newCfg)
+		}
+	})
+	s.appliesOnChange = true
+}
+
+// geoipLoaders open the three GeoIP databases. A field so a test can see which
+// were asked for without a MaxMind database on disk.
+type geoipLoaders struct {
+	city, asn, country func(path string) error
+}
+
+var telemetryGeoIP = geoipLoaders{
+	city: telemetry.InitGeoIP, asn: telemetry.InitGeoIPASN, country: telemetry.InitGeoIPCountry,
+}
+
+// loadGeoIPDatabases opens each database a saved GeoIP config names.
+//
+// Only the City database was reopened on a save. The ASN and Country paths
+// were read once, at start, while the card they are on says it applies when
+// saved: a new ASN database showed no ASN in Security Hub until a restart.
+func (s *ApiService) loadGeoIPDatabases(g *gateonv1.GeoIPConfig) {
+	if g == nil || !g.GetEnabled() {
+		return
+	}
+	l := s.geoip
+	if l == nil {
+		l = &telemetryGeoIP
+	}
+	for _, db := range []struct {
+		name, path string
+		load       func(string) error
+	}{
+		{"city", g.GetDbPath(), l.city},
+		{"asn", g.GetAsnDbPath(), l.asn},
+		{"country", g.GetCountryDbPath(), l.country},
+	} {
+		if db.path == "" {
+			continue
+		}
+		if err := db.load(db.path); err != nil {
+			logger.L.LogWarn("a saved GeoIP database could not be opened; the one loaded before stays in use",
+				"database", db.name, "path", db.path, "error", err)
+		}
 	}
 }
 
