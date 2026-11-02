@@ -29,7 +29,14 @@ const (
 	  bytes_total = path_stats.bytes_total + excluded.bytes_total,
 	  updated_at = CURRENT_TIMESTAMP;`
 
-	QueryPrunePathStats = "DELETE FROM path_stats WHERE day < ?"
+	// QueryPathStatsRowsOfDay seeds the path budget (pathbudget) with a day's
+	// stored rows after a restart.
+	QueryPathStatsRowsOfDay = "SELECT host, path FROM path_stats WHERE day = ? LIMIT ?"
+
+	// QueryPrunePathStats deletes at most one chunk (the second argument) of
+	// the rows past retention; prune repeats it until a chunk comes back short.
+	QueryPrunePathStats = `DELETE FROM path_stats WHERE (day, host, path) IN
+		(SELECT day, host, path FROM path_stats WHERE day < ? LIMIT ?)`
 
 	// SQLitePragmas enables WAL mode and NORMAL synchronous for SQLite (no-op for other drivers).
 	//
@@ -82,7 +89,8 @@ const (
 	  bytes_total = domain_stats.bytes_total + excluded.bytes_total,
 	  updated_at = CURRENT_TIMESTAMP;`
 
-	QueryPruneDomainStats = "DELETE FROM domain_stats WHERE day < ?"
+	QueryPruneDomainStats = `DELETE FROM domain_stats WHERE (day, hour, domain) IN
+		(SELECT day, hour, domain FROM domain_stats WHERE day < ? LIMIT ?)`
 
 	QueryGetDomainStatsWin = `SELECT domain, SUM(req_count) AS rc, SUM(latency_sum_s) AS lsum, SUM(bytes_total) AS bsum
 		FROM domain_stats
@@ -198,6 +206,17 @@ const (
 				AND (ip_mitigations.expires_at IS NULL OR ip_mitigations.expires_at > ?))
 			AND NOT (ip_mitigations.status = 'unmitigated' AND ip_mitigations.unmitigated_at > ?)`
 
+	// QueryPruneSpentIPShuns deletes at most one chunk of the rows nothing
+	// reads any more: an automatic or bounded shun that lapsed before the
+	// first bound time, past the ladder's memory of it (autoShunMemory), and a
+	// release made before the second, past its hold (ipReleaseHold). An
+	// operator's block with no end is never spent.
+	QueryPruneSpentIPShuns = `DELETE FROM ip_mitigations WHERE ip IN
+		(SELECT ip FROM ip_mitigations
+			WHERE (status = 'mitigated' AND expires_at IS NOT NULL AND expires_at < ?)
+				OR (status = 'unmitigated' AND unmitigated_at < ?)
+			LIMIT ?)`
+
 	QueryReleaseIPMitigation = `UPDATE ip_mitigations SET status = 'unmitigated', unmitigated_at = ?,
 		expires_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE ip = ?`
 )
@@ -224,7 +243,8 @@ const (
 		WHERE ` + inForceUserMitigation + ` AND SUBSTR(fingerprint, 1, ?) = ?
 		LIMIT ?`
 
-	QueryPruneUserMitigations = `DELETE FROM user_mitigations WHERE updated_at < ?`
+	QueryPruneUserMitigations = `DELETE FROM user_mitigations WHERE (fingerprint, ja4h) IN
+		(SELECT fingerprint, ja4h FROM user_mitigations WHERE updated_at < ? LIMIT ?)`
 )
 
 // The block list's read (ADR 0058): every block in force, newest first, one

@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/gsoultan/gateon/internal/auth"
 	"github.com/gsoultan/gateon/internal/domain/proxy"
@@ -72,12 +73,12 @@ func NewDistributedProxyInvalidator(local proxy.Invalidator, redis redis.Client)
 //
 // Checked and logged, unlike PublishBindingRevocation below, and for the
 // opposite reason. A session binding expires at DefaultBindingTTL whatever
-// happens, so a broker that is down costs that path latency. Nothing
-// re-converges a config cache: the registries load once at construction and
-// there is no periodic reload, so invalidation is the only mechanism there is.
-// A publish that fails therefore leaves every peer serving the superseded
-// value until it restarts -- for InvalidateTLS, called after a certificate is
-// replaced, that is the old certificate.
+// happens, so a broker that is down costs that path latency. Nothing else
+// re-converges a config cache: the registries load at construction and on a
+// peer's message (peerReloaders), with no periodic reload, so invalidation is
+// the only mechanism there is. A publish that fails therefore leaves every
+// peer serving the superseded value until it restarts -- for InvalidateTLS,
+// called after a certificate is replaced, that is the old certificate.
 //
 // The four callers used to discard both errors, while the session publisher
 // twenty lines down checked them. Same file, same call, same broker.
@@ -191,7 +192,7 @@ func installBindingPublisher(svc auth.Service, c redis.Client) {
 }
 
 // StartListener listens for invalidation events from other nodes.
-func StartInvalidationListener(ctx context.Context, local proxy.Invalidator, bindings SessionBindingInvalidator, redisClient redis.Client) {
+func StartInvalidationListener(ctx context.Context, local proxy.Invalidator, bindings SessionBindingInvalidator, reload *peerReloaders, redisClient redis.Client) {
 	if redisClient == nil {
 		return
 	}
@@ -210,7 +211,7 @@ func StartInvalidationListener(ctx context.Context, local proxy.Invalidator, bin
 			if err := json.Unmarshal([]byte(msg.Payload), &inv); err != nil {
 				continue
 			}
-			handleInvalidation(inv, local, bindings)
+			handleInvalidation(ctx, inv, local, bindings, reload)
 		}
 	}
 }
@@ -218,10 +219,13 @@ func StartInvalidationListener(ctx context.Context, local proxy.Invalidator, bin
 // handleInvalidation applies one message from a peer. Split out of the receive
 // loop so it can be tested without a broker: the routing is the part with the
 // behaviour in it, and the loop around it is plumbing.
-func handleInvalidation(inv InvalidationMessage, local proxy.Invalidator, bindings SessionBindingInvalidator) {
+func handleInvalidation(ctx context.Context, inv InvalidationMessage, local proxy.Invalidator, bindings SessionBindingInvalidator, reload *peerReloaders) {
 	if inv.NodeID == nodeID {
 		return // our own broadcast, already applied locally
 	}
+	// Before the caches are cleared, so that they are rebuilt from what the
+	// peer wrote and not from what this node read at start-up.
+	reload.forMessage(ctx, inv.Type)
 	switch inv.Type {
 	case "route":
 		logger.L.LogDebug("Received remote route invalidation", "route_id", inv.ID, "from", inv.NodeID)
@@ -243,6 +247,80 @@ func handleInvalidation(inv InvalidationMessage, local proxy.Invalidator, bindin
 		if bindings != nil && inv.ID != "" {
 			logger.L.LogDebug("Received remote session revocation", "user_id", inv.ID, "from", inv.NodeID)
 			bindings.InvalidateBinding(inv.ID)
+		}
+	}
+}
+
+// A peer's invalidation used to clear this node's proxy caches and nothing
+// else. The caches were rebuilt from the registries, and the registries are
+// read from the database once, at start-up -- so a route, service, middleware,
+// entrypoint, TLS option or WAF rule another gateway wrote was never seen
+// here until a restart, and the message that announced it cost a rebuild
+// of the same stale configuration (ADR 0081). Every message now re-reads the
+// registries the message can concern before the caches are cleared.
+
+// configReloader re-reads one registry from the database, replacing what it
+// holds. The database-backed registries and the WAF rule store implement it;
+// a file-backed registry does not, and is left as it is.
+type configReloader interface {
+	Reload(ctx context.Context) error
+}
+
+// peerReloadTimeout bounds one reload. A database that does not answer must
+// not hold the listener, and with it every later invalidation.
+const peerReloadTimeout = 30 * time.Second
+
+// peerReloaders is what a peer's message re-reads, by name for the log.
+type peerReloaders struct {
+	config []namedReloader // routes, services, middlewares, entrypoints, TLS options
+	waf    []namedReloader
+}
+
+type namedReloader struct {
+	name string
+	r    configReloader
+}
+
+// reloadersOf collects the registries of s that can re-read themselves.
+func reloadersOf(s *Server) *peerReloaders {
+	p := &peerReloaders{}
+	add := func(dst *[]namedReloader, name string, v any) {
+		if r, ok := v.(configReloader); ok && r != nil {
+			*dst = append(*dst, namedReloader{name: name, r: r})
+		}
+	}
+	add(&p.config, "routes", s.RouteStore)
+	add(&p.config, "services", s.ServiceStore)
+	add(&p.config, "middlewares", s.MwStore)
+	add(&p.config, "entrypoints", s.EpStore)
+	add(&p.config, "tls options", s.TLSOptStore)
+	add(&p.waf, "waf rules", s.WafRules)
+	return p
+}
+
+// forMessage re-reads the registries a message of type t concerns: the
+// configuration for a route, TLS or global message, the WAF rules for a WAF
+// message. A registry whose read fails is logged and left as it was; the
+// invalidation still runs, since a stale rebuild is no worse than before.
+func (p *peerReloaders) forMessage(ctx context.Context, t string) {
+	if p == nil {
+		return
+	}
+	var set []namedReloader
+	switch t {
+	case "route", "all", "tls":
+		set = p.config
+	case "waf":
+		set = p.waf
+	default:
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, peerReloadTimeout)
+	defer cancel()
+	for _, nr := range set {
+		if err := nr.r.Reload(ctx); err != nil {
+			logger.L.LogError("peer invalidation: registry not reloaded; this node keeps serving what it had",
+				"registry", nr.name, "error", err)
 		}
 	}
 }

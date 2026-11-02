@@ -38,6 +38,7 @@ import (
 	"github.com/gsoultan/gateon/internal/syncutil"
 	"github.com/gsoultan/gateon/internal/telemetry/blocklist"
 	"github.com/gsoultan/gateon/internal/telemetry/lookupgate"
+	"github.com/gsoultan/gateon/internal/telemetry/pathbudget"
 	"github.com/gsoultan/gateon/internal/telemetry/repid"
 	"github.com/gsoultan/gateon/internal/telemetry/tracebudget"
 	arc "github.com/hashicorp/golang-lru/arc/v2"
@@ -903,7 +904,10 @@ type ThreatFilter struct {
 type pathStatsStore struct {
 	// domains bounds the distinct Host values domain_stats will hold. The Host
 	// header is the client's to choose; see storedDomain.
-	domains                     *boundedLabels
+	domains *boundedLabels
+	// pathRows bounds the rows path_stats gains a day. Only the writer
+	// goroutine touches it.
+	pathRows                    *pathbudget.Budget
 	db                          *sql.DB
 	pebble                      *pebble.DB
 	dialect                     db.Dialect
@@ -1118,7 +1122,11 @@ func initStore(databaseURL string, retentionDays int) error {
 	}
 
 	st := &pathStatsStore{
-		domains:      &boundedLabels{max: maxDistinctDomains},
+		domains: &boundedLabels{max: maxDistinctDomains},
+		pathRows: pathbudget.New(pathbudget.Limits{
+			PathsPerHost: td.PathStatsMaxPathsPerHost,
+			RowsPerDay:   td.PathStatsMaxRowsPerDay,
+		}.WithEnv()),
 		db:           database,
 		pebble:       pdb,
 		dialect:      dialect,
@@ -1142,7 +1150,7 @@ func initStore(databaseURL string, retentionDays int) error {
 	if cache, err := arc.NewARC[string, float64](cacheSizeFromEnv(envScoreCacheSize, cacheNameScore, defaultScoreCacheSize)); err == nil {
 		st.scoreCache = cache
 	}
-	if cache, err := arc.NewARC[enforcementKey, any](cacheSizeFromEnv(envUnmitigatedCacheSize, cacheNameUnmitigated, defaultUnmitigatedCacheSize)); err == nil {
+	if cache, err := arc.NewARC[enforcementKey, any](cacheSizeFromEnv(envUnmitigatedCacheSize, cacheNameUnmitigated, cmp.Or(td.MitigationCacheEntries, defaultUnmitigatedCacheSize))); err == nil {
 		st.unmitigatedCache = cache
 	}
 	if cache, err := arc.NewARC[string, any](cacheSizeFromEnv(envUserMitigatedCacheSize, cacheNameUserMitigated, defaultUserMitigatedCacheSize)); err == nil {
@@ -1195,8 +1203,9 @@ func (s *pathStatsStore) syncTierSettings() {
 	}
 
 	// Update DB pool limits
-	s.db.SetMaxOpenConns(td.DBMaxOpenConns)
-	s.db.SetMaxIdleConns(td.DBMaxIdleConns)
+	open, idle := db.PoolLimits(s.dialect.Driver, td)
+	s.db.SetMaxOpenConns(open)
+	s.db.SetMaxIdleConns(idle)
 
 	// Update trace store toggle
 	s.traceStoreEnabled.Store(td.TraceStoreEnabled)
@@ -1356,15 +1365,12 @@ type queryExecutor interface {
 	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 }
 
-func (s *pathStatsStore) getExecutor(ctx context.Context) (queryExecutor, func()) {
-	if s.dialect.Driver != db.DriverPostgres {
-		return s.db, func() {}
-	}
-	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
-	if err != nil {
-		return s.db, func() {}
-	}
-	return tx, func() { _ = tx.Rollback() }
+// getExecutor is what a dashboard read queries. It used to open a read-only
+// transaction on Postgres, which cost every read a BEGIN and a ROLLBACK round
+// trip around its one statement: every caller runs exactly one query, so the
+// transaction isolated nothing. The pool answers directly on both engines.
+func (s *pathStatsStore) getExecutor(context.Context) (queryExecutor, func()) {
+	return s.db, func() {}
 }
 
 func (s *pathStatsStore) dailyResetLoop() {
@@ -1717,7 +1723,8 @@ func (s *pathStatsStore) flushIncrements(batch []increment) []increment {
 				logger.Default().LogError("domain stats: upsert failed", "error", err)
 			}
 		case !key.isDomain && pathStmt != nil:
-			if _, err := pathStmt.Exec(key.day, db.SafeText(key.host), db.SafeText(key.path), val.count, val.latS, val.bytes); err != nil {
+			host, path := s.pathRow(key)
+			if _, err := pathStmt.Exec(key.day, host, path, val.count, val.latS, val.bytes); err != nil {
 				logger.Default().LogError("path stats: upsert failed", "error", err)
 			}
 		}
@@ -1733,6 +1740,40 @@ func (s *pathStatsStore) flushIncrements(batch []increment) []increment {
 		logger.Default().LogError("telemetry: stats commit failed; this flush's statistics are lost", "error", err)
 	}
 	return batch[:0]
+}
+
+// pathRow is the path_stats host and path a bucket is counted under: both as
+// given while the day's budget allows, else the budget's overflow row. The
+// budget's own ceiling bounds the hosts it tracks, since each new host takes
+// a row. A day the budget does not know yet is
+// seeded from what is stored, so a restart does not grant it a second budget.
+func (s *pathStatsStore) pathRow(key statKey) (string, string) {
+	host, path := db.SafeText(key.host), db.SafeText(key.path)
+	if s.pathRows == nil {
+		return host, path
+	}
+	if !s.pathRows.Known(key.day) {
+		s.seedPathRows(key.day)
+	}
+	return s.pathRows.Admit(key.day, host, path)
+}
+
+// seedPathRows records day's stored path_stats rows in the budget. It reads
+// no more of them than the day may hold.
+func (s *pathStatsStore) seedPathRows(day string) {
+	s.pathRows.Open(day) // known even if the read fails, so it is not retried every flush
+	rows, err := s.db.Query(s.dialect.Rebind(QueryPathStatsRowsOfDay), day, s.pathRows.SeedLimit())
+	if err != nil {
+		logger.Default().LogError("path stats: reading the day's rows failed", "error", err)
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var host, path string
+		if rows.Scan(&host, &path) == nil {
+			s.pathRows.Seed(day, host, path)
+		}
+	}
 }
 
 // storedDomain is the domain_stats key for a Host value: the first
@@ -1871,6 +1912,7 @@ func (s *pathStatsStore) prune() {
 	s.holdTraceBudget()
 	s.pruneSecurityThreats(ctx)
 	s.pruneUserMitigations(ctx)
+	s.pruneSpentIPShuns(ctx, time.Now())
 
 	// Reclaim the disk space freed by the deletes above. Deleting rows/keys
 	// only marks them obsolete; without these steps SQLite and Pebble keep the
@@ -1895,11 +1937,49 @@ func (s *pathStatsStore) prunePathAndDomainStats(ctx context.Context) {
 		return
 	}
 	cutoff := time.Now().AddDate(0, 0, -days).UTC().Format("2006-01-02")
-	if _, err := s.db.ExecContext(ctx, s.dialect.Rebind(QueryPrunePathStats), cutoff); err != nil {
+	if err := s.deleteInChunks(ctx, QueryPrunePathStats, cutoff); err != nil {
 		logger.Default().LogError("path stats: prune failed", "error", err)
 	}
-	if _, err := s.db.ExecContext(ctx, s.dialect.Rebind(QueryPruneDomainStats), cutoff); err != nil {
+	if err := s.deleteInChunks(ctx, QueryPruneDomainStats, cutoff); err != nil {
 		logger.Default().LogError("domain stats: prune failed", "error", err)
+	}
+}
+
+// pruneChunk is how many rows one retention DELETE removes. Each chunk is its
+// own statement and so its own transaction: on SQLite the write lock is held
+// for one chunk and the telemetry writer's flushes run between them, where a
+// single DELETE over a day's backlog held it for the whole delete.
+const pruneChunk = 5000
+
+// maxPruneChunks bounds one prune of one table at a million rows; a larger
+// backlog drains over the following hours.
+const maxPruneChunks = 200
+
+// deleteInChunks runs query -- a DELETE whose last placeholder is the chunk
+// size -- until a chunk deletes fewer rows than it allows.
+func (s *pathStatsStore) deleteInChunks(ctx context.Context, query string, args ...any) error {
+	q := s.dialect.Rebind(query)
+	args = append(args, pruneChunk)
+	for range maxPruneChunks {
+		res, err := s.db.ExecContext(ctx, q, args...)
+		if err != nil {
+			return err
+		}
+		if n, err := res.RowsAffected(); err != nil || n < pruneChunk {
+			return err
+		}
+	}
+	return nil
+}
+
+// pruneSpentIPShuns deletes the address shuns nothing reads any more: a
+// lapsed one older than the ladder's memory of it, and a release past its
+// hold. Nothing pruned them, so ip_mitigations grew by a row for every
+// address ever shunned automatically.
+func (s *pathStatsStore) pruneSpentIPShuns(ctx context.Context, now time.Time) {
+	lapsed, released := sqlUTC(now.Add(-autoShunMemory)), sqlUTC(now.Add(-ipReleaseHold))
+	if err := s.deleteInChunks(ctx, QueryPruneSpentIPShuns, lapsed, released); err != nil {
+		logger.Default().LogError("ip mitigations: prune failed", "error", err)
 	}
 }
 
@@ -2766,8 +2846,9 @@ func (s *pathStatsStore) processThreat(st *SecurityThreat) {
 	escalateMitigation(st)
 	enrichThreatOrigin(st)
 
-	// Log to audit trail
-	audit.Log(context.Background(), "system", st.Type, st.RequestURI, fmt.Sprintf("Severity: %s, Details: %s, Action: %s", st.Severity, st.Details, st.ActionTaken), st.SourceIP)
+	// Log to audit trail, without waiting for the row: this is the telemetry
+	// writer, and under attack an INSERT per threat stalled it.
+	audit.LogSystem(st.Type, st.RequestURI, fmt.Sprintf("Severity: %s, Details: %s, Action: %s", st.Severity, st.Details, st.ActionTaken), st.SourceIP)
 
 	// Alerting and Broadcasting
 	notifyThreat(st)
@@ -4398,7 +4479,7 @@ func (s *pathStatsStore) inForceUserMitigationKeysOfClass(class string) []string
 // otherwise grow by a row for every network a class was ever blocked on.
 func (s *pathStatsStore) pruneUserMitigations(ctx context.Context) {
 	cutoff := time.Now().UTC().Add(-userMitigationRetention()).Format("2006-01-02 15:04:05")
-	if _, err := s.db.ExecContext(ctx, s.dialect.Rebind(QueryPruneUserMitigations), cutoff); err != nil {
+	if err := s.deleteInChunks(ctx, QueryPruneUserMitigations, cutoff); err != nil {
 		logger.Default().LogError("user mitigations: prune failed", "error", err)
 	}
 }

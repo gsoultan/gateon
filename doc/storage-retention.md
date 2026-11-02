@@ -39,7 +39,13 @@ Categories left at `0` fall back to the global default. The prune loop:
    entries are not deleted here: the audit manager owns them, applies the
    shorter of `audit.retention_days` and `log.audit_log_retention_days`, and
    archives each chunk of 5,000 first when `audit.archive_on_retention` is on
-   (ADR 0066).
+   (ADR 0066). The other tables go 5,000 rows a statement, each its own
+   transaction, so on SQLite the telemetry writer's flushes run between the
+   chunks instead of waiting behind one DELETE over the whole backlog.
+   `user_mitigations` past the fingerprint TTL and hold, and `ip_mitigations`
+   rows nothing reads any more -- a shun that lapsed more than a day ago and a
+   release past its day's hold -- are pruned the same way. An operator's block
+   with no end is never pruned.
 2. `DeleteRange`s expired Pebble trace keys, then **compacts the pruned key
    range** so the space is physically reclaimed instead of left as tombstones.
 3. Reclaims SQLite disk via `PRAGMA incremental_vacuum` (enabled by
@@ -321,6 +327,28 @@ the oldest files go first; the file just written is always kept. Gateways that
 share one database each run the prune, so two of them can archive the same
 chunk and a threat can then appear in two files; none is lost. See ADR 0066.
 
+## Connection pools
+
+Each of the four stores (telemetry, auth, audit, WAF) opens its own pool. On
+Postgres a pool holds the tier's `DBMaxOpenConns` (5 / 25 / 100). On SQLite,
+where the file admits one writer at a time and every connection keeps its own
+page cache, a pool holds 2 / 4 / 8 connections instead;
+`GATEON_DB_SQLITE_MAX_OPEN_CONNS` overrides it for every store.
+
+## Path statistics budget
+
+`path_stats` keeps a row per day, host and path, and the path is whatever the
+client asked for. A day keeps at most a set number of paths per host and of
+rows overall; past them, a host's new paths are counted in one `other` row,
+and past the day's ceiling every new host and path is counted in an
+`other`/`other` row. No request goes uncounted, so the totals stay right. After
+a restart the day's budget is seeded from the rows already stored.
+
+| Env var | Default (minimal / standard / enterprise) |
+|---------|------------------------------------------|
+| `GATEON_PATH_STATS_MAX_PATHS_PER_HOST` | 500 / 2000 / 10000 |
+| `GATEON_PATH_STATS_MAX_ROWS_PER_DAY` | 5000 / 20000 / 200000 |
+
 ## In-memory cache bounds
 
 The telemetry subsystem keeps several in-memory LRU/ARC caches. Their capacities
@@ -333,7 +361,7 @@ below-minimum values fall back to the default and log a warning.
 | `GATEON_TELEMETRY_REPUTATION_CACHE_SIZE` | IP reputation (sharded) | 100000 |
 | `GATEON_TELEMETRY_BEHAVIOR_CACHE_SIZE` | Per-IP behavior (sharded) | 10000 |
 | `GATEON_TELEMETRY_SCORE_CACHE_SIZE` | IP threat score | 10000 |
-| `GATEON_TELEMETRY_UNMITIGATED_CACHE_SIZE` | Unmitigated threats | 1000 |
+| `GATEON_TELEMETRY_UNMITIGATED_CACHE_SIZE` | Address shun answers in front of `ip_mitigations` | by profile: 4000 / 20000 / 100000 (minimal / standard / enterprise), about 500 bytes each |
 
 Sharded caches divide the configured total across shards (each shard floored at
 1 entry).

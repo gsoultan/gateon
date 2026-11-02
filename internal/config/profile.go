@@ -35,9 +35,17 @@ type TierDefaults struct {
 	CorrelationMaxSources   int
 	CorrelationMaxPerSource int
 
-	// Database connection pool.
+	// Database connection pool, per store: the telemetry, auth, audit and WAF
+	// stores each open their own.
 	DBMaxOpenConns int
 	DBMaxIdleConns int
+	// SQLiteMaxOpenConns is each store's pool on SQLite instead, where the
+	// file admits one writer at a time and reads scale with cores, not with
+	// connections. Each connection keeps its own page cache of up to ~8 MiB,
+	// so the Postgres sizes -- four stores at 25 connections on standard --
+	// could pin 800 MiB of cache on a 2 GB host while queueing on one write
+	// lock. GATEON_DB_SQLITE_MAX_OPEN_CONNS overrides it.
+	SQLiteMaxOpenConns int
 
 	// Telemetry.
 	TelemetryIntervalSeconds int
@@ -103,6 +111,28 @@ type TierDefaults struct {
 	// GATEON_THREAT_ARCHIVE_ENABLED turns it on, for the same reason as the
 	// trace archive. GATEON_THREAT_ARCHIVE_MAX_MB overrides it.
 	ThreatArchiveMaxBytes int64
+
+	// MitigationCacheEntries is how many enforcement answers -- "this address
+	// is shunned until", "this address is not shunned", a fingerprint release
+	// -- the telemetry store keeps in front of ip_mitigations. Every request
+	// whose address is not in it costs a database read, so a fixed 1,000 meant
+	// that any gateway seeing more than a thousand distinct clients in a
+	// mitigation epoch read SQL for most of them again and again. An entry,
+	// ghost lists included, is about 500 bytes. A flood of new addresses still
+	// costs one read per address; the block list (ADR 0058) is what keeps a
+	// block enforced through it. GATEON_TELEMETRY_UNMITIGATED_CACHE_SIZE
+	// overrides it.
+	MitigationCacheEntries int
+
+	// PathStatsMaxPathsPerHost and PathStatsMaxRowsPerDay bound the rows
+	// path_stats gains in a day (internal/telemetry/pathbudget): past them a
+	// host's new paths are counted in one "other" row, and past the day's
+	// ceiling every new host and path is. path_stats had a row per distinct
+	// path the clients asked for, so a scanner grew it by a row a request.
+	// GATEON_PATH_STATS_MAX_PATHS_PER_HOST and
+	// GATEON_PATH_STATS_MAX_ROWS_PER_DAY override them.
+	PathStatsMaxPathsPerHost int
+	PathStatsMaxRowsPerDay   int
 
 	// WAF default tier when WafConfig.Tier is empty.
 	WAFTier Tier
@@ -312,8 +342,12 @@ func DefaultsFor(tier Tier) TierDefaults {
 			TraceArchiveRetentionDays:  7,
 			TraceArchiveMaxBytes:       256 << 20, // 256 MiB
 			ThreatArchiveMaxBytes:      256 << 20, // 256 MiB
+			MitigationCacheEntries:     4_000,     // ~2 MiB
+			PathStatsMaxPathsPerHost:   500,
+			PathStatsMaxRowsPerDay:     5_000,
 			DBMaxOpenConns:             5,
 			DBMaxIdleConns:             5,
+			SQLiteMaxOpenConns:         2,
 			TelemetryIntervalSeconds:   30,
 			DashboardAggregateInterval: 2 * time.Minute,
 			FlushIntervalSeconds:       10,
@@ -358,8 +392,12 @@ func DefaultsFor(tier Tier) TierDefaults {
 			TraceArchiveRetentionDays:  365,
 			TraceArchiveMaxBytes:       20 << 30, // 20 GiB
 			ThreatArchiveMaxBytes:      10 << 30, // 10 GiB
+			MitigationCacheEntries:     100_000,  // ~50 MiB
+			PathStatsMaxPathsPerHost:   10_000,
+			PathStatsMaxRowsPerDay:     200_000,
 			DBMaxOpenConns:             100,
 			DBMaxIdleConns:             50,
+			SQLiteMaxOpenConns:         8,
 			TelemetryIntervalSeconds:   2,
 			DashboardAggregateInterval: 30 * time.Second,
 			FlushIntervalSeconds:       1,
@@ -404,8 +442,12 @@ func DefaultsFor(tier Tier) TierDefaults {
 			TraceArchiveRetentionDays:  90,
 			TraceArchiveMaxBytes:       2 << 30, // 2 GiB
 			ThreatArchiveMaxBytes:      1 << 30, // 1 GiB
+			MitigationCacheEntries:     20_000,  // ~10 MiB
+			PathStatsMaxPathsPerHost:   2_000,
+			PathStatsMaxRowsPerDay:     20_000,
 			DBMaxOpenConns:             25,
 			DBMaxIdleConns:             25,
+			SQLiteMaxOpenConns:         4,
 			TelemetryIntervalSeconds:   5,
 			DashboardAggregateInterval: time.Minute,
 			FlushIntervalSeconds:       2,

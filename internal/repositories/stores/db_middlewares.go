@@ -7,6 +7,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"maps"
 
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/db"
@@ -29,18 +30,31 @@ func NewDBMiddlewareRegistry(database *sql.DB, dialect db.Dialect) *DBMiddleware
 	return r
 }
 
-func (r *DBMiddlewareRegistry) loadFromDB() {
+// loadFromDB fills the registry at construction. A failure is logged by
+// reload and leaves the registry as it was: empty.
+func (r *DBMiddlewareRegistry) loadFromDB() { _ = r.reload(context.Background()) }
+
+// Reload replaces what the registry holds with what the database holds now:
+// how a peer takes a change another gateway wrote (ADR 0081). A read that
+// fails changes nothing and is returned.
+func (r *DBMiddlewareRegistry) Reload(ctx context.Context) error { return r.reload(ctx) }
+
+func (r *DBMiddlewareRegistry) reload(ctx context.Context) error {
 	r.Mu().Lock()
 	defer r.Mu().Unlock()
 
 	query := "SELECT id, name, type, config, wasm_blob FROM middlewares"
-	rows, err := r.db.Query(query)
+	rows, err := r.db.QueryContext(ctx, query)
 	if err != nil {
 		logLoadQueryFailed("middlewares", err)
-		return
+		return err
 	}
 	defer rows.Close()
 
+	// Collected first and stored only once every row is read: a read that
+	// fails part way must not replace what the gateway is serving with the
+	// part of it that arrived.
+	fresh := make(map[string]*gateonv1.Middleware)
 	for rows.Next() {
 		var m gateonv1.Middleware
 		var configStr string
@@ -60,11 +74,15 @@ func (r *DBMiddlewareRegistry) loadFromDB() {
 			}
 			m.Config = cfg
 		}
-		r.Middlewares()[m.Id] = &m
+		fresh[m.Id] = &m
 	}
 	if err := rows.Err(); err != nil {
 		logLoadTruncated("middlewares", err)
+		return err
 	}
+	clear(r.Middlewares())
+	maps.Copy(r.Middlewares(), fresh)
+	return nil
 }
 
 func (r *DBMiddlewareRegistry) Update(ctx context.Context, m *gateonv1.Middleware) error {

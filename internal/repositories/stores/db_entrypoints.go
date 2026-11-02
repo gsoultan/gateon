@@ -31,15 +31,24 @@ func NewDBEntryPointRegistry(database *sql.DB, dialect db.Dialect) *DBEntryPoint
 	return r
 }
 
-func (r *DBEntryPointRegistry) loadFromDB() {
+// loadFromDB fills the registry at construction. A failure is logged by
+// reload and leaves the registry as it was: empty.
+func (r *DBEntryPointRegistry) loadFromDB() { _ = r.reload(context.Background()) }
+
+// Reload replaces what the registry holds with what the database holds now:
+// how a peer takes a change another gateway wrote (ADR 0081). A read that
+// fails changes nothing and is returned.
+func (r *DBEntryPointRegistry) Reload(ctx context.Context) error { return r.reload(ctx) }
+
+func (r *DBEntryPointRegistry) reload(ctx context.Context) error {
 	r.Mu().Lock()
 	defer r.Mu().Unlock()
 
 	query := "SELECT id, name, address, type, protocol, protocols, tls_config, read_timeout_ms, write_timeout_ms, max_connections, access_log_enabled FROM entrypoints"
-	rows, err := r.db.Query(query)
+	rows, err := r.db.QueryContext(ctx, query)
 	if err != nil {
 		logLoadQueryFailed("entrypoints", err)
-		return
+		return err
 	}
 	defer rows.Close()
 
@@ -79,9 +88,10 @@ func (r *DBEntryPointRegistry) loadFromDB() {
 		// Not stored. Replacing a good map with a truncated one turns a read
 		// error into missing entrypoints that look deliberate.
 		logLoadTruncated("entrypoints", err)
-		return
+		return err
 	}
 	r.EntryPoints().Store(&newMap)
+	return nil
 }
 
 func (r *DBEntryPointRegistry) Update(ctx context.Context, ep *gateonv1.EntryPoint) error {

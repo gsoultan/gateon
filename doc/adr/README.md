@@ -91,6 +91,7 @@ ADRs follow a lightweight [MADR](https://adr.github.io/madr/)-style format:
 | [0078](./0078-a-route-wafs-audit-log-stays-in-the-audit-directory.md) | A route WAF's audit log stays in the audit directory | Accepted |
 | [0079](./0079-a-reputation-score-refuses-the-address-that-earned-it-before-its-network.md) | A reputation score refuses the address that earned it before its network | Accepted |
 | [0080](./0080-a-global-change-is-applied-whoever-stores-it.md) | A global change is applied whoever stores it | Accepted |
+| [0081](./0081-the-database-serves-the-gateway-not-its-own-bookkeeping.md) | The database serves the gateway, not its own bookkeeping | Accepted |
 
 ## Conventions
 

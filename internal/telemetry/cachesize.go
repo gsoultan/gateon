@@ -39,10 +39,12 @@ const (
 
 // Default cache capacities (total entries across all shards where sharded).
 const (
-	defaultZeroTrustCacheSize     = 100_000
-	defaultReputationCacheSize    = 100_000
-	defaultBehaviorCacheSize      = 10_000
-	defaultScoreCacheSize         = 10_000
+	defaultZeroTrustCacheSize  = 100_000
+	defaultReputationCacheSize = 100_000
+	defaultBehaviorCacheSize   = 10_000
+	defaultScoreCacheSize      = 10_000
+	// defaultUnmitigatedCacheSize is the floor under a tier that names no size;
+	// the tiers size it (TierDefaults.MitigationCacheEntries).
 	defaultUnmitigatedCacheSize   = 1_000
 	defaultUserMitigatedCacheSize = 10_000
 

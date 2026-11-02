@@ -11,6 +11,7 @@ import (
 	neturl "net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -80,11 +81,9 @@ func Open(url string) (*sql.DB, Dialect, error) {
 		return nil, Dialect{}, fmt.Errorf("ping %s: %w", driver, err)
 	}
 
-	// Configure connection pool for production resilience.
-	// Defaults are tuned by resource tier (minimal: 5, standard: 25, enterprise: 100).
-	td := config.CurrentTierDefaults()
-	db.SetMaxOpenConns(td.DBMaxOpenConns)
-	db.SetMaxIdleConns(td.DBMaxIdleConns)
+	open, idle := PoolLimits(driver, config.CurrentTierDefaults())
+	db.SetMaxOpenConns(open)
+	db.SetMaxIdleConns(idle)
 	db.SetConnMaxLifetime(5 * time.Minute)
 
 	return db, Dialect{Driver: driver}, nil
@@ -324,4 +323,26 @@ func refusedEngine(url string) (scheme, name string) {
 		return got, display
 	}
 	return "", ""
+}
+
+// EnvSQLiteMaxOpenConns overrides the SQLite pool size of every store.
+const EnvSQLiteMaxOpenConns = "GATEON_DB_SQLITE_MAX_OPEN_CONNS"
+
+// PoolLimits is the open and idle connection limits of one store's pool on
+// driver under td: the tier's DBMaxOpenConns on Postgres, and the smaller
+// SQLiteMaxOpenConns on SQLite, where connections past the cores add page
+// caches and a longer queue for the one write lock, and nothing else.
+func PoolLimits(driver string, td config.TierDefaults) (open, idle int) {
+	open, idle = td.DBMaxOpenConns, td.DBMaxIdleConns
+	if driver != DriverSQLite {
+		return open, idle
+	}
+	open = td.SQLiteMaxOpenConns
+	if n, err := strconv.Atoi(strings.TrimSpace(os.Getenv(EnvSQLiteMaxOpenConns))); err == nil && n > 0 {
+		open = n
+	}
+	if open <= 0 {
+		open = td.DBMaxOpenConns
+	}
+	return open, open
 }

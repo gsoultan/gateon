@@ -6,6 +6,7 @@ package stores
 import (
 	"context"
 	"database/sql"
+	"maps"
 	"strings"
 
 	"github.com/gsoultan/gateon/internal/config"
@@ -30,22 +31,35 @@ func NewDBTLSOptionRegistry(database *sql.DB, dialect db.Dialect) *DBTLSOptionRe
 	return r
 }
 
-func (r *DBTLSOptionRegistry) loadFromDB() {
+// loadFromDB fills the registry at construction. A failure is logged by
+// reload and leaves the registry as it was: empty.
+func (r *DBTLSOptionRegistry) loadFromDB() { _ = r.reload(context.Background()) }
+
+// Reload replaces what the registry holds with what the database holds now:
+// how a peer takes a change another gateway wrote (ADR 0081). A read that
+// fails changes nothing and is returned.
+func (r *DBTLSOptionRegistry) Reload(ctx context.Context) error { return r.reload(ctx) }
+
+func (r *DBTLSOptionRegistry) reload(ctx context.Context) error {
 	r.Mu().Lock()
 	defer r.Mu().Unlock()
 
 	query := "SELECT id, name, min_tls_version, max_tls_version, cipher_suites, alpn_protocols, client_auth_type, prefer_server_cipher_suites, sni_strict, client_authority_ids FROM tls_options"
-	rows, err := r.db.Query(query)
+	rows, err := r.db.QueryContext(ctx, query)
 	if err != nil {
 		// Returning quietly is how a schema mismatch here stayed invisible: the
 		// registry simply came up empty, and a gateway with no TLS options looks
 		// exactly like a gateway that was never given any.
 		logger.L.LogError("cannot load TLS options; the gateway will start with none",
 			"error", err)
-		return
+		return err
 	}
 	defer rows.Close()
 
+	// Collected first and stored only once every row is read: a read that
+	// fails part way must not replace what the gateway is serving with the
+	// part of it that arrived.
+	fresh := make(map[string]*gateonv1.TLSOption)
 	for rows.Next() {
 		var opt gateonv1.TLSOption
 		var ciphers, alpn, caIds string
@@ -63,11 +77,15 @@ func (r *DBTLSOptionRegistry) loadFromDB() {
 			opt.ClientAuthorityIds = strings.Split(caIds, ",")
 		}
 
-		r.Options()[opt.Id] = &opt
+		fresh[opt.Id] = &opt
 	}
 	if err := rows.Err(); err != nil {
 		logLoadTruncated("TLS options", err)
+		return err
 	}
+	clear(r.Options())
+	maps.Copy(r.Options(), fresh)
+	return nil
 }
 
 func (r *DBTLSOptionRegistry) Update(ctx context.Context, opt *gateonv1.TLSOption) error {
