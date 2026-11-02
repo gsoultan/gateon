@@ -416,6 +416,25 @@ describe("custom error pages", () => {
   });
 });
 
+describe("forward auth body size", () => {
+  // The gateway refuses a negative max_body_size and takes the route out of
+  // service; the form offered -1 and described it as unlimited.
+  test("offers no negative size and promises no unlimited body", () => {
+    const html = renderToString(
+      <MantineProvider>
+        <MiddlewareConfigEditor
+          type="forwardauth"
+          config={{ address: "https://auth.example/verify", forward_body: "true" }}
+          onChange={() => {}}
+        />
+      </MantineProvider>,
+    );
+    expect(html).toContain("Max Body Size (bytes)");
+    expect(html).not.toContain("unlimited");
+    expect(html).not.toContain('min="-1"');
+  });
+});
+
 describe("policy help", () => {
   // The gateway hands CEL `auth` as the claims map itself; the help text said
   // `auth.claims`, so a rule written from it read a key that does not exist

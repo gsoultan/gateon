@@ -17,88 +17,28 @@
 # Format: type/key  # note
 
 accesslog/route  # unproven
-addprefix/prefix  # unproven
-auth/allow_any_audience  # unproven
-auth/audience  # unproven
+auth/allow_any_audience  # unproven: it matters only for a key-set validator (jwks_url, oidc), which needs a provider to fetch keys from
 auth/client_id  # unproven
 auth/client_secret  # unproven
-auth/dry_run  # unproven
 auth/enable_revocation  # proven by TestRevokedTokenIsRefusedByEveryTypeThatOffersRevocation (needs Redis, which the registry harness does not run)
-auth/error_template  # unproven
-auth/hashed  # unproven
-auth/header  # unproven
 auth/introspection_url  # unproven
-auth/issuer  # unproven
 auth/jwks_url  # unproven
-auth/password  # unproven
-auth/realm  # unproven
-auth/required_roles  # unproven
-auth/required_scopes  # unproven
 auth/revocation_prefix  # proven by TestRevokedTokenIsRefusedByEveryTypeThatOffersRevocation (needs Redis, which the registry harness does not run)
-auth/secret  # unproven
 auth/token_type_hint  # unproven
-auth/type  # unproven
-auth/username  # unproven
-auth/users  # unproven
 bot_management/challenge_timeout  # unproven
 bot_management/enable_browser_integrity  # unproven
 bot_management/enable_js_challenge  # unproven
 bot_management/secret_key  # unproven
-cache/max_body_kb  # unproven
-cache/max_entries  # unproven
+cache/max_entries  # unproven: the memory cache bounds each of its 16 shards, so a small bound shows only for keys that share a shard
 cache/storage  # unproven
-cache/ttl_seconds  # unproven
+cache/ttl_seconds  # unproven: its effect is over time; the dashboard offers no value below 1 second
 circuit_breaker/sleep_window  # unproven: time-based; TestFailedProbeReopensForAFullSleepWindow builds the config struct, not through the factory
 circuit_breaker/window_size  # unproven: time-based; TestBreakerJudgesAWindowOnlyOnceItHoldsMinRequests builds the config struct, not through the factory (NEW-10: passing 0 here fails no test)
-compress/algorithm  # unproven
-compress/excluded_content_types  # unproven
-compress/included_content_types  # unproven
-compress/min_response_body_bytes  # unproven
-cors/allow_credentials  # unproven
-cors/allowed_headers  # unproven
-cors/allowed_methods  # unproven
-cors/exposed_headers  # unproven
-cors/max_age  # unproven
-cors/preset  # unproven
-deception/canary_header  # unproven: editor added for NEW-8
-deception/canary_token  # unproven: editor added for NEW-8
-deception/enable_troll_response  # unproven: editor added for NEW-8
-deception/honey_forms  # unproven: editor added for NEW-8
-deception/inject_invisible_links  # unproven: editor added for NEW-8
-deception/invisible_link_paths  # unproven: editor added for NEW-8
+deception/enable_troll_response  # unproven: it answers only a client whose reputation is already low, with a stream that does not end
 entropy/threshold  # unproven: editor added for NEW-8
-errors/status_codes  # unproven
-file_security/allowed_mime_types  # unproven
-file_security/blocked_mime_types  # unproven
-file_security/clamav_addr  # unproven
-file_security/enable_clamav  # unproven
-file_security/max_file_size  # unproven
-forwardauth/address  # unproven
-forwardauth/auth_request_headers  # unproven
-forwardauth/auth_response_headers  # unproven
-forwardauth/forward_body  # unproven
-forwardauth/max_body_size  # unproven
-forwardauth/preserve_request_method  # unproven
-forwardauth/tls_insecure_skip_verify  # unproven
-forwardauth/trust_forward_header  # unproven
-forwardedheaders/proto  # unproven
-forwardedheaders/trust_forward_header  # unproven
 geoip/allow_countries  # unproven
 geoip/db_path  # unproven
 geoip/deny_countries  # unproven
-graphql_firewall/max_complexity  # unproven: editor added for NEW-8
-grpcweb/allow_credentials  # unproven
-grpcweb/max_age  # unproven
-grpcweb/preset  # unproven
-headers/force_sts_header  # unproven
-headers/sts_include_subdomains  # unproven
-headers/sts_preload  # unproven
-headers/sts_seconds  # unproven
-hmac/body_limit  # unproven
-hmac/header  # unproven
-hmac/methods  # unproven
-hmac/prefix  # unproven
-hmac/secret  # unproven
 inflightreq/amount  # unproven
 inflightreq/per_ip  # unproven: differs only under concurrent requests; TestInflightPerAddressIsPerAddress builds the middleware directly
 metrics/route  # unproven
@@ -112,47 +52,18 @@ pow/secret  # unproven: editor added for NEW-8
 pow/threshold  # unproven: editor added for NEW-8
 ratelimit/requests_per_minute  # unproven: its effect is over time; the burst row proves the limiter
 ratelimit/storage  # unproven
-ratelimit/strategy  # unproven
-replacepath/path  # unproven
-replacepathregex/pattern  # unproven
-replacepathregex/replacement  # unproven
-retry/attempts  # unproven
-rewrite/path  # unproven
-rewrite/pattern  # unproven
-rewrite/replacement  # unproven
-schema_validation/schema  # unproven
-stripprefix/prefixes  # unproven
-stripprefixregex/regex  # unproven
 tarpit/base_delay  # unproven: editor added for NEW-8
 tarpit/max_delay  # unproven: editor added for NEW-8
 tarpit/threshold  # unproven: editor added for NEW-8
 tls_binding/cookie_name  # unproven: the effect is a Set-Cookie on a TLS session; TestTLSBindingBindsTheIssuedSessionToTheClientCertificate builds the middleware directly
 tls_binding/secret  # unproven
-transform/content_type  # unproven
-transform/request_replace  # unproven
-transform/request_search  # unproven
-transform/response_replace  # unproven
-transform/response_search  # unproven
 turnstile/header  # unproven
-turnstile/methods  # unproven
 turnstile/secret  # unproven
-waf/anomaly_threshold  # unproven
+waf/anomaly_threshold  # unproven: no probe found that one threshold refuses and another passes
 waf/app_profiles  # unproven
 waf/audit_log_path  # unproven
 waf/audit_log_relevant_only  # unproven
-waf/disable_entropy  # unproven
-waf/dlp  # unproven
-waf/dlp_action  # unproven
-waf/entropy_threshold  # unproven
 waf/ip_reputation  # unproven
-waf/malware_detection  # unproven
-waf/paranoia_level  # unproven
+waf/paranoia_level  # unproven: no probe found that one level refuses and another passes
 waf/protocol  # unproven: WAF category switch, real since ADR 0044; no probe in the registry yet
-waf/ransomware_detection  # unproven
-waf/request_body_limit  # unproven
-waf/response_body_limit  # unproven
-waf/ssrf_protection  # unproven
-waf/wordpress  # unproven: WAF category switch, real since ADR 0044; no probe in the registry yet
-xfcc/forward_dns  # unproven
-xfcc/forward_hash  # unproven
 xfcc/forward_uri  # unproven

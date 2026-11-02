@@ -28,6 +28,9 @@ type fakeMwStore struct {
 }
 
 func (f *fakeMwStore) List(context.Context) []*gateonv1.Middleware { return f.mws }
+func (f *fakeMwStore) ListPaginated(context.Context, int32, int32, string) ([]*gateonv1.Middleware, int32) {
+	return f.mws, int32(len(f.mws))
+}
 func (f *fakeMwStore) Get(_ context.Context, id string) (*gateonv1.Middleware, bool) {
 	for _, m := range f.mws {
 		if m.Id == id {

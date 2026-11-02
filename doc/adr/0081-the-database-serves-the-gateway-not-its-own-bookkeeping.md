@@ -1,4 +1,4 @@
-# 80. The database serves the gateway, not its own bookkeeping
+# 81. The database serves the gateway, not its own bookkeeping
 
 Date: 2026-11-02
 

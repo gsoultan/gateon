@@ -472,7 +472,7 @@ func buildSystemInterfaces(ctx context.Context, svc GlobalAndAuthAPI) systemInte
 const watchDiagnosticsFor = 4 * time.Second
 
 func registerDiagnosticHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
-	// One snapshot per period for every open watch stream (ADR 0080). The
+	// One snapshot per period for every open watch stream (ADR 0081). The
 	// one-shot GET is not served from it: an operator who has just acted
 	// reads the state as it is now.
 	watched := sharedread.New(watchDiagnosticsFor, func(ctx context.Context) (*gateonv1.GetDiagnosticsResponse, error) {

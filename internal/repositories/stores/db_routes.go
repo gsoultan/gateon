@@ -36,7 +36,7 @@ func NewDBRouteRegistry(database *sql.DB, dialect db.Dialect) *DBRouteRegistry {
 func (r *DBRouteRegistry) loadFromDB() { _ = r.reload(context.Background()) }
 
 // Reload replaces what the registry holds with what the database holds now:
-// how a peer takes a change another gateway wrote (ADR 0080). A read that
+// how a peer takes a change another gateway wrote (ADR 0081). A read that
 // fails changes nothing and is returned.
 func (r *DBRouteRegistry) Reload(ctx context.Context) error { return r.reload(ctx) }
 

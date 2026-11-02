@@ -148,11 +148,11 @@ func FileSecurity(cfg FileSecurityConfig) kind.Middleware {
 
 	allowedMap := make(map[string]bool)
 	for _, m := range cfg.AllowedMimeTypes {
-		allowedMap[m] = true
+		allowedMap[mediaType(m)] = true
 	}
 	blockedMap := make(map[string]bool)
 	for _, m := range cfg.BlockedMimeTypes {
-		blockedMap[m] = true
+		blockedMap[mediaType(m)] = true
 	}
 
 	rt := fileScanRuntime{
@@ -668,7 +668,23 @@ func restoreBody(r *http.Request, body []byte) {
 	r.Header.Set("Content-Length", strconv.Itoa(len(body)))
 }
 
+// mediaType is a MIME type without its parameters, lower-cased: the form both
+// lists are kept in and a detected type is compared in.
+//
+// http.DetectContentType names every text type with a charset
+// ("text/plain; charset=utf-8"), and the lists were compared against that
+// whole string. A list naming "text/html" therefore matched no upload: Blocked
+// MIME Types: text/html let every HTML file through, and Allowed MIME Types:
+// text/plain refused every text file.
+func mediaType(v string) string {
+	if i := strings.IndexByte(v, ';'); i != -1 {
+		v = v[:i]
+	}
+	return strings.ToLower(strings.TrimSpace(v))
+}
+
 func isBlockedMime(mimeType string, allowedMap, blockedMap map[string]bool) bool {
+	mimeType = mediaType(mimeType)
 	if len(allowedMap) > 0 {
 		return !allowedMap[mimeType]
 	}

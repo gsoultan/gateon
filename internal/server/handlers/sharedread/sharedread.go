@@ -7,7 +7,7 @@
 // shared between two operators on the same page. A Shared answers a caller
 // whose tick finds a result younger than the period with that result, and
 // callers that arrive while one is being computed wait for it rather than
-// starting their own (ADR 0080).
+// starting their own (ADR 0081).
 package sharedread
 
 import (

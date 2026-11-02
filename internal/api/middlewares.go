@@ -12,12 +12,14 @@ import (
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
-func (s *ApiService) ListMiddlewares(ctx context.Context, _ *gateonv1.ListMiddlewaresRequest) (*gateonv1.ListMiddlewaresResponse, error) {
+func (s *ApiService) ListMiddlewares(ctx context.Context, req *gateonv1.ListMiddlewaresRequest) (*gateonv1.ListMiddlewaresResponse, error) {
 	if s.Middlewares == nil {
 		return &gateonv1.ListMiddlewaresResponse{Middlewares: nil}, nil
 	}
+	page, size := listPage(req.GetPage(), req.GetPageSize())
+	mws, total := s.Middlewares.ListPaginated(ctx, page, size, req.GetSearch())
 	return &gateonv1.ListMiddlewaresResponse{
-		Middlewares: maskMiddlewares(ctx, s.Middlewares.List(ctx)),
+		Middlewares: maskMiddlewares(ctx, mws), TotalCount: total, Page: page, PageSize: size,
 	}, nil
 }
 

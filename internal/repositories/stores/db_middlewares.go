@@ -35,7 +35,7 @@ func NewDBMiddlewareRegistry(database *sql.DB, dialect db.Dialect) *DBMiddleware
 func (r *DBMiddlewareRegistry) loadFromDB() { _ = r.reload(context.Background()) }
 
 // Reload replaces what the registry holds with what the database holds now:
-// how a peer takes a change another gateway wrote (ADR 0080). A read that
+// how a peer takes a change another gateway wrote (ADR 0081). A read that
 // fails changes nothing and is returned.
 func (r *DBMiddlewareRegistry) Reload(ctx context.Context) error { return r.reload(ctx) }
 

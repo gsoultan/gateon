@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/gsoultan/gateon/internal/api"
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/httputil"
 	"google.golang.org/protobuf/proto"
@@ -63,9 +64,10 @@ func DecodeRequestBody(r *http.Request, dst any) error {
 // Pagination bounds. Both values come straight off the query string, so both
 // need a ceiling: pageSize is what a caller can turn into one enormous result
 // set, and page is what they can turn into an enormous OFFSET.
+// The same bounds as the Connect and gRPC list calls.
 const (
-	maxPageNumber int32 = 1_000_000
-	maxPageSize   int32 = 1_000
+	maxPageNumber = api.MaxListPage
+	maxPageSize   = api.MaxListPageSize
 )
 
 // ParsePagination extracts page, pageSize, and search from query params.

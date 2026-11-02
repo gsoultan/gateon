@@ -276,8 +276,10 @@ func (f *Factory) Create(m *gateonv1.Middleware, routeID string) (Middleware, er
 	case "addprefix":
 		return transform.AddPrefix(cfg["prefix"]), nil
 	case "stripprefix":
-		prefixes := strings.Split(cfg["prefixes"], ",")
-		return transform.StripPrefix(prefixes), nil
+		// Trimmed: the dashboard joins the list without spaces, but the REST
+		// and gRPC APIs store what they are sent, and "/api, /v1" made " /v1" a
+		// prefix no path starts with.
+		return transform.StripPrefix(kind.ParseListStrict(cfg["prefixes"])), nil
 	case "stripprefixregex":
 		return transform.StripPrefixRegex(cfg["regex"])
 	case "replacepath":

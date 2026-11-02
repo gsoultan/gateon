@@ -40,7 +40,7 @@ func injectingWriters() map[string]injectingWriter {
 	return map[string]injectingWriter{
 		"deception": {
 			wrap: func(w http.ResponseWriter) http.ResponseWriter {
-				return &deceptionResponseWriter{ResponseWriter: w, cfg: DeceptionConfig{InvisibleLinkPaths: []string{"/trap"}}}
+				return &deceptionResponseWriter{ResponseWriter: w, cfg: DeceptionConfig{InjectInvisibleLinks: true, InvisibleLinkPaths: []string{"/trap"}}}
 			},
 			marker: `href="/trap"`,
 		},
@@ -114,7 +114,7 @@ func (discardHTML) WriteString(s string) (n int, err error) { return len(s), nil
 func BenchmarkDeceptionInjection(b *testing.B) {
 	page := []byte(strings.Repeat("<p>lorem ipsum dolor sit amet</p>\n", 32*1024/34) + "</body></html>")
 	dst := discardHTML{header: http.Header{"Content-Type": {"text/html"}}}
-	cfg := DeceptionConfig{InvisibleLinkPaths: []string{"/wp-admin-backup", "/.env.old"}}
+	cfg := DeceptionConfig{InjectInvisibleLinks: true, InvisibleLinkPaths: []string{"/wp-admin-backup", "/.env.old"}}
 	b.ReportAllocs()
 	b.SetBytes(int64(len(page)))
 	for b.Loop() {

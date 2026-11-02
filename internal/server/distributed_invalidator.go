@@ -256,7 +256,7 @@ func handleInvalidation(ctx context.Context, inv InvalidationMessage, local prox
 // read from the database once, at start-up -- so a route, service, middleware,
 // entrypoint, TLS option or WAF rule another gateway wrote was never seen
 // here until a restart, and the message that announced it cost a rebuild
-// of the same stale configuration (ADR 0080). Every message now re-reads the
+// of the same stale configuration (ADR 0081). Every message now re-reads the
 // registries the message can concern before the caches are cleared.
 
 // configReloader re-reads one registry from the database, replacing what it

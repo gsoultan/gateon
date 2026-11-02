@@ -10,11 +10,13 @@ import (
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
-func (s *ApiService) ListEntryPoints(ctx context.Context, _ *gateonv1.ListEntryPointsRequest) (*gateonv1.ListEntryPointsResponse, error) {
+func (s *ApiService) ListEntryPoints(ctx context.Context, req *gateonv1.ListEntryPointsRequest) (*gateonv1.ListEntryPointsResponse, error) {
 	if s.EntryPoints == nil {
 		return &gateonv1.ListEntryPointsResponse{EntryPoints: nil}, nil
 	}
-	return &gateonv1.ListEntryPointsResponse{EntryPoints: s.EntryPoints.List(ctx)}, nil
+	page, size := listPage(req.GetPage(), req.GetPageSize())
+	eps, total := s.EntryPoints.ListPaginated(ctx, page, size, req.GetSearch())
+	return &gateonv1.ListEntryPointsResponse{EntryPoints: eps, TotalCount: total, Page: page, PageSize: size}, nil
 }
 
 func (s *ApiService) UpdateEntryPoint(ctx context.Context, req *gateonv1.UpdateEntryPointRequest) (*gateonv1.UpdateEntryPointResponse, error) {
