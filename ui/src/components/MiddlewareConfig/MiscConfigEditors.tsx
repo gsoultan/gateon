@@ -223,8 +223,8 @@ export function PrefixConfigEditor({ config, updateConfig }: Omit<EditorProps, '
 
 export function StripPrefixConfigEditor({ config, updateConfig }: Omit<EditorProps, 'onChange'>) {
   const splitTags = (val: string) => (val || "").split(",").map((s) => s.trim()).filter(Boolean);
-  // No space after the comma: the gateway splits "prefixes" on "," without
-  // trimming, so " /v1" is a prefix no path ever starts with.
+  // No space after the comma. The gateway trims each prefix now, but an
+  // older gateway read " /v1" as a prefix no path ever starts with.
   const joinTags = (tags: string[]) => tags.join(",");
 
   return (

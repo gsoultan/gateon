@@ -292,7 +292,7 @@ export function MiddlewareConfigEditor({
           <Group grow>
             <NumberInput
               label="Max Body Size (bytes)"
-              description="Limit when forwarding body. Default 1MB. -1 = unlimited"
+              description="The auth service is sent at most this many bytes of the body; the backend still gets all of it. Default 1 MB."
               value={
                 config.max_body_size
                   ? parseInt(config.max_body_size)
@@ -304,7 +304,7 @@ export function MiddlewareConfigEditor({
                   (val ?? 1048576).toString()
                 )
               }
-              min={-1}
+              min={0}
             />
             <Switch
               label="Trust Forward Header"

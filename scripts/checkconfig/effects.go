@@ -39,6 +39,10 @@ import (
 
 const (
 	effectsRegistryPath = "internal/middleware/dashboard_key_effects_test.go"
+	// effectsRegistryMorePath holds the rows that proved the keys the baseline
+	// listed as unproven; the same table, kept apart so the first file stays
+	// readable.
+	effectsRegistryMorePath = "internal/middleware/dashboard_key_effects_more_test.go"
 	effectsBaselinePath = "scripts/checkconfig/effects-baseline.txt"
 	editorsDir          = "ui/src/components/MiddlewareConfig"
 )
@@ -136,6 +140,13 @@ func checkEffects(idx testIndex) bool {
 	rows, err := effectRows(effectsRegistryPath)
 	if err != nil {
 		fatalf("reading the effect registry: %v", err)
+	}
+	more, err := effectRows(effectsRegistryMorePath)
+	if err != nil {
+		fatalf("reading the effect registry: %v", err)
+	}
+	for k, inert := range more {
+		rows[k] = rows[k] || inert
 	}
 	notes, err := loadNotedBaseline(effectsBaselinePath)
 	if err != nil {
