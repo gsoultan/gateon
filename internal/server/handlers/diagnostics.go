@@ -467,6 +467,7 @@ func buildSystemInterfaces(ctx context.Context, svc GlobalAndAuthAPI) systemInte
 }
 
 func registerDiagnosticHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
+	watched := newSharedDiagnostics(svc.GetDiagnostics)
 	mux.HandleFunc("GET /v1/diagnostics", func(w http.ResponseWriter, r *http.Request) {
 		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceDiagnostics) {
 			return
@@ -502,7 +503,7 @@ func registerDiagnosticHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Dep
 		for {
 			select {
 			case <-ticker.C:
-				res, err := svc.GetDiagnostics(ctx, &gateonv1.GetDiagnosticsRequest{})
+				res, err := watched.get(ctx)
 				if err != nil {
 					return
 				}
