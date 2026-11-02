@@ -29,7 +29,7 @@ var _ proxy.Invalidator = (*noopInvalidator)(nil)
 
 func TestHandleInvalidation_SessionReachesTheBindingCache(t *testing.T) {
 	b := &recordingBindings{}
-	handleInvalidation(InvalidationMessage{Type: "session", ID: "user-1", NodeID: "other-node"}, &noopInvalidator{}, b)
+	handleInvalidation(InvalidationMessage{Type: "session", ID: "user-1", NodeID: "other-node"}, &noopInvalidator{}, b, nil)
 
 	if len(b.ids) != 1 || b.ids[0] != "user-1" {
 		t.Fatalf("expected user-1 invalidated, got %v", b.ids)
@@ -39,7 +39,7 @@ func TestHandleInvalidation_SessionReachesTheBindingCache(t *testing.T) {
 // A node applied the change before publishing, so its own echo is noise.
 func TestHandleInvalidation_SkipsItsOwnBroadcast(t *testing.T) {
 	b := &recordingBindings{}
-	handleInvalidation(InvalidationMessage{Type: "session", ID: "user-1", NodeID: nodeID}, &noopInvalidator{}, b)
+	handleInvalidation(InvalidationMessage{Type: "session", ID: "user-1", NodeID: nodeID}, &noopInvalidator{}, b, nil)
 
 	if len(b.ids) != 0 {
 		t.Fatalf("a node must ignore its own broadcast, got %v", b.ids)
@@ -48,7 +48,7 @@ func TestHandleInvalidation_SkipsItsOwnBroadcast(t *testing.T) {
 
 func TestHandleInvalidation_SessionWithoutIDIsIgnored(t *testing.T) {
 	b := &recordingBindings{}
-	handleInvalidation(InvalidationMessage{Type: "session", NodeID: "other-node"}, &noopInvalidator{}, b)
+	handleInvalidation(InvalidationMessage{Type: "session", NodeID: "other-node"}, &noopInvalidator{}, b, nil)
 
 	if len(b.ids) != 0 {
 		t.Fatalf("an empty user id must not invalidate anything, got %v", b.ids)
@@ -58,7 +58,7 @@ func TestHandleInvalidation_SessionWithoutIDIsIgnored(t *testing.T) {
 // The listener is shared with route/TLS/WAF invalidation; a nil bindings
 // argument must not take the whole loop down.
 func TestHandleInvalidation_NilBindingsIsSafe(t *testing.T) {
-	handleInvalidation(InvalidationMessage{Type: "session", ID: "user-1", NodeID: "other-node"}, &noopInvalidator{}, nil)
+	handleInvalidation(InvalidationMessage{Type: "session", ID: "user-1", NodeID: "other-node"}, &noopInvalidator{}, nil, nil)
 }
 
 func TestHandleInvalidation_StillRoutesTheOtherTypes(t *testing.T) {
@@ -66,7 +66,7 @@ func TestHandleInvalidation_StillRoutesTheOtherTypes(t *testing.T) {
 		{"route", "route"}, {"all", "all"}, {"tls", "tls"}, {"waf", "waf"},
 	} {
 		inv := &noopInvalidator{}
-		handleInvalidation(InvalidationMessage{Type: tc.msgType, NodeID: "other-node"}, inv, nil)
+		handleInvalidation(InvalidationMessage{Type: tc.msgType, NodeID: "other-node"}, inv, nil, nil)
 		if len(inv.calls) != 1 || inv.calls[0] != tc.want {
 			t.Errorf("type %q: got %v, want [%s]", tc.msgType, inv.calls, tc.want)
 		}

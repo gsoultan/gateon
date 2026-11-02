@@ -90,6 +90,7 @@ ADRs follow a lightweight [MADR](https://adr.github.io/madr/)-style format:
 | [0077](./0077-the-gateway-never-proxies-to-cloud-instance-metadata.md) | The gateway never proxies to cloud instance metadata | Accepted |
 | [0078](./0078-a-route-wafs-audit-log-stays-in-the-audit-directory.md) | A route WAF's audit log stays in the audit directory | Accepted |
 | [0079](./0079-a-reputation-score-refuses-the-address-that-earned-it-before-its-network.md) | A reputation score refuses the address that earned it before its network | Accepted |
+| [0080](./0080-the-database-serves-the-gateway-not-its-own-bookkeeping.md) | The database serves the gateway, not its own bookkeeping | Accepted |
 
 ## Conventions
 

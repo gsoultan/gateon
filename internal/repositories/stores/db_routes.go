@@ -7,6 +7,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"maps"
 	"strings"
 
 	"github.com/gsoultan/gateon/internal/config"
@@ -30,18 +31,31 @@ func NewDBRouteRegistry(database *sql.DB, dialect db.Dialect) *DBRouteRegistry {
 	return r
 }
 
-func (r *DBRouteRegistry) loadFromDB() {
+// loadFromDB fills the registry at construction. A failure is logged by
+// reload and leaves the registry as it was: empty.
+func (r *DBRouteRegistry) loadFromDB() { _ = r.reload(context.Background()) }
+
+// Reload replaces what the registry holds with what the database holds now:
+// how a peer takes a change another gateway wrote (ADR 0080). A read that
+// fails changes nothing and is returned.
+func (r *DBRouteRegistry) Reload(ctx context.Context) error { return r.reload(ctx) }
+
+func (r *DBRouteRegistry) reload(ctx context.Context) error {
 	r.Mu().Lock()
 	defer r.Mu().Unlock()
 
 	query := "SELECT id, name, type, entrypoints, rule, priority, middlewares, service_id, tls_config, disabled, stream_mode FROM routes"
-	rows, err := r.db.Query(query)
+	rows, err := r.db.QueryContext(ctx, query)
 	if err != nil {
 		logLoadQueryFailed("routes", err)
-		return
+		return err
 	}
 	defer rows.Close()
 
+	// Collected first and stored only once every row is read: a read that
+	// fails part way must not replace what the gateway is serving with the
+	// part of it that arrived.
+	fresh := make(map[string]*gateonv1.Route)
 	for rows.Next() {
 		var rt gateonv1.Route
 		var entrypoints, middlewares, tlsConfig string
@@ -65,12 +79,16 @@ func (r *DBRouteRegistry) loadFromDB() {
 			}
 			rt.Tls = &tls
 		}
-		r.Routes()[rt.Id] = &rt
+		fresh[rt.Id] = &rt
 	}
 	if err := rows.Err(); err != nil {
 		logLoadTruncated("routes", err)
+		return err
 	}
+	clear(r.Routes())
+	maps.Copy(r.Routes(), fresh)
 	r.RebuildSortedLocked()
+	return nil
 }
 
 func (r *DBRouteRegistry) Update(ctx context.Context, rt *gateonv1.Route) error {

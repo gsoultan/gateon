@@ -65,7 +65,7 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 		//
 		installBindingPublisher(s.AuthManager, s.RedisClient)
 		wg.Go(func() {
-			StartInvalidationListener(ctx, proxyInvalidator, s.AuthManager, s.RedisClient)
+			StartInvalidationListener(ctx, proxyInvalidator, s.AuthManager, reloadersOf(s), s.RedisClient)
 		})
 	}
 	s.TLSManager = CreateTLSManager(s)

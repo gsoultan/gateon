@@ -72,12 +72,12 @@ func NewDistributedProxyInvalidator(local proxy.Invalidator, redis redis.Client)
 //
 // Checked and logged, unlike PublishBindingRevocation below, and for the
 // opposite reason. A session binding expires at DefaultBindingTTL whatever
-// happens, so a broker that is down costs that path latency. Nothing
-// re-converges a config cache: the registries load once at construction and
-// there is no periodic reload, so invalidation is the only mechanism there is.
-// A publish that fails therefore leaves every peer serving the superseded
-// value until it restarts -- for InvalidateTLS, called after a certificate is
-// replaced, that is the old certificate.
+// happens, so a broker that is down costs that path latency. Nothing else
+// re-converges a config cache: the registries load at construction and on a
+// peer's message (peerReloaders), with no periodic reload, so invalidation is
+// the only mechanism there is. A publish that fails therefore leaves every
+// peer serving the superseded value until it restarts -- for InvalidateTLS,
+// called after a certificate is replaced, that is the old certificate.
 //
 // The four callers used to discard both errors, while the session publisher
 // twenty lines down checked them. Same file, same call, same broker.
@@ -191,7 +191,7 @@ func installBindingPublisher(svc auth.Service, c redis.Client) {
 }
 
 // StartListener listens for invalidation events from other nodes.
-func StartInvalidationListener(ctx context.Context, local proxy.Invalidator, bindings SessionBindingInvalidator, redisClient redis.Client) {
+func StartInvalidationListener(ctx context.Context, local proxy.Invalidator, bindings SessionBindingInvalidator, reload *peerReloaders, redisClient redis.Client) {
 	if redisClient == nil {
 		return
 	}
@@ -210,7 +210,7 @@ func StartInvalidationListener(ctx context.Context, local proxy.Invalidator, bin
 			if err := json.Unmarshal([]byte(msg.Payload), &inv); err != nil {
 				continue
 			}
-			handleInvalidation(inv, local, bindings)
+			handleInvalidation(inv, local, bindings, reload)
 		}
 	}
 }
@@ -218,10 +218,13 @@ func StartInvalidationListener(ctx context.Context, local proxy.Invalidator, bin
 // handleInvalidation applies one message from a peer. Split out of the receive
 // loop so it can be tested without a broker: the routing is the part with the
 // behaviour in it, and the loop around it is plumbing.
-func handleInvalidation(inv InvalidationMessage, local proxy.Invalidator, bindings SessionBindingInvalidator) {
+func handleInvalidation(inv InvalidationMessage, local proxy.Invalidator, bindings SessionBindingInvalidator, reload *peerReloaders) {
 	if inv.NodeID == nodeID {
 		return // our own broadcast, already applied locally
 	}
+	// Before the caches are cleared, so that they are rebuilt from what the
+	// peer wrote and not from what this node read at start-up.
+	reload.forMessage(inv.Type)
 	switch inv.Type {
 	case "route":
 		logger.L.LogDebug("Received remote route invalidation", "route_id", inv.ID, "from", inv.NodeID)

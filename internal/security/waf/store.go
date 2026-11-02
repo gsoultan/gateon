@@ -6,6 +6,7 @@ package waf
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"strings"
 	"sync"
 	"time"
@@ -95,8 +96,13 @@ func GetStore() *Store {
 	return globalStore
 }
 
-// Reload refreshes the in-memory cache from the database.
+// Reload refreshes the in-memory cache from the database. A store that never
+// opened -- GetStore is nil then, and a nil *Store satisfies the interfaces
+// that take one -- has nothing to reload and says so.
 func (s *Store) Reload(ctx context.Context) error {
+	if s == nil || s.db == nil {
+		return errors.New("waf: rule store is not open")
+	}
 	rows, err := s.db.QueryContext(ctx, "SELECT id, name, directive, definition, format, conversion_note, enabled, paranoia_level, category, created_at, updated_at FROM waf_rules ORDER BY id ASC")
 	if err != nil {
 		return err

@@ -7,6 +7,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"maps"
 
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/db"
@@ -29,18 +30,31 @@ func NewDBServiceRegistry(database *sql.DB, dialect db.Dialect) *DBServiceRegist
 	return r
 }
 
-func (r *DBServiceRegistry) loadFromDB() {
+// loadFromDB fills the registry at construction. A failure is logged by
+// reload and leaves the registry as it was: empty.
+func (r *DBServiceRegistry) loadFromDB() { _ = r.reload(context.Background()) }
+
+// Reload replaces what the registry holds with what the database holds now:
+// how a peer takes a change another gateway wrote (ADR 0080). A read that
+// fails changes nothing and is returned.
+func (r *DBServiceRegistry) Reload(ctx context.Context) error { return r.reload(ctx) }
+
+func (r *DBServiceRegistry) reload(ctx context.Context) error {
 	r.Mu().Lock()
 	defer r.Mu().Unlock()
 
 	query := "SELECT id, name, backend_type, load_balancer_policy, health_check_path, weighted_targets, discovery_url, tls_client_config, health_check_port, health_check_protocol, health_check_type, l4_health_check_interval_ms, l4_health_check_timeout_ms, l4_udp_session_timeout_s, l4_proxy_protocol, unhealthy_threshold, healthy_threshold FROM services"
-	rows, err := r.db.Query(query)
+	rows, err := r.db.QueryContext(ctx, query)
 	if err != nil {
 		logLoadQueryFailed("services", err)
-		return
+		return err
 	}
 	defer rows.Close()
 
+	// Collected first and stored only once every row is read: a read that
+	// fails part way must not replace what the gateway is serving with the
+	// part of it that arrived.
+	fresh := make(map[string]*gateonv1.Service)
 	for rows.Next() {
 		var s gateonv1.Service
 		var targetsStr, tlsStr string
@@ -66,11 +80,15 @@ func (r *DBServiceRegistry) loadFromDB() {
 			s.TlsClientConfig = &tlsCfg
 		}
 
-		r.Services()[s.Id] = &s
+		fresh[s.Id] = &s
 	}
 	if err := rows.Err(); err != nil {
 		logLoadTruncated("services", err)
+		return err
 	}
+	clear(r.Services())
+	maps.Copy(r.Services(), fresh)
+	return nil
 }
 
 func (r *DBServiceRegistry) Update(ctx context.Context, s *gateonv1.Service) error {
