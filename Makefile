@@ -25,7 +25,7 @@ GOTOOLCHAIN := $(shell go env GOVERSION)
 endif
 export GOTOOLCHAIN
 
-.PHONY: proto models build build-fips release deb test test-race bench clean vuln staticcheck gosec sec check-invariants check-config check-auth-nil check-coverage check-folders ebpf ebpf-docker pgo-profile docker
+.PHONY: proto models build build-fips release deb test test-race bench clean vuln staticcheck gosec sec check-invariants check-config check-auth-nil check-coverage check-folders ebpf ebpf-docker pgo-profile docker fuzz
 
 ## proto: regenerate Go bindings from proto/gateon/v1/*.proto using buf
 proto:
@@ -191,6 +191,21 @@ bench:
 	mkdir -p dist
 	go test -run '^$$' -bench . -benchmem -benchtime 1s -count 8 \
 		./internal/middleware/ ./pkg/proxy/ ./internal/telemetry/ | tee dist/bench.txt
+
+## fuzz:  run one fuzz target for FUZZTIME, the way the weekly CI job does.
+##        make fuzz FUZZ_PKG=./internal/middleware/security FUZZ=FuzzGraphQLFirewall FUZZTIME=10m
+##        The corpus grows in $$(go env GOCACHE)/fuzz and survives between runs;
+##        a crasher is written to $$(FUZZ_PKG)/testdata/fuzz/$$(FUZZ)/, and
+##        committing that file makes it a permanent seed that runs on every
+##        `go test`. -run '^$$' skips the package's ordinary tests, which the
+##        per-PR suite already covers. go test's -timeout bounds the seed pass
+##        only (testing stops the alarm before fuzzing starts), so an hour of
+##        fuzzing needs no -timeout of its own.
+FUZZ_PKG ?= ./internal/middleware/security
+FUZZ ?= FuzzGraphQLFirewall
+FUZZTIME ?= 1m
+fuzz:
+	go test -run '^$$' -fuzz '^$(FUZZ)$$' -fuzztime $(FUZZTIME) $(FUZZ_PKG)
 
 ## vuln: scan for known vulnerabilities in dependencies and code (govulncheck)
 vuln:
