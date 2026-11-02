@@ -339,6 +339,9 @@ func scanMultipart(r *http.Request, body []byte, boundary string, cfg FileSecuri
 		if err != nil {
 			return malformedMultipart(r, err)
 		}
+		if opaquePart(p) {
+			return opaqueMultipart(r)
+		}
 		if !isFilePart(p) {
 			continue
 		}
@@ -367,6 +370,44 @@ func isFilePart(p *multipart.Part) bool {
 		return false
 	}
 	return strings.Contains(strings.ToLower(cd), "filename")
+}
+
+// opaquePart reports whether a part's bytes, as scanned, are not the bytes a
+// backend would store, whether or not it names a file.
+//
+// A form-data part with no filename and a multipart/* body was skipped as an
+// ordinary field, while RFC 2388 parsers (commons-fileupload) unpack its inner
+// parts as files: an executable one level down reached the backend unscanned.
+// And Go's reader decodes only quoted-printable (removing the header as it
+// does), so under Content-Transfer-Encoding: base64 the scanner read base64
+// text while a backend honouring the header saved the decoded executable.
+//
+// Browsers send neither: RFC 7578 deprecates multipart/mixed and forbids
+// Content-Transfer-Encoding. Both are refused rather than decoded, which would
+// mean a recursion bound and a second buffer per part on the request path for
+// shapes no legitimate client produces. Every value of each header is checked,
+// since a backend may read the last where Header.Get returns the first.
+func opaquePart(p *multipart.Part) bool {
+	for _, ct := range p.Header.Values("Content-Type") {
+		if strings.HasPrefix(mediaType(ct), "multipart/") {
+			return true
+		}
+	}
+	for _, cte := range p.Header.Values("Content-Transfer-Encoding") {
+		switch strings.ToLower(strings.TrimSpace(cte)) {
+		case "7bit", "8bit", "binary":
+		default:
+			return true
+		}
+	}
+	return false
+}
+
+// opaqueMultipart refuses a part encoded in a way the scanner does not read.
+func opaqueMultipart(r *http.Request) scanResult {
+	logger.L.LogWarn("File upload blocked: nested multipart or content-transfer-encoding in part",
+		"client_ip", r.RemoteAddr)
+	return scanResult{blocked: true, status: http.StatusBadRequest, message: "Unsupported multipart part encoding"}
 }
 
 // malformedMultipart refuses a body the parser could not read.
