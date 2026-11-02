@@ -53,7 +53,7 @@ func TestAPeersInvalidationReloadsBeforeItClearsCaches(t *testing.T) {
 				config: []namedReloader{{name: "routes", r: rec}},
 				waf:    []namedReloader{{name: "waf rules", r: rec}},
 			}
-			handleInvalidation(InvalidationMessage{Type: tc.msgType, ID: "r1", NodeID: "other-node"}, rec, nil, p)
+			handleInvalidation(context.Background(), InvalidationMessage{Type: tc.msgType, ID: "r1", NodeID: "other-node"}, rec, nil, p)
 			if len(rec.events) != len(tc.want) {
 				t.Fatalf("%s: events %v, want %v", tc.msgType, rec.events, tc.want)
 			}
@@ -71,7 +71,7 @@ func TestAPeersInvalidationReloadsBeforeItClearsCaches(t *testing.T) {
 func TestAFailedPeerReloadStillInvalidates(t *testing.T) {
 	rec := &reloadRecorder{fail: true}
 	p := &peerReloaders{config: []namedReloader{{name: "routes", r: rec}}}
-	handleInvalidation(InvalidationMessage{Type: "all", NodeID: "other-node"}, rec, nil, p)
+	handleInvalidation(context.Background(), InvalidationMessage{Type: "all", NodeID: "other-node"}, rec, nil, p)
 	if len(rec.events) != 2 || rec.events[1] != "invalidate" {
 		t.Fatalf("events %v, want a reload then an invalidation", rec.events)
 	}
@@ -81,7 +81,7 @@ func TestAFailedPeerReloadStillInvalidates(t *testing.T) {
 func TestOurOwnBroadcastReloadsNothing(t *testing.T) {
 	rec := &reloadRecorder{}
 	p := &peerReloaders{config: []namedReloader{{name: "routes", r: rec}}}
-	handleInvalidation(InvalidationMessage{Type: "all", NodeID: nodeID}, rec, nil, p)
+	handleInvalidation(context.Background(), InvalidationMessage{Type: "all", NodeID: nodeID}, rec, nil, p)
 	if len(rec.events) != 0 {
 		t.Fatalf("our own message produced %v", rec.events)
 	}

@@ -211,7 +211,7 @@ func StartInvalidationListener(ctx context.Context, local proxy.Invalidator, bin
 			if err := json.Unmarshal([]byte(msg.Payload), &inv); err != nil {
 				continue
 			}
-			handleInvalidation(inv, local, bindings, reload)
+			handleInvalidation(ctx, inv, local, bindings, reload)
 		}
 	}
 }
@@ -219,13 +219,13 @@ func StartInvalidationListener(ctx context.Context, local proxy.Invalidator, bin
 // handleInvalidation applies one message from a peer. Split out of the receive
 // loop so it can be tested without a broker: the routing is the part with the
 // behaviour in it, and the loop around it is plumbing.
-func handleInvalidation(inv InvalidationMessage, local proxy.Invalidator, bindings SessionBindingInvalidator, reload *peerReloaders) {
+func handleInvalidation(ctx context.Context, inv InvalidationMessage, local proxy.Invalidator, bindings SessionBindingInvalidator, reload *peerReloaders) {
 	if inv.NodeID == nodeID {
 		return // our own broadcast, already applied locally
 	}
 	// Before the caches are cleared, so that they are rebuilt from what the
 	// peer wrote and not from what this node read at start-up.
-	reload.forMessage(inv.Type)
+	reload.forMessage(ctx, inv.Type)
 	switch inv.Type {
 	case "route":
 		logger.L.LogDebug("Received remote route invalidation", "route_id", inv.ID, "from", inv.NodeID)
@@ -302,7 +302,7 @@ func reloadersOf(s *Server) *peerReloaders {
 // configuration for a route, TLS or global message, the WAF rules for a WAF
 // message. A registry whose read fails is logged and left as it was; the
 // invalidation still runs, since a stale rebuild is no worse than before.
-func (p *peerReloaders) forMessage(t string) {
+func (p *peerReloaders) forMessage(ctx context.Context, t string) {
 	if p == nil {
 		return
 	}
@@ -315,7 +315,7 @@ func (p *peerReloaders) forMessage(t string) {
 	default:
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), peerReloadTimeout)
+	ctx, cancel := context.WithTimeout(ctx, peerReloadTimeout)
 	defer cancel()
 	for _, nr := range set {
 		if err := nr.r.Reload(ctx); err != nil {

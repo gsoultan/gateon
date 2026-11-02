@@ -62,7 +62,9 @@ func (s *Shared[T]) Get(ctx context.Context) (T, error) {
 		s.inflight = done
 		s.mu.Unlock()
 
-		cctx, cancel := context.WithTimeout(context.Background(), s.period)
+		// The computation outlives the caller that started it, since others may be
+		// waiting on it, so it carries the caller's values but not its deadline.
+		cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), s.period)
 		res, err := s.compute(cctx)
 		cancel()
 
