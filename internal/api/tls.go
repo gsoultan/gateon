@@ -10,11 +10,13 @@ import (
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
-func (s *ApiService) ListTLSOptions(ctx context.Context, _ *gateonv1.ListTLSOptionsRequest) (*gateonv1.ListTLSOptionsResponse, error) {
+func (s *ApiService) ListTLSOptions(ctx context.Context, req *gateonv1.ListTLSOptionsRequest) (*gateonv1.ListTLSOptionsResponse, error) {
 	if s.TLSOptions == nil {
 		return &gateonv1.ListTLSOptionsResponse{TlsOptions: nil}, nil
 	}
-	return &gateonv1.ListTLSOptionsResponse{TlsOptions: s.TLSOptions.List(ctx)}, nil
+	page, size := listPage(req.GetPage(), req.GetPageSize())
+	opts, total := s.TLSOptions.ListPaginated(ctx, page, size, req.GetSearch())
+	return &gateonv1.ListTLSOptionsResponse{TlsOptions: opts, TotalCount: total, Page: page, PageSize: size}, nil
 }
 
 func (s *ApiService) UpdateTLSOption(ctx context.Context, req *gateonv1.UpdateTLSOptionRequest) (*gateonv1.UpdateTLSOptionResponse, error) {

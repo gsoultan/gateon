@@ -14,11 +14,13 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-func (s *ApiService) ListServices(ctx context.Context, _ *gateonv1.ListServicesRequest) (*gateonv1.ListServicesResponse, error) {
+func (s *ApiService) ListServices(ctx context.Context, req *gateonv1.ListServicesRequest) (*gateonv1.ListServicesResponse, error) {
 	if s.Services == nil {
 		return &gateonv1.ListServicesResponse{Services: nil}, nil
 	}
-	return &gateonv1.ListServicesResponse{Services: s.Services.List(ctx)}, nil
+	page, size := listPage(req.GetPage(), req.GetPageSize())
+	svcs, total := s.Services.ListPaginated(ctx, page, size, req.GetSearch())
+	return &gateonv1.ListServicesResponse{Services: svcs, TotalCount: total, Page: page, PageSize: size}, nil
 }
 
 func (s *ApiService) UpdateService(ctx context.Context, req *gateonv1.UpdateServiceRequest) (*gateonv1.UpdateServiceResponse, error) {

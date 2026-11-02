@@ -212,9 +212,18 @@ func (w *deceptionResponseWriter) Write(b []byte) (int, error) {
 // styles -- a search engine follows a hidden link as readily as a bot does,
 // and one that trips the trap is refused as a critical threat. Well-behaved
 // crawlers honour nofollow; the bots the trap is for do not.
+//
+// Links go in only when InjectInvisibleLinks is on. The switch used to decide
+// whether a page was rewritten at all, and markup wrote every link it held:
+// with a honey form configured, every page was rewritten and the links went
+// in with "Inject Invisible Links" switched off.
 func (cfg DeceptionConfig) markup() string {
 	var sb strings.Builder
-	for _, link := range cfg.InvisibleLinkPaths {
+	links := cfg.InvisibleLinkPaths
+	if !cfg.InjectInvisibleLinks {
+		links = nil
+	}
+	for _, link := range links {
 		sb.WriteString(`<a href="`)
 		sb.WriteString(html.EscapeString(link))
 		sb.WriteString(`" rel="nofollow" style="display:none" aria-hidden="true" tabIndex="-1"></a>`)
