@@ -1676,6 +1676,24 @@ func init() {
 		}
 		return addColumns(db, dialect, stmt)
 	})
+
+	// The fingerprint checks read user_mitigations by "fingerprint = ? OR
+	// ja4h = ?". The primary key (fingerprint, ja4h) serves only the first
+	// half, so every check scanned the table for the second. And the prune of
+	// lapsed address shuns reads ip_mitigations by expires_at, which nothing
+	// indexed. Both are new indexes rather than edits to the migrations that
+	// made the tables, which have shipped.
+	Register(71, "mitigation_lookup_indexes", func(db *sql.DB, _ Dialect) error {
+		for _, stmt := range []string{
+			`CREATE INDEX IF NOT EXISTS idx_user_mitigations_ja4h ON user_mitigations(ja4h)`,
+			`CREATE INDEX IF NOT EXISTS idx_ip_mitigations_expires_at ON ip_mitigations(expires_at)`,
+		} {
+			if _, err := db.Exec(stmt); err != nil {
+				return fmt.Errorf("%s: %w", stmt, err)
+			}
+		}
+		return nil
+	})
 }
 
 // legacyObservedThreatTypes are the types only a control that let the request

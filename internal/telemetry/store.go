@@ -1142,7 +1142,7 @@ func initStore(databaseURL string, retentionDays int) error {
 	if cache, err := arc.NewARC[string, float64](cacheSizeFromEnv(envScoreCacheSize, cacheNameScore, defaultScoreCacheSize)); err == nil {
 		st.scoreCache = cache
 	}
-	if cache, err := arc.NewARC[enforcementKey, any](cacheSizeFromEnv(envUnmitigatedCacheSize, cacheNameUnmitigated, defaultUnmitigatedCacheSize)); err == nil {
+	if cache, err := arc.NewARC[enforcementKey, any](cacheSizeFromEnv(envUnmitigatedCacheSize, cacheNameUnmitigated, cmp.Or(td.MitigationCacheEntries, defaultUnmitigatedCacheSize))); err == nil {
 		st.unmitigatedCache = cache
 	}
 	if cache, err := arc.NewARC[string, any](cacheSizeFromEnv(envUserMitigatedCacheSize, cacheNameUserMitigated, defaultUserMitigatedCacheSize)); err == nil {

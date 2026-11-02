@@ -333,7 +333,7 @@ below-minimum values fall back to the default and log a warning.
 | `GATEON_TELEMETRY_REPUTATION_CACHE_SIZE` | IP reputation (sharded) | 100000 |
 | `GATEON_TELEMETRY_BEHAVIOR_CACHE_SIZE` | Per-IP behavior (sharded) | 10000 |
 | `GATEON_TELEMETRY_SCORE_CACHE_SIZE` | IP threat score | 10000 |
-| `GATEON_TELEMETRY_UNMITIGATED_CACHE_SIZE` | Unmitigated threats | 1000 |
+| `GATEON_TELEMETRY_UNMITIGATED_CACHE_SIZE` | Address shun answers in front of `ip_mitigations` | by profile: 4000 / 20000 / 100000 (minimal / standard / enterprise), about 500 bytes each |
 
 Sharded caches divide the configured total across shards (each shard floored at
 1 entry).

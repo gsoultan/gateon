@@ -104,6 +104,18 @@ type TierDefaults struct {
 	// trace archive. GATEON_THREAT_ARCHIVE_MAX_MB overrides it.
 	ThreatArchiveMaxBytes int64
 
+	// MitigationCacheEntries is how many enforcement answers -- "this address
+	// is shunned until", "this address is not shunned", a fingerprint release
+	// -- the telemetry store keeps in front of ip_mitigations. Every request
+	// whose address is not in it costs a database read, so a fixed 1,000 meant
+	// that any gateway seeing more than a thousand distinct clients in a
+	// mitigation epoch read SQL for most of them again and again. An entry,
+	// ghost lists included, is about 500 bytes. A flood of new addresses still
+	// costs one read per address; the block list (ADR 0058) is what keeps a
+	// block enforced through it. GATEON_TELEMETRY_UNMITIGATED_CACHE_SIZE
+	// overrides it.
+	MitigationCacheEntries int
+
 	// WAF default tier when WafConfig.Tier is empty.
 	WAFTier Tier
 
@@ -312,6 +324,7 @@ func DefaultsFor(tier Tier) TierDefaults {
 			TraceArchiveRetentionDays:  7,
 			TraceArchiveMaxBytes:       256 << 20, // 256 MiB
 			ThreatArchiveMaxBytes:      256 << 20, // 256 MiB
+			MitigationCacheEntries:     4_000,     // ~2 MiB
 			DBMaxOpenConns:             5,
 			DBMaxIdleConns:             5,
 			TelemetryIntervalSeconds:   30,
@@ -358,6 +371,7 @@ func DefaultsFor(tier Tier) TierDefaults {
 			TraceArchiveRetentionDays:  365,
 			TraceArchiveMaxBytes:       20 << 30, // 20 GiB
 			ThreatArchiveMaxBytes:      10 << 30, // 10 GiB
+			MitigationCacheEntries:     100_000,  // ~50 MiB
 			DBMaxOpenConns:             100,
 			DBMaxIdleConns:             50,
 			TelemetryIntervalSeconds:   2,
@@ -404,6 +418,7 @@ func DefaultsFor(tier Tier) TierDefaults {
 			TraceArchiveRetentionDays:  90,
 			TraceArchiveMaxBytes:       2 << 30, // 2 GiB
 			ThreatArchiveMaxBytes:      1 << 30, // 1 GiB
+			MitigationCacheEntries:     20_000,  // ~10 MiB
 			DBMaxOpenConns:             25,
 			DBMaxIdleConns:             25,
 			TelemetryIntervalSeconds:   5,
