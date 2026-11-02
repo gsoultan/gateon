@@ -26,6 +26,7 @@ import (
 	"github.com/gsoultan/gateon/internal/ebpf"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware"
+	"github.com/gsoultan/gateon/internal/server/handlers/sharedread"
 	"github.com/gsoultan/gateon/internal/server/mgmtorigin"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	"github.com/gsoultan/gateon/pkg/proxy"
@@ -466,8 +467,17 @@ func buildSystemInterfaces(ctx context.Context, svc GlobalAndAuthAPI) systemInte
 	return resp
 }
 
+// watchDiagnosticsFor is how long every watch stream shares one diagnostics
+// snapshot: under the five-second tick, so each tick sees a fresh one.
+const watchDiagnosticsFor = 4 * time.Second
+
 func registerDiagnosticHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
-	watched := newSharedDiagnostics(svc.GetDiagnostics)
+	// One snapshot per period for every open watch stream (ADR 0080). The
+	// one-shot GET is not served from it: an operator who has just acted
+	// reads the state as it is now.
+	watched := sharedread.New(watchDiagnosticsFor, func(ctx context.Context) (*gateonv1.GetDiagnosticsResponse, error) {
+		return svc.GetDiagnostics(ctx, &gateonv1.GetDiagnosticsRequest{})
+	})
 	mux.HandleFunc("GET /v1/diagnostics", func(w http.ResponseWriter, r *http.Request) {
 		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceDiagnostics) {
 			return
@@ -503,7 +513,7 @@ func registerDiagnosticHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Dep
 		for {
 			select {
 			case <-ticker.C:
-				res, err := watched.get(ctx)
+				res, err := watched.Get(ctx)
 				if err != nil {
 					return
 				}
