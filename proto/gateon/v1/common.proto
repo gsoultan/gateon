@@ -127,6 +127,13 @@ message LogConfig {
   // profile's default.
   bool security_threat_archive_enabled = 11;
   int32 security_threat_archive_max_size_mb = 12;
+  // Archive everything on retention: every log retention removes -- access
+  // logs (traces), security threats and audit entries -- is archived first,
+  // whatever the per-log switches above and audit.archive_on_retention say.
+  // It only ever adds an archive; with it off each per-log switch decides on
+  // its own. Off unless enabled, on every tier. GATEON_ARCHIVE_ON_RETENTION
+  // overrides it, and each per-log GATEON_*_ARCHIVE_ENABLED overrides both.
+  bool archive_on_retention = 13;
 }
 
 message TlsClientConfig {

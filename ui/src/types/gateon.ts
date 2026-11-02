@@ -301,6 +301,7 @@ export type LogConfig = {
   traceArchiveMaxSizeMb?: number;
   securityThreatArchiveEnabled?: boolean;
   securityThreatArchiveMaxSizeMb?: number;
+  archiveOnRetention?: boolean;
 };
 
 export type TransportConfig = {

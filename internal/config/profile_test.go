@@ -6,6 +6,8 @@ package config
 import (
 	"testing"
 	"time"
+
+	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
 func TestNormalizeTier(t *testing.T) {
@@ -121,5 +123,45 @@ func TestBlockLookupsHaveADeadlineOnEveryTier(t *testing.T) {
 		if d := DefaultsFor(tier).BlockLookupTimeout; d <= 0 || d > time.Second {
 			t.Errorf("%s: block lookup deadline %v; want set, and under a second", tier, d)
 		}
+	}
+}
+
+// log.archive_on_retention is off on every tier: turning it on spends disk on
+// three archives at once, and a default that changed would re-price every
+// existing install without anyone choosing it.
+func TestArchiveOnRetention_OffOnEveryTier(t *testing.T) {
+	for _, tier := range []Tier{TierMinimal, TierStandard, TierEnterprise} {
+		if DefaultsFor(tier).ArchiveOnRetention {
+			t.Errorf("tier %s archives everything by default; it must be off", tier)
+		}
+	}
+}
+
+// The environment beats the stored setting, which beats the tier, and a
+// malformed variable is ignored rather than read as either answer.
+func TestArchiveOnRetentionFor_Precedence(t *testing.T) {
+	on := &gateonv1.LogConfig{ArchiveOnRetention: true}
+	off := &gateonv1.LogConfig{}
+	cases := []struct {
+		name string
+		env  string
+		log  *gateonv1.LogConfig
+		want bool
+	}{
+		{"unset everywhere", "", off, false},
+		{"no log block", "", nil, false},
+		{"stored on", "", on, true},
+		{"env on beats stored off", "true", off, true},
+		{"env off beats stored on", "false", on, false},
+		{"malformed env is ignored, stored on", "yes please", on, true},
+		{"malformed env is ignored, stored off", "yes please", off, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Setenv(EnvArchiveOnRetention, c.env)
+			if got := ArchiveOnRetentionFor(c.log); got != c.want {
+				t.Fatalf("ArchiveOnRetentionFor = %v, want %v", got, c.want)
+			}
+		})
 	}
 }

@@ -62,7 +62,9 @@ func CurrentSettings() Settings {
 }
 
 func (s *Settings) applyConfig(l *gateonv1.LogConfig) {
-	s.Enabled = l.GetTraceArchiveEnabled()
+	// log.archive_on_retention turns every archive on; it never turns this
+	// one off. GATEON_TRACE_ARCHIVE_ENABLED, applied after, still can.
+	s.Enabled = l.GetTraceArchiveEnabled() || config.ArchiveOnRetentionFor(l)
 	if d := l.GetTraceArchiveRetentionDays(); d > 0 {
 		s.RetentionDays = int(d)
 	}
