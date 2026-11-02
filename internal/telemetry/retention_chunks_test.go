@@ -59,10 +59,10 @@ func TestSpentAddressShunsArePruned(t *testing.T) {
 			expires, release any
 			kept             bool
 		}{
-			{"192.0.2.1", statusMitigated, ago(autoShunMemory + time.Hour), nil, false}, // lapsed, forgotten by the ladder
-			{"192.0.2.2", statusMitigated, ago(time.Hour), nil, true},                   // lapsed, the ladder still reads it
-			{"192.0.2.3", statusMitigated, sqlUTC(now.Add(time.Hour)), nil, true},       // in force
-			{"192.0.2.4", statusMitigated, nil, nil, true},                              // an operator's block
+			{"192.0.2.1", statusMitigated, ago(autoShunMemory + time.Hour), nil, false},  // lapsed, forgotten by the ladder
+			{"192.0.2.2", statusMitigated, ago(time.Hour), nil, true},                    // lapsed, the ladder still reads it
+			{"192.0.2.3", statusMitigated, sqlUTC(now.Add(time.Hour)), nil, true},        // in force
+			{"192.0.2.4", statusMitigated, nil, nil, true},                               // an operator's block
 			{"192.0.2.5", statusUnmitigated, nil, ago(ipReleaseHold + time.Hour), false}, // release past its hold
 			{"192.0.2.6", statusUnmitigated, nil, ago(time.Hour), true},                  // release still held
 		}

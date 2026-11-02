@@ -60,7 +60,18 @@ type AuditManager struct {
 	stmtMu     sync.RWMutex
 	// retentionChunk overrides DefaultRetentionChunk; zero uses the default.
 	retentionChunk int
+
+	// The system-entry writer (writer.go). A manager built without it, as
+	// tests do, writes system entries at once.
+	queue      chan systemEntry
+	flushReq   chan chan struct{}
+	writerDone chan struct{}
+	// lastStamp is the newest timestamp handed to an entry; guarded by mu.
+	lastStamp time.Time
 }
+
+// insertAuditQuery stores one entry.
+const insertAuditQuery = "INSERT INTO audit_logs (id, user_id, action, resource, details, timestamp, ip_address, signature, previous_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
 
 // GenerateSignatureKey returns a cryptographically-random 256-bit key as a hex
 // string, suitable for HMAC-SHA256 audit signing. Used when signing is enabled
@@ -141,6 +152,7 @@ func Init(cfg *gateonv1.AuditConfig, databaseURL string) error {
 		}
 		manager.loadLastHash()
 		manager.prepareStatements()
+		manager.startWriter()
 		go manager.runRetentionTask()
 		warnIfNotRecording(cfg)
 	})
@@ -166,6 +178,9 @@ func warnIfNotRecording(cfg *gateonv1.AuditConfig) {
 func Stop() {
 	if manager != nil {
 		close(manager.stop)
+		if manager.writerDone != nil {
+			<-manager.writerDone // what is queued is stored before the database goes
+		}
 		manager.stmtMu.Lock()
 		if manager.stmtInsert != nil {
 			_ = manager.stmtInsert.Close()
@@ -178,8 +193,7 @@ func Stop() {
 func (m *AuditManager) prepareStatements() {
 	m.stmtMu.Lock()
 	defer m.stmtMu.Unlock()
-	query := m.dialect.Rebind("INSERT INTO audit_logs (id, user_id, action, resource, details, timestamp, ip_address, signature, previous_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
-	stmt, err := m.db.Prepare(query)
+	stmt, err := m.db.Prepare(m.dialect.Rebind(insertAuditQuery))
 	if err != nil {
 		logger.L.LogError("audit: failed to prepare insert statement", "error", err)
 		return
@@ -264,7 +278,7 @@ func (m *AuditManager) log(ctx context.Context, userID, action, resource, detail
 		Action:       db.SafeText(action),
 		Resource:     db.SafeText(resource),
 		Details:      db.SafeText(details),
-		Timestamp:    time.Now(),
+		Timestamp:    m.nextStamp(),
 		IPAddress:    db.SafeText(ip),
 		PreviousHash: m.lastHash,
 	}
@@ -296,8 +310,7 @@ func (m *AuditManager) log(ctx context.Context, userID, action, resource, detail
 		_, err = stmt.ExecContext(ctx, entry.ID, entry.UserID, entry.Action, entry.Resource, entry.Details, entry.Timestamp, entry.IPAddress, entry.Signature, entry.PreviousHash)
 	} else {
 		// Fallback to unnamed statement if preparation failed
-		query := m.dialect.Rebind("INSERT INTO audit_logs (id, user_id, action, resource, details, timestamp, ip_address, signature, previous_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
-		_, err = m.db.ExecContext(ctx, query, entry.ID, entry.UserID, entry.Action, entry.Resource, entry.Details, entry.Timestamp, entry.IPAddress, entry.Signature, entry.PreviousHash)
+		_, err = m.db.ExecContext(ctx, m.dialect.Rebind(insertAuditQuery), entry.ID, entry.UserID, entry.Action, entry.Resource, entry.Details, entry.Timestamp, entry.IPAddress, entry.Signature, entry.PreviousHash)
 	}
 
 	if err != nil {

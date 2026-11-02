@@ -330,6 +330,9 @@ func main() {
 
 	uiHandler := getUIHandler(*uiPath)
 	server.Run(ctx, s, uiHandler)
+	// The audit writer stores the system entries still queued before the
+	// process ends; nothing stopped it before, and no entry was queued then.
+	audit.Stop()
 }
 
 func buildUIAssets(uiPath *string) {

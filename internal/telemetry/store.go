@@ -2848,8 +2848,9 @@ func (s *pathStatsStore) processThreat(st *SecurityThreat) {
 	escalateMitigation(st)
 	enrichThreatOrigin(st)
 
-	// Log to audit trail
-	audit.Log(context.Background(), "system", st.Type, st.RequestURI, fmt.Sprintf("Severity: %s, Details: %s, Action: %s", st.Severity, st.Details, st.ActionTaken), st.SourceIP)
+	// Log to audit trail, without waiting for the row: this is the telemetry
+	// writer, and under attack an INSERT per threat stalled it.
+	audit.LogSystem(st.Type, st.RequestURI, fmt.Sprintf("Severity: %s, Details: %s, Action: %s", st.Severity, st.Details, st.ActionTaken), st.SourceIP)
 
 	// Alerting and Broadcasting
 	notifyThreat(st)
