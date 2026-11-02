@@ -19,6 +19,7 @@ import (
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware/kind"
+	"github.com/gsoultan/gateon/internal/request"
 	"github.com/kaptinlin/jsonschema"
 )
 
@@ -185,6 +186,19 @@ func validateSchemaBody(w http.ResponseWriter, r *http.Request, schema *jsonsche
 	if err := json.Unmarshal(body, &input); err != nil {
 		logger.SecurityEvent("schema_validation_failed", r, "invalid JSON: "+err.Error())
 		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return false
+	}
+	// Decoding into `any` keeps the last of two colliding keys, so
+	// {"role":"admin","role":"user"} validated as "user" while a backend whose
+	// parser keeps the first (simdjson's find_field, several streaming
+	// decoders) acted on "admin", and {"role":"user","Role":"admin"} passed as
+	// an unconstrained extra property while a Go backend decoding into a
+	// struct matched "Role" case-insensitively and took "admin". The schema
+	// vouched for a document the backend never read; a body with colliding
+	// keys has no single reading, so it is refused.
+	if _, dup, err := request.AmbiguousJSONKey(body, false); dup || err != nil {
+		logger.SecurityEvent("schema_validation_failed", r, "ambiguous duplicate JSON key")
+		http.Error(w, "Invalid JSON: ambiguous duplicate keys", http.StatusBadRequest)
 		return false
 	}
 	if result := schema.Validate(input); !result.IsValid() {
