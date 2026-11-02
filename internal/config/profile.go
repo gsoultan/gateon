@@ -35,9 +35,17 @@ type TierDefaults struct {
 	CorrelationMaxSources   int
 	CorrelationMaxPerSource int
 
-	// Database connection pool.
+	// Database connection pool, per store: the telemetry, auth, audit and WAF
+	// stores each open their own.
 	DBMaxOpenConns int
 	DBMaxIdleConns int
+	// SQLiteMaxOpenConns is each store's pool on SQLite instead, where the
+	// file admits one writer at a time and reads scale with cores, not with
+	// connections. Each connection keeps its own page cache of up to ~8 MiB,
+	// so the Postgres sizes -- four stores at 25 connections on standard --
+	// could pin 800 MiB of cache on a 2 GB host while queueing on one write
+	// lock. GATEON_DB_SQLITE_MAX_OPEN_CONNS overrides it.
+	SQLiteMaxOpenConns int
 
 	// Telemetry.
 	TelemetryIntervalSeconds int
@@ -339,6 +347,7 @@ func DefaultsFor(tier Tier) TierDefaults {
 			PathStatsMaxRowsPerDay:     5_000,
 			DBMaxOpenConns:             5,
 			DBMaxIdleConns:             5,
+			SQLiteMaxOpenConns:         2,
 			TelemetryIntervalSeconds:   30,
 			DashboardAggregateInterval: 2 * time.Minute,
 			FlushIntervalSeconds:       10,
@@ -388,6 +397,7 @@ func DefaultsFor(tier Tier) TierDefaults {
 			PathStatsMaxRowsPerDay:     200_000,
 			DBMaxOpenConns:             100,
 			DBMaxIdleConns:             50,
+			SQLiteMaxOpenConns:         8,
 			TelemetryIntervalSeconds:   2,
 			DashboardAggregateInterval: 30 * time.Second,
 			FlushIntervalSeconds:       1,
@@ -437,6 +447,7 @@ func DefaultsFor(tier Tier) TierDefaults {
 			PathStatsMaxRowsPerDay:     20_000,
 			DBMaxOpenConns:             25,
 			DBMaxIdleConns:             25,
+			SQLiteMaxOpenConns:         4,
 			TelemetryIntervalSeconds:   5,
 			DashboardAggregateInterval: time.Minute,
 			FlushIntervalSeconds:       2,

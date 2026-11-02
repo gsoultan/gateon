@@ -1203,8 +1203,9 @@ func (s *pathStatsStore) syncTierSettings() {
 	}
 
 	// Update DB pool limits
-	s.db.SetMaxOpenConns(td.DBMaxOpenConns)
-	s.db.SetMaxIdleConns(td.DBMaxIdleConns)
+	open, idle := db.PoolLimits(s.dialect.Driver, td)
+	s.db.SetMaxOpenConns(open)
+	s.db.SetMaxIdleConns(idle)
 
 	// Update trace store toggle
 	s.traceStoreEnabled.Store(td.TraceStoreEnabled)
@@ -1364,15 +1365,12 @@ type queryExecutor interface {
 	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 }
 
-func (s *pathStatsStore) getExecutor(ctx context.Context) (queryExecutor, func()) {
-	if s.dialect.Driver != db.DriverPostgres {
-		return s.db, func() {}
-	}
-	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
-	if err != nil {
-		return s.db, func() {}
-	}
-	return tx, func() { _ = tx.Rollback() }
+// getExecutor is what a dashboard read queries. It used to open a read-only
+// transaction on Postgres, which cost every read a BEGIN and a ROLLBACK round
+// trip around its one statement: every caller runs exactly one query, so the
+// transaction isolated nothing. The pool answers directly on both engines.
+func (s *pathStatsStore) getExecutor(context.Context) (queryExecutor, func()) {
+	return s.db, func() {}
 }
 
 func (s *pathStatsStore) dailyResetLoop() {

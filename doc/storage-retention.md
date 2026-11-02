@@ -327,6 +327,14 @@ the oldest files go first; the file just written is always kept. Gateways that
 share one database each run the prune, so two of them can archive the same
 chunk and a threat can then appear in two files; none is lost. See ADR 0066.
 
+## Connection pools
+
+Each of the four stores (telemetry, auth, audit, WAF) opens its own pool. On
+Postgres a pool holds the tier's `DBMaxOpenConns` (5 / 25 / 100). On SQLite,
+where the file admits one writer at a time and every connection keeps its own
+page cache, a pool holds 2 / 4 / 8 connections instead;
+`GATEON_DB_SQLITE_MAX_OPEN_CONNS` overrides it for every store.
+
 ## Path statistics budget
 
 `path_stats` keeps a row per day, host and path, and the path is whatever the
