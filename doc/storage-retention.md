@@ -39,7 +39,13 @@ Categories left at `0` fall back to the global default. The prune loop:
    entries are not deleted here: the audit manager owns them, applies the
    shorter of `audit.retention_days` and `log.audit_log_retention_days`, and
    archives each chunk of 5,000 first when `audit.archive_on_retention` is on
-   (ADR 0066).
+   (ADR 0066). The other tables go 5,000 rows a statement, each its own
+   transaction, so on SQLite the telemetry writer's flushes run between the
+   chunks instead of waiting behind one DELETE over the whole backlog.
+   `user_mitigations` past the fingerprint TTL and hold, and `ip_mitigations`
+   rows nothing reads any more -- a shun that lapsed more than a day ago and a
+   release past its day's hold -- are pruned the same way. An operator's block
+   with no end is never pruned.
 2. `DeleteRange`s expired Pebble trace keys, then **compacts the pruned key
    range** so the space is physically reclaimed instead of left as tombstones.
 3. Reclaims SQLite disk via `PRAGMA incremental_vacuum` (enabled by
@@ -320,6 +326,20 @@ An environment variable beats the global config
 the oldest files go first; the file just written is always kept. Gateways that
 share one database each run the prune, so two of them can archive the same
 chunk and a threat can then appear in two files; none is lost. See ADR 0066.
+
+## Path statistics budget
+
+`path_stats` keeps a row per day, host and path, and the path is whatever the
+client asked for. A day keeps at most a set number of paths per host and of
+rows overall; past them, a host's new paths are counted in one `other` row,
+and past the day's ceiling every new host and path is counted in an
+`other`/`other` row. No request goes uncounted, so the totals stay right. After
+a restart the day's budget is seeded from the rows already stored.
+
+| Env var | Default (minimal / standard / enterprise) |
+|---------|------------------------------------------|
+| `GATEON_PATH_STATS_MAX_PATHS_PER_HOST` | 500 / 2000 / 10000 |
+| `GATEON_PATH_STATS_MAX_ROWS_PER_DAY` | 5000 / 20000 / 200000 |
 
 ## In-memory cache bounds
 

@@ -116,6 +116,16 @@ type TierDefaults struct {
 	// overrides it.
 	MitigationCacheEntries int
 
+	// PathStatsMaxPathsPerHost and PathStatsMaxRowsPerDay bound the rows
+	// path_stats gains in a day (internal/telemetry/pathbudget): past them a
+	// host's new paths are counted in one "other" row, and past the day's
+	// ceiling every new host and path is. path_stats had a row per distinct
+	// path the clients asked for, so a scanner grew it by a row a request.
+	// GATEON_PATH_STATS_MAX_PATHS_PER_HOST and
+	// GATEON_PATH_STATS_MAX_ROWS_PER_DAY override them.
+	PathStatsMaxPathsPerHost int
+	PathStatsMaxRowsPerDay   int
+
 	// WAF default tier when WafConfig.Tier is empty.
 	WAFTier Tier
 
@@ -325,6 +335,8 @@ func DefaultsFor(tier Tier) TierDefaults {
 			TraceArchiveMaxBytes:       256 << 20, // 256 MiB
 			ThreatArchiveMaxBytes:      256 << 20, // 256 MiB
 			MitigationCacheEntries:     4_000,     // ~2 MiB
+			PathStatsMaxPathsPerHost:   500,
+			PathStatsMaxRowsPerDay:     5_000,
 			DBMaxOpenConns:             5,
 			DBMaxIdleConns:             5,
 			TelemetryIntervalSeconds:   30,
@@ -372,6 +384,8 @@ func DefaultsFor(tier Tier) TierDefaults {
 			TraceArchiveMaxBytes:       20 << 30, // 20 GiB
 			ThreatArchiveMaxBytes:      10 << 30, // 10 GiB
 			MitigationCacheEntries:     100_000,  // ~50 MiB
+			PathStatsMaxPathsPerHost:   10_000,
+			PathStatsMaxRowsPerDay:     200_000,
 			DBMaxOpenConns:             100,
 			DBMaxIdleConns:             50,
 			TelemetryIntervalSeconds:   2,
@@ -419,6 +433,8 @@ func DefaultsFor(tier Tier) TierDefaults {
 			TraceArchiveMaxBytes:       2 << 30, // 2 GiB
 			ThreatArchiveMaxBytes:      1 << 30, // 1 GiB
 			MitigationCacheEntries:     20_000,  // ~10 MiB
+			PathStatsMaxPathsPerHost:   2_000,
+			PathStatsMaxRowsPerDay:     20_000,
 			DBMaxOpenConns:             25,
 			DBMaxIdleConns:             25,
 			TelemetryIntervalSeconds:   5,
