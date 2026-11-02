@@ -48,6 +48,9 @@ type Factory struct {
 	// send a management one (ADR 0051). Nil recognises only the session cookie
 	// and API tokens.
 	sessions TokenVerifier
+	// turnstileVerifyURL replaces Cloudflare's siteverify endpoint. Only a
+	// test sets it, to stand in for Cloudflare; "" is Cloudflare.
+	turnstileVerifyURL string
 }
 
 func NewFactory(redisClient redis.Client, globalStore config.GlobalConfigStore, ebpfManager ebpf.Manager, reputation *reputation.IPReputationStore, dataDir string) *Factory {
@@ -345,7 +348,7 @@ func (f *Factory) Create(m *gateonv1.Middleware, routeID string) (Middleware, er
 	case "honeypot":
 		return security.NewHoneypot(cfg), nil
 	case "turnstile":
-		return challenge.NewTurnstile(cfg)
+		return challenge.NewTurnstile(cfg, f.turnstileVerifyURL)
 	case "geoip":
 		return security.NewGeoIP(cfg)
 	case "hmac":

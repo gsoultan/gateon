@@ -39,13 +39,19 @@ import (
 
 const (
 	effectsRegistryPath = "internal/middleware/dashboard_key_effects_test.go"
-	// effectsRegistryMorePath holds the rows that proved the keys the baseline
-	// listed as unproven; the same table, kept apart so the first file stays
-	// readable.
-	effectsRegistryMorePath = "internal/middleware/dashboard_key_effects_more_test.go"
 	effectsBaselinePath = "scripts/checkconfig/effects-baseline.txt"
 	editorsDir          = "ui/src/components/MiddlewareConfig"
 )
+
+// effectsRegistryMorePaths hold the rows that proved the keys the baseline
+// listed as unproven; the same table, kept apart so the first file stays
+// readable. The proofs file holds the rows whose effect is outside the one
+// response: at an identity provider, in Redis, a log, a metric or a file, or
+// over time.
+var effectsRegistryMorePaths = []string{
+	"internal/middleware/dashboard_key_effects_more_test.go",
+	"internal/middleware/dashboard_key_effects_proofs_test.go",
+}
 
 // dashboardKeyRE finds the key in updateConfig("key", ...) and toggle("key",
 // ...), the two ways the editors write one, across line breaks.
@@ -141,12 +147,14 @@ func checkEffects(idx testIndex) bool {
 	if err != nil {
 		fatalf("reading the effect registry: %v", err)
 	}
-	more, err := effectRows(effectsRegistryMorePath)
-	if err != nil {
-		fatalf("reading the effect registry: %v", err)
-	}
-	for k, inert := range more {
-		rows[k] = rows[k] || inert
+	for _, path := range effectsRegistryMorePaths {
+		more, err := effectRows(path)
+		if err != nil {
+			fatalf("reading the effect registry: %v", err)
+		}
+		for k, inert := range more {
+			rows[k] = rows[k] || inert
+		}
 	}
 	notes, err := loadNotedBaseline(effectsBaselinePath)
 	if err != nil {
