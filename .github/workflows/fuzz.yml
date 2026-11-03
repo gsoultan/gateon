@@ -1,0 +1,165 @@
+name: fuzz
+
+# The per-PR suite runs each fuzz target's seed corpus once, as an ordinary
+# test, which proves the seeds still pass and finds nothing new. Finding new
+# inputs takes hours of mutation, and the four targets here guard parsers that
+# take bytes a hostile client wrote: the GraphQL firewall and its analysis, the
+# multipart upload scanner, and the Content-Type boundary parse that runs
+# before any size bound applies. An hour each, once a week, is enough to keep
+# the corpus growing without taxing the queue.
+#
+# The corpus is the point of running weekly rather than once: each run starts
+# from everything the previous runs found, so an hour this week continues last
+# week's hour instead of repeating it. It is carried as an artifact of the last
+# completed run rather than in actions/cache, because the cache evicts an entry
+# nobody has read for seven days and a weekly schedule lands right on that edge.
+on:
+  schedule:
+    - cron: "17 2 * * 0" # Sunday 02:17 UTC; off the hour, when the queue is quiet
+  workflow_dispatch:
+    inputs:
+      fuzztime:
+        description: "How long to fuzz each target (go test -fuzztime, e.g. 10m or 1h)"
+        required: false
+        default: "1h"
+
+permissions:
+  contents: read
+  actions: read # to download the previous run's corpus
+
+# Two runs at once would each start from the same corpus and the second to
+# finish would discard what the first found.
+concurrency:
+  group: fuzz
+  cancel-in-progress: false
+
+env:
+  # See extended.yml: <asm/*.h> lives under the multiarch triplet.
+  CPATH: /usr/include/x86_64-linux-gnu:/usr/include/aarch64-linux-gnu
+
+jobs:
+  fuzz:
+    name: ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    # An hour of fuzzing, plus setup and generation, plus slack for the
+    # fuzzer's final minimisation of a crasher.
+    timeout-minutes: 100
+    strategy:
+      # One target finding a crasher says nothing about the others; let them
+      # all finish so every corpus is saved.
+      fail-fast: false
+      matrix:
+        include:
+          - { pkg: ./internal/middleware/security, target: FuzzGraphQLFirewall }
+          - { pkg: ./internal/middleware/security, target: FuzzGraphQLAnalysis }
+          - { pkg: ./internal/middleware/security, target: FuzzFileSecurityMultipart }
+          - { pkg: ./internal/middleware/security, target: FuzzMultipartBoundary }
+    env:
+      PKG: ${{ matrix.pkg }}
+      TARGET: ${{ matrix.target }}
+      FUZZTIME: ${{ inputs.fuzztime || '1h' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      # The input reaches a shell command; accept only a go duration or an
+      # iteration count, never anything a shell would interpret.
+      - name: Validate fuzz time
+        run: |
+          if ! printf '%s' "$FUZZTIME" | grep -Eq '^[0-9]+(s|m|h|x)$'; then
+            echo "::error::fuzztime must look like 30s, 10m, 1h or 5000x, got '${FUZZTIME}'"
+            exit 1
+          fi
+
+      # cache: false keeps the fuzz corpus, which lives under GOCACHE, out of
+      # the build cache the per-PR jobs restore, and keeps their build cache
+      # out of this job's corpus.
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          check-latest: true
+          cache: false
+
+      - name: Install eBPF build toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang llvm libbpf-dev libelf-dev linux-libc-dev
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      # The security package imports the generated protobuf types and, through
+      # the middleware it shares a binary with, the bpf2go loader; both are
+      # gitignored, so a fresh checkout cannot compile the target without this.
+      - name: Generate all artifacts
+        run: |
+          bun install --frozen-lockfile --cwd ui
+          go install tool
+          PATH=$PATH:$(go env GOPATH)/bin:$(pwd)/ui/node_modules/.bin buf generate
+          go generate ./...
+
+      - name: Locate the corpus
+        id: corpus
+        run: echo "dir=$(go env GOCACHE)/fuzz/github.com/gsoultan/gateon/${PKG#./}/${TARGET}" >> "$GITHUB_OUTPUT"
+
+      # The most recent completed run of this workflow on main, whatever its
+      # outcome: a run that found a crasher still grew the other corpora, and
+      # its own corpus is uploaded before the job fails. No previous run, or
+      # one that predates this target, starts from the seeds alone.
+      - name: Restore the previous corpus
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DIR: ${{ steps.corpus.outputs.dir }}
+        run: |
+          mkdir -p "$DIR"
+          prev="$(gh run list -R "$GITHUB_REPOSITORY" --workflow fuzz.yml --branch main \
+            --status completed --limit 1 --json databaseId -q '.[0].databaseId // empty')"
+          if [ -n "$prev" ] && gh run download "$prev" -R "$GITHUB_REPOSITORY" -n "corpus-${TARGET}" -D "$DIR"; then
+            echo "restored $(find "$DIR" -type f | wc -l) corpus entries from run ${prev}"
+          else
+            echo "no previous corpus for ${TARGET}; starting from the seeds"
+          fi
+
+      - name: Fuzz
+        run: make fuzz FUZZ_PKG="$PKG" FUZZ="$TARGET" FUZZTIME="$FUZZTIME"
+
+      # Saved whether or not the fuzzer failed, so next week continues from
+      # here. Ninety days outlives any gap in the schedule.
+      - name: Save the corpus
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: corpus-${{ matrix.target }}
+          path: ${{ steps.corpus.outputs.dir }}
+          retention-days: 90
+          if-no-files-found: ignore
+
+      # go test writes the minimised failing input here. It is the whole
+      # reproduction: committed under the same path it becomes a seed that
+      # every `go test` runs, which is the regression test for the fix.
+      - name: Keep the crasher
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: crasher-${{ matrix.target }}
+          path: ${{ matrix.pkg }}/testdata/fuzz/${{ matrix.target }}/
+          retention-days: 90
+          if-no-files-found: ignore
+
+      - name: How to reproduce
+        if: failure()
+        run: |
+          {
+            echo "### ${TARGET} found a failing input"
+            echo
+            echo "Download the \`crasher-${TARGET}\` artifact from this run and unpack it into"
+            echo "\`${PKG#./}/testdata/fuzz/${TARGET}/\`, then:"
+            echo
+            echo '```'
+            echo "go test -run '${TARGET}/' ${PKG}"
+            echo '```'
+            echo
+            echo "Commit the file with the fix: it is the test that fails before and passes after."
+          } >> "$GITHUB_STEP_SUMMARY"

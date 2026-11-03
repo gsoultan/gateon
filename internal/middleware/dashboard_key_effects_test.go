@@ -4,6 +4,7 @@
 package middleware
 
 import (
+	"bytes"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -20,6 +21,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
@@ -50,6 +52,20 @@ type keyEffect struct {
 	freshBackend func() http.HandlerFunc // a new backend per build, for one that counts
 	header       string                  // a response header to record as well
 	inert        string                  // the finding that says it does nothing
+
+	// For keys whose effect is not in one plain response (the rows in
+	// dashboard_key_effects_proofs_test.go).
+	route     string                                                            // a fixed route name, for a probe that must know it; "" numbers a fresh one
+	setup     func(t *testing.T, f *Factory)                                    // gives the factory what the key reaches: a Redis, a verify endpoint
+	next      func(t *testing.T, prev *httptest.ResponseRecorder) *http.Request // the probes after the first, given the response before
+	hold      func(t *testing.T) *http.Request                                  // sent first and held at the backend while the probes are served
+	pause     time.Duration                                                     // between probes, on a fake clock: the row runs in a synctest bubble
+	fakeClock bool                                                              // run in a synctest bubble with no pause, so a delay costs no wall time
+	view      func(rec *httptest.ResponseRecorder, took time.Duration) string   // what to record of a response; nil records the default
+	measure   func(t *testing.T) float64                                        // read before and after the probes; the change is recorded
+	logged    string                                                            // record how many log lines carry this
+	refusable bool                                                              // a refused build is an outcome to compare, not a failure
+	writeCap  int                                                               // the response writer fails past this many bytes, as a closed connection does
 }
 
 // effectBuild numbers the registry's builds. Each build is its own route, so
@@ -110,6 +126,13 @@ func TestDashboardKeysChangeWhatTheGatewayDoes(t *testing.T) {
 	for _, row := range dashboardKeyEffects {
 		t.Run(row.mwType+"/"+row.key, func(t *testing.T) {
 			withA, withB := observe(t, row, row.a), observe(t, row, row.b)
+			// A record that differs between two identical builds -- a random
+			// challenge, a time -- would differ between a and b whatever the
+			// key did, and prove nothing.
+			if again := observe(t, row, row.a); again != withA {
+				t.Fatalf("two builds with %s=%q answer the probe differently, so a difference proves nothing:\n  %s\n  %s",
+					row.key, row.a, withA, again)
+			}
 			switch differs := withA != withB; {
 			case row.inert == "" && !differs:
 				t.Errorf("%s=%q and %s=%q answer the same probe identically:\n  %s\nthe setting has no effect",
@@ -126,15 +149,41 @@ func TestDashboardKeysChangeWhatTheGatewayDoes(t *testing.T) {
 // records what the probe gets back, and what reached the backend.
 func observe(t *testing.T, row keyEffect, value string) string {
 	t.Helper()
+	if row.pause <= 0 && !row.fakeClock {
+		return observeBuild(t, row, value)
+	}
+	// A time-based key is compared on a fake clock: the bubble's time moves
+	// only when every goroutine in it is blocked, so a pause or a delay is
+	// exact and costs no wall time.
+	var out string
+	synctest.Test(t, func(t *testing.T) { out = observeBuild(t, row, value) })
+	return out
+}
+
+func observeBuild(t *testing.T, row keyEffect, value string) string {
+	t.Helper()
 	cfg := maps.Clone(row.base)
 	if cfg == nil {
 		cfg = map[string]string{}
 	}
 	cfg[row.key] = value
-	route := fmt.Sprintf("effect-route-%d", effectBuild.Add(1))
-	mw, err := NewFactory(nil, nil, nil, nil, t.TempDir()).Create(
-		&gateonv1.Middleware{Id: "effect", Type: row.mwType, Config: cfg}, route)
+	route := row.route
+	if route == "" {
+		route = fmt.Sprintf("effect-route-%d", effectBuild.Add(1))
+	}
+	f := NewFactory(nil, nil, nil, nil, t.TempDir())
+	if row.setup != nil {
+		row.setup(t, f)
+	}
+	var logs *bytes.Buffer
+	if row.logged != "" {
+		logs = captureLog(t)
+	}
+	mw, err := f.Create(&gateonv1.Middleware{Id: "effect", Type: row.mwType, Config: cfg}, route)
 	if err != nil {
+		if row.refusable {
+			return "build refused: " + err.Error()
+		}
 		t.Fatalf("build %s with %s=%q: %v", row.mwType, row.key, value, err)
 	}
 	backend := row.backend
@@ -144,16 +193,122 @@ func observe(t *testing.T, row keyEffect, value string) string {
 	if backend == nil {
 		backend = echoBackend
 	}
-	h := mw(backend)
-	var out []string
-	for range max(row.requests, 1) {
-		rec := httptest.NewRecorder()
-		h.ServeHTTP(rec, row.probe(t))
-		out = append(out, fmt.Sprintf("%d enc=%q acao=%q hdr=%q body=%q", rec.Code,
-			rec.Header().Get("Content-Encoding"), rec.Header().Get("Access-Control-Allow-Origin"),
-			headerOf(rec, row.header), rec.Body.String()))
+	var before float64
+	if row.measure != nil {
+		before = row.measure(t)
+	}
+	out := serveProbes(t, row, mw, backend)
+	if row.measure != nil {
+		out = append(out, fmt.Sprintf("measured +%v", row.measure(t)-before))
+	}
+	if logs != nil {
+		out = append(out, fmt.Sprintf("logged %q x%d", row.logged, strings.Count(logs.String(), row.logged)))
 	}
 	return strings.Join(out, " | ")
+}
+
+// serveProbes serves the row's probes through mw and records each response.
+func serveProbes(t *testing.T, row keyEffect, mw Middleware, backend http.HandlerFunc) []string {
+	t.Helper()
+	var hold *heldRequest
+	if row.hold != nil {
+		hold = newHeldRequest(backend)
+		backend = hold.backend
+	}
+	h := mw(backend)
+	if hold != nil {
+		hold.send(t, h, row.hold(t))
+		defer hold.release()
+	}
+	var out []string
+	var prev *httptest.ResponseRecorder
+	for i := range max(row.requests, 1) {
+		req := row.probe
+		if i > 0 && row.next != nil {
+			req = func(t *testing.T) *http.Request { return row.next(t, prev) }
+		}
+		if i > 0 && row.pause > 0 {
+			time.Sleep(row.pause) // on the bubble's clock
+		}
+		probe := req(t)
+		rec := httptest.NewRecorder()
+		var w http.ResponseWriter = rec
+		if row.writeCap > 0 {
+			w = &cappedWriter{ResponseRecorder: rec, left: row.writeCap}
+		}
+		start := time.Now()
+		h.ServeHTTP(w, probe)
+		took := time.Since(start)
+		if row.view != nil {
+			out = append(out, row.view(rec, took))
+		} else {
+			out = append(out, fmt.Sprintf("%d enc=%q acao=%q hdr=%q body=%q", rec.Code,
+				rec.Header().Get("Content-Encoding"), rec.Header().Get("Access-Control-Allow-Origin"),
+				headerOf(rec, row.header), rec.Body.String()))
+		}
+		prev = rec
+	}
+	return out
+}
+
+// holdHeader marks the request a heldRequest parks at the backend.
+const holdHeader = "X-Effect-Hold"
+
+// heldRequest parks one request at the backend, so the probes are served
+// through the same chain while it is in flight.
+type heldRequest struct {
+	entered, unblock, done chan struct{}
+	backend                http.HandlerFunc
+}
+
+func newHeldRequest(next http.HandlerFunc) *heldRequest {
+	h := &heldRequest{entered: make(chan struct{}), unblock: make(chan struct{}), done: make(chan struct{})}
+	h.backend = func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get(holdHeader) != "" {
+			close(h.entered)
+			<-h.unblock
+		}
+		next(w, r)
+	}
+	return h
+}
+
+// send serves r through chain in the background and returns once it is
+// parked at the backend.
+func (h *heldRequest) send(t *testing.T, chain http.Handler, r *http.Request) {
+	t.Helper()
+	r.Header.Set(holdHeader, "1")
+	go func() {
+		defer close(h.done)
+		chain.ServeHTTP(httptest.NewRecorder(), r)
+	}()
+	select {
+	case <-h.entered:
+	case <-h.done:
+		t.Fatalf("the held request was answered without reaching the backend")
+	case <-time.After(10 * time.Second):
+		t.Fatalf("the held request did not reach the backend")
+	}
+}
+
+func (h *heldRequest) release() {
+	close(h.unblock)
+	<-h.done
+}
+
+// cappedWriter fails a write past its budget, as a closed connection does, so
+// a response that never ends ends.
+type cappedWriter struct {
+	*httptest.ResponseRecorder
+	left int
+}
+
+func (w *cappedWriter) Write(p []byte) (int, error) {
+	if len(p) > w.left {
+		return 0, io.ErrClosedPipe
+	}
+	w.left -= len(p)
+	return w.ResponseRecorder.Write(p)
 }
 
 // echoBackend answers with the client-certificate header it was given.

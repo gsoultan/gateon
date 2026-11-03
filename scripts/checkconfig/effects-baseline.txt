@@ -15,55 +15,6 @@
 #                                factory that dropped the key would pass it.
 #
 # Format: type/key  # note
-
-accesslog/route  # unproven
-auth/allow_any_audience  # unproven: it matters only for a key-set validator (jwks_url, oidc), which needs a provider to fetch keys from
-auth/client_id  # unproven
-auth/client_secret  # unproven
-auth/enable_revocation  # proven by TestRevokedTokenIsRefusedByEveryTypeThatOffersRevocation (needs Redis, which the registry harness does not run)
-auth/introspection_url  # unproven
-auth/jwks_url  # unproven
-auth/revocation_prefix  # proven by TestRevokedTokenIsRefusedByEveryTypeThatOffersRevocation (needs Redis, which the registry harness does not run)
-auth/token_type_hint  # unproven
-bot_management/challenge_timeout  # unproven
-bot_management/enable_browser_integrity  # unproven
-bot_management/enable_js_challenge  # unproven
-bot_management/secret_key  # unproven
-cache/max_entries  # unproven: the memory cache bounds each of its 16 shards, so a small bound shows only for keys that share a shard
-cache/storage  # unproven
-cache/ttl_seconds  # unproven: its effect is over time; the dashboard offers no value below 1 second
-circuit_breaker/sleep_window  # unproven: time-based; TestFailedProbeReopensForAFullSleepWindow builds the config struct, not through the factory
-circuit_breaker/window_size  # unproven: time-based; TestBreakerJudgesAWindowOnlyOnceItHoldsMinRequests builds the config struct, not through the factory (NEW-10: passing 0 here fails no test)
-deception/enable_troll_response  # unproven: it answers only a client whose reputation is already low, with a stream that does not end
-entropy/threshold  # unproven: editor added for NEW-8
-geoip/allow_countries  # unproven
-geoip/db_path  # unproven
-geoip/deny_countries  # unproven
-inflightreq/amount  # unproven
-inflightreq/per_ip  # unproven: differs only under concurrent requests; TestInflightPerAddressIsPerAddress builds the middleware directly
-metrics/route  # unproven
-oidc/client_id  # unproven
-oidc/client_secret  # unproven
-oidc/issuer  # unproven
-oidc/redirect_url  # unproven
-oidc/scopes  # unproven
-pow/difficulty  # unproven: editor added for NEW-8
-pow/secret  # unproven: editor added for NEW-8
-pow/threshold  # unproven: editor added for NEW-8
-ratelimit/requests_per_minute  # unproven: its effect is over time; the burst row proves the limiter
-ratelimit/storage  # unproven
-tarpit/base_delay  # unproven: editor added for NEW-8
-tarpit/max_delay  # unproven: editor added for NEW-8
-tarpit/threshold  # unproven: editor added for NEW-8
-tls_binding/cookie_name  # unproven: the effect is a Set-Cookie on a TLS session; TestTLSBindingBindsTheIssuedSessionToTheClientCertificate builds the middleware directly
-tls_binding/secret  # unproven
-turnstile/header  # unproven
-turnstile/secret  # unproven
-waf/anomaly_threshold  # unproven: no probe found that one threshold refuses and another passes
-waf/app_profiles  # unproven
-waf/audit_log_path  # unproven
-waf/audit_log_relevant_only  # unproven
-waf/ip_reputation  # unproven
-waf/paranoia_level  # unproven: no probe found that one level refuses and another passes
-waf/protocol  # unproven: WAF category switch, real since ADR 0044; no probe in the registry yet
-xfcc/forward_uri  # unproven
+#
+# Empty since 2026-11-02: every key the dashboard writes has a row. A line
+# added here is new debt, and says why.

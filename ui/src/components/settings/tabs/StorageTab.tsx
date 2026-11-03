@@ -4,6 +4,7 @@
 import { Stack } from "@mantine/core";
 import { TraceArchiveSettingsCard } from "../../Traces/TraceArchiveSettingsCard";
 import { SettingsEntry } from "../AppliesChip";
+import { ArchiveOnRetentionCard } from "../ArchiveOnRetentionCard";
 import { AuditSettingsCard } from "../AuditSettingsCard";
 import { LoggingSection } from "../gateway/LoggingSection";
 import { ThreatArchiveSettingsCard } from "../ThreatArchiveSettingsCard";
@@ -11,7 +12,8 @@ import { SectionCard } from "./SectionCard";
 import type { SettingsTabProps } from "./settingsState";
 
 // What the gateway writes down and for how long: the log itself, the
-// retention of each kind of record, the two archives and the audit log.
+// retention of each kind of record, the switch that archives all of them,
+// the two archives and the audit log.
 export default function StorageTab({ settings }: SettingsTabProps) {
   const { config, setConfig, formDisabled } = settings;
   return (
@@ -23,6 +25,10 @@ export default function StorageTab({ settings }: SettingsTabProps) {
         >
           <LoggingSection log={config.log || {}} onChange={(log) => setConfig({ ...config, log })} disabled={formDisabled} />
         </SectionCard>
+      </SettingsEntry>
+
+      <SettingsEntry id="archive-on-retention" applies="now">
+        <ArchiveOnRetentionCard config={config} onChange={setConfig} disabled={formDisabled} />
       </SettingsEntry>
 
       <SettingsEntry id="trace-archive" applies="now">

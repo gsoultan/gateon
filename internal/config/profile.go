@@ -5,8 +5,11 @@ package config
 
 import (
 	"os"
+	"strconv"
 	"strings"
 	"time"
+
+	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
 // Tier is a resource profile preset. It sizes heavy subsystems (correlation
@@ -111,6 +114,15 @@ type TierDefaults struct {
 	// GATEON_THREAT_ARCHIVE_ENABLED turns it on, for the same reason as the
 	// trace archive. GATEON_THREAT_ARCHIVE_MAX_MB overrides it.
 	ThreatArchiveMaxBytes int64
+
+	// ArchiveOnRetention is the default for log.archive_on_retention: archive
+	// every log retention removes -- traces, security threats and audit
+	// entries -- instead of only the ones whose own switch is on. Off on every
+	// tier, because turning it on spends disk on three archives that every
+	// existing install has budgeted for something else; each archive is still
+	// bounded by its own size limit above. GATEON_ARCHIVE_ON_RETENTION
+	// overrides it. Resolved by ArchiveOnRetention.
+	ArchiveOnRetention bool
 
 	// MitigationCacheEntries is how many enforcement answers -- "this address
 	// is shunned until", "this address is not shunned", a fingerprint release
@@ -342,6 +354,7 @@ func DefaultsFor(tier Tier) TierDefaults {
 			TraceArchiveRetentionDays:  7,
 			TraceArchiveMaxBytes:       256 << 20, // 256 MiB
 			ThreatArchiveMaxBytes:      256 << 20, // 256 MiB
+			ArchiveOnRetention:         false,     // off on every tier
 			MitigationCacheEntries:     4_000,     // ~2 MiB
 			PathStatsMaxPathsPerHost:   500,
 			PathStatsMaxRowsPerDay:     5_000,
@@ -392,6 +405,7 @@ func DefaultsFor(tier Tier) TierDefaults {
 			TraceArchiveRetentionDays:  365,
 			TraceArchiveMaxBytes:       20 << 30, // 20 GiB
 			ThreatArchiveMaxBytes:      10 << 30, // 10 GiB
+			ArchiveOnRetention:         false,    // off on every tier
 			MitigationCacheEntries:     100_000,  // ~50 MiB
 			PathStatsMaxPathsPerHost:   10_000,
 			PathStatsMaxRowsPerDay:     200_000,
@@ -442,6 +456,7 @@ func DefaultsFor(tier Tier) TierDefaults {
 			TraceArchiveRetentionDays:  90,
 			TraceArchiveMaxBytes:       2 << 30, // 2 GiB
 			ThreatArchiveMaxBytes:      1 << 30, // 1 GiB
+			ArchiveOnRetention:         false,   // off on every tier
 			MitigationCacheEntries:     20_000,  // ~10 MiB
 			PathStatsMaxPathsPerHost:   2_000,
 			PathStatsMaxRowsPerDay:     20_000,
@@ -478,4 +493,32 @@ func DefaultsFor(tier Tier) TierDefaults {
 // CurrentTierDefaults resolves the active profile and returns its defaults.
 func CurrentTierDefaults() TierDefaults {
 	return DefaultsFor(ResolveProfile())
+}
+
+// EnvArchiveOnRetention overrides log.archive_on_retention and the tier's
+// default. A value strconv.ParseBool does not accept is ignored rather than
+// guessed at, as every other archive variable is.
+const EnvArchiveOnRetention = "GATEON_ARCHIVE_ON_RETENTION"
+
+// ArchiveOnRetention reports whether every log is to be archived on
+// retention, as the global configuration stands now. It is cheap enough to
+// call on every retention pass, so a saved change takes effect without a
+// restart.
+func ArchiveOnRetention() bool {
+	return ArchiveOnRetentionFor(GetGlobalConfig().GetLog())
+}
+
+// ArchiveOnRetentionFor resolves the switch for l: the environment variable
+// when it is set and valid, otherwise l's setting, otherwise the tier's
+// default. A false setting cannot be told from an unset one, so it falls
+// through to the tier, which is off everywhere today.
+//
+// The switch only ever adds an archive. A per-log switch that is on stays on
+// whatever this says, and each per-log GATEON_*_ARCHIVE_ENABLED variable,
+// applied after it, still has the last word for its own log.
+func ArchiveOnRetentionFor(l *gateonv1.LogConfig) bool {
+	if b, err := strconv.ParseBool(strings.TrimSpace(os.Getenv(EnvArchiveOnRetention))); err == nil {
+		return b
+	}
+	return l.GetArchiveOnRetention() || CurrentTierDefaults().ArchiveOnRetention
 }

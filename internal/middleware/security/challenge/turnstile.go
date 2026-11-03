@@ -5,6 +5,7 @@ package challenge
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -27,6 +28,11 @@ type TurnstileConfig struct {
 	Secret     string   // Site secret key (required)
 	HeaderName string   // Header containing the token (default CF-Turnstile-Response)
 	Methods    []string // HTTP methods to verify; empty = all
+	// VerifyURL is where tokens are checked; empty is Cloudflare's siteverify.
+	// Nothing an operator writes reaches it: the factory sets it only from a
+	// field the router never sets, so a test can stand in for Cloudflare and
+	// show the secret is the one sent.
+	VerifyURL string
 }
 
 // Turnstile returns a middleware that verifies Cloudflare Turnstile tokens.
@@ -56,6 +62,7 @@ func Turnstile(cfg TurnstileConfig) kind.Middleware {
 		secret:     cfg.Secret,
 		headerName: headerName,
 		methods:    methodSet,
+		verifyURL:  cmp.Or(cfg.VerifyURL, turnstileVerifyURL),
 	}
 
 	return func(next http.Handler) http.Handler {
@@ -72,6 +79,7 @@ type turnstileRuntime struct {
 	secret     string
 	headerName string
 	methods    map[string]bool
+	verifyURL  string
 }
 
 func (t turnstileRuntime) serve(next http.Handler, w http.ResponseWriter, r *http.Request) {
@@ -180,7 +188,7 @@ func (t turnstileRuntime) verify(r *http.Request, token, remoteIP string) (turns
 
 	var result turnstileResult
 
-	req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, turnstileVerifyURL, bytes.NewBufferString(form.Encode()))
+	req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, t.verifyURL, bytes.NewBufferString(form.Encode()))
 	if err != nil {
 		return result, turnstileFailure{http.StatusInternalServerError, "internal error", "create request failed"}, err
 	}
