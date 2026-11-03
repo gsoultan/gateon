@@ -10,11 +10,13 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 
 	"github.com/gsoultan/gateon/internal/middleware/auth"
 	"github.com/gsoultan/gateon/internal/middleware/kind"
+	"github.com/gsoultan/gateon/internal/request"
 	arc "github.com/hashicorp/golang-lru/arc/v2"
 	"github.com/vektah/gqlparser/v2/ast"
 	"github.com/vektah/gqlparser/v2/parser"
@@ -224,7 +226,11 @@ func GraphQLFirewall(cfg GraphQLFirewallConfig) kind.Middleware {
 // URL. A GET with no query parameter is not a GraphQL request and costs
 // nothing.
 func graphQLGETAllowed(cfg GraphQLFirewallConfig, w http.ResponseWriter, r *http.Request) bool {
-	query := r.URL.Query().Get("query")
+	query, ok := graphQLGETQuery(r.URL.RawQuery)
+	if !ok {
+		http.Error(w, "Invalid GraphQL request: ambiguous query parameters", http.StatusBadRequest)
+		return false
+	}
 	if query == "" {
 		return true
 	}
@@ -233,6 +239,42 @@ func graphQLGETAllowed(cfg GraphQLFirewallConfig, w http.ResponseWriter, r *http
 		return false
 	}
 	return graphQLQueryAllowed(analysis, query, cfg, r, w)
+}
+
+// graphQLParams are the GraphQL-over-HTTP request parameters. A backend reads
+// one value for each; which one, when the URL carries several, is the
+// backend's choice and not the firewall's.
+var graphQLParams = [...]string{"query", "operationName", "variables", "extensions"}
+
+// graphQLGETQuery returns the query a GET carries, refusing (false) a URL that
+// does not have exactly one reading of it. url.Values.Get returns the first of
+// a repeated parameter, while Express hands the backend an array, PHP keeps
+// the last and ASP.NET Core matches names case-insensitively, so
+// `?query={user}&query={__schema{...}}` was analysed as one document and
+// executed as the other. A URL Go cannot parse is refused for the same
+// reason: url.ParseQuery drops a "a=1;query=..." pair whole, which a backend
+// that splits on ';' reads as a query the firewall never saw.
+func graphQLGETQuery(rawQuery string) (string, bool) {
+	values, err := url.ParseQuery(rawQuery)
+	if err != nil {
+		return "", false
+	}
+	var query string
+	for _, name := range graphQLParams {
+		seen := 0
+		for key, vals := range values {
+			if strings.EqualFold(key, name) {
+				seen += len(vals)
+			}
+		}
+		if seen > 1 {
+			return "", false
+		}
+	}
+	if vals := values["query"]; len(vals) == 1 {
+		query = vals[0]
+	}
+	return query, true
 }
 
 func serveGraphQLFirewall(cfg GraphQLFirewallConfig, next http.Handler, w http.ResponseWriter, r *http.Request) {
@@ -307,6 +349,16 @@ func readGraphQLQuery(buf *bytes.Buffer, w http.ResponseWriter, r *http.Request)
 	}
 	if err := json.Unmarshal(buf.Bytes(), &body); err != nil {
 		http.Error(w, "Invalid GraphQL request", http.StatusBadRequest)
+		return "", false
+	}
+	// encoding/json matched "QUERY" to the query field and let the last
+	// duplicate win, so {"query":"<blocked>","QUERY":"<benign>"} was analysed
+	// as the benign query and executed as the blocked one by a backend that
+	// reads body.query exactly. Every check below then vouched for a document
+	// the backend never ran. A body whose top-level keys collide has no single
+	// reading, so it is refused rather than read one way.
+	if _, dup, err := request.AmbiguousJSONKey(buf.Bytes(), true); dup || err != nil {
+		http.Error(w, "Invalid GraphQL request: ambiguous duplicate keys", http.StatusBadRequest)
 		return "", false
 	}
 	return body.Query, true
