@@ -92,6 +92,7 @@ ADRs follow a lightweight [MADR](https://adr.github.io/madr/)-style format:
 | [0079](./0079-a-reputation-score-refuses-the-address-that-earned-it-before-its-network.md) | A reputation score refuses the address that earned it before its network | Accepted |
 | [0080](./0080-a-global-change-is-applied-whoever-stores-it.md) | A global change is applied whoever stores it | Accepted |
 | [0081](./0081-the-database-serves-the-gateway-not-its-own-bookkeeping.md) | The database serves the gateway, not its own bookkeeping | Accepted |
+| [0082](./0082-one-switch-archives-every-log-on-retention.md) | One switch archives every log on retention | Accepted |
 
 ## Conventions
 

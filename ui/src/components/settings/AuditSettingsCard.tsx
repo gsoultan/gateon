@@ -65,7 +65,10 @@ export const AuditSettingsCard: React.FC<AuditSettingsCardProps> = ({
   };
 
   const retentionDays = audit.retentionDays || 0;
-  const archiveOnRetention = !!audit.archiveOnRetention;
+  // Archive everything on retention archives audit entries too; this switch
+  // cannot turn that off while it is on.
+  const archiveAll = !!config.log?.archiveOnRetention;
+  const archiveOnRetention = !!audit.archiveOnRetention || archiveAll;
 
   return (
     <Card withBorder radius="md" p="xl" shadow="sm">
@@ -152,14 +155,16 @@ export const AuditSettingsCard: React.FC<AuditSettingsCardProps> = ({
                       <Text fw={500}>Archive on Retention</Text>
                     </Group>
                     <Text size="xs" c="dimmed">
-                      Compress and archive old logs as Brotli-encoded files when they are removed from the database.
+                      {archiveAll
+                        ? "On, because Archive everything on retention is on."
+                        : "Compress and archive old logs as Brotli-encoded files when they are removed from the database."}
                     </Text>
                   </Stack>
                   <Switch
                     checked={archiveOnRetention}
                     aria-label="Archive on retention"
                     onChange={(e) => updateAudit({ archiveOnRetention: e.currentTarget.checked })}
-                    disabled={disabled || retentionDays === 0}
+                    disabled={disabled || retentionDays === 0 || archiveAll}
                   />
                 </Group>
               </Stack>

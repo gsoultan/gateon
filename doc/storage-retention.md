@@ -327,6 +327,25 @@ the oldest files go first; the file just written is always kept. Gateways that
 share one database each run the prune, so two of them can archive the same
 chunk and a threat can then appear in two files; none is lost. See ADR 0066.
 
+## Archive everything on retention
+
+One switch, `log.archive_on_retention` (Settings, Storage, *Archive everything
+on retention*), archives every log retention removes: traces, security threats
+and audit entries, whatever each archive's own switch says. It only ever adds
+an archive; with it off each archive's own switch decides, as before. Each
+archive keeps its own directory and size limit, so the switch adds no
+unbounded growth. Administrator-only, because switching it off lets retention
+delete audit entries it used to keep.
+
+| Setting | Environment variable | minimal | standard | enterprise |
+|---------|----------------------|---------|----------|------------|
+| Archive everything | `GATEON_ARCHIVE_ON_RETENTION` | off | off | off |
+
+The variable beats the stored setting, and each archive's own
+`GATEON_TRACE_ARCHIVE_ENABLED` / `GATEON_THREAT_ARCHIVE_ENABLED` beats both, so a
+container can keep one archive off while the switch keeps the rest on. See
+ADR 0082.
+
 ## Connection pools
 
 Each of the four stores (telemetry, auth, audit, WAF) opens its own pool. On

@@ -120,6 +120,10 @@ var classes = map[protoreflect.FullName]Class{
 	"gateon.v1.LogConfig.trace_archive_max_size_mb":           Operational,
 	"gateon.v1.LogConfig.security_threat_archive_enabled":     Operational,
 	"gateon.v1.LogConfig.security_threat_archive_max_size_mb": Operational,
+	// It archives audit entries too, so switching it off lets retention
+	// delete an audit trail it used to keep: the same reason
+	// audit_log_retention_days and the audit block are administrator-only.
+	"gateon.v1.LogConfig.archive_on_retention": Boundary,
 
 	// --- transport ---
 	"gateon.v1.TransportConfig.max_idle_conns":            Operational,
@@ -317,6 +321,7 @@ var classes = map[protoreflect.FullName]Class{
 var recordFields = map[protoreflect.FullName]bool{
 	"gateon.v1.GlobalConfig.audit":                 true,
 	"gateon.v1.LogConfig.audit_log_retention_days": true,
+	"gateon.v1.LogConfig.archive_on_retention":     true,
 }
 
 // ClassOf returns how fd is classified. A field the table does not name is
