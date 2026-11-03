@@ -11,7 +11,10 @@ import (
 	"github.com/gsoultan/gateon/internal/middleware/kind"
 )
 
-func NewTurnstile(cfg map[string]string) (kind.Middleware, error) {
+// NewTurnstile builds the turnstile middleware from its dashboard config.
+// verifyURL is where tokens are checked, "" for Cloudflare; it is not part of
+// the config, so an operator cannot point verification at a server of their own.
+func NewTurnstile(cfg map[string]string, verifyURL string) (kind.Middleware, error) {
 	secret := strings.TrimSpace(cfg["secret"])
 	if secret == "" {
 		secret = os.Getenv("GATEON_TURNSTILE_SECRET")
@@ -31,5 +34,6 @@ func NewTurnstile(cfg map[string]string) (kind.Middleware, error) {
 		Secret:     secret,
 		HeaderName: strings.TrimSpace(headerName),
 		Methods:    strings.Split(methods, ","),
+		VerifyURL:  verifyURL,
 	}), nil
 }

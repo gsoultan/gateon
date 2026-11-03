@@ -59,5 +59,8 @@ func TestMain(m *testing.M) {
 
 	code := m.Run()
 	os.RemoveAll(dir)
+	for _, d := range geoDirs {
+		os.RemoveAll(d)
+	}
 	os.Exit(code)
 }
