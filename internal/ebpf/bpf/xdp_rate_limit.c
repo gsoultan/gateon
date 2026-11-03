@@ -189,6 +189,7 @@ struct {
 #define DROP_REASON_INVALID_PORT_KNOCK 3
 #define DROP_REASON_RATE_LIMITED 4
 #define DROP_REASON_SYN_FLOOD 5
+#define DROP_REASON_IP_OPTIONS_SYN 6
 
 static __always_inline void count_drop(__u32 reason) {
     __u64 *count = bpf_map_lookup_elem(&drop_stats, &reason);
@@ -323,6 +324,29 @@ static __always_inline struct l4_view read_l4(struct iphdr *iph, void *data_end)
     case 15: L4_READ_AT(v, iph, data_end, 60); break;
     }
     return v;
+}
+
+// ipv4_options_syn reports a handshake SYN that carries IPv4 options: the
+// trigger for CVE-2026-98432. The kernel saves a SYN's IP options on the
+// request socket and hands them to the child socket without a copy; a
+// retransmitted SYN raced on another CPU then builds a SYN-ACK from options
+// already freed. A use-after-free in the handshake, before accept(), so no
+// layer above this one -- the WAF included -- ever sees the connection.
+//
+// Every option kind is refused, not just Record Route and Timestamp: the
+// kernel saves NOP padding all the same, and naming the dangerous kinds would
+// mean walking the option list, which is what read_l4's comment explains the
+// verifier will not take. A SYN with IP options has no legitimate use on the
+// open internet -- routers commonly drop them -- and established traffic is
+// untouched, so the cost of refusing the class is nil and the rule needs no
+// switch. A packet whose flags cannot be read (a first fragment cut short of
+// them) is refused too: reassembly would hand the stack the whole SYN.
+static __always_inline int ipv4_options_syn(const struct iphdr *iph, const struct l4_view *l4) {
+    if (iph->protocol != IPPROTO_TCP || iph->ihl <= 5)
+        return 0;
+    if (l4->flags < 0)
+        return 1;
+    return (l4->flags & TCP_FLAG_BITS_SYN) && !(l4->flags & TCP_FLAG_BITS_ACK);
 }
 
 // l6_view is read_l6's answer: the fields of l4_view, the final header when it
@@ -478,6 +502,11 @@ static __always_inline int handle_ip_packet(struct xdp_md *ctx, struct ethhdr *e
 
     // The transport header, read once for every check below.
     struct l4_view l4 = read_l4(iph, data_end);
+
+    if (ipv4_options_syn(iph, &l4)) {
+        count_drop(DROP_REASON_IP_OPTIONS_SYN);
+        return XDP_DROP;
+    }
 
     // 2. TCP State Anomaly & SYN Flood Protection
     if (iph->protocol == IPPROTO_TCP) {
@@ -722,9 +751,18 @@ int xdp_gateon_main(struct xdp_md *ctx) {
 
 // tc_filter_ipv4 returns TC_ACT_SHOT when the packet must be dropped. Split out
 // of the entry point to keep each function within the verifier's comfort zone.
-// Order: the management allowlist, then the blocklists, then the rate limiter.
+// Order: the IP-options SYN guard, the management allowlist, then the
+// blocklists, then the rate limiter.
 static __always_inline int tc_filter_ipv4(struct iphdr *iph, void *data_end) {
     __u32 src_ip = iph->saddr;
+
+    // Before the allowlist: a kernel bug is not a lockout, and a listed source
+    // can be spoofed in a SYN, which needs no reply to land.
+    struct l4_view l4 = read_l4(iph, data_end);
+    if (ipv4_options_syn(iph, &l4)) {
+        count_drop(DROP_REASON_IP_OPTIONS_SYN);
+        return TC_ACT_SHOT;
+    }
 
     // A listed source short-circuits before any drop check, so an operator can
     // never lock themselves out with a bad rule. Anyone else is held to the
@@ -736,7 +774,7 @@ static __always_inline int tc_filter_ipv4(struct iphdr *iph, void *data_end) {
     if (cfg && cfg->enable_mgmt_whitelist) {
         if (bpf_map_lookup_elem(&mgmt_whitelist, &src_ip)) return TC_ACT_OK;
         if (cfg->mgmt_port > 0 && iph->protocol == IPPROTO_TCP &&
-            read_l4(iph, data_end).dport == cfg->mgmt_port) {
+            l4.dport == cfg->mgmt_port) {
             count_drop(DROP_REASON_INVALID_PORT_KNOCK);
             return TC_ACT_SHOT;
         }

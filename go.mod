@@ -2,6 +2,12 @@ module github.com/gsoultan/gateon
 
 go 1.27.3
 
+// Go 1.24 made net.Listen("tcp") open MPTCP sockets by default. No Gateon
+// feature uses MPTCP, and the public exploit for CVE-2026-98432 targets an
+// MPTCP listener, so the binary opts out. GODEBUG=multipathtcp=1 restores it at
+// runtime for an operator who wants it. See doc/adr/0083.
+godebug multipathtcp=0
+
 require (
 	aidanwoods.dev/go-paseto v1.6.0
 	cel.dev/cel-go v0.32.0
