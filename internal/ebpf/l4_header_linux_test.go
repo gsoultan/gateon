@@ -78,8 +78,11 @@ var mgmtGates = []struct {
 }
 
 // TestManagementGatesFindTheTCPHeaderByIHL: however the header is shaped, a
-// stranger's SYN to the management port is dropped. The first shape is the
+// stranger's packet to the management port is dropped. The first shape is the
 // control -- the gate works at all -- so the others can only fail on the shape.
+// The option-bearing shapes are ACKs, not SYNs: a SYN with IP options is now
+// refused before any gate runs (ip_options_syn_linux_test.go), so as a SYN it
+// would pass this test whatever offset the gate read.
 func TestManagementGatesFindTheTCPHeaderByIHL(t *testing.T) {
 	stranger := net.IPv4(203, 0, 113, 60)
 	shapes := []struct {
@@ -87,8 +90,8 @@ func TestManagementGatesFindTheTCPHeaderByIHL(t *testing.T) {
 		pkt  []byte
 	}{
 		{"no options", ipv4TCP(stranger, 8443, tcpSYN)},
-		{"one option word", ipv4TCPWithOptions(stranger, 8443, tcpSYN, 1)},
-		{"maximum options, IHL 15", ipv4TCPWithOptions(stranger, 8443, tcpSYN, 10)},
+		{"one option word", ipv4TCPWithOptions(stranger, 8443, tcpACK, 1)},
+		{"maximum options, IHL 15", ipv4TCPWithOptions(stranger, 8443, tcpACK, 10)},
 		{"first fragment, 8 bytes of TCP", ipv4FirstFragment(stranger, 8443)},
 	}
 	for _, g := range mgmtGates {
@@ -97,7 +100,7 @@ func TestManagementGatesFindTheTCPHeaderByIHL(t *testing.T) {
 			prog := coll.Programs[g.prog]
 			for _, s := range shapes {
 				if v := verdict(t, prog, s.pkt, 1); v != g.drop {
-					t.Errorf("%s: a stranger's SYN to the management port got verdict %d, want %d: "+
+					t.Errorf("%s: a stranger's packet to the management port got verdict %d, want %d: "+
 						"the gate read its port from the wrong bytes and let it through", s.name, v, g.drop)
 				}
 			}
@@ -122,19 +125,8 @@ func TestManagementGatesReadNoPortFromALaterFragment(t *testing.T) {
 	}
 }
 
-// TestXDPSYNFloodGuardSeesPastIPOptions: the guard reads the SYN flag from the
-// TCP header. At a fixed offset, one option word put the flags on a byte of the
-// acknowledgement number, and a SYN flood carrying an option was never counted.
-func TestXDPSYNFloodGuardSeesPastIPOptions(t *testing.T) {
-	_, coll := loadedManager(t, &gateonv1.EbpfConfig{Enabled: true, XdpIpShunning: true})
-	prog := coll.Programs[xdpProgName]
-	syn := ipv4TCPWithOptions(net.IPv4(198, 51, 100, 31), 443, tcpSYN, 1)
-
-	if v := verdict(t, prog, syn, 6); v != xdpPass {
-		t.Fatalf("the 6th SYN from one client with no ACK in between got verdict %d, want XDP_PASS %d", v, xdpPass)
-	}
-	if v := verdict(t, prog, syn, 512); v != xdpDrop {
-		t.Fatalf("512 more SYNs carrying an IP option were all passed (last verdict %d); "+
-			"the guard read the flags from the wrong offset", v)
-	}
-}
+// The SYN-flood guard's own test of reading flags past IP options is gone: a
+// SYN carrying options is now dropped on the first packet, before the guard
+// counts it. The offset is still covered -- TestIPOptionDropLeavesOrdinaryTrafficAlone
+// passes an option-bearing ACK that TestIPOptionSYNIsDroppedOnFirstPacket would
+// drop as a SYN, which only a correct read of the flags can tell apart.

@@ -442,6 +442,7 @@ var dropReasons = map[uint32]string{
 	3: "invalid_port_knock",
 	4: "rate_limited",
 	5: "syn_flood",
+	6: "ip_options_syn", // CVE-2026-98432 trigger; see ipv4_options_syn in the C program
 }
 
 // GetMapStats returns statistics from eBPF maps along with the current load
