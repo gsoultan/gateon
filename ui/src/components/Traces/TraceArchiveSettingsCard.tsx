@@ -21,6 +21,9 @@ const orZero = (v: string | number) => (typeof v === "number" && v > 0 ? Math.fl
 export function TraceArchiveSettingsCard({ config, onChange, disabled }: TraceArchiveSettingsCardProps) {
   const log = config.log || {};
   const update = (value: Partial<LogConfig>) => onChange({ ...config, log: { ...log, ...value } });
+  // Archive everything on retention turns this archive on; it cannot be
+  // switched off here while that is on.
+  const archiveAll = !!log.archiveOnRetention;
 
   return (
     <Card withBorder radius="md" p="xl" shadow="sm">
@@ -40,12 +43,17 @@ export function TraceArchiveSettingsCard({ config, onChange, disabled }: TraceAr
           </Group>
           <Switch
             aria-label="Archive traces"
-            checked={!!log.traceArchiveEnabled}
+            checked={!!log.traceArchiveEnabled || archiveAll}
             onChange={(e) => update({ traceArchiveEnabled: e.currentTarget.checked })}
-            disabled={disabled}
+            disabled={disabled || archiveAll}
             size="lg"
           />
         </Group>
+        {archiveAll && (
+          <Text size="xs" c="dimmed">
+            On, because Archive everything on retention is on.
+          </Text>
+        )}
 
         <Group grow align="flex-start">
           <NumberInput

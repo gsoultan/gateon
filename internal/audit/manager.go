@@ -490,7 +490,7 @@ func (m *AuditManager) checkRetention() {
 
 	deleted := 0
 	for range maxRetentionChunks {
-		n, err := m.retireChunk(cutoff, cfg.GetArchiveOnRetention())
+		n, err := m.retireChunk(cutoff, archiveOnRetention(cfg))
 		deleted += n
 		if err != nil {
 			// Nothing in the failed chunk was deleted; the next run retries it.
@@ -504,6 +504,14 @@ func (m *AuditManager) checkRetention() {
 	if deleted > 0 {
 		logger.L.LogInfo("audit: retention task completed", "deleted_rows", deleted)
 	}
+}
+
+// archiveOnRetention reports whether expired entries are archived before
+// they are deleted: when audit.archive_on_retention asks for it, or when
+// log.archive_on_retention asks for every log to be. Read on every pass, so a
+// saved change applies at the next one.
+func archiveOnRetention(cfg *gateonv1.AuditConfig) bool {
+	return cfg.GetArchiveOnRetention() || config.ArchiveOnRetention()
 }
 
 // retireChunk archives (when asked) and then deletes the oldest expired

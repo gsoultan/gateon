@@ -34,6 +34,7 @@ export const SETTINGS_INDEX: readonly SettingsIndexEntry[] = [
   { id: "ha", section: "network", title: "High availability", keywords: ["vrrp", "failover", "virtual ip", "keepalived"] },
   { id: "ebpf", section: "network", title: "eBPF offload", keywords: ["xdp", "kernel", "port knocking", "drop"] },
   { id: "logging", section: "storage", title: "Logging and retention", keywords: ["log level", "format", "json", "retention days", "access log", "path metrics"] },
+  { id: "archive-on-retention", section: "storage", title: "Archive everything on retention", keywords: ["archive", "retention", "traces", "security threats", "audit"] },
   { id: "trace-archive", section: "storage", title: "Trace archive", keywords: ["traces", "pebble", "archive", "disk"] },
   { id: "threat-archive", section: "storage", title: "Threat archive", keywords: ["security threats", "archive", "retention"] },
   { id: "audit", section: "storage", title: "Audit log", keywords: ["forensic", "signing", "retention", "tamper"] },

@@ -50,7 +50,9 @@ func CurrentSettings() Settings {
 }
 
 func (s *Settings) applyConfig(l *gateonv1.LogConfig) {
-	s.Enabled = l.GetSecurityThreatArchiveEnabled()
+	// log.archive_on_retention turns every archive on; it never turns this
+	// one off. GATEON_THREAT_ARCHIVE_ENABLED, applied after, still can.
+	s.Enabled = l.GetSecurityThreatArchiveEnabled() || config.ArchiveOnRetentionFor(l)
 	if mb := l.GetSecurityThreatArchiveMaxSizeMb(); mb > 0 {
 		s.MaxBytes = int64(mb) << 20
 	}
