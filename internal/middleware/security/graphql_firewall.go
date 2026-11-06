@@ -222,10 +222,19 @@ func GraphQLFirewall(cfg GraphQLFirewallConfig) kind.Middleware {
 	}
 }
 
-// graphQLGETAllowed applies the same four limits to a query carried in the
-// URL. A GET with no query parameter is not a GraphQL request and costs
-// nothing.
-func graphQLGETAllowed(cfg GraphQLFirewallConfig, w http.ResponseWriter, r *http.Request) bool {
+// graphQLURLAllowed applies the same four limits to a query carried in the
+// URL, whatever the method. A request with no query parameter costs nothing.
+//
+// This used to run for GET only, and the POST path read the body alone. But
+// express-graphql takes the URL's query in preference to the body's on a POST,
+// so `POST /graphql?query={__schema{...}}` with a benign or empty body was
+// analysed as the body and executed as the URL; and a server that accepts
+// GraphQL on another method saw the URL go through unchecked. Which reading a
+// backend picks is its choice, so every reading is checked.
+func graphQLURLAllowed(cfg GraphQLFirewallConfig, w http.ResponseWriter, r *http.Request) bool {
+	if r.URL.RawQuery == "" {
+		return true
+	}
 	query, ok := graphQLGETQuery(r.URL.RawQuery)
 	if !ok {
 		http.Error(w, "Invalid GraphQL request: ambiguous query parameters", http.StatusBadRequest)
@@ -271,8 +280,15 @@ func graphQLGETQuery(rawQuery string) (string, bool) {
 			return "", false
 		}
 	}
-	if vals := values["query"]; len(vals) == 1 {
-		query = vals[0]
+	// The single value is taken whatever the case of its name. Reading
+	// values["query"] exactly meant `?QUERY={__schema{...}}` came back empty
+	// and was forwarded unanalysed, while ASP.NET Core (Hot Chocolate) matched
+	// it to query and ran it -- the case folding the count above guards
+	// against, missed on the read.
+	for key, vals := range values {
+		if strings.EqualFold(key, "query") && len(vals) == 1 {
+			query = vals[0]
+		}
 	}
 	return query, true
 }
@@ -284,14 +300,9 @@ func serveGraphQLFirewall(cfg GraphQLFirewallConfig, next http.Handler, w http.R
 	// introspection block, the depth limit, the complexity limit and
 	// field-level claim auth -- every check this middleware performs, chosen
 	// by the client picking a method.
-	if r.Method == http.MethodGet {
-		if !graphQLGETAllowed(cfg, w, r) {
-			return
-		}
-		next.ServeHTTP(w, r)
+	if !graphQLURLAllowed(cfg, w, r) {
 		return
 	}
-
 	if r.Method != http.MethodPost {
 		next.ServeHTTP(w, r)
 		return

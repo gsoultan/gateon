@@ -332,7 +332,15 @@ func bufferBodyInto(body io.Reader, maxBytes int64, buf *bytes.Buffer) (data []b
 func scanMultipart(r *http.Request, body []byte, boundary string, cfg FileSecurityConfig, engine *yara.Engine, blockSev yara.Severity, allowedMap, blockedMap map[string]bool) scanResult {
 	mr := multipart.NewReader(bytes.NewReader(body), boundary)
 	for {
-		p, err := mr.NextPart()
+		// NextRawPart, not NextPart: NextPart decodes a part whose first
+		// Content-Transfer-Encoding is quoted-printable and deletes every value
+		// of the header, so opaquePart below never saw them. A part sent with
+		// "quoted-printable" then "base64" was scanned as base64 text while a
+		// backend reading the last value saved the decoded executable -- the
+		// exact shape the base64 refusal exists for, reopened by a header line.
+		// Read raw, the scanner sees the bytes the backend receives and
+		// quoted-printable is refused like every other transfer encoding.
+		p, err := mr.NextRawPart()
 		if err == io.EOF {
 			break
 		}
@@ -378,9 +386,9 @@ func isFilePart(p *multipart.Part) bool {
 // A form-data part with no filename and a multipart/* body was skipped as an
 // ordinary field, while RFC 2388 parsers (commons-fileupload) unpack its inner
 // parts as files: an executable one level down reached the backend unscanned.
-// And Go's reader decodes only quoted-printable (removing the header as it
-// does), so under Content-Transfer-Encoding: base64 the scanner read base64
-// text while a backend honouring the header saved the decoded executable.
+// And under Content-Transfer-Encoding: base64 the scanner read base64 text
+// while a backend honouring the header saved the decoded executable. Parts are
+// read with NextRawPart so the header reaches this check undeleted.
 //
 // Browsers send neither: RFC 7578 deprecates multipart/mixed and forbids
 // Content-Transfer-Encoding. Both are refused rather than decoded, which would
