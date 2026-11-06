@@ -9,6 +9,7 @@ import { useForm } from "@tanstack/react-form";
 import { notifications } from "@mantine/notifications";
 import { useEntryPoints, useMiddlewares, useTLSOptions, useCertificates, useServices, apiFetch, getApiErrorMessage } from "../../hooks/useGateon";
 import { IconCheck, IconCode, IconRoute, IconServer, IconShieldLock } from "@tabler/icons-react";
+import { policyOptions } from "./policyOptions";
 import { FormSection } from "../layout";
 import { RoutingConfig, UpstreamConfig, PipelineConfig, RoutePreview } from "./";
 import { formValuesToRoute, routeToFormValues } from "./routePayload";
@@ -102,7 +103,7 @@ export default function RouteForm({ onSuccess, initialData }: { onSuccess?: () =
     })
     .map(({ value, label }) => ({ value, label }));
 
-  const mwOptions = (mwData?.middlewares || []).map((mw) => ({ value: mw.id, label: `${mw.name} (${mw.type})` }));
+  const mwOptions = policyOptions(mwData?.middlewares || [], routeType, form.state.values.middlewares || []);
 
   const tlsOptOptions = ((tlsOptData as any)?.tlsOptions || (tlsOptData as any)?.options || []).map((opt: any) => ({ value: opt.id, label: opt.name }));
 
@@ -157,7 +158,7 @@ export default function RouteForm({ onSuccess, initialData }: { onSuccess?: () =
         <Divider />
 
         <FormSection title="Policies and TLS" description="What runs on each request before the service sees it, and the certificate the route serves." icon={<IconShieldLock size={18} />}>
-          <PipelineConfig form={form} middlewareOptions={mwOptions} tlsOptOptions={tlsOptOptions} certOptions={certOptions} />
+          <PipelineConfig form={form} routeType={routeType} middlewareOptions={mwOptions} tlsOptOptions={tlsOptOptions} certOptions={certOptions} />
         </FormSection>
 
         <Divider />

@@ -26,6 +26,7 @@ import (
 	dtls "github.com/gsoultan/gateon/internal/domain/tls"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware"
+	mwsecurity "github.com/gsoultan/gateon/internal/middleware/security"
 	wafmw "github.com/gsoultan/gateon/internal/middleware/security/waf"
 	"github.com/gsoultan/gateon/internal/middleware/transform"
 	"github.com/gsoultan/gateon/internal/phantom"
@@ -53,6 +54,9 @@ const ShutdownTimeout = 30 * time.Second
 func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 	var wg syncutil.WaitGroup
 	l4Resolver := l4.NewResolver(s.RouteStore, s.ServiceStore)
+	// An ipfilter on a TCP route (SSH, RDP, raw TCP) is enforced against the
+	// connection's peer address, from the same lists the HTTP filter reads.
+	l4Resolver.SetAddrFilters(s.MwStore, mwsecurity.NewAddrFilter)
 	proxyInvalidator := NewServerProxyInvalidator(s, l4Resolver, s.RouteStore)
 	if s.RedisClient != nil {
 		proxyInvalidator = NewDistributedProxyInvalidator(proxyInvalidator, s.RedisClient)
