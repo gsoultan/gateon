@@ -9,14 +9,17 @@ import { apiFetch, getApiErrorMessage } from "../../hooks/useGateon";
 import { useMiddlewarePresets } from "../../hooks/useGateon";
 import type { RouteFormApi } from "./RoutingConfig";
 import type { Middleware } from "../../types/gateon";
+import { policyDescription } from "./policyOptions";
 
 export function PipelineConfig({
   form,
+  routeType,
   middlewareOptions,
   tlsOptOptions,
   certOptions,
 }: {
   form: RouteFormApi;
+  routeType: string;
   middlewareOptions: { value: string; label: string }[];
   tlsOptOptions: { value: string; label: string }[];
   certOptions: { value: string; label: string }[];
@@ -72,7 +75,8 @@ export function PipelineConfig({
 
   return (
     <Stack gap="md" mt="xl">
-      {presets && presets.length > 0 && (
+      {/* Presets attach HTTP middlewares (ratelimit, inflightreq, buffering), which a TCP or UDP route never runs. */}
+      {presets && presets.length > 0 && routeType !== "tcp" && routeType !== "udp" && (
         <Select
           label="Add Protection Preset"
           description="Creates and attaches middlewares (ratelimit, inflightreq, buffering) to this route"
@@ -92,7 +96,7 @@ export function PipelineConfig({
         children={(field: any) => (
           <MultiSelect
             label="Policies"
-            description="Add a protection preset above or pick the policies this route is protected by"
+            description={policyDescription(routeType)}
             data={middlewareOptions}
             value={field.state.value}
             onBlur={field.handleBlur}

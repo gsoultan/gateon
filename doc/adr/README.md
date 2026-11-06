@@ -94,6 +94,7 @@ ADRs follow a lightweight [MADR](https://adr.github.io/madr/)-style format:
 | [0081](./0081-the-database-serves-the-gateway-not-its-own-bookkeeping.md) | The database serves the gateway, not its own bookkeeping | Accepted |
 | [0082](./0082-one-switch-archives-every-log-on-retention.md) | One switch archives every log on retention | Accepted |
 | [0083](./0083-the-kernel-is-shielded-from-handshakes-the-waf-never-sees.md) | The kernel is shielded from handshakes the WAF never sees | Accepted |
+| [0084](./0084-a-tcp-route-enforces-the-ip-filter-it-lists.md) | A TCP route enforces the IP filter it lists | Accepted |
 
 ## Conventions
 

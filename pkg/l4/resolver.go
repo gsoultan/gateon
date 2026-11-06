@@ -26,6 +26,12 @@ type Resolver struct {
 	tcpPools     map[tcpPoolKey]*cachedTCPPool
 	udpProxies   map[string]*cachedUDPProxy
 	claims       atomic.Pointer[routeClaims] // see OnlyTCPRoute
+
+	// The ipfilter middlewares a TCP route lists (admission.go). Set once,
+	// before serving, by SetAddrFilters; guards is keyed like tcpPools.
+	mwStore     config.MiddlewareStore
+	buildFilter AddrFilterBuilder
+	guards      map[tcpPoolKey]*cachedGuard
 }
 
 // tcpPoolKey names a cached TCP pool: one per route per entrypoint. An
@@ -56,6 +62,7 @@ func NewResolver(routeStore config.RouteStore, serviceStore config.ServiceStore)
 		serviceStore: serviceStore,
 		tcpPools:     make(map[tcpPoolKey]*cachedTCPPool),
 		udpProxies:   make(map[string]*cachedUDPProxy),
+		guards:       make(map[tcpPoolKey]*cachedGuard),
 	}
 }
 
@@ -168,15 +175,25 @@ func ConfigFromRouteService(rt *gateonv1.Route, svc *gateonv1.Service) *L4Config
 	}
 }
 
-// ResolveTCP resolves the TCP backend pool for an L4 entrypoint from Route → Service.
+// ResolveTCP resolves the TCP backend pool for an L4 entrypoint from Route → Service,
+// behind the route's ipfilter middlewares when it lists any (admission.go).
 // An optional protocol (e.g. "ssh") can be provided for more specific routing.
 func (r *Resolver) ResolveTCP(ep *gateonv1.EntryPoint, protocol string) TCPProxy {
-	route, cfg := r.resolveConfig(ep, "tcp", protocol)
+	rt, cfg := r.resolveConfig(ep, "tcp", protocol)
 	if cfg == nil || len(cfg.Backends) == 0 {
 		return nil
 	}
+	key := tcpPoolKey{entrypoint: ep.Id, route: rt.Id}
+	pool := r.tcpPool(ep, key, cfg)
+	if pool == nil {
+		return nil
+	}
+	return r.admit(key, rt, pool)
+}
+
+// tcpPool returns the cached pool for key, building it when cfg has changed.
+func (r *Resolver) tcpPool(ep *gateonv1.EntryPoint, key tcpPoolKey, cfg *L4Config) *TCPBackendPool {
 	hash := configHash(cfg)
-	key := tcpPoolKey{entrypoint: ep.Id, route: route}
 	r.mu.RLock()
 	if cached, ok := r.tcpPools[key]; ok && cached.hash == hash {
 		p := cached.pool
@@ -228,23 +245,23 @@ func (r *Resolver) ResolveUDP(ep *gateonv1.EntryPoint) UDPProxy {
 	return proxy
 }
 
-// resolveConfig selects the route for ep and returns its ID and the L4
+// resolveConfig selects the route for ep and returns it and the L4
 // configuration of its service; a nil config when nothing matches.
-func (r *Resolver) resolveConfig(ep *gateonv1.EntryPoint, routeType string, protocol string) (string, *L4Config) {
+func (r *Resolver) resolveConfig(ep *gateonv1.EntryPoint, routeType string, protocol string) (*gateonv1.Route, *L4Config) {
 	rt := SelectL4Route(context.Background(), ep.Id, routeType, protocol, r.routeStore)
 	if rt == nil {
-		return "", nil
+		return nil, nil
 	}
 	svc, ok := r.serviceStore.Get(context.Background(), rt.ServiceId)
 	if !ok {
-		return "", nil
+		return nil, nil
 	}
 	bt := strings.ToLower(svc.BackendType)
 	want := strings.ToLower(routeType)
 	if bt != want {
-		return "", nil
+		return nil, nil
 	}
-	return rt.Id, ConfigFromRouteService(rt, svc)
+	return rt, ConfigFromRouteService(rt, svc)
 }
 
 // configHash identifies a configuration so the resolver can tell a cached pool
@@ -362,6 +379,7 @@ func (r *Resolver) dropTCPPoolsLocked(epID string) {
 			c.pool.Stop()
 		}
 		delete(r.tcpPools, key)
+		delete(r.guards, key)
 	}
 }
 

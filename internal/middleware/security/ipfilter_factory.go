@@ -33,6 +33,31 @@ func NewIPFilter(cfg map[string]string) (kind.Middleware, error) {
 	return IPFilterWithClientIP(allowList, denyList, clientIP), nil
 }
 
+// NewAddrFilter builds the same allow and deny lists as NewIPFilter, as a
+// decision about a connection's peer address rather than about an HTTP
+// request. It is what an ipfilter middleware means on a TCP route (SSH, RDP,
+// raw TCP), where there are no headers to read: the address is the TCP peer
+// and nothing the client sends can change it, so trust_cloudflare_headers has
+// nothing to apply to and is ignored. The lists are validated exactly as
+// NewIPFilter validates them, so an entry it refuses is refused here too.
+func NewAddrFilter(cfg map[string]string) (func(netip.Addr) bool, error) {
+	allowList := kind.ParseListStrict(cfg["allow_list"])
+	denyList := kind.ParseListStrict(cfg["deny_list"])
+	if err := ValidateIPList("allow_list", allowList); err != nil {
+		return nil, err
+	}
+	if err := ValidateIPList("deny_list", denyList); err != nil {
+		return nil, err
+	}
+	data := newIPFilterData(allowList, denyList)
+	return func(addr netip.Addr) bool {
+		// Unmapped so ::ffff:203.0.113.9 is judged as the IPv4 address it is,
+		// the form the lists are written in.
+		ip := addr.Unmap().String()
+		return !data.matches(ip) && data.allowed(ip)
+	}, nil
+}
+
 // ValidateIPList refuses the first entry of a list that is neither an IP
 // address nor a CIDR, naming key and the entry. Wildcards ("10.0.0.*") and
 // ranges ("10.0.0.1-10.0.0.9") are not supported; write the CIDR.
