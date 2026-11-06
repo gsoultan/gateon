@@ -13,7 +13,7 @@ require (
 	cel.dev/cel-go v0.32.0
 	connectrpc.com/connect v1.20.0
 	github.com/MicahParks/keyfunc/v3 v3.8.0
-	github.com/andybalholm/brotli v1.2.1
+	github.com/andybalholm/brotli v1.2.7
 	github.com/aws/aws-sdk-go-v2 v1.41.5
 	github.com/aws/aws-sdk-go-v2/config v1.32.13
 	github.com/aws/aws-sdk-go-v2/service/secretsmanager v1.41.5
@@ -37,7 +37,7 @@ require (
 	github.com/hashicorp/memberlist v0.5.4
 	github.com/hashicorp/vault/api v1.23.0
 	github.com/kaptinlin/jsonschema v0.9.2
-	github.com/klauspost/compress v1.19.0
+	github.com/klauspost/compress v1.20.2
 	github.com/lib/pq v1.12.3
 	github.com/oschwald/geoip2-golang v1.13.0
 	github.com/pquerna/otp v1.5.0
