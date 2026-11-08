@@ -1,23 +1,58 @@
 [
   {
-    "id": "api-route",
-    "name": "API (own WAF override + rate limit, strips /api)",
+    "id": "host-route",
+    "name": "Host-based route for whoami.localhost",
     "type": "http",
-    "entrypoints": ["web"],
+    "entrypoints": [
+      "web"
+    ],
+    "rule": "Host(`whoami.localhost`)",
+    "service_id": "whoami-service",
+    "middlewares": [
+      "request-id",
+      "security-headers",
+      "compress"
+    ]
+  },
+  {
+    "id": "api-route",
+    "name": "API (own WAF override, rate limit, in-flight cap, circuit breaker, strips /api)",
+    "type": "http",
+    "entrypoints": [
+      "web"
+    ],
     "rule": "PathPrefix(`/api`)",
     "service_id": "api-service",
     "middlewares": [
       "waf-protect",
       "ratelimit-dev",
+      "inflight-api",
+      "breaker-api",
       "strip-api",
       "cors-allow-all"
+    ]
+  },
+  {
+    "id": "canary-route",
+    "name": "Weighted canary (strips /canary)",
+    "type": "http",
+    "entrypoints": [
+      "web"
+    ],
+    "rule": "PathPrefix(`/canary`)",
+    "service_id": "canary-service",
+    "middlewares": [
+      "retry-twice",
+      "strip-canary"
     ]
   },
   {
     "id": "web-route",
     "name": "Web catch-all (protected by the global WAF, no per-route setup)",
     "type": "http",
-    "entrypoints": ["web"],
+    "entrypoints": [
+      "web"
+    ],
     "rule": "PathPrefix(`/`)",
     "service_id": "whoami-service",
     "middlewares": [

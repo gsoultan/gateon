@@ -4,27 +4,34 @@
 #
 # dev.sh — run gateon locally against the sample config in dev/.
 #
-# It builds the gateway, starts two throwaway upstream backends for the sample
-# services to point at, seeds a dev admin so the dashboard is usable immediately,
-# and boots gateon with every config file wired up. Everything it creates lives
-# under dev/.data/ and is torn down on exit.
+# It starts PostgreSQL in an Apple container, builds the gateway, starts three
+# throwaway upstream backends for the sample services to point at, seeds dev
+# accounts so the dashboard is usable immediately, and boots gateon with every
+# config file wired up. Local state lives under dev/.data/; gateon and the
+# backends are torn down on exit, Postgres keeps running.
 #
-#   Dashboard : http://localhost:8080   (login: admin / gateon-dev-passphrase)
+#   Dashboard : http://localhost:8080   (login: admin / admin)
 #   Proxy     : http://localhost:8000   (the sample routes)
 #
-# Usage:
-#   scripts/dev.sh              # build (using embedded UI) and run, on SQLite
-#   scripts/dev.sh --postgres   # run against Postgres in an Apple container
-#   scripts/dev.sh --ui         # rebuild the dashboard UI first, then run
-#   scripts/dev.sh --clean      # wipe dev/.data (fresh DB) before running
-#   scripts/dev.sh -h           # help
+# The dev accounts are admin/admin, operator/operator and viewer/viewer. Those
+# passwords exist only here: the password policy refuses them on every API, and
+# dev/seed writes them only into a SQLite file under dev/.data or a Postgres on
+# a loopback address. The dashboard listens on 127.0.0.1 only.
 #
-# --postgres starts (or reuses) the database managed by scripts/dev-postgres.sh
-# and points every store at it. The container is left running on exit so the next
-# run is instant; stop it with 'scripts/dev-postgres.sh down' or throw the data
-# away with 'destroy'. With --clean it is destroyed and recreated, which is the
-# only way to get a genuinely empty schema — dropping dev/.data does nothing to a
-# database that does not live there.
+# Usage:
+#   scripts/dev.sh              # Postgres in an Apple container (default)
+#   scripts/dev.sh --sqlite     # SQLite under dev/.data instead, no container
+#   scripts/dev.sh --ui         # rebuild the dashboard UI first, then run
+#   scripts/dev.sh --clean      # start from an empty database
+#   scripts/dev.sh -h           # help
+#   make dev / make dev-sqlite  # the same, from make
+#
+# Postgres is managed by scripts/dev-postgres.sh (Apple's `container` CLI,
+# macOS 15+ on Apple silicon). The container is left running on exit so the
+# next run is instant; stop it with 'scripts/dev-postgres.sh down' or throw the
+# data away with 'destroy'. With --clean it is destroyed and recreated, which is
+# the only way to get a genuinely empty schema — dropping dev/.data does nothing
+# to a database that does not live there.
 set -euo pipefail
 
 # ---- locate the repo and toolchain -----------------------------------------
@@ -41,14 +48,15 @@ fi
 
 BUILD_UI=false
 CLEAN=false
-POSTGRES=false
+POSTGRES=true
 for arg in "$@"; do
   case "${arg}" in
     --ui) BUILD_UI=true ;;
     --clean) CLEAN=true ;;
-    --postgres|--pg) POSTGRES=true ;;
+    --sqlite) POSTGRES=false ;;
+    --postgres|--pg) POSTGRES=true ;; # the default; kept so old habits work
     -h|--help)
-      sed -n '3,34p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+      sed -n '4,34p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
       exit 0 ;;
     *) echo "error: unknown flag '${arg}' (try -h)" >&2; exit 1 ;;
   esac
@@ -65,7 +73,7 @@ BACKEND_BIN="${DATA_DIR}/devbackend"
 PG_SCRIPT="${SCRIPT_DIR}/dev-postgres.sh"
 
 # The database everything points at, and the config file that names it. On
-# SQLite these are the checked-in defaults; --postgres replaces both. One
+# SQLite (--sqlite) these are the checked-in defaults; Postgres replaces both. One
 # variable rather than a branch at each use site: gateon derives the WAF rule
 # store, the audit log, path stats and auth from this single URL
 # (db.AuthDatabaseURL), so a second copy that drifted would split the gateway
@@ -77,6 +85,7 @@ DB_LABEL="SQLite  ${DB_PATH}"
 # Backend upstreams the sample services in dev/services.json point at.
 WHOAMI_ADDR="127.0.0.1:9001"
 API_ADDR="127.0.0.1:9002"
+CANARY_ADDR="127.0.0.1:9003"
 
 BG_PIDS=()
 cleanup() {
@@ -103,7 +112,7 @@ mkdir -p "${DATA_DIR}" "${TRACE_DIR}"
 # ---- database --------------------------------------------------------------
 if ${POSTGRES}; then
   command -v jq >/dev/null 2>&1 || {
-    echo "error: --postgres needs 'jq' to write the dev config (brew install jq)" >&2
+    echo "error: Postgres mode needs 'jq' to write the dev config (brew install jq), or run with --sqlite" >&2
     exit 1
   }
   "${PG_SCRIPT}" up
@@ -139,6 +148,7 @@ echo "==> building dev backend"
 echo "==> starting sample backends"
 "${BACKEND_BIN}" -name whoami -addr "${WHOAMI_ADDR}" & BG_PIDS+=("$!")
 "${BACKEND_BIN}" -name api -addr "${API_ADDR}" & BG_PIDS+=("$!")
+"${BACKEND_BIN}" -name canary -addr "${CANARY_ADDR}" & BG_PIDS+=("$!")
 
 wait_for() { # host:port
   local hp="$1" host="${1%%:*}" port="${1##*:}" i
@@ -150,13 +160,22 @@ wait_for() { # host:port
 }
 wait_for "${WHOAMI_ADDR}"
 wait_for "${API_ADDR}"
+wait_for "${CANARY_ADDR}"
 
-# ---- seed the dev admin ----------------------------------------------------
+# ---- seed the dev accounts -------------------------------------------------
+# admin/admin, operator/operator, viewer/viewer. Set GATEON_DEV_PASSWORD to give
+# all three one password of your own instead.
 echo "==> seeding dev accounts (admin/operator/viewer)"
 GATEON_DEV_DB="${DB_URL}" GATEON_DEV_PASETO="${PASETO_SECRET}" \
   "${GO}" run ./dev/seed -db "${DB_URL}" -secret "${PASETO_SECRET}"
 
 # ---- run gateon ------------------------------------------------------------
+if [ -n "${GATEON_DEV_PASSWORD:-}" ]; then
+  LOGIN_HINT="admin / \$GATEON_DEV_PASSWORD"
+else
+  LOGIN_HINT="admin / admin   — dev only"
+fi
+
 # Ctrl-C stops gateon but deliberately leaves Postgres running, so say what that
 # means and how to undo it. A container still running after the script exited is
 # only a surprise if nothing mentioned it.
@@ -175,18 +194,22 @@ cat <<BANNER
 ────────────────────────────────────────────────────────────────────
   gateon dev is starting
 
-  Dashboard   http://localhost:8080     (login: admin / gateon-dev-passphrase)
+  Dashboard   http://localhost:8080     (login: ${LOGIN_HINT})
   Proxy       http://localhost:8000
   Database    ${DB_LABEL}
 
   Sample routes (dev/routes.json):
-    web-route   PathPrefix(/)      -> whoami-service   [dev-headers, cors]
-    api-route   PathPrefix(/api)   -> api-service      [waf, ratelimit, strip /api]
+    host-route    Host(whoami.localhost)   -> whoami-service   [security headers, compress, request id]
+    api-route     PathPrefix(/api)         -> api-service      [waf, ratelimit, inflight, circuit breaker, strip /api]
+    canary-route  PathPrefix(/canary)      -> canary-service   [90% whoami / 10% canary, retry, strip /canary]
+    web-route     PathPrefix(/)            -> whoami-service   [dev-headers, cors]
 
   Try it:
-    curl http://localhost:8000/                       # whoami backend
-    curl http://localhost:8000/api/anything           # api backend, /api stripped
-    curl 'http://localhost:8000/api/x?id=1%27+OR+1=1' # WAF blocks this (403)
+    curl http://localhost:8000/                         # whoami backend
+    curl http://whoami.localhost:8000/                  # host-based route
+    curl http://localhost:8000/api/anything             # api backend, /api stripped
+    for i in \$(seq 20); do curl -s http://localhost:8000/canary/ | jq -r .backend; done | sort | uniq -c
+    curl 'http://localhost:8000/api/x?id=1%27+OR+1=1'   # WAF blocks this (403)
 
   (WAF blocks from 127.0.0.1 are not recorded as Security Hub threats —
    loopback is trusted; drive traffic from another host to populate it.)
