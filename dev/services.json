@@ -5,7 +5,9 @@
     "backend_type": "http",
     "load_balancer_policy": "round_robin",
     "weighted_targets": [
-      { "url": "http://127.0.0.1:9001" }
+      {
+        "url": "http://127.0.0.1:9001"
+      }
     ],
     "health_check_type": 1,
     "health_check_path": "/healthz"
@@ -16,7 +18,27 @@
     "backend_type": "http",
     "load_balancer_policy": "round_robin",
     "weighted_targets": [
-      { "url": "http://127.0.0.1:9002" }
+      {
+        "url": "http://127.0.0.1:9002"
+      }
+    ],
+    "health_check_type": 1,
+    "health_check_path": "/healthz"
+  },
+  {
+    "id": "canary-service",
+    "name": "Canary (90% stable / 10% canary)",
+    "backend_type": "http",
+    "load_balancer_policy": "weighted_round_robin",
+    "weighted_targets": [
+      {
+        "url": "http://127.0.0.1:9001",
+        "weight": 90
+      },
+      {
+        "url": "http://127.0.0.1:9003",
+        "weight": 10
+      }
     ],
     "health_check_type": 1,
     "health_check_path": "/healthz"

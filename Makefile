@@ -25,7 +25,7 @@ GOTOOLCHAIN := $(shell go env GOVERSION)
 endif
 export GOTOOLCHAIN
 
-.PHONY: proto models build build-fips release deb test test-race bench clean vuln staticcheck gosec sec check-invariants check-config check-auth-nil check-coverage check-folders ebpf ebpf-docker pgo-profile docker fuzz
+.PHONY: proto models build build-fips release deb test test-race bench clean vuln staticcheck gosec sec check-invariants check-config check-auth-nil check-coverage check-folders ebpf ebpf-docker pgo-profile docker fuzz dev dev-sqlite dev-pg-down dev-pg-destroy
 
 ## proto: regenerate Go bindings from proto/gateon/v1/*.proto using buf
 proto:
@@ -365,6 +365,25 @@ lint-new:
 ## lint-fix: apply the formatters (gofmt + goimports) via golangci-lint
 lint-fix:
 	$(GOLANGCI_LINT) fmt ./...
+
+## dev: run gateon locally with the sample config in dev/, against PostgreSQL in
+##      an Apple container (macOS 15+, `brew install container jq`). Dashboard
+##      http://localhost:8080, login admin/admin -- dev only; see doc/development.md.
+##      Pass flags through DEV_FLAGS, e.g. `make dev DEV_FLAGS="--clean --ui"`.
+dev:
+	./scripts/dev.sh $(DEV_FLAGS)
+
+## dev-sqlite: the same on SQLite under dev/.data, no container needed.
+dev-sqlite:
+	./scripts/dev.sh --sqlite $(DEV_FLAGS)
+
+## dev-pg-down: stop the dev Postgres container, keep its data.
+dev-pg-down:
+	./scripts/dev-postgres.sh down
+
+## dev-pg-destroy: delete the dev Postgres container and its data.
+dev-pg-destroy:
+	./scripts/dev-postgres.sh destroy
 
 ## clean: clean build artifacts
 clean:

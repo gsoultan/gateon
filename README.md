@@ -111,6 +111,14 @@ Uninstall: `gateon uninstall`. See [doc/services.md](doc/services.md) for packag
 
 ### Development Setup
 
+The quickest way to a running gateway with something on the dashboard is
+`make dev` (or `scripts/dev.sh`): it starts PostgreSQL in an Apple container,
+loads sample entrypoints, routes, services and middleware, and signs you in as
+`admin` / `admin`. Those credentials are for local development only. See
+[doc/development.md](doc/development.md).
+
+To build and run by hand:
+
 1. **Install dependencies**:
    ```bash
    rtk go mod tidy

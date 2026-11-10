@@ -46,5 +46,61 @@
     "config": {
       "prefixes": "/api"
     }
+  },
+  {
+    "id": "security-headers",
+    "name": "Security headers (recommended preset)",
+    "type": "security_headers",
+    "config": {
+      "preset": "recommended"
+    }
+  },
+  {
+    "id": "compress",
+    "name": "Compress responses over 1 KB",
+    "type": "compress",
+    "config": {
+      "min_response_body_bytes": "1024"
+    }
+  },
+  {
+    "id": "request-id",
+    "name": "Request ID",
+    "type": "request_id",
+    "config": {}
+  },
+  {
+    "id": "inflight-api",
+    "name": "At most 50 in-flight requests per client",
+    "type": "inflightreq",
+    "config": {
+      "amount": "50",
+      "per_ip": "true"
+    }
+  },
+  {
+    "id": "breaker-api",
+    "name": "Circuit breaker (50% errors over 10 requests)",
+    "type": "circuit_breaker",
+    "config": {
+      "error_threshold": "0.5",
+      "min_requests": "10"
+    }
+  },
+  {
+    "id": "retry-twice",
+    "name": "Retry idempotent requests twice",
+    "type": "retry",
+    "config": {
+      "attempts": "2"
+    }
+  },
+  {
+    "id": "strip-canary",
+    "name": "Strip /canary prefix",
+    "type": "stripprefix",
+    "config": {
+      "prefixes": "/canary"
+    }
   }
 ]
