@@ -141,6 +141,32 @@ if ${BUILD_UI} || [ ! -d "${REPO_ROOT}/internal/ui/dist" ]; then
   "${GO}" run "${REPO_ROOT}/scripts/sync_assets.go"
 fi
 
+# The gRPC/Connect stubs are generated, not committed (.gitignore), so a fresh
+# checkout cannot compile until they exist. Generate them once rather than fail
+# on "no required module provides package .../proto/gateon/v1".
+if ! compgen -G "${REPO_ROOT}/proto/gateon/v1/*.pb.go" >/dev/null; then
+  echo "==> generating gRPC code (make proto)"
+  GOBIN_DIR="$("${GO}" env GOPATH)/bin"
+  missing=""
+  for tool in buf protoc-gen-go protoc-gen-go-grpc protoc-gen-connect-go; do
+    command -v "${tool}" >/dev/null 2>&1 || [ -x "${GOBIN_DIR}/${tool}" ] || missing="${missing} ${tool}"
+  done
+  if [ -n "${missing}" ]; then
+    cat >&2 <<EOF_MISSING
+error: generating the gRPC code needs:${missing}
+  brew install bufbuild/buf/buf
+  go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.11 \
+    google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest \
+    connectrpc.com/connect/cmd/protoc-gen-connect-go@latest
+EOF_MISSING
+    exit 1
+  fi
+  # buf also generates the dashboard's TypeScript client with a plugin that
+  # lives in ui/node_modules.
+  [ -x "${REPO_ROOT}/ui/node_modules/.bin/protoc-gen-es" ] || ( cd "${REPO_ROOT}/ui" && bun install --frozen-lockfile )
+  ( cd "${REPO_ROOT}" && ./scripts/buf-generate.sh >/dev/null )
+fi
+
 echo "==> building gateon"
 "${GO}" build -o "${GATEON_BIN}" ./cmd/gateon
 
