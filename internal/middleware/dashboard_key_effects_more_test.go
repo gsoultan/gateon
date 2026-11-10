@@ -114,13 +114,6 @@ func newProbe(method, target, body string) *http.Request {
 	return r
 }
 
-// originGet is a GET in origin form ("GET /path"), as a browser sends it.
-// get's absolute form puts the whole URL in the request target, which a rule
-// on absolute URLs in request values reads as one.
-func originGet(target string) func(*testing.T) *http.Request {
-	return func(*testing.T) *http.Request { return newProbe(http.MethodGet, target, "") }
-}
-
 // signedPost is a POST of body signed with secret, as a webhook sender signs.
 func signedPost(secret, header, prefix, body string) func(*testing.T) *http.Request {
 	return func(*testing.T) *http.Request {
@@ -272,9 +265,9 @@ func with(base map[string]string, kv ...string) map[string]string {
 
 var authKeyEffects = []keyEffect{
 	// WAF switches with a rule of their own to show.
-	{mwType: "waf", key: "malware_detection", a: "false", b: "true", probe: originGet("/c99.php")},
+	{mwType: "waf", key: "malware_detection", a: "false", b: "true", probe: get("/c99.php")},
 	{mwType: "waf", key: "ransomware_detection", a: "false", b: "true", probe: get("/decrypt_files.txt")},
-	{mwType: "waf", key: "wordpress", a: "false", b: "true", probe: originGet("/wp-content/plugins/x.php")},
+	{mwType: "waf", key: "wordpress", a: "false", b: "true", probe: get("/wp-content/plugins/x.php")},
 	{mwType: "waf", key: "request_body_limit", a: "1048576", b: "16", probe: postBody(4096)},
 	{mwType: "waf", key: "dlp", a: "false", b: "true", probe: get("/"),
 		backend: textBackend("card 4111 1111 1111 1111", "text/plain")},

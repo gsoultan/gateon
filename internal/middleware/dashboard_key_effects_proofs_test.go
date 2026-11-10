@@ -293,7 +293,7 @@ func postForm(target, body string) func(*testing.T) *http.Request {
 }
 
 var wafPolicyEffects = []keyEffect{
-	{mwType: "waf", key: "protocol", a: "true", b: "false", probe: originGet(deepPath)},
+	{mwType: "waf", key: "protocol", a: "true", b: "false", probe: get(deepPath)},
 	// Shellshock in a body is a paranoia-level-2 rule (1151009).
 	{mwType: "waf", key: "paranoia_level", a: "1", b: "2", probe: postForm("/form", "x=%28%29+%7B+%3A%3B+%7D")},
 	// A client gateon scores hostile is refused by the reputation rules only
@@ -309,12 +309,12 @@ var wafPolicyEffects = []keyEffect{
 	// threshold is from rules an operator writes with action "score" -- here
 	// one critical rule, worth 5, on a token nothing else carries.
 	{mwType: "waf", key: "anomaly_threshold", setup: withScoringRule, a: "5", b: "10",
-		probe: originGet("/?q=effect-anomaly-token")},
+		probe: get("/?q=effect-anomaly-token")},
 	// The audit log a route writes, and whether it records what was allowed.
 	{mwType: "waf", key: "audit_log_path", a: "effect-a.log", b: "effect-b.log",
 		probe: get("/?id=1%27%20OR%20%271%27%3D%271"), measure: fileSize("audit/waf/effect-b.log")},
 	{mwType: "waf", key: "audit_log_relevant_only", base: map[string]string{"audit_log_path": "effect-relevant.log"},
-		a: "true", b: "false", probe: originGet("/benign"), measure: fileSize("audit/waf/effect-relevant.log")},
+		a: "true", b: "false", probe: get("/benign"), measure: fileSize("audit/waf/effect-relevant.log")},
 }
 
 // statusOnly records the status: a challenge page carries a fresh challenge
