@@ -134,7 +134,10 @@ fi
 # read; otherwise reuse whatever is embedded and skip the slow UI build.
 if ${BUILD_UI} || [ ! -d "${REPO_ROOT}/internal/ui/dist" ]; then
   echo "==> building dashboard UI"
-  ( cd "${REPO_ROOT}/ui" && bun run build )
+  # Install first: a fresh checkout, or one whose lockfile moved since the
+  # last install, has no or stale node_modules, and the build then fails on a
+  # missing tsc. With nothing to change this takes well under a second.
+  ( cd "${REPO_ROOT}/ui" && bun install --frozen-lockfile && bun run build )
   "${GO}" run "${REPO_ROOT}/scripts/sync_assets.go"
 fi
 

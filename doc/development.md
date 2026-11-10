@@ -14,7 +14,7 @@ make dev                      # or: scripts/dev.sh
 | :--- | :--- |
 | Dashboard | <http://localhost:8080> — sign in as **admin / admin** |
 | Proxy | <http://localhost:8000> |
-| Database | PostgreSQL 18 in the Apple container `gateon-dev-pg`, on `127.0.0.1:55432` |
+| Database | PostgreSQL 18 in the Apple container `gateon-dev-pg`, on `127.0.0.1:54329` |
 | Local state | `dev/.data/` (gitignored) |
 
 Ctrl-C stops gateon and the sample backends. Postgres keeps running so the next
