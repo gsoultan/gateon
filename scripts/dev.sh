@@ -10,7 +10,8 @@
 # config file wired up. Local state lives under dev/.data/; gateon and the
 # backends are torn down on exit, Postgres keeps running.
 #
-#   Dashboard : http://localhost:8080   (login: admin / admin)
+#   Dashboard : http://localhost:8080   (login: admin / admin; the next free
+#               port if 8080 is taken, or GATEON_MANAGEMENT_PORT)
 #   Proxy     : http://localhost:8000   (the sample routes)
 #
 # The dev accounts are admin/admin, operator/operator and viewer/viewer. Those
@@ -52,7 +53,7 @@ for arg in "$@"; do
     --sqlite) POSTGRES=false ;;
     --postgres|--pg) POSTGRES=true ;; # the default; kept so old habits work
     -h|--help)
-      sed -n '4,34p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+      sed -n '4,35p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
       exit 0 ;;
     *) echo "error: unknown flag '${arg}' (try -h)" >&2; exit 1 ;;
   esac
@@ -126,6 +127,24 @@ if ! command -v node >/dev/null 2>&1; then
   chmod +x "${TOOLS_DIR}/node"
   echo "==> no node found; using bun as node (${TOOLS_DIR}/node)"
 fi
+
+# The dashboard defaults to 8080, which plenty of other tools also want. Take
+# the first free port from there rather than fail on bind; an explicit
+# GATEON_MANAGEMENT_PORT is used as given, since asking for a port means it.
+port_busy() { (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null; }
+if [ -z "${GATEON_MANAGEMENT_PORT:-}" ]; then
+  mgmt=8080
+  while port_busy "${mgmt}"; do
+    mgmt=$((mgmt + 1))
+    if [ "${mgmt}" -ge 8130 ]; then
+      echo "error: ports 8080-8129 are all in use; set GATEON_MANAGEMENT_PORT" >&2
+      exit 1
+    fi
+  done
+  [ "${mgmt}" = 8080 ] || echo "==> port 8080 is in use; the dashboard will use ${mgmt}"
+  export GATEON_MANAGEMENT_PORT="${mgmt}"
+fi
+DASHBOARD_URL="http://localhost:${GATEON_MANAGEMENT_PORT}"
 
 # The container system has to be running before Postgres can start, and
 # starting it is safe to do on the user's behalf.
@@ -254,7 +273,7 @@ cat <<BANNER
 ────────────────────────────────────────────────────────────────────
   gateon dev is starting
 
-  Dashboard   http://localhost:8080     (login: ${LOGIN_HINT})
+  Dashboard   ${DASHBOARD_URL}     (login: ${LOGIN_HINT})
   Proxy       http://localhost:8000
   Database    ${DB_LABEL}
 
