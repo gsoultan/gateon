@@ -131,6 +131,7 @@ trace_archive/
 
 # Dev runtime state (scripts/dev.sh)
 /dev/.data/
+/dev/.tools/
 
 # Runtime WAF audit logs. gateon resolves its data directory from
 # GATEON_DATA_DIR, GATEON_STATE_DIR or, failing both, the working
