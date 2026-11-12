@@ -12,7 +12,7 @@ make dev                      # or: scripts/dev.sh
 
 | What | Where |
 | :--- | :--- |
-| Dashboard | <http://localhost:8080> — sign in as **admin / admin** |
+| Dashboard | <http://localhost:8080> — sign in as **admin / admin**. If 8080 is taken, dev.sh uses the next free port and prints it; `GATEON_MANAGEMENT_PORT` picks one yourself |
 | Proxy | <http://localhost:8000> |
 | Database | PostgreSQL 18 in the Apple container `gateon-dev-pg`, on `127.0.0.1:54329` |
 | Local state | `dev/.data/` (gitignored) |

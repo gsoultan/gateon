@@ -10,7 +10,8 @@
 # config file wired up. Local state lives under dev/.data/; gateon and the
 # backends are torn down on exit, Postgres keeps running.
 #
-#   Dashboard : http://localhost:8080   (login: admin / admin)
+#   Dashboard : http://localhost:8080   (login: admin / admin; the next free
+#               port if 8080 is taken, or GATEON_MANAGEMENT_PORT)
 #   Proxy     : http://localhost:8000   (the sample routes)
 #
 # The dev accounts are admin/admin, operator/operator and viewer/viewer. Those
@@ -41,10 +42,6 @@ cd "${REPO_ROOT}"
 
 GO="$(command -v go || true)"
 [ -z "${GO}" ] && [ -x /opt/homebrew/bin/go ] && GO=/opt/homebrew/bin/go
-if [ -z "${GO}" ]; then
-  echo "error: 'go' not found on PATH (and not at /opt/homebrew/bin/go)" >&2
-  exit 1
-fi
 
 BUILD_UI=false
 CLEAN=false
@@ -56,7 +53,7 @@ for arg in "$@"; do
     --sqlite) POSTGRES=false ;;
     --postgres|--pg) POSTGRES=true ;; # the default; kept so old habits work
     -h|--help)
-      sed -n '4,34p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+      sed -n '4,35p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
       exit 0 ;;
     *) echo "error: unknown flag '${arg}' (try -h)" >&2; exit 1 ;;
   esac
@@ -96,6 +93,65 @@ cleanup() {
   done
 }
 trap cleanup EXIT INT TERM
+
+# ---- preflight: every prerequisite, checked before any work starts ---------
+# A run that fails on the fifth missing tool, one at a time, after minutes of
+# building, is worse than one that lists all of them in the first second. So
+# everything that cannot be installed from here is checked first and reported
+# together; everything that can is installed into dev/.tools, which goes
+# first on PATH for the rest of the run.
+TOOLS_DIR="${CONFIG_DIR}/.tools" # outside .data, so --clean keeps it
+missing=""
+need() { missing="${missing}
+  - $1: $2"; }
+[ -n "${GO}" ] || need go "brew install go"
+BUN="$(command -v bun || true)"
+[ -n "${BUN}" ] || need bun "brew install oven-sh/bun/bun"
+if ${POSTGRES}; then
+  command -v container >/dev/null 2>&1 ||
+    need container "brew install container (macOS 15+ on Apple silicon), or run with --sqlite"
+  command -v jq >/dev/null 2>&1 || need jq "brew install jq, or run with --sqlite"
+fi
+if [ -n "${missing}" ]; then
+  echo "error: dev.sh needs these, and found none of them on PATH:${missing}" >&2
+  exit 1
+fi
+mkdir -p "${TOOLS_DIR}"
+export PATH="${TOOLS_DIR}:${PATH}"
+
+# Some JavaScript tools (protoc-gen-es among them) start with
+# '#!/usr/bin/env node'. A machine with only bun has no node, and bun runs
+# those scripts unchanged, so a two-line node that hands off to bun is enough.
+if ! command -v node >/dev/null 2>&1; then
+  printf '#!/bin/sh\nexec "%s" "$@"\n' "${BUN}" > "${TOOLS_DIR}/node"
+  chmod +x "${TOOLS_DIR}/node"
+  echo "==> no node found; using bun as node (${TOOLS_DIR}/node)"
+fi
+
+# The dashboard defaults to 8080, which plenty of other tools also want. Take
+# the first free port from there rather than fail on bind; an explicit
+# GATEON_MANAGEMENT_PORT is used as given, since asking for a port means it.
+port_busy() { (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null; }
+if [ -z "${GATEON_MANAGEMENT_PORT:-}" ]; then
+  mgmt=8080
+  while port_busy "${mgmt}"; do
+    mgmt=$((mgmt + 1))
+    if [ "${mgmt}" -ge 8130 ]; then
+      echo "error: ports 8080-8129 are all in use; set GATEON_MANAGEMENT_PORT" >&2
+      exit 1
+    fi
+  done
+  [ "${mgmt}" = 8080 ] || echo "==> port 8080 is in use; the dashboard will use ${mgmt}"
+  export GATEON_MANAGEMENT_PORT="${mgmt}"
+fi
+DASHBOARD_URL="http://localhost:${GATEON_MANAGEMENT_PORT}"
+
+# The container system has to be running before Postgres can start, and
+# starting it is safe to do on the user's behalf.
+if ${POSTGRES} && ! container ls >/dev/null 2>&1; then
+  echo "==> starting the container system (container system start)"
+  container system start
+fi
 
 if ${CLEAN}; then
   echo "==> --clean: removing ${DATA_DIR}"
@@ -146,21 +202,15 @@ fi
 # on "no required module provides package .../proto/gateon/v1".
 if ! compgen -G "${REPO_ROOT}/proto/gateon/v1/*.pb.go" >/dev/null; then
   echo "==> generating gRPC code (make proto)"
-  GOBIN_DIR="$("${GO}" env GOPATH)/bin"
-  missing=""
-  for tool in buf protoc-gen-go protoc-gen-go-grpc protoc-gen-connect-go; do
-    command -v "${tool}" >/dev/null 2>&1 || [ -x "${GOBIN_DIR}/${tool}" ] || missing="${missing} ${tool}"
+  # buf and the Go plugins are pinned as tools in go.mod, so build those exact
+  # versions here rather than ask for an install that might not match. The
+  # first run takes a minute; later runs reuse dev/.tools.
+  for tool in github.com/bufbuild/buf/cmd/buf \
+    google.golang.org/protobuf/cmd/protoc-gen-go \
+    google.golang.org/grpc/cmd/protoc-gen-go-grpc \
+    connectrpc.com/connect/cmd/protoc-gen-connect-go; do
+    [ -x "${TOOLS_DIR}/${tool##*/}" ] || "${GO}" build -o "${TOOLS_DIR}/${tool##*/}" "${tool}"
   done
-  if [ -n "${missing}" ]; then
-    cat >&2 <<EOF_MISSING
-error: generating the gRPC code needs:${missing}
-  brew install bufbuild/buf/buf
-  go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.11 \
-    google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest \
-    connectrpc.com/connect/cmd/protoc-gen-connect-go@latest
-EOF_MISSING
-    exit 1
-  fi
   # buf also generates the dashboard's TypeScript client with a plugin that
   # lives in ui/node_modules.
   [ -x "${REPO_ROOT}/ui/node_modules/.bin/protoc-gen-es" ] || ( cd "${REPO_ROOT}/ui" && bun install --frozen-lockfile )
@@ -223,7 +273,7 @@ cat <<BANNER
 ────────────────────────────────────────────────────────────────────
   gateon dev is starting
 
-  Dashboard   http://localhost:8080     (login: ${LOGIN_HINT})
+  Dashboard   ${DASHBOARD_URL}     (login: ${LOGIN_HINT})
   Proxy       http://localhost:8000
   Database    ${DB_LABEL}
 
