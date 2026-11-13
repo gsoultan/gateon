@@ -6,11 +6,31 @@ import react from '@vitejs/plugin-react'
 import { visualizer } from 'rollup-plugin-visualizer'
 import { compression } from 'vite-plugin-compression2'
 import { VitePWA } from 'vite-plugin-pwa'
+import type { ManifestTransform } from 'workbox-build'
+import { readFile } from 'node:fs/promises'
+import path from 'node:path'
 
 // Set ANALYZE=1 to emit dist/stats.html (treemap of chunk/module sizes) after a
 // build, e.g. `ANALYZE=1 bun run build`. Off by default so normal/CI builds are
 // unaffected.
 const analyze = process.env.ANALYZE === '1' || process.env.ANALYZE === 'true'
+
+// Keeps the precache entries index.html loads (entry script, modulepreloads,
+// stylesheets) plus images; everything else is a lazy chunk. It reads the
+// built index.html, which Vite has written by the time Workbox runs.
+const precacheCoreOnly: ManifestTransform = async (entries) => {
+  const html = await readFile(path.resolve(import.meta.dirname, 'dist/index.html'), 'utf8')
+  const referenced = new Set(
+    [...html.matchAll(/(?:src|href)="\/?([^"]+)"/g)].map((m) => m[1]),
+  )
+  const manifest = entries.filter(
+    (e) => referenced.has(e.url) || /\.(png|svg|ico)$/.test(e.url),
+  )
+  if (!manifest.some((e) => e.url.endsWith('.js'))) {
+    throw new Error('precacheCoreOnly: no entry script found in dist/index.html')
+  }
+  return { manifest, warnings: [] }
+}
 
 export default defineConfig({
   plugins: [
@@ -67,9 +87,28 @@ export default defineConfig({
       //   rendered the dashboard — and that copy carried one CSP nonce that
       //   every page load then reused. The server already answers unknown paths
       //   with the dashboard, with a fresh nonce each time.
+      //
+      // Precache only what the first page load needs: the files index.html
+      // references and the icons. Precaching every chunk had the worker
+      // download all ~100 of them (3.25 MB) on the first visit, the lazy
+      // Docs, Topology and map pages included, which undid route-level code
+      // splitting for bandwidth. Lazy chunks are cached when first fetched
+      // instead, bounded by count and age.
       workbox: {
         globPatterns: ['**/*.{js,css,ico,png,svg,woff2}'],
         navigateFallback: null,
+        manifestTransforms: [precacheCoreOnly],
+        runtimeCaching: [
+          {
+            urlPattern: ({ url, sameOrigin }) => sameOrigin && url.pathname.startsWith('/assets/'),
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'gateon-lazy-assets',
+              expiration: { maxEntries: 150, maxAgeSeconds: 30 * 24 * 60 * 60, purgeOnQuotaError: true },
+              cacheableResponse: { statuses: [200] },
+            },
+          },
+        ],
       }
     }),
     ...(analyze

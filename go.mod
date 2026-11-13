@@ -1,6 +1,6 @@
 module github.com/gsoultan/gateon
 
-go 1.27.3
+go 1.27.4
 
 // Go 1.24 made net.Listen("tcp") open MPTCP sockets by default. No Gateon
 // feature uses MPTCP, and the public exploit for CVE-2026-98432 targets an
