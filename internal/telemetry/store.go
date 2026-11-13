@@ -1411,9 +1411,24 @@ func (s *pathStatsStore) syncDailyBaselines(isDayRollover bool) {
 		return
 	}
 
-	now := time.Now().UTC()
-	day := now.Format("2006-01-02")
-	startOfDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	s.seedDailyCounters(time.Now(), time.Local)
+}
+
+// seedDailyCounters sets today's counters from the database, as of now.
+//
+// "Today" is the UTC day, as the rollover in dailyResetLoop and the traffic
+// table's day keys have it. security_threats.timestamp is the writer's local
+// wall clock, though (see attackTrendBucketQuery), so the day's start is
+// compared in that zone. It was compared as UTC text: on a gateway east of
+// UTC, a restart restored Mitigated Today from up to fourteen hours of the
+// previous day, and the figure jumped at the restart and again at midnight.
+// writerZone is the zone threats are written in: time.Local, a parameter so a
+// test can name one without changing the process's.
+func (s *pathStatsStore) seedDailyCounters(now time.Time, writerZone *time.Location) {
+	utc := now.UTC()
+	day := utc.Format("2006-01-02")
+	startOfDay := time.Date(utc.Year(), utc.Month(), utc.Day(), 0, 0, 0, 0, time.UTC)
+	threatsSince := startOfDay.In(writerZone).Format(threatTimestampLayout)
 
 	// Traffic totals for today
 	q := s.dialect.Rebind(QueryGetTotalTrafficToday)
@@ -2775,9 +2790,13 @@ var mitigationFunnelRules = []funnelRule{
 	},
 	{
 		matches: func(cat, typ string) bool {
+			// A reputation block is filed under category "bot", and the bot
+			// rule below claimed it: with no bot management configured, the
+			// funnel's "Bot Mitigation" stage counted every client refused for
+			// its reputation. It is a blocked source, like a shun.
 			return typ == "reputation_hit" || typ == "advanced_security" ||
 				cat == "advanced" || cat == "threat_intel" ||
-				typ == "ip_mitigation" || typ == "user_mitigation"
+				typ == typeIPMitigation || typ == typeUserMitigation || typ == typeReputationBlock
 		},
 		record: func(routeID, typ string, _ *SecurityThreat) {
 			MiddlewareAdvancedSecurityBlockedTotal.WithLabelValues(routeID, typ).Inc()
