@@ -181,16 +181,47 @@ jobs:
       # and --skip=publish stops it uploading. Both paths run the same `before`
       # hook and the same builds, so a dispatch that passes is real evidence the
       # next tag will too.
+      #
+      # Signing (ADR 0085). The dry run holds no secret -- any branch can
+      # dispatch it -- so it signs with a key releasesign throws away: the
+      # signing step still runs and its output is still checked, and what it
+      # produces verifies under nothing. A tag signs with the release key, and
+      # releasesign fails the release before anything is published if that key
+      # is missing or is not one release_keys.txt lists.
+      #
+      # Until a release key is committed there is nothing to sign for: no
+      # gateway could verify it. Such a release is published unsigned, loudly,
+      # and gateways report its version as unverified. That branch disappears
+      # with the first line in release_keys.txt.
       - name: Run GoReleaser
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GORELEASER_CURRENT_TAG: ${{ github.ref_name }}
+          EVENT_NAME: ${{ github.event_name }}
+          # Empty on a dry run, which must never hold the key.
+          GATEON_RELEASE_SIGNING_KEY: ${{ github.event_name == 'push' && secrets.GATEON_RELEASE_SIGNING_KEY || '' }}
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
             echo "::notice::dry run - building every artifact, publishing none"
-            goreleaser release --snapshot --clean --skip=publish
+            GATEON_RELEASE_SIGN_EPHEMERAL=1 goreleaser release --snapshot --clean --skip=publish
+          elif [ -z "$(go run ./scripts/releasesign keys)" ]; then
+            echo "::warning::no release key is committed in internal/selfupdate/release_keys.txt - publishing this release unsigned; see doc/releasing.md"
+            goreleaser release --clean --skip=sign
           else
             goreleaser release --clean
+          fi
+
+      # The signature is checked the way a gateway checks it, with the keys
+      # compiled into the binaries this run just built. goreleaser has already
+      # published by now; this is what turns "signed" into "verified" in the
+      # run's result, and a failure here is a release to withdraw.
+      - name: Verify the release list's signature
+        if: github.event_name == 'push'
+        run: |
+          if [ -f dist/checksums.txt.sig ]; then
+            go run ./scripts/releasesign verify -in dist/checksums.txt -sig dist/checksums.txt.sig
+          else
+            echo "::warning::this release has no checksums.txt.sig"
           fi
 
       # Only on a dry run: the artifacts have nowhere else to go, and being able
@@ -206,6 +237,7 @@ jobs:
             dist/*.rpm
             dist/*.sbom.json
             dist/checksums.txt
+            dist/checksums.txt.sig
           if-no-files-found: error
           retention-days: 7
 
