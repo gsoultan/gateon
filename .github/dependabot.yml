@@ -1,0 +1,76 @@
+# Weekly library updates, opened as pull requests so each one runs the full CI
+# and security gates before it can land.
+#
+# The weekly security scan (security.yml) finds a vulnerable dependency; it does
+# not fix one. On 2026-11-09 it went red on golang.org/x/net v0.60.0 and the fix
+# was a one-line version bump that nothing proposed. This is the half that
+# proposes it: Dependabot opens the bump, CI proves it, a human merges it.
+#
+# Runs Monday 05:00 UTC, an hour before the security scan, so the scan reads a
+# week whose update PRs are already open.
+#
+# Minor and patch bumps are grouped into one PR per ecosystem so a quiet week
+# costs one review, not twenty. Major bumps stay separate, because a major is an
+# API change and deserves its own diff. Security updates are never grouped away:
+# Dependabot opens those on its own schedule as soon as an advisory lands.
+#
+# github.com/gsoultan/gwaf is ignored on purpose. A detection fix is made in
+# gwaf, tagged, then taken here as a deliberate bump with its own tests
+# (project rule), and an automatic bump would skip that step.
+#
+# What this does not cover: the `go` line in go.mod. Dependabot never moves it,
+# so the toolchain check in security.yml reports when a newer Go patch exists.
+
+version: 2
+
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "05:00"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 5
+    ignore:
+      - dependency-name: github.com/gsoultan/gwaf
+    groups:
+      go-minor-and-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: bun
+    directory: /ui
+    schedule:
+      interval: weekly
+      day: monday
+      time: "05:00"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 5
+    groups:
+      ui-minor-and-patch:
+        update-types: [minor, patch]
+
+  # Workflow actions run with repository access, so a stale one is a supply-chain
+  # exposure of its own; this keeps the pinned versions moving deliberately.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "05:00"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 5
+    groups:
+      actions:
+        patterns: ["*"]
+
+  # The shipped image's base layers: the Bun and Go builders and the distroless
+  # runtime. A CVE in the runtime base ships in every image we publish.
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "05:00"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 3
