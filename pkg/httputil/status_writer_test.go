@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"testing"
+	"time"
 )
 
 func TestWriteHeaderCapturesStatus(t *testing.T) {
@@ -244,5 +245,34 @@ func TestOptionalInterfacesPassThrough(t *testing.T) {
 	}
 	if inner.pushed != "/asset.js" {
 		t.Errorf("Push target = %q, want %q", inner.pushed, "/asset.js")
+	}
+}
+
+// TestFirstByteAtIsWhenTheResponseStarted: the predictive balancer prices a
+// backend by this instant, so it must be unset until something is written,
+// fall inside the response once it is, and not move when the body follows --
+// a stream's last byte is not when its backend answered.
+func TestFirstByteAtIsWhenTheResponseStarted(t *testing.T) {
+	t.Parallel()
+
+	sw := GetStatusResponseWriter(httptest.NewRecorder())
+	defer PutStatusResponseWriter(sw)
+
+	if at, ok := sw.FirstByteAt(); ok || !at.IsZero() {
+		t.Fatalf("before anything is written: FirstByteAt = %v, %v; want zero, false", at, ok)
+	}
+	before := time.Now()
+	sw.WriteHeader(http.StatusOK)
+	after := time.Now()
+
+	first, ok := sw.FirstByteAt()
+	if !ok || first.Before(before) || first.After(after) {
+		t.Fatalf("FirstByteAt = %v, %v; want a time between %v and %v", first, ok, before, after)
+	}
+	if _, err := sw.Write([]byte("body")); err != nil {
+		t.Fatal(err)
+	}
+	if again, _ := sw.FirstByteAt(); !again.Equal(first) {
+		t.Errorf("FirstByteAt moved from %v to %v when the body was written", first, again)
 	}
 }

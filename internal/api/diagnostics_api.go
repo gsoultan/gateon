@@ -12,7 +12,6 @@ import (
 	"net"
 	"net/netip"
 	"net/url"
-	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -23,6 +22,7 @@ import (
 	"github.com/gsoultan/gateon/internal/ai"
 	"github.com/gsoultan/gateon/internal/ai/advisory"
 	"github.com/gsoultan/gateon/internal/auth"
+	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/ebpf"
 	"github.com/gsoultan/gateon/internal/httputil"
 	"github.com/gsoultan/gateon/internal/logger"
@@ -30,10 +30,12 @@ import (
 	"github.com/gsoultan/gateon/internal/middleware/security"
 	"github.com/gsoultan/gateon/internal/middleware/security/identity"
 	wafmw "github.com/gsoultan/gateon/internal/middleware/security/waf"
+	"github.com/gsoultan/gateon/internal/resource"
 	"github.com/gsoultan/gateon/internal/security/posture"
 	"github.com/gsoultan/gateon/internal/security/waf"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	"github.com/gsoultan/gateon/internal/telemetry/repid"
+	gtls "github.com/gsoultan/gateon/internal/tls"
 	"github.com/gsoultan/gateon/pkg/proxy"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 	"google.golang.org/protobuf/proto"
@@ -518,22 +520,16 @@ func (s *ApiService) getSystemInfo(ctx context.Context) *gateonv1.SystemInfo {
 	}
 	titanStats.AiPredictorEnabled = ai.GlobalPredictor() != nil
 	titanStats.AiModelStatus = ai.ActiveModel()
+	titanStats.AiPolicyServiceCount = s.countPredictiveServices(ctx)
 	if s.EbpfManager != nil {
 		if stats, err := s.EbpfManager.GetMapStats(); err == nil {
 			titanStats.ShunnedIpCount = int32(stats.ShunnedIPsCount)
 		}
 	}
-	titanStats.PqcEnabled = tlsOffersPostQuantumKeyExchange()
+	titanStats.PqcEnabled = gtls.OffersPostQuantumKeyExchange()
 
 	if s.Governor != nil {
-		active, memHooks, cpuHooks, memPressure, cpuPressure := s.Governor.GetStatus(ctx)
-		titanStats.Governor = &gateonv1.ResourceGovernorStats{
-			Active:                active,
-			MemoryHooksCount:      int32(memHooks),
-			CpuHooksCount:         int32(cpuHooks),
-			MemoryPressurePercent: memPressure,
-			CpuPressurePercent:    cpuPressure,
-		}
+		titanStats.Governor = governorStats(s.Governor.Status())
 	}
 
 	return &gateonv1.SystemInfo{
@@ -1827,19 +1823,52 @@ func hardeningMessage(changed []string) string {
 	return "Applied: " + strings.Join(changed, "; ") + "." + scope
 }
 
-// tlsOffersPostQuantumKeyExchange reports whether TLS 1.3 handshakes offer the
-// hybrid ML-KEM key exchanges. They are Go's default and nothing in the gateway
-// sets CurvePreferences, so they are offered unless GODEBUG=tlsmlkem=0 turned
-// them off. That is all the post-quantum cryptography the gateway does: the
-// panel used to report "ML-KEM / ML-DSA active" unconditionally, and no
-// certificate or signature anywhere uses ML-DSA.
-func tlsOffersPostQuantumKeyExchange() bool {
-	for _, setting := range strings.Split(os.Getenv("GODEBUG"), ",") {
-		if strings.TrimSpace(setting) == "tlsmlkem=0" {
-			return false
+// governorStats is the resource governor's status as the Diagnostics page
+// reads it.
+func governorStats(st resource.Status) *gateonv1.ResourceGovernorStats {
+	return &gateonv1.ResourceGovernorStats{
+		Active:                 st.Running,
+		MemoryHooksCount:       int32(st.MemoryHooks),
+		CpuHooksCount:          int32(st.CPUHooks),
+		MemoryPressurePercent:  st.MemoryPercent,
+		CpuPressurePercent:     st.CPUPercent,
+		UnderPressure:          st.UnderPressure(),
+		Sampled:                st.Sampled,
+		ReadingsUnavailable:    st.Unreadable,
+		MemoryThresholdPercent: st.MemoryThreshold,
+		CpuThresholdPercent:    st.CPUThreshold,
+		MemoryYardstick:        st.MemoryYardstick,
+	}
+}
+
+// countPredictiveServices is how many HTTP services balance with the
+// predictive policy, the only reader of the predictor's forecast.
+func (s *ApiService) countPredictiveServices(ctx context.Context) int32 {
+	if s.Services == nil {
+		return 0
+	}
+	var n int32
+	for _, svc := range s.Services.List(ctx) {
+		if usesPredictor(svc) {
+			n++
 		}
 	}
-	return true
+	return n
+}
+
+// usesPredictor reports whether svc is balanced by the predictive balancer:
+// its policy names it and it is not a TCP or UDP service, which the L4
+// balancer handles without it.
+func usesPredictor(svc *gateonv1.Service) bool {
+	switch strings.ToLower(svc.GetBackendType()) {
+	case "tcp", "udp":
+		return false
+	}
+	switch config.CanonicalLBPolicy(svc.GetLoadBalancerPolicy()) {
+	case "ai_predictive", "intelligent":
+		return true
+	}
+	return false
 }
 
 // AnalyzeConfig runs the AI Advisory over the live configuration and routes

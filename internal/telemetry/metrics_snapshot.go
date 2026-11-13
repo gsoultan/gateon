@@ -16,6 +16,8 @@ import (
 	"github.com/gsoultan/gateon/internal/ai"
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/ebpf"
+	"github.com/gsoultan/gateon/internal/resource"
+	gtls "github.com/gsoultan/gateon/internal/tls"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	dto "github.com/prometheus/client_model/go"
@@ -49,7 +51,7 @@ type titanProviderContainer struct {
 }
 
 type GovernorProvider interface {
-	GetStatus(ctx context.Context) (active bool, memHooks, cpuHooks int, memPressure, cpuPressure float64)
+	Status() resource.Status
 }
 
 type governorProviderContainer struct {
@@ -1337,7 +1339,15 @@ func buildSystemMetrics(idx map[string]*dto.MetricFamily) SystemMetrics {
 	sm.StorageUsagePct = gaugeValue(idx, "gateon_storage_usage_percent")
 	sm.PublicIP = GetPublicIP(context.Background())
 
-	// Feature flags
+	setFeatureFlags(&sm)
+
+	return sm
+}
+
+// setFeatureFlags fills in which optional subsystems are running. Each flag
+// is read from the subsystem, not assumed: pqcEnabled was a literal true and
+// resourceGovernorEnabled was true for any governor that existed.
+func setFeatureFlags(sm *SystemMetrics) {
 	sm.TitanEnabled = false
 	if v := globalTitan.Load(); v != nil {
 		if container, ok := v.(*titanProviderContainer); ok && container.p != nil {
@@ -1348,17 +1358,14 @@ func buildSystemMetrics(idx map[string]*dto.MetricFamily) SystemMetrics {
 
 	sm.PredictiveAiEnabled = ai.GlobalPredictor() != nil
 	sm.NeuralSentinelEnabled, sm.GraphIntelligenceEnabled = detectorStatus()
-	sm.PqcEnabled = true // ML-KEM/ML-DSA always available in binary
+	sm.PqcEnabled = gtls.OffersPostQuantumKeyExchange()
 
 	sm.ResourceGovernorEnabled = false
 	if v := globalGovernor.Load(); v != nil {
 		if container, ok := v.(*governorProviderContainer); ok && container.p != nil {
-			active, _, _, _, _ := container.p.GetStatus(context.Background())
-			sm.ResourceGovernorEnabled = active
+			sm.ResourceGovernorEnabled = container.p.Status().Running
 		}
 	}
-
-	return sm
 }
 
 // buildSecurityInsights reads what reads asks for and carries the rest over

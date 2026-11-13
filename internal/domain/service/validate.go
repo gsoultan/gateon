@@ -35,6 +35,9 @@ func validateService(svc *gateonv1.Service) error {
 		return fmt.Errorf("%w: load balancer policy %q is not one the gateway has; use round_robin, "+
 			"least_conn or weighted_round_robin", ErrInvalidService, svc.LoadBalancerPolicy)
 	}
+	if err := validateL4Policy(svc, policy); err != nil {
+		return err
+	}
 	if err := validateWeights(svc, policy); err != nil {
 		return err
 	}
@@ -43,6 +46,20 @@ func validateService(svc *gateonv1.Service) error {
 	}
 	if err := gtls.ValidateClientConfig(svc.GetTlsClientConfig()); err != nil {
 		return fmt.Errorf("%w: %w", ErrInvalidService, err)
+	}
+	return nil
+}
+
+// validateL4Policy refuses the predictive balancer on a TCP or UDP service. It
+// prices backends by how quickly an HTTP response's headers come back, which a
+// TCP or UDP session does not have, and the L4 balancer knows round robin and
+// least connections only: such a service saved, showed the predictive policy,
+// and was balanced round robin.
+func validateL4Policy(svc *gateonv1.Service, policy string) error {
+	l4 := strings.ToLower(svc.GetBackendType())
+	if (l4 == "tcp" || l4 == "udp") && (policy == "ai_predictive" || policy == "intelligent") {
+		return fmt.Errorf("%w: a %s service cannot use %s, which balances HTTP responses by latency; "+
+			"use round robin or least connections", ErrInvalidService, l4, policy)
 	}
 	return nil
 }

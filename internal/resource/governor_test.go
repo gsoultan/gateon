@@ -181,34 +181,122 @@ func TestHooksRunUnlocked(t *testing.T) {
 	waitFor(t, done, "a hook that re-enters the governor to complete")
 }
 
-func TestGetStatusReportsRegisteredHooksAndPressure(t *testing.T) {
+// TestStatusReportsWhatTheLoopLastMeasured: hooks, readings, thresholds and
+// the memory yardstick, as of the loop's last check.
+func TestStatusReportsWhatTheLoopLastMeasured(t *testing.T) {
 	g := newTestGovernor(fixed(42.5), fixed(17.25))
 	g.RegisterMemoryHook("m1", func() {})
 	g.RegisterMemoryHook("m2", func() {})
 	g.RegisterCPUHook("c1", func() {})
+	g.check(context.Background())
 
-	active, memHooks, cpuHooks, memPressure, cpuPressure := g.GetStatus(context.Background())
-	if !active {
-		t.Error("active = false, want true")
+	st := g.Status()
+	if st.MemoryHooks != 2 || st.CPUHooks != 1 {
+		t.Errorf("hooks = (%d mem, %d cpu), want (2, 1)", st.MemoryHooks, st.CPUHooks)
 	}
-	if memHooks != 2 || cpuHooks != 1 {
-		t.Errorf("hooks = (%d mem, %d cpu), want (2, 1)", memHooks, cpuHooks)
+	if st.MemoryPercent != 42.5 || st.CPUPercent != 17.25 {
+		t.Errorf("pressure = (%.2f, %.2f), want (42.50, 17.25)", st.MemoryPercent, st.CPUPercent)
 	}
-	if memPressure != 42.5 || cpuPressure != 17.25 {
-		t.Errorf("pressure = (%.2f, %.2f), want (42.50, 17.25)", memPressure, cpuPressure)
+	if st.MemoryThreshold != memoryPressurePercent || st.CPUThreshold != cpuPressurePercent {
+		t.Errorf("thresholds = (%v, %v), want (%v, %v)", st.MemoryThreshold, st.CPUThreshold,
+			memoryPressurePercent, cpuPressurePercent)
+	}
+	if !st.Sampled || st.Unreadable || st.UnderPressure() {
+		t.Errorf("status = %+v; want sampled, readable, not under pressure", st)
+	}
+	if st.MemoryYardstick != "test budget" {
+		t.Errorf("yardstick = %q, want %q", st.MemoryYardstick, "test budget")
 	}
 }
 
-// TestGetStatusToleratesUnreadableStats keeps a broken gauge from taking the
-// status endpoint down with it.
-func TestGetStatusToleratesUnreadableStats(t *testing.T) {
-	g := newTestGovernor(failing(errors.New("boom")), failing(errors.New("boom")))
-	active, _, _, memPressure, cpuPressure := g.GetStatus(context.Background())
-	if !active {
-		t.Error("active = false, want true")
+// TestStatusSaysWhenItIsUnderPressure: the dashboard showed STABLE whenever
+// the governor existed, at 95% memory as at 5%.
+func TestStatusSaysWhenItIsUnderPressure(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		mem, cpu float64
+		want     bool
+	}{
+		{"memory above its threshold", memoryPressurePercent + 15, 10, true},
+		{"CPU above its threshold", 10, cpuPressurePercent + 5, true},
+		{"both at their thresholds", memoryPressurePercent, cpuPressurePercent, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			g := newTestGovernor(fixed(tc.mem), fixed(tc.cpu))
+			g.check(context.Background())
+			if got := g.Status().UnderPressure(); got != tc.want {
+				t.Errorf("memory %.0f%%, CPU %.0f%%: UnderPressure() = %v, want %v", tc.mem, tc.cpu, got, tc.want)
+			}
+		})
 	}
-	if memPressure != 0 || cpuPressure != 0 {
-		t.Errorf("pressure = (%.2f, %.2f), want zeroes when the stats cannot be read", memPressure, cpuPressure)
+}
+
+// TestStatusSaysWhenReadingsFail: a gauge that cannot be read used to report
+// 0%, which the dashboard showed as STABLE at 0% -- no pressure, rather than
+// no idea.
+func TestStatusSaysWhenReadingsFail(t *testing.T) {
+	g := newTestGovernor(failing(errors.New("boom")), failing(errors.New("boom")))
+	if st := g.Status(); st.Sampled || st.Unreadable {
+		t.Errorf("before any reading: %+v; want neither sampled nor unreadable", st)
+	}
+	g.check(context.Background())
+	st := g.Status()
+	if !st.Sampled || !st.Unreadable {
+		t.Errorf("after failed readings: %+v; want sampled and unreadable", st)
+	}
+}
+
+// TestStatusIsNotSampledUntilCPUIsRead: the loop reads memory as it starts and
+// CPU on its first tick. In between, the panel showed the CPU it had not
+// measured as 0.0% beside a STABLE badge.
+func TestStatusIsNotSampledUntilCPUIsRead(t *testing.T) {
+	g := newTestGovernor(fixed(40), fixed(95))
+	g.logStart(context.Background())
+	if g.Status().Sampled {
+		t.Error("with memory read and CPU not yet, the status claims to be sampled")
+	}
+	g.check(context.Background())
+	if !g.Status().Sampled {
+		t.Error("after a full check the status is still not sampled")
+	}
+}
+
+// TestStatusIsRunningOnlyWhileTheLoopIs: "active" was true for a governor
+// that had never been started, and for one whose loop had stopped.
+func TestStatusIsRunningOnlyWhileTheLoopIs(t *testing.T) {
+	g := newTestGovernor(fixed(0), fixed(cpuPressurePercent+5))
+	if g.Status().Running {
+		t.Fatal("a governor never started reports itself running")
+	}
+	hook, fired := signalHook()
+	g.RegisterCPUHook("probe", hook)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { g.Start(ctx); close(done) }()
+	waitFor(t, fired, "the loop to check once")
+	if !g.Status().Running {
+		t.Error("a governor whose loop is checking reports itself not running")
+	}
+	cancel()
+	waitFor(t, done, "the loop to stop")
+	if g.Status().Running {
+		t.Error("a governor whose loop has stopped reports itself running")
+	}
+}
+
+// TestStatusDoesNotSample: a CPU reading is the usage since the previous one,
+// process-wide, so a status request that sampled would shrink the loop's next
+// window to however long ago the dashboard last asked.
+func TestStatusDoesNotSample(t *testing.T) {
+	var calls atomic.Int32
+	count := func(context.Context) (float64, error) { calls.Add(1); return 1, nil }
+	g := newTestGovernor(count, count)
+	for range 3 {
+		g.Status()
+	}
+	if n := calls.Load(); n != 0 {
+		t.Errorf("Status took %d readings, want 0", n)
 	}
 }
 

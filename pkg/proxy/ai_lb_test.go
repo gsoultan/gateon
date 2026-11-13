@@ -213,13 +213,43 @@ func TestAIPredictiveAvoidsABackendThatFailsFast(t *testing.T) {
 		s := lb.NextState()
 		got[s.url]++
 		if s.url == failing {
-			h.recordMetrics(s, time.Now().Add(-time.Millisecond), 503)
+			h.recordMetrics(s, time.Now().Add(-time.Millisecond), responseOutcome{status: 503})
 		} else {
-			h.recordMetrics(s, time.Now().Add(-50*time.Millisecond), 200)
+			h.recordMetrics(s, time.Now().Add(-50*time.Millisecond), responseOutcome{status: 200})
 		}
 	}
 	if got[healthy] < 900 {
 		t.Errorf("healthy backend (50 ms) got %d of 1000 requests, failing backend (503 in 1 ms) got %d; "+
 			"want the healthy one to take at least 900", got[healthy], got[failing])
+	}
+}
+
+// TestAIPredictivePricesABackendByWhenItAnswers: the balancer was fed each
+// response's whole duration, body included. A backend that answers in 5 ms
+// and then streams -- server-sent events, a download, a long poll -- was
+// priced at however long the client kept reading, thirty seconds here, and
+// lost its traffic to one ten times slower to answer. How long a client reads
+// says nothing about how quickly the backend responds; when its headers
+// arrive does, which is what latency-aware balancers measure.
+func TestAIPredictivePricesABackendByWhenItAnswers(t *testing.T) {
+	installProductionPredictor(t)
+	const streaming, plain = "http://streaming", "http://plain"
+	lb := newAIBalancer(t, streaming, plain)
+	h := &ProxyHandler{lb: lb}
+	got := map[string]int{}
+	for range 1000 {
+		s := lb.NextState()
+		got[s.url]++
+		if s.url == streaming {
+			start := time.Now().Add(-30 * time.Second)
+			h.recordMetrics(s, start, responseOutcome{status: 200, answeredAt: start.Add(5 * time.Millisecond)})
+		} else {
+			start := time.Now().Add(-50 * time.Millisecond)
+			h.recordMetrics(s, start, responseOutcome{status: 200, answeredAt: start.Add(50 * time.Millisecond)})
+		}
+	}
+	if got[streaming] < 900 {
+		t.Errorf("backend answering in 5 ms then streaming 30 s got %d of 1000 requests, one answering in 50 ms got %d; "+
+			"want the faster one to take at least 900", got[streaming], got[plain])
 	}
 }
