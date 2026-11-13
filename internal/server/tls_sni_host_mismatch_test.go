@@ -212,6 +212,12 @@ func newFrontingGateway(t *testing.T, hosts []string, routes ...*gateonv1.Route)
 		_ = srv.ServeTLS(ln, "", "")
 	}()
 	t.Cleanup(func() {
+		// Shutdown, not Close alone: Close returns while a handler is still
+		// writing its access log after the response went out, and the next
+		// test to swap logger.L then races with it.
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = srv.Shutdown(ctx)
 		_ = srv.Close()
 		<-done
 	})
