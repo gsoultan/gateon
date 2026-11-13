@@ -94,11 +94,32 @@ func StaticHandler(content fs.FS, subDir string) http.Handler {
 		} else {
 			_ = f.Close()
 		}
+		if ct, ok := ownContentTypes[path.Ext(cleanPath)]; ok {
+			w.Header().Set("Content-Type", ct)
+		}
 		if servePrecompressed(w, r, dist, cleanPath) {
 			return
 		}
 		fileServer.ServeHTTP(w, r)
 	})
+}
+
+// ownContentTypes names the types the dashboard build ships that Go's mime
+// table does not know. Without it the web app manifest went out as text/plain,
+// sniffed from its bytes: browsers tolerate that today, but the type the spec
+// registers is application/manifest+json, and a type that depends on sniffing
+// is one X-Content-Type-Options: nosniff can take away. Set per response rather
+// than with mime.AddExtensionType, which would change the process-wide table.
+var ownContentTypes = map[string]string{
+	".webmanifest": "application/manifest+json",
+}
+
+func assetContentType(name string) string {
+	ext := path.Ext(name)
+	if ct, ok := ownContentTypes[ext]; ok {
+		return ct
+	}
+	return mime.TypeByExtension(ext)
 }
 
 func isAsset(p string) bool {
@@ -174,7 +195,7 @@ func serveVariant(w http.ResponseWriter, r *http.Request, f fs.File, name, encod
 		return false
 	}
 	h := w.Header()
-	if ct := mime.TypeByExtension(path.Ext(name)); ct != "" {
+	if ct := assetContentType(name); ct != "" {
 		h.Set("Content-Type", ct)
 	}
 	h.Set("Content-Encoding", encoding)
