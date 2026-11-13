@@ -75,13 +75,12 @@ func TestWriteValidateResponse(t *testing.T) {
 
 func TestWriteImportResponse(t *testing.T) {
 	w := httptest.NewRecorder()
-	exp := &configExport{Routes: []*gateonv1.Route{{}}}
-	writeImportResponse(w, exp, nil)
-	var out map[string]bool
+	writeImportResponse(w, importResult{Success: true, Applied: importCounts{Routes: 1}})
+	var out importResult
 	if err := json.NewDecoder(w.Body).Decode(&out); err != nil {
 		t.Fatal(err)
 	}
-	if !out["success"] {
-		t.Error("success = false, want true")
+	if !out.Success || out.Applied.Routes != 1 {
+		t.Errorf("decoded %+v, want success with one route applied", out)
 	}
 }
