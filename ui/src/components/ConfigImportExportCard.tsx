@@ -2,9 +2,11 @@
 // SPDX-License-Identifier: MIT
 
 import { useState } from "react";
-import { Card, Stack, Group, Button, Text, Paper, Alert, Title } from "@mantine/core";
+import { useQueryClient } from "@tanstack/react-query";
+import { Card, Stack, Group, Button, Text, Paper, Alert, Title, List } from "@mantine/core";
 import { IconDownload, IconUpload } from "@tabler/icons-react";
 import { getApiBaseUrl } from "../store/useApiConfigStore";
+import { settleConfigImport, type ConfigImportOutcome } from "./configImportResult";
 
 interface ConfigImportExportCardProps {
   canImport?: boolean;
@@ -15,6 +17,8 @@ export function ConfigImportExportCard({ canImport = true, canExport = true }: C
   const [importing, setImporting] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
   const [dryRunDiff, setDryRunDiff] = useState<any>(null);
+  const [importOutcome, setImportOutcome] = useState<ConfigImportOutcome | null>(null);
+  const queryClient = useQueryClient();
 
   const base = getApiBaseUrl();
 
@@ -56,6 +60,7 @@ export function ConfigImportExportCard({ canImport = true, canExport = true }: C
       setImporting(true);
       setImportError(null);
       setDryRunDiff(null);
+      setImportOutcome(null);
       try {
         const body = await file.text();
         const res = await fetch(`${base}/v1/config/import${dryRun ? "?dryRun=true" : ""}`, {
@@ -72,11 +77,9 @@ export function ConfigImportExportCard({ canImport = true, canExport = true }: C
           setDryRunDiff(data.diff);
           return;
         }
-        if (data.errors?.length) {
-          setImportError(data.errors.join("; "));
-          return;
-        }
-        window.location.reload();
+        // Applied item by item: a refusal leaves the rest of the file live,
+        // so the lists are refreshed and the card says both halves.
+        setImportOutcome(await settleConfigImport(data, queryClient));
       } catch (err: unknown) {
         setImportError(err instanceof Error ? err.message : "Import failed");
       } finally {
@@ -105,6 +108,24 @@ export function ConfigImportExportCard({ canImport = true, canExport = true }: C
         {importError && (
           <Alert color="red" variant="light" withCloseButton onClose={() => setImportError(null)}>
             {importError}
+          </Alert>
+        )}
+        {importOutcome && (
+          <Alert
+            color={{ success: "green", partial: "yellow", failed: "red" }[importOutcome.tone]}
+            variant="light"
+            title={{ success: "Import applied", partial: "Import partly applied", failed: "Import not applied" }[importOutcome.tone]}
+            withCloseButton
+            onClose={() => setImportOutcome(null)}
+          >
+            <Text size="sm">{importOutcome.summary}</Text>
+            {importOutcome.refused.length > 0 && (
+              <List size="sm" mt="xs">
+                {importOutcome.refused.map((r) => (
+                  <List.Item key={r}>{r}</List.Item>
+                ))}
+              </List>
+            )}
           </Alert>
         )}
         <Group>
