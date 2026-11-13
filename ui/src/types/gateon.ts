@@ -586,6 +586,13 @@ export type GlobalConfig = {
 export type UpdateConfig = {
   checkDisabled?: boolean;
   sourceUrl?: string;
+  /** Install a newer release without being asked (ADR 0087). */
+  autoInstall?: boolean;
+  /** UpdateScope: 0 unset (patch), 1 patch, 2 minor, 3 major. */
+  autoInstallScope?: number;
+  /** The daily window an automatic install may start in, "HH:MM" local time. Both or neither. */
+  autoInstallWindowStart?: string;
+  autoInstallWindowEnd?: string;
 };
 
 /** The third-party model the AI Advisory and Log Assistant may ask (ADR 0070). */

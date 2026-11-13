@@ -181,3 +181,85 @@ func (f httpFetcher) fetch(ctx context.Context, rawURL string, limit int64) ([]b
 	}
 	return body, nil
 }
+
+// downloadTimeout bounds the download of one release archive. An archive is
+// tens of megabytes, which fetchTimeout would cut off on a slow link.
+const downloadTimeout = 10 * time.Minute
+
+// releaseDownload is where the files of one named release are, at a source
+// laid out as GitHub's is.
+const releaseDownload = "/download/v"
+
+// ReleaseFiles names the files of one release at a release source.
+type ReleaseFiles struct {
+	base string // ends in "/"
+}
+
+// FilesOf is where the files of release v are at rawSource. v is a parsed
+// Version, so nothing reaches the URL but digits.
+func FilesOf(rawSource string, v Version) (ReleaseFiles, error) {
+	src, err := newSource(rawSource)
+	if err != nil {
+		return ReleaseFiles{}, err
+	}
+	return ReleaseFiles{base: src.base + releaseDownload + v.String() + "/"}, nil
+}
+
+// Checksums is the URL of the release list.
+func (f ReleaseFiles) Checksums() string { return f.base + checksumsFile }
+
+// Signature is the URL of the signature over the release list.
+func (f ReleaseFiles) Signature() string { return f.base + signatureFile }
+
+// Artifact is the URL of a file the release list names. name comes from
+// ParseChecksums, which refuses one holding a path separator.
+func (f ReleaseFiles) Artifact(name string) string { return f.base + url.PathEscape(name) }
+
+// Downloader reads release files with the client the check uses: https only,
+// never the management listener or a cloud metadata address, and no redirect
+// to anything checkFetchURL refuses.
+type Downloader struct {
+	small httpFetcher
+	large *http.Client
+}
+
+// NewDownloader builds a Downloader that identifies itself as version.
+func NewDownloader(version string) *Downloader {
+	large := newClient()
+	large.Timeout = downloadTimeout
+	return &Downloader{
+		small: httpFetcher{client: newClient(), userAgent: "gateon/" + version},
+		large: large,
+	}
+}
+
+// Fetch returns the body of rawURL, refusing one longer than limit.
+func (d *Downloader) Fetch(ctx context.Context, rawURL string, limit int64) ([]byte, error) {
+	return d.small.fetch(ctx, rawURL, limit)
+}
+
+// Download copies the body of rawURL into w and refuses one longer than
+// limit. What was written before a refusal is the caller's to discard.
+func (d *Downloader) Download(ctx context.Context, rawURL string, w io.Writer, limit int64) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, http.NoBody)
+	if err != nil {
+		return fmt.Errorf("build request: %w", err)
+	}
+	req.Header.Set("User-Agent", d.small.userAgent)
+	resp, err := d.large.Do(req)
+	if err != nil {
+		return fmt.Errorf("download release archive: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		return fmt.Errorf("the release source answered %d", resp.StatusCode)
+	}
+	n, err := io.Copy(w, io.LimitReader(resp.Body, limit+1))
+	if err != nil {
+		return fmt.Errorf("download release archive: %w", err)
+	}
+	if n > limit {
+		return fmt.Errorf("%w: the archive is longer than %d bytes", ErrMalformed, limit)
+	}
+	return nil
+}

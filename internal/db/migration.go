@@ -26,7 +26,9 @@ func Register(id int, name string, up func(*sql.DB, Dialect) error) {
 	migrations = append(migrations, Migration{ID: id, Name: name, Up: up})
 }
 
-// Migrate runs all pending migrations.
+// Migrate runs all pending migrations. Before the first one touches a
+// database that an earlier gateway migrated, the database is copied aside
+// (SQLite) and the migration observer is told: see prepareUpgrade.
 func Migrate(db *sql.DB, dialect Dialect) error {
 	if err := ensureMigrationsTable(db, dialect); err != nil {
 		return fmt.Errorf("ensure migrations table: %w", err)
@@ -36,13 +38,17 @@ func Migrate(db *sql.DB, dialect Dialect) error {
 		return migrations[i].ID < migrations[j].ID
 	})
 
-	for _, m := range migrations {
-		if applied, err := isApplied(db, dialect, m.ID); err != nil {
-			return fmt.Errorf("check migration %d: %w", m.ID, err)
-		} else if applied {
-			continue
+	pending, applied, err := pendingMigrations(db, dialect)
+	if err != nil || len(pending) == 0 {
+		return err
+	}
+	var run MigrationRun
+	if applied > 0 {
+		if run, err = prepareUpgrade(db, dialect); err != nil {
+			return err
 		}
-
+	}
+	for _, m := range pending {
 		if err := m.Up(db, dialect); err != nil {
 			return fmt.Errorf("migration %d (%s) failed: %w", m.ID, m.Name, err)
 		}
@@ -51,8 +57,27 @@ func Migrate(db *sql.DB, dialect Dialect) error {
 			return fmt.Errorf("mark migration %d as applied: %w", m.ID, err)
 		}
 	}
-
+	if applied > 0 {
+		finishUpgrade(run)
+	}
 	return nil
+}
+
+// pendingMigrations is the registered migrations this database has not had,
+// in order, and how many it has.
+func pendingMigrations(db *sql.DB, dialect Dialect) (pending []Migration, applied int, err error) {
+	for _, m := range migrations {
+		done, err := isApplied(db, dialect, m.ID)
+		if err != nil {
+			return nil, 0, fmt.Errorf("check migration %d: %w", m.ID, err)
+		}
+		if done {
+			applied++
+			continue
+		}
+		pending = append(pending, m)
+	}
+	return pending, applied, nil
 }
 
 func ensureMigrationsTable(db *sql.DB, dialect Dialect) error {

@@ -61,6 +61,12 @@ nfpms:
     contents:
       - src: packaging/gateon.service
         dst: /lib/systemd/system/gateon.service
+      # The upgrade helper and the unit that starts it (ADR 0087). The
+      # watcher is enabled by postinstall on a first install only.
+      - src: packaging/gateon-upgrade.service
+        dst: /lib/systemd/system/gateon-upgrade.service
+      - src: packaging/gateon-upgrade.path
+        dst: /lib/systemd/system/gateon-upgrade.path
       # Not active: the drop-in that grants eBPF and HA their capabilities,
       # for an operator to link into gateon.service.d (ADR 0049).
       - src: packaging/ebpf-ha.conf

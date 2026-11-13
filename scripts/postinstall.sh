@@ -52,5 +52,10 @@ if command -v systemctl >/dev/null 2>&1; then
   else
     systemctl enable gateon 2>/dev/null || true
     systemctl restart gateon 2>/dev/null || true
+    # The upgrade helper's watcher (ADR 0087), on a first install only. A
+    # package upgrade leaves it as the operator had it: enabling it lets the
+    # gateway ask root to install a signed release, and that is not something
+    # an upgrade should switch on behind an operator's back.
+    systemctl enable --now gateon-upgrade.path 2>/dev/null || true
   fi
 fi

@@ -8,6 +8,7 @@ package gateon.v1;
 option go_package = "github.com/gsoultan/gateon/proto/gateon/v1;gateonv1";
 
 import "gateon/v1/common.proto";
+import "gateon/v1/status.proto";
 
 message GetGlobalConfigRequest {}
 
@@ -78,6 +79,19 @@ message UpdateConfig {
   // a mirror on this host's loopback address. The gateway reads
   // <source>/latest/download/checksums.txt and checksums.txt.sig from it.
   string source_url = 2;
+  // Install a newer release without being asked (ADR 0087). Off unless set;
+  // GATEON_UPDATE_AUTO_INSTALL overrides it either way. It applies only
+  // where the gateway can install at all: a systemd service with the
+  // upgrade helper. Only a release whose signature verified is installed.
+  bool auto_install = 3;
+  // How far an automatic install may go. Unset is patch releases only.
+  UpdateScope auto_install_scope = 4;
+  // The daily window, in the host's local time, in which an automatic
+  // install may start: "HH:MM". Both or neither; neither uses
+  // GATEON_UPDATE_WINDOW, then 02:00 to 04:00. An end before the start runs
+  // through midnight.
+  string auto_install_window_start = 5;
+  string auto_install_window_end = 6;
 }
 
 // AIConfig selects the language model the dashboard's AI features may ask.

@@ -9,6 +9,7 @@ import (
 	"database/sql"
 	"net/http"
 	"os"
+	"runtime"
 	"time"
 
 	"connectrpc.com/connect"
@@ -35,6 +36,7 @@ import (
 	"github.com/gsoultan/gateon/internal/security/reputation"
 	"github.com/gsoultan/gateon/internal/security/waf"
 	"github.com/gsoultan/gateon/internal/selfupdate"
+	"github.com/gsoultan/gateon/internal/selfupdate/upgrade"
 	"github.com/gsoultan/gateon/internal/server/entrypoint"
 	"github.com/gsoultan/gateon/internal/server/handlers"
 	"github.com/gsoultan/gateon/internal/server/readiness"
@@ -140,6 +142,25 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 	// reads the saved settings at each check, so a change needs no restart.
 	updates := selfupdate.New(s.Version, func() *gateonv1.UpdateConfig { return s.GlobalStore.Get(ctx).GetUpdate() })
 	wg.Go(func() { updates.Run(ctx) })
+	// Installs a release when an administrator asks, or on its own inside
+	// the maintenance window when that is switched on (ADR 0087). It only
+	// downloads and verifies; the root-owned helper replaces the binary.
+	upgradeDirs := upgrade.Dirs{Data: config.DataDir(), State: upgrade.DefaultStateDir}
+	upgrades := upgrade.NewInstaller(upgrade.Options{
+		Version:  s.Version,
+		DataDir:  upgradeDirs.Data,
+		StateDir: upgradeDirs.State,
+		Checker:  updates,
+		Config:   func() *gateonv1.UpdateConfig { return s.GlobalStore.Get(ctx).GetUpdate() },
+		Stager: upgrade.Stager{
+			DataDir: upgradeDirs.Data,
+			Keys:    selfupdate.ReleaseKeys(),
+			Fetch:   selfupdate.NewDownloader(s.Version),
+			Arch:    runtime.GOARCH,
+		},
+		HasKey: len(selfupdate.ReleaseKeys()) > 0,
+	})
+	wg.Go(func() { upgrades.Run(ctx) })
 	apiService := api.NewApiService(api.ApiServiceConfig{
 		Lifetime:           ctx,
 		Version:            s.Version,
@@ -167,6 +188,7 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 		Throttles:           findingLimiter(rlLimiter),
 		ManagementWorldOpen: entrypoint.ManagementListenerWorldOpen,
 		Updates:             updates,
+		Upgrades:            upgrades,
 	})
 	announceSetupToken(ctx, apiService, setupToken)
 	if gov != nil {
@@ -335,6 +357,9 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 	// s.Port is only its last fallback -- naming it said "started" on a port
 	// nothing listened on.
 	logger.L.LogInfo("Gateon API Gateway started")
+	// Every listener has bound or said why not, so readiness now means
+	// something: answer an upgrade helper that is waiting for this version.
+	wg.Go(func() { upgrade.Confirm(ctx, s.Version, upgradeDirs, gatewayReady) })
 
 	wg.Go(func() {
 		ticker := time.NewTicker(30 * time.Second)
@@ -378,6 +403,11 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 	// would find its guest closed. The drain's context, for the reason above.
 	transform.CloseWasmModules(shutdownCtx) //nolint:contextcheck // ctx has already fired; see shutdownCtx.
 	logger.L.LogInfo("shutdown complete")
+}
+
+// gatewayReady is what /readyz answers 200 for.
+func gatewayReady() bool {
+	return telemetry.PathStatsStoreReady() && len(readiness.NotReady()) == 0
 }
 
 // configDatabasePinger pings whichever user database the auth holder holds

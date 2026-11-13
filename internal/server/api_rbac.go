@@ -175,6 +175,10 @@ var apiPermissions = map[string]apiPermission{
 	// say where.
 	gateonv1connect.ApiServiceGetUpdateStatusProcedure: readOn(auth.ResourceDiagnostics),
 	gateonv1connect.ApiServiceCheckForUpdateProcedure:  writeOn(auth.ResourceGlobal),
+	// Installing a release (ADR 0087), POST /v1/update/install. The right to
+	// change the global settings here; ApiService additionally requires
+	// admin, as it does for users.
+	gateonv1connect.ApiServiceInstallUpdateProcedure: writeOn(auth.ResourceGlobal),
 
 	// Diagnostics reads. GET /v1/status, /v1/diagnostics, /v1/audit/*,
 	// /v1/diag/security-threats, /v1/security/reputations, /v1/traces.

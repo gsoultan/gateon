@@ -308,6 +308,27 @@ type TierDefaults struct {
 	// between an hour and thirty days; GATEON_UPDATE_CHECK=0 turns the check
 	// off.
 	UpdateCheckInterval time.Duration
+
+	// UpdateAutoInstall is whether a release is installed without anyone
+	// asking (ADR 0087). Off on every tier: an upgrade restarts the gateway,
+	// and a gateway that restarts itself on a schedule nobody chose is a
+	// surprise, whatever the size of the host. The setting turns it on;
+	// GATEON_UPDATE_AUTO_INSTALL overrides the setting either way.
+	UpdateAutoInstall bool
+	// UpdateWindow is the local time of day, "HH:MM-HH:MM", in which an
+	// automatic install may start when the setting names none.
+	// GATEON_UPDATE_WINDOW overrides it.
+	UpdateWindow string
+	// UpgradeReadyTimeout is how long a newly installed binary has to report
+	// ready before the previous one is put back. The same on every tier: it
+	// bounds an outage, and start-up time does not follow the tier.
+	// GATEON_UPGRADE_READY_TIMEOUT overrides it, between 15 s and 15 min.
+	UpgradeReadyTimeout time.Duration
+	// MigrationBackup is whether a SQLite database is copied aside before a
+	// newer gateway migrates it, which is what lets a failed upgrade be
+	// undone. On everywhere; it costs free disk equal to the database.
+	// GATEON_MIGRATION_BACKUP=0 turns it off.
+	MigrationBackup bool
 }
 
 // NormalizeTier coerces an arbitrary string to a known tier, defaulting to
@@ -392,6 +413,10 @@ func DefaultsFor(tier Tier) TierDefaults {
 			IPFeedCoverageV4Prefix:     4,
 			IPFeedCoverageV6Prefix:     32,
 			UpdateCheckInterval:        24 * time.Hour,
+			UpdateAutoInstall:          false,
+			UpdateWindow:               defaultUpdateWindow,
+			UpgradeReadyTimeout:        90 * time.Second,
+			MigrationBackup:            true,
 		}
 	case TierEnterprise:
 		return TierDefaults{
@@ -444,6 +469,10 @@ func DefaultsFor(tier Tier) TierDefaults {
 			IPFeedCoverageV4Prefix:     4,
 			IPFeedCoverageV6Prefix:     32,
 			UpdateCheckInterval:        24 * time.Hour,
+			UpdateAutoInstall:          false,
+			UpdateWindow:               defaultUpdateWindow,
+			UpgradeReadyTimeout:        90 * time.Second,
+			MigrationBackup:            true,
 		}
 	default: // TierStandard
 		return TierDefaults{
@@ -496,6 +525,10 @@ func DefaultsFor(tier Tier) TierDefaults {
 			IPFeedCoverageV4Prefix:     4,
 			IPFeedCoverageV6Prefix:     32,
 			UpdateCheckInterval:        24 * time.Hour,
+			UpdateAutoInstall:          false,
+			UpdateWindow:               defaultUpdateWindow,
+			UpgradeReadyTimeout:        90 * time.Second,
+			MigrationBackup:            true,
 		}
 	}
 }
@@ -508,6 +541,10 @@ func CurrentTierDefaults() TierDefaults {
 // EnvArchiveOnRetention overrides log.archive_on_retention and the tier's
 // default. A value strconv.ParseBool does not accept is ignored rather than
 // guessed at, as every other archive variable is.
+// defaultUpdateWindow is when an automatic install may start on every tier:
+// the small hours of the host's own clock, where a restart is least noticed.
+const defaultUpdateWindow = "02:00-04:00"
+
 const EnvArchiveOnRetention = "GATEON_ARCHIVE_ON_RETENTION"
 
 // ArchiveOnRetention reports whether every log is to be archived on

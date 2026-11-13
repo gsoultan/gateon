@@ -18,6 +18,10 @@ contents:
     dst: "/usr/bin/gateon"
   - src: "packaging/gateon.service"
     dst: "/lib/systemd/system/gateon.service"
+  - src: "packaging/gateon-upgrade.service"
+    dst: "/lib/systemd/system/gateon-upgrade.service"
+  - src: "packaging/gateon-upgrade.path"
+    dst: "/lib/systemd/system/gateon-upgrade.path"
   - src: "packaging/ebpf-ha.conf"
     dst: "/usr/share/gateon/systemd/ebpf-ha.conf"
     file_info:

@@ -26,6 +26,10 @@ service ApiService {
   rpc GetUpdateStatus(GetUpdateStatusRequest) returns (GetUpdateStatusResponse);
   // CheckForUpdate asks the release source now, and reports what it found.
   rpc CheckForUpdate(CheckForUpdateRequest) returns (CheckForUpdateResponse);
+  // InstallUpdate downloads, verifies and asks the root-owned helper to
+  // install the named release (ADR 0087). Administrators only. It answers
+  // as soon as the download has started; GetUpdateStatus reports progress.
+  rpc InstallUpdate(InstallUpdateRequest) returns (InstallUpdateResponse);
   rpc ListTraces(ListTracesRequest) returns (ListTracesResponse);
   rpc GetTrace(GetTraceRequest) returns (GetTraceResponse);
   rpc QueryTraces(QueryTracesRequest) returns (QueryTracesResponse);

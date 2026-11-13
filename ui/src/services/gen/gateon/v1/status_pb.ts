@@ -13,7 +13,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file gateon/v1/status.proto.
  */
 export const file_gateon_v1_status: GenFile = /*@__PURE__*/
-  fileDesc("ChZnYXRlb24vdjEvc3RhdHVzLnByb3RvEglnYXRlb24udjEiEgoQR2V0U3RhdHVzUmVxdWVzdCKyAwoRR2V0U3RhdHVzUmVzcG9uc2USDgoGc3RhdHVzGAEgASgJEg8KB3ZlcnNpb24YAiABKAkSDgoGdXB0aW1lGAMgASgDEhQKDG1lbW9yeV91c2FnZRgEIAEoAxIUCgxyb3V0ZXNfY291bnQYBSABKAUSFgoOc2VydmljZXNfY291bnQYBiABKAUSGgoSZW50cnlfcG9pbnRzX2NvdW50GAcgASgFEhkKEW1pZGRsZXdhcmVzX2NvdW50GAggASgFEhEKCWNwdV91c2FnZRgJIAEoARIcChRtZW1vcnlfdXNhZ2VfcGVyY2VudBgKIAEoARIRCgljcHVfY29yZXMYCyABKAUSFwoPbWVtb3J5X3RvdGFsX2diGAwgASgBEhgKEHN0b3JhZ2VfdXNhZ2VfZ2IYDSABKAESGAoQc3RvcmFnZV90b3RhbF9nYhgOIAEoARIdChVzdG9yYWdlX3VzYWdlX3BlcmNlbnQYDyABKAESGAoQY2xhbWF2X2luc3RhbGxlZBgQIAEoCBIPCgdwcm9maWxlGBEgASgJEhYKDnByb2ZpbGVfcGlubmVkGBIgASgIIoADCgxVcGRhdGVTdGF0dXMSFwoPY3VycmVudF92ZXJzaW9uGAEgASgJEhYKDmxhdGVzdF92ZXJzaW9uGAIgASgJEhgKEHVwZGF0ZV9hdmFpbGFibGUYAyABKAgSLQoJc2lnbmF0dXJlGAQgASgOMhouZ2F0ZW9uLnYxLlVwZGF0ZVNpZ25hdHVyZRISCgpjaGVja2VkX2F0GAUgASgDEioKBXN0YXRlGAYgASgOMhsuZ2F0ZW9uLnYxLlVwZGF0ZUNoZWNrU3RhdGUSKQoHZmFpbHVyZRgHIAEoDjIYLmdhdGVvbi52MS5VcGRhdGVGYWlsdXJlEhkKEXJlbGVhc2Vfbm90ZXNfdXJsGAggASgJEhIKCnNvdXJjZV91cmwYCSABKAkSLAoMaW5zdGFsbF9raW5kGAogASgOMhYuZ2F0ZW9uLnYxLkluc3RhbGxLaW5kEhcKD2Rpc2FibGVkX2J5X2VudhgLIAEoCBIVCg1yZWxlYXNlX2J1aWxkGAwgASgIIhgKFkdldFVwZGF0ZVN0YXR1c1JlcXVlc3QiQgoXR2V0VXBkYXRlU3RhdHVzUmVzcG9uc2USJwoGc3RhdHVzGAEgASgLMhcuZ2F0ZW9uLnYxLlVwZGF0ZVN0YXR1cyIXChVDaGVja0ZvclVwZGF0ZVJlcXVlc3QiQQoWQ2hlY2tGb3JVcGRhdGVSZXNwb25zZRInCgZzdGF0dXMYASABKAsyFy5nYXRlb24udjEuVXBkYXRlU3RhdHVzKrEBChBVcGRhdGVDaGVja1N0YXRlEiIKHlVQREFURV9DSEVDS19TVEFURV9VTlNQRUNJRklFRBAAEh4KGlVQREFURV9DSEVDS19TVEFURV9QRU5ESU5HEAESGQoVVVBEQVRFX0NIRUNLX1NUQVRFX09LEAISHQoZVVBEQVRFX0NIRUNLX1NUQVRFX0ZBSUxFRBADEh8KG1VQREFURV9DSEVDS19TVEFURV9ESVNBQkxFRBAEKm8KD1VwZGF0ZVNpZ25hdHVyZRIgChxVUERBVEVfU0lHTkFUVVJFX1VOU1BFQ0lGSUVEEAASHQoZVVBEQVRFX1NJR05BVFVSRV9WRVJJRklFRBABEhsKF1VQREFURV9TSUdOQVRVUkVfTk9fS0VZEAIqpgEKDVVwZGF0ZUZhaWx1cmUSHgoaVVBEQVRFX0ZBSUxVUkVfVU5TUEVDSUZJRUQQABIeChpVUERBVEVfRkFJTFVSRV9VTlJFQUNIQUJMRRABEhwKGFVQREFURV9GQUlMVVJFX1NJR05BVFVSRRACEhwKGFVQREFURV9GQUlMVVJFX01BTEZPUk1FRBADEhkKFVVQREFURV9GQUlMVVJFX1NPVVJDRRAEKpYBCgtJbnN0YWxsS2luZBIcChhJTlNUQUxMX0tJTkRfVU5TUEVDSUZJRUQQABIYChRJTlNUQUxMX0tJTkRfU1lTVEVNRBABEhoKFklOU1RBTExfS0lORF9DT05UQUlORVIQAhIbChdJTlNUQUxMX0tJTkRfS1VCRVJORVRFUxADEhYKEklOU1RBTExfS0lORF9PVEhFUhAEQpYBCg1jb20uZ2F0ZW9uLnYxQgtTdGF0dXNQcm90b1ABWjNnaXRodWIuY29tL2dzb3VsdGFuL2dhdGVvbi9wcm90by9nYXRlb24vdjE7Z2F0ZW9udjGiAgNHWFiqAglHYXRlb24uVjHKAglHYXRlb25cVjHiAhVHYXRlb25cVjFcR1BCTWV0YWRhdGHqAgpHYXRlb246OlYxYgZwcm90bzM");
+  fileDesc("ChZnYXRlb24vdjEvc3RhdHVzLnByb3RvEglnYXRlb24udjEiEgoQR2V0U3RhdHVzUmVxdWVzdCKyAwoRR2V0U3RhdHVzUmVzcG9uc2USDgoGc3RhdHVzGAEgASgJEg8KB3ZlcnNpb24YAiABKAkSDgoGdXB0aW1lGAMgASgDEhQKDG1lbW9yeV91c2FnZRgEIAEoAxIUCgxyb3V0ZXNfY291bnQYBSABKAUSFgoOc2VydmljZXNfY291bnQYBiABKAUSGgoSZW50cnlfcG9pbnRzX2NvdW50GAcgASgFEhkKEW1pZGRsZXdhcmVzX2NvdW50GAggASgFEhEKCWNwdV91c2FnZRgJIAEoARIcChRtZW1vcnlfdXNhZ2VfcGVyY2VudBgKIAEoARIRCgljcHVfY29yZXMYCyABKAUSFwoPbWVtb3J5X3RvdGFsX2diGAwgASgBEhgKEHN0b3JhZ2VfdXNhZ2VfZ2IYDSABKAESGAoQc3RvcmFnZV90b3RhbF9nYhgOIAEoARIdChVzdG9yYWdlX3VzYWdlX3BlcmNlbnQYDyABKAESGAoQY2xhbWF2X2luc3RhbGxlZBgQIAEoCBIPCgdwcm9maWxlGBEgASgJEhYKDnByb2ZpbGVfcGlubmVkGBIgASgIIqsDCgxVcGRhdGVTdGF0dXMSFwoPY3VycmVudF92ZXJzaW9uGAEgASgJEhYKDmxhdGVzdF92ZXJzaW9uGAIgASgJEhgKEHVwZGF0ZV9hdmFpbGFibGUYAyABKAgSLQoJc2lnbmF0dXJlGAQgASgOMhouZ2F0ZW9uLnYxLlVwZGF0ZVNpZ25hdHVyZRISCgpjaGVja2VkX2F0GAUgASgDEioKBXN0YXRlGAYgASgOMhsuZ2F0ZW9uLnYxLlVwZGF0ZUNoZWNrU3RhdGUSKQoHZmFpbHVyZRgHIAEoDjIYLmdhdGVvbi52MS5VcGRhdGVGYWlsdXJlEhkKEXJlbGVhc2Vfbm90ZXNfdXJsGAggASgJEhIKCnNvdXJjZV91cmwYCSABKAkSLAoMaW5zdGFsbF9raW5kGAogASgOMhYuZ2F0ZW9uLnYxLkluc3RhbGxLaW5kEhcKD2Rpc2FibGVkX2J5X2VudhgLIAEoCBIVCg1yZWxlYXNlX2J1aWxkGAwgASgIEikKB3VwZ3JhZGUYDSABKAsyGC5nYXRlb24udjEuVXBncmFkZVN0YXR1cyKAAgoNVXBncmFkZVJlY29yZBImCgVwaGFzZRgBIAEoDjIXLmdhdGVvbi52MS5VcGdyYWRlUGhhc2USKAoGcmVhc29uGAIgASgOMhguZ2F0ZW9uLnYxLlVwZ3JhZGVSZWFzb24SFgoOdGFyZ2V0X3ZlcnNpb24YAyABKAkSGAoQcHJldmlvdXNfdmVyc2lvbhgEIAEoCRISCgpzdGFydGVkX2F0GAUgASgDEhMKC2ZpbmlzaGVkX2F0GAYgASgDEhQKDHJlcXVlc3RlZF9ieRgHIAEoCRIRCglhdXRvbWF0aWMYCCABKAgSGQoRZGF0YWJhc2VfcmVzdG9yZWQYCSABKAgiogIKDVVwZ3JhZGVTdGF0dXMSKgoHYmxvY2tlchgBIAEoDjIZLmdhdGVvbi52MS5VcGdyYWRlQmxvY2tlchIpCgdjdXJyZW50GAIgASgLMhguZ2F0ZW9uLnYxLlVwZ3JhZGVSZWNvcmQSKQoHaGlzdG9yeRgDIAMoCzIYLmdhdGVvbi52MS5VcGdyYWRlUmVjb3JkEhQKDGF1dG9faW5zdGFsbBgEIAEoCBIbChNhdXRvX2luc3RhbGxfYnlfZW52GAUgASgIEjIKEmF1dG9faW5zdGFsbF9zY29wZRgGIAEoDjIWLmdhdGVvbi52MS5VcGRhdGVTY29wZRIUCgx3aW5kb3dfc3RhcnQYByABKAkSEgoKd2luZG93X2VuZBgIIAEoCSIYChZHZXRVcGRhdGVTdGF0dXNSZXF1ZXN0IkIKF0dldFVwZGF0ZVN0YXR1c1Jlc3BvbnNlEicKBnN0YXR1cxgBIAEoCzIXLmdhdGVvbi52MS5VcGRhdGVTdGF0dXMiFwoVQ2hlY2tGb3JVcGRhdGVSZXF1ZXN0IkEKFkNoZWNrRm9yVXBkYXRlUmVzcG9uc2USJwoGc3RhdHVzGAEgASgLMhcuZ2F0ZW9uLnYxLlVwZGF0ZVN0YXR1cyInChRJbnN0YWxsVXBkYXRlUmVxdWVzdBIPCgd2ZXJzaW9uGAEgASgJIkAKFUluc3RhbGxVcGRhdGVSZXNwb25zZRInCgZzdGF0dXMYASABKAsyFy5nYXRlb24udjEuVXBkYXRlU3RhdHVzKrEBChBVcGRhdGVDaGVja1N0YXRlEiIKHlVQREFURV9DSEVDS19TVEFURV9VTlNQRUNJRklFRBAAEh4KGlVQREFURV9DSEVDS19TVEFURV9QRU5ESU5HEAESGQoVVVBEQVRFX0NIRUNLX1NUQVRFX09LEAISHQoZVVBEQVRFX0NIRUNLX1NUQVRFX0ZBSUxFRBADEh8KG1VQREFURV9DSEVDS19TVEFURV9ESVNBQkxFRBAEKm8KD1VwZGF0ZVNpZ25hdHVyZRIgChxVUERBVEVfU0lHTkFUVVJFX1VOU1BFQ0lGSUVEEAASHQoZVVBEQVRFX1NJR05BVFVSRV9WRVJJRklFRBABEhsKF1VQREFURV9TSUdOQVRVUkVfTk9fS0VZEAIqpgEKDVVwZGF0ZUZhaWx1cmUSHgoaVVBEQVRFX0ZBSUxVUkVfVU5TUEVDSUZJRUQQABIeChpVUERBVEVfRkFJTFVSRV9VTlJFQUNIQUJMRRABEhwKGFVQREFURV9GQUlMVVJFX1NJR05BVFVSRRACEhwKGFVQREFURV9GQUlMVVJFX01BTEZPUk1FRBADEhkKFVVQREFURV9GQUlMVVJFX1NPVVJDRRAEKpYBCgtJbnN0YWxsS2luZBIcChhJTlNUQUxMX0tJTkRfVU5TUEVDSUZJRUQQABIYChRJTlNUQUxMX0tJTkRfU1lTVEVNRBABEhoKFklOU1RBTExfS0lORF9DT05UQUlORVIQAhIbChdJTlNUQUxMX0tJTkRfS1VCRVJORVRFUxADEhYKEklOU1RBTExfS0lORF9PVEhFUhAEKnMKC1VwZGF0ZVNjb3BlEhwKGFVQREFURV9TQ09QRV9VTlNQRUNJRklFRBAAEhYKElVQREFURV9TQ09QRV9QQVRDSBABEhYKElVQREFURV9TQ09QRV9NSU5PUhACEhYKElVQREFURV9TQ09QRV9NQUpPUhADKrYCCgxVcGdyYWRlUGhhc2USHQoZVVBHUkFERV9QSEFTRV9VTlNQRUNJRklFRBAAEh0KGVVQR1JBREVfUEhBU0VfRE9XTkxPQURJTkcQARIbChdVUEdSQURFX1BIQVNFX1JFUVVFU1RFRBACEhwKGFVQR1JBREVfUEhBU0VfSU5TVEFMTElORxADEhwKGFVQR1JBREVfUEhBU0VfUkVTVEFSVElORxAEEh4KGlVQR1JBREVfUEhBU0VfUk9MTElOR19CQUNLEAUSGwoXVVBHUkFERV9QSEFTRV9TVUNDRUVERUQQBhIdChlVUEdSQURFX1BIQVNFX1JPTExFRF9CQUNLEAcSGQoVVVBHUkFERV9QSEFTRV9SRUZVU0VEEAgSGAoUVVBHUkFERV9QSEFTRV9GQUlMRUQQCSrQAgoNVXBncmFkZVJlYXNvbhIeChpVUEdSQURFX1JFQVNPTl9VTlNQRUNJRklFRBAAEhwKGFVQR1JBREVfUkVBU09OX1NJR05BVFVSRRABEhsKF1VQR1JBREVfUkVBU09OX0NIRUNLU1VNEAISHAoYVVBHUkFERV9SRUFTT05fTUFMRk9STUVEEAMSHAoYVVBHUkFERV9SRUFTT05fTk9UX05FV0VSEAQSGQoVVVBHUkFERV9SRUFTT05fTk9fS0VZEAUSGgoWVVBHUkFERV9SRUFTT05fSU5TVEFMTBAGEhwKGFVQR1JBREVfUkVBU09OX05PVF9SRUFEWRAHEhsKF1VQR1JBREVfUkVBU09OX01JR1JBVEVEEAgSGwoXVVBHUkFERV9SRUFTT05fRE9XTkxPQUQQCRIZChVVUEdSQURFX1JFQVNPTl9IRUxQRVIQCiq1AQoOVXBncmFkZUJsb2NrZXISHwobVVBHUkFERV9CTE9DS0VSX1VOU1BFQ0lGSUVEEAASIAocVVBHUkFERV9CTE9DS0VSX09SQ0hFU1RSQVRFRBABEh0KGVVQR1JBREVfQkxPQ0tFUl9OT19IRUxQRVIQAhIaChZVUEdSQURFX0JMT0NLRVJfTk9fS0VZEAMSJQohVVBHUkFERV9CTE9DS0VSX0RFVkVMT1BNRU5UX0JVSUxEEARClgEKDWNvbS5nYXRlb24udjFCC1N0YXR1c1Byb3RvUAFaM2dpdGh1Yi5jb20vZ3NvdWx0YW4vZ2F0ZW9uL3Byb3RvL2dhdGVvbi92MTtnYXRlb252MaICA0dYWKoCCUdhdGVvbi5WMcoCCUdhdGVvblxWMeICFUdhdGVvblxWMVxHUEJNZXRhZGF0YeoCCkdhdGVvbjo6VjFiBnByb3RvMw");
 
 /**
  * @generated from message gateon.v1.GetStatusRequest
@@ -218,6 +218,14 @@ export type UpdateStatus = Message<"gateon.v1.UpdateStatus"> & {
    * @generated from field: bool release_build = 12;
    */
   releaseBuild: boolean;
+
+  /**
+   * Whether this gateway can install a release, the install in hand or the
+   * last one, and what came before it (ADR 0087).
+   *
+   * @generated from field: gateon.v1.UpgradeStatus upgrade = 13;
+   */
+  upgrade?: UpgradeStatus | undefined;
 };
 
 /**
@@ -226,6 +234,139 @@ export type UpdateStatus = Message<"gateon.v1.UpdateStatus"> & {
  */
 export const UpdateStatusSchema: GenMessage<UpdateStatus> = /*@__PURE__*/
   messageDesc(file_gateon_v1_status, 2);
+
+/**
+ * UpgradeRecord is one install.
+ *
+ * @generated from message gateon.v1.UpgradeRecord
+ */
+export type UpgradeRecord = Message<"gateon.v1.UpgradeRecord"> & {
+  /**
+   * @generated from field: gateon.v1.UpgradePhase phase = 1;
+   */
+  phase: UpgradePhase;
+
+  /**
+   * @generated from field: gateon.v1.UpgradeReason reason = 2;
+   */
+  reason: UpgradeReason;
+
+  /**
+   * The release being installed, and the one it replaces.
+   *
+   * @generated from field: string target_version = 3;
+   */
+  targetVersion: string;
+
+  /**
+   * @generated from field: string previous_version = 4;
+   */
+  previousVersion: string;
+
+  /**
+   * Unix seconds. finished_at is 0 while the install is running.
+   *
+   * @generated from field: int64 started_at = 5;
+   */
+  startedAt: bigint;
+
+  /**
+   * @generated from field: int64 finished_at = 6;
+   */
+  finishedAt: bigint;
+
+  /**
+   * Who asked, as the gateway recorded it. Empty for an automatic install.
+   *
+   * @generated from field: string requested_by = 7;
+   */
+  requestedBy: string;
+
+  /**
+   * @generated from field: bool automatic = 8;
+   */
+  automatic: boolean;
+
+  /**
+   * The previous gateway was told to put back the SQLite copy taken before
+   * the migration, and reported ready after doing so.
+   *
+   * @generated from field: bool database_restored = 9;
+   */
+  databaseRestored: boolean;
+};
+
+/**
+ * Describes the message gateon.v1.UpgradeRecord.
+ * Use `create(UpgradeRecordSchema)` to create a new message.
+ */
+export const UpgradeRecordSchema: GenMessage<UpgradeRecord> = /*@__PURE__*/
+  messageDesc(file_gateon_v1_status, 3);
+
+/**
+ * UpgradeStatus is what the gateway knows about installing releases.
+ *
+ * @generated from message gateon.v1.UpgradeStatus
+ */
+export type UpgradeStatus = Message<"gateon.v1.UpgradeStatus"> & {
+  /**
+   * @generated from field: gateon.v1.UpgradeBlocker blocker = 1;
+   */
+  blocker: UpgradeBlocker;
+
+  /**
+   * The install in hand, or the last one. Unset when there has been none.
+   *
+   * @generated from field: gateon.v1.UpgradeRecord current = 2;
+   */
+  current?: UpgradeRecord | undefined;
+
+  /**
+   * Finished installs, newest first, at most twenty.
+   *
+   * @generated from field: repeated gateon.v1.UpgradeRecord history = 3;
+   */
+  history: UpgradeRecord[];
+
+  /**
+   * The automatic-install policy in force, after the environment and the
+   * profile's defaults.
+   *
+   * @generated from field: bool auto_install = 4;
+   */
+  autoInstall: boolean;
+
+  /**
+   * GATEON_UPDATE_AUTO_INSTALL decided auto_install, so the setting cannot.
+   *
+   * @generated from field: bool auto_install_by_env = 5;
+   */
+  autoInstallByEnv: boolean;
+
+  /**
+   * @generated from field: gateon.v1.UpdateScope auto_install_scope = 6;
+   */
+  autoInstallScope: UpdateScope;
+
+  /**
+   * The maintenance window in force, "HH:MM" local time.
+   *
+   * @generated from field: string window_start = 7;
+   */
+  windowStart: string;
+
+  /**
+   * @generated from field: string window_end = 8;
+   */
+  windowEnd: string;
+};
+
+/**
+ * Describes the message gateon.v1.UpgradeStatus.
+ * Use `create(UpgradeStatusSchema)` to create a new message.
+ */
+export const UpgradeStatusSchema: GenMessage<UpgradeStatus> = /*@__PURE__*/
+  messageDesc(file_gateon_v1_status, 4);
 
 /**
  * @generated from message gateon.v1.GetUpdateStatusRequest
@@ -238,7 +379,7 @@ export type GetUpdateStatusRequest = Message<"gateon.v1.GetUpdateStatusRequest">
  * Use `create(GetUpdateStatusRequestSchema)` to create a new message.
  */
 export const GetUpdateStatusRequestSchema: GenMessage<GetUpdateStatusRequest> = /*@__PURE__*/
-  messageDesc(file_gateon_v1_status, 3);
+  messageDesc(file_gateon_v1_status, 5);
 
 /**
  * @generated from message gateon.v1.GetUpdateStatusResponse
@@ -255,7 +396,7 @@ export type GetUpdateStatusResponse = Message<"gateon.v1.GetUpdateStatusResponse
  * Use `create(GetUpdateStatusResponseSchema)` to create a new message.
  */
 export const GetUpdateStatusResponseSchema: GenMessage<GetUpdateStatusResponse> = /*@__PURE__*/
-  messageDesc(file_gateon_v1_status, 4);
+  messageDesc(file_gateon_v1_status, 6);
 
 /**
  * @generated from message gateon.v1.CheckForUpdateRequest
@@ -268,7 +409,7 @@ export type CheckForUpdateRequest = Message<"gateon.v1.CheckForUpdateRequest"> &
  * Use `create(CheckForUpdateRequestSchema)` to create a new message.
  */
 export const CheckForUpdateRequestSchema: GenMessage<CheckForUpdateRequest> = /*@__PURE__*/
-  messageDesc(file_gateon_v1_status, 5);
+  messageDesc(file_gateon_v1_status, 7);
 
 /**
  * @generated from message gateon.v1.CheckForUpdateResponse
@@ -285,7 +426,47 @@ export type CheckForUpdateResponse = Message<"gateon.v1.CheckForUpdateResponse">
  * Use `create(CheckForUpdateResponseSchema)` to create a new message.
  */
 export const CheckForUpdateResponseSchema: GenMessage<CheckForUpdateResponse> = /*@__PURE__*/
-  messageDesc(file_gateon_v1_status, 6);
+  messageDesc(file_gateon_v1_status, 8);
+
+/**
+ * InstallUpdateRequest asks the gateway to install a release (ADR 0087).
+ *
+ * @generated from message gateon.v1.InstallUpdateRequest
+ */
+export type InstallUpdateRequest = Message<"gateon.v1.InstallUpdateRequest"> & {
+  /**
+   * The release to install, "1.8.3". It must be the newest release the last
+   * check verified: the caller names what they were shown, and a release
+   * that appeared since is not installed in its place.
+   *
+   * @generated from field: string version = 1;
+   */
+  version: string;
+};
+
+/**
+ * Describes the message gateon.v1.InstallUpdateRequest.
+ * Use `create(InstallUpdateRequestSchema)` to create a new message.
+ */
+export const InstallUpdateRequestSchema: GenMessage<InstallUpdateRequest> = /*@__PURE__*/
+  messageDesc(file_gateon_v1_status, 9);
+
+/**
+ * @generated from message gateon.v1.InstallUpdateResponse
+ */
+export type InstallUpdateResponse = Message<"gateon.v1.InstallUpdateResponse"> & {
+  /**
+   * @generated from field: gateon.v1.UpdateStatus status = 1;
+   */
+  status?: UpdateStatus | undefined;
+};
+
+/**
+ * Describes the message gateon.v1.InstallUpdateResponse.
+ * Use `create(InstallUpdateResponseSchema)` to create a new message.
+ */
+export const InstallUpdateResponseSchema: GenMessage<InstallUpdateResponse> = /*@__PURE__*/
+  messageDesc(file_gateon_v1_status, 10);
 
 /**
  * UpdateCheckState is where the release check stands.
@@ -458,4 +639,269 @@ export enum InstallKind {
  */
 export const InstallKindSchema: GenEnum<InstallKind> = /*@__PURE__*/
   enumDesc(file_gateon_v1_status, 3);
+
+/**
+ * UpdateScope is how far from the running release an automatic install may
+ * go.
+ *
+ * @generated from enum gateon.v1.UpdateScope
+ */
+export enum UpdateScope {
+  /**
+   * Patch releases only, as UPDATE_SCOPE_PATCH. GATEON_UPDATE_AUTO_SCOPE
+   * names another default.
+   *
+   * @generated from enum value: UPDATE_SCOPE_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * 1.8.2 to 1.8.3, never to 1.9.0.
+   *
+   * @generated from enum value: UPDATE_SCOPE_PATCH = 1;
+   */
+  PATCH = 1,
+
+  /**
+   * To any release of the same major version.
+   *
+   * @generated from enum value: UPDATE_SCOPE_MINOR = 2;
+   */
+  MINOR = 2,
+
+  /**
+   * To any newer release.
+   *
+   * @generated from enum value: UPDATE_SCOPE_MAJOR = 3;
+   */
+  MAJOR = 3,
+}
+
+/**
+ * Describes the enum gateon.v1.UpdateScope.
+ */
+export const UpdateScopeSchema: GenEnum<UpdateScope> = /*@__PURE__*/
+  enumDesc(file_gateon_v1_status, 4);
+
+/**
+ * UpgradePhase is where an install stands.
+ *
+ * @generated from enum gateon.v1.UpgradePhase
+ */
+export enum UpgradePhase {
+  /**
+   * Nothing has been installed by this gateway and nothing is being.
+   *
+   * @generated from enum value: UPGRADE_PHASE_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * The gateway is downloading the release and checking its signature.
+   *
+   * @generated from enum value: UPGRADE_PHASE_DOWNLOADING = 1;
+   */
+  DOWNLOADING = 1,
+
+  /**
+   * The release is verified and waiting for the root-owned helper.
+   *
+   * @generated from enum value: UPGRADE_PHASE_REQUESTED = 2;
+   */
+  REQUESTED = 2,
+
+  /**
+   * The helper is verifying the release again and replacing the binary.
+   *
+   * @generated from enum value: UPGRADE_PHASE_INSTALLING = 3;
+   */
+  INSTALLING = 3,
+
+  /**
+   * The new binary is in place; the helper waits for it to report ready.
+   *
+   * @generated from enum value: UPGRADE_PHASE_RESTARTING = 4;
+   */
+  RESTARTING = 4,
+
+  /**
+   * The new binary did not become ready; the previous one is being put back.
+   *
+   * @generated from enum value: UPGRADE_PHASE_ROLLING_BACK = 5;
+   */
+  ROLLING_BACK = 5,
+
+  /**
+   * @generated from enum value: UPGRADE_PHASE_SUCCEEDED = 6;
+   */
+  SUCCEEDED = 6,
+
+  /**
+   * The previous binary is back in place.
+   *
+   * @generated from enum value: UPGRADE_PHASE_ROLLED_BACK = 7;
+   */
+  ROLLED_BACK = 7,
+
+  /**
+   * Nothing was installed. reason says why.
+   *
+   * @generated from enum value: UPGRADE_PHASE_REFUSED = 8;
+   */
+  REFUSED = 8,
+
+  /**
+   * The new binary is installed, did not report ready, and was not rolled
+   * back. reason says why.
+   *
+   * @generated from enum value: UPGRADE_PHASE_FAILED = 9;
+   */
+  FAILED = 9,
+}
+
+/**
+ * Describes the enum gateon.v1.UpgradePhase.
+ */
+export const UpgradePhaseSchema: GenEnum<UpgradePhase> = /*@__PURE__*/
+  enumDesc(file_gateon_v1_status, 5);
+
+/**
+ * UpgradeReason is why an install was refused, rolled back or left failed.
+ *
+ * @generated from enum gateon.v1.UpgradeReason
+ */
+export enum UpgradeReason {
+  /**
+   * @generated from enum value: UPGRADE_REASON_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * The release list is not signed by a key the installed binary trusts.
+   *
+   * @generated from enum value: UPGRADE_REASON_SIGNATURE = 1;
+   */
+  SIGNATURE = 1,
+
+  /**
+   * The archive is not the one the signed list names.
+   *
+   * @generated from enum value: UPGRADE_REASON_CHECKSUM = 2;
+   */
+  CHECKSUM = 2,
+
+  /**
+   * The release list or the archive cannot be read.
+   *
+   * @generated from enum value: UPGRADE_REASON_MALFORMED = 3;
+   */
+  MALFORMED = 3,
+
+  /**
+   * The release is not newer than the installed one.
+   *
+   * @generated from enum value: UPGRADE_REASON_NOT_NEWER = 4;
+   */
+  NOT_NEWER = 4,
+
+  /**
+   * The installed binary carries no release key.
+   *
+   * @generated from enum value: UPGRADE_REASON_NO_KEY = 5;
+   */
+  NO_KEY = 5,
+
+  /**
+   * The binary could not be put in place.
+   *
+   * @generated from enum value: UPGRADE_REASON_INSTALL = 6;
+   */
+  INSTALL = 6,
+
+  /**
+   * The new binary did not report ready in time.
+   *
+   * @generated from enum value: UPGRADE_REASON_NOT_READY = 7;
+   */
+  NOT_READY = 7,
+
+  /**
+   * The new binary changed a database that cannot be put back (PostgreSQL,
+   * or SQLite with the pre-migration copy switched off), so the previous
+   * binary was not put back either.
+   *
+   * @generated from enum value: UPGRADE_REASON_MIGRATED = 8;
+   */
+  MIGRATED = 8,
+
+  /**
+   * The release could not be downloaded.
+   *
+   * @generated from enum value: UPGRADE_REASON_DOWNLOAD = 9;
+   */
+  DOWNLOAD = 9,
+
+  /**
+   * The helper did not pick the request up: gateon-upgrade.path is not
+   * enabled.
+   *
+   * @generated from enum value: UPGRADE_REASON_HELPER = 10;
+   */
+  HELPER = 10,
+}
+
+/**
+ * Describes the enum gateon.v1.UpgradeReason.
+ */
+export const UpgradeReasonSchema: GenEnum<UpgradeReason> = /*@__PURE__*/
+  enumDesc(file_gateon_v1_status, 6);
+
+/**
+ * UpgradeBlocker is why this gateway cannot install a release itself.
+ *
+ * @generated from enum gateon.v1.UpgradeBlocker
+ */
+export enum UpgradeBlocker {
+  /**
+   * It can.
+   *
+   * @generated from enum value: UPGRADE_BLOCKER_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * A container, a pod, or a binary started by hand: whatever started it
+   * decides its version.
+   *
+   * @generated from enum value: UPGRADE_BLOCKER_ORCHESTRATED = 1;
+   */
+  ORCHESTRATED = 1,
+
+  /**
+   * A systemd service without the upgrade helper units.
+   *
+   * @generated from enum value: UPGRADE_BLOCKER_NO_HELPER = 2;
+   */
+  NO_HELPER = 2,
+
+  /**
+   * Built with no release key, so it can verify nothing.
+   *
+   * @generated from enum value: UPGRADE_BLOCKER_NO_KEY = 3;
+   */
+  NO_KEY = 3,
+
+  /**
+   * Not a release build, so no release is newer than it.
+   *
+   * @generated from enum value: UPGRADE_BLOCKER_DEVELOPMENT_BUILD = 4;
+   */
+  DEVELOPMENT_BUILD = 4,
+}
+
+/**
+ * Describes the enum gateon.v1.UpgradeBlocker.
+ */
+export const UpgradeBlockerSchema: GenEnum<UpgradeBlocker> = /*@__PURE__*/
+  enumDesc(file_gateon_v1_status, 7);
 

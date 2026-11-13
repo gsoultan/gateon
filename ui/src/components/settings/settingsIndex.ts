@@ -43,6 +43,8 @@ export const SETTINGS_INDEX: readonly SettingsIndexEntry[] = [
   { id: "alerting", section: "integrations", title: "Alerting", keywords: ["webhook", "slack", "email", "soar", "playbook", "dispatcher", "siem"] },
   { id: "ai", section: "integrations", title: "AI provider", keywords: ["llm", "openai", "anthropic", "advisory", "model"] },
   { id: "software-update", section: "updates", title: "Software update", keywords: ["version", "upgrade", "new release", "latest", "release notes"] },
+  { id: "software-install", section: "updates", title: "Install", keywords: ["upgrade", "upgrade now", "install", "rollback", "history", "self-upgrade"] },
+  { id: "update-auto-install", section: "updates", title: "Automatic install", keywords: ["auto update", "auto upgrade", "maintenance window", "patch", "GATEON_UPDATE_AUTO_INSTALL"] },
   { id: "update-check", section: "updates", title: "Update check", keywords: ["version", "upgrade", "release source", "mirror", "air-gapped", "GATEON_UPDATE_CHECK"] },
 ];
 

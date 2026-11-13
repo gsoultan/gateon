@@ -37,6 +37,8 @@ import (
 	"github.com/gsoultan/gateon/internal/security/mitigation"
 	"github.com/gsoultan/gateon/internal/security/reputation"
 	"github.com/gsoultan/gateon/internal/security/waf"
+	"github.com/gsoultan/gateon/internal/selfupdate/helper"
+	"github.com/gsoultan/gateon/internal/selfupdate/upgrade"
 	"github.com/gsoultan/gateon/internal/server"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	"github.com/gsoultan/gateon/internal/telemetry/threatarchive"
@@ -70,6 +72,16 @@ func main() {
 				os.Exit(1)
 			}
 			return
+		case "version":
+			fmt.Println(version())
+			return
+		case "upgrade":
+			// Install a release, as root, with or without a running gateway
+			// (ADR 0087).
+			os.Exit(upgradeCLI().Upgrade(context.Background(), os.Args[2:]))
+		case "upgrade-helper":
+			// What gateon-upgrade.service runs when the gateway asks.
+			os.Exit(upgradeCLI().Helper(context.Background(), os.Args[2:]))
 		case "top":
 			apiURL, token := tui.TopArgs(os.Args[2:], "http://localhost:"+getPort())
 			if err := tui.RunTop(context.Background(), apiURL, token); err != nil {
@@ -89,6 +101,8 @@ func main() {
 		os.Exit(1)
 	}
 	defer logger.Sync()
+
+	prepareForUpgrades()
 
 	// Apply container-aware runtime tuning (GOMAXPROCS awareness, optional soft
 	// memory limit and GC target) before any allocation-heavy subsystem starts.
@@ -498,6 +512,25 @@ func getEnvDefault(key, def string) string {
 		return val
 	}
 	return filepath.Join(config.ConfigDir(), def)
+}
+
+func upgradeCLI() helper.CLI {
+	return helper.CLI{Version: version(), In: os.Stdin, Out: os.Stdout, Err: os.Stderr}
+}
+
+// prepareForUpgrades does the two things an upgrade needs of a starting
+// gateway before any store opens (ADR 0087). A gateway the helper is rolling
+// back to puts the pre-migration database copy back first: it must not open
+// a schema the version it replaced migrated. And every gateway records the
+// migrations it runs, so that the helper can tell whether putting an older
+// binary back is safe.
+func prepareForUpgrades() {
+	dirs := upgrade.Dirs{Data: config.DataDir(), State: upgrade.DefaultStateDir}
+	if err := upgrade.RestoreIfOrdered(version(), dirs); err != nil {
+		logger.Fatal("could not put the database back after a failed upgrade; refusing to start on a schema this version does not know",
+			"error", err)
+	}
+	db.SetMigrationObserver(upgrade.NewRecorder(version(), dirs.Data))
 }
 
 // Version is set at build time via -ldflags "-X main.Version=<tag>".
