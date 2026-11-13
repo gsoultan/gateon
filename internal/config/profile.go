@@ -301,6 +301,13 @@ type TierDefaults struct {
 	// (1-32) and GATEON_IP_FEED_COVERAGE_V6 (1-64) override them.
 	IPFeedCoverageV4Prefix int
 	IPFeedCoverageV6Prefix int
+
+	// UpdateCheckInterval is how often the gateway asks its release source
+	// whether a newer version exists (ADR 0085): two small files over HTTPS,
+	// so the same on every tier. GATEON_UPDATE_CHECK_INTERVAL overrides it,
+	// between an hour and thirty days; GATEON_UPDATE_CHECK=0 turns the check
+	// off.
+	UpdateCheckInterval time.Duration
 }
 
 // NormalizeTier coerces an arbitrary string to a known tier, defaulting to
@@ -384,6 +391,7 @@ func DefaultsFor(tier Tier) TierDefaults {
 			IPFeedMaxBytes:             8 << 20, // 8 MiB
 			IPFeedCoverageV4Prefix:     4,
 			IPFeedCoverageV6Prefix:     32,
+			UpdateCheckInterval:        24 * time.Hour,
 		}
 	case TierEnterprise:
 		return TierDefaults{
@@ -435,6 +443,7 @@ func DefaultsFor(tier Tier) TierDefaults {
 			IPFeedMaxBytes:             128 << 20, // 128 MiB
 			IPFeedCoverageV4Prefix:     4,
 			IPFeedCoverageV6Prefix:     32,
+			UpdateCheckInterval:        24 * time.Hour,
 		}
 	default: // TierStandard
 		return TierDefaults{
@@ -486,6 +495,7 @@ func DefaultsFor(tier Tier) TierDefaults {
 			IPFeedMaxBytes:             32 << 20, // 32 MiB
 			IPFeedCoverageV4Prefix:     4,
 			IPFeedCoverageV6Prefix:     32,
+			UpdateCheckInterval:        24 * time.Hour,
 		}
 	}
 }

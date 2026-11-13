@@ -120,6 +120,7 @@ var notCredentials = map[string]string{
 	"tls.certificates.key_file":                 "a path to the key file, not the key",
 	"security_advanced.ip_reputation.feed_urls": "public blocklist feed addresses",
 	"ai.base_url":                               "the provider's endpoint; llm.Validate refuses credentials, a query or a fragment in it",
+	"update.source_url":                         "the release source; selfupdate.ValidateSource refuses credentials, a query or a fragment in it",
 }
 
 // TestEveryCredentialFieldIsCovered walks every string field of GlobalConfig

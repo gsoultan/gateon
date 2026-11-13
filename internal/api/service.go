@@ -80,6 +80,9 @@ type ApiService struct {
 	// ManagementWorldOpen: see ApiServiceConfig. Nil reports the listener closed.
 	ManagementWorldOpen func(*gateonv1.ManagementConfig) bool
 
+	// Updates: see ApiServiceConfig. Nil reports the release check as off.
+	Updates UpdateChecker
+
 	// Performance caches for Diagnostics & Security Hub
 	publicIPCache    atomic.Pointer[string]
 	cfReachableCache atomic.Bool
@@ -370,6 +373,7 @@ func NewApiService(cfg ApiServiceConfig) *ApiService {
 		SetupToken:          cfg.SetupToken,
 		Throttles:           cfg.Throttles,
 		ManagementWorldOpen: cfg.ManagementWorldOpen,
+		Updates:             cfg.Updates,
 	}
 
 	s.applyEveryGlobalChange(cfg.Globals)

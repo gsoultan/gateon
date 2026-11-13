@@ -399,6 +399,7 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 		data, _ := ProtojsonOptions().Marshal(res)
 		_, _ = w.Write(data)
 	})
+	registerUpdateHandlers(mux, svc)
 	mux.HandleFunc("GET /v1/status/watch", func(w http.ResponseWriter, r *http.Request) {
 		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceDiagnostics) {
 			return
@@ -1086,4 +1087,32 @@ func writeServiceAnswer(w http.ResponseWriter, resp proto.Message, err error) {
 		return
 	}
 	_, _ = w.Write(data)
+}
+
+// registerUpdateHandlers wires the release check to the ApiService RPCs that
+// Connect and gRPC serve too (ADR 0085). The permissions are the ones
+// apiProcedurePermissions gives those RPCs.
+func registerUpdateHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI) {
+	mux.HandleFunc("GET /v1/update/status", func(w http.ResponseWriter, r *http.Request) {
+		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceDiagnostics) {
+			return
+		}
+		res, err := svc.GetUpdateStatus(r.Context(), &gateonv1.GetUpdateStatusRequest{})
+		if err != nil {
+			WriteHTTPError(w, http.StatusInternalServerError, "the update status could not be read")
+			return
+		}
+		WriteProtoResponse(w, http.StatusOK, res.GetStatus())
+	})
+	mux.HandleFunc("POST /v1/update/check", func(w http.ResponseWriter, r *http.Request) {
+		if !RequirePermission(w, r, auth.ActionWrite, auth.ResourceGlobal) {
+			return
+		}
+		res, err := svc.CheckForUpdate(r.Context(), &gateonv1.CheckForUpdateRequest{})
+		if err != nil {
+			WriteHTTPError(w, http.StatusInternalServerError, "the release check could not be run")
+			return
+		}
+		WriteProtoResponse(w, http.StatusOK, res.GetStatus())
+	})
 }

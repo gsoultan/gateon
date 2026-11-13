@@ -579,6 +579,13 @@ export type GlobalConfig = {
   audit?: AuditConfig;
   profile?: string;
   ai?: AIConfig;
+  update?: UpdateConfig;
+};
+
+/** Whether the gateway looks for a newer release, and where (ADR 0085). */
+export type UpdateConfig = {
+  checkDisabled?: boolean;
+  sourceUrl?: string;
 };
 
 /** The third-party model the AI Advisory and Log Assistant may ask (ADR 0070). */

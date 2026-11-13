@@ -14,7 +14,7 @@ export interface SettingsIndexEntry {
 
 /**
  * Every card of Settings, by the words someone might search for. A search
- * finds the card and its section; six sections are more than anyone can
+ * finds the card and its section; seven sections are more than anyone can
  * remember the contents of.
  */
 export const SETTINGS_INDEX: readonly SettingsIndexEntry[] = [
@@ -42,6 +42,8 @@ export const SETTINGS_INDEX: readonly SettingsIndexEntry[] = [
   { id: "otel", section: "integrations", title: "OpenTelemetry", keywords: ["otlp", "tracing", "exporter", "jaeger", "tempo"] },
   { id: "alerting", section: "integrations", title: "Alerting", keywords: ["webhook", "slack", "email", "soar", "playbook", "dispatcher", "siem"] },
   { id: "ai", section: "integrations", title: "AI provider", keywords: ["llm", "openai", "anthropic", "advisory", "model"] },
+  { id: "software-update", section: "updates", title: "Software update", keywords: ["version", "upgrade", "new release", "latest", "release notes"] },
+  { id: "update-check", section: "updates", title: "Update check", keywords: ["version", "upgrade", "release source", "mirror", "air-gapped", "GATEON_UPDATE_CHECK"] },
 ];
 
 /** The entries whose title or keywords contain every word of the query, in index order. */

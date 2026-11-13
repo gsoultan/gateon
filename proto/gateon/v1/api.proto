@@ -22,6 +22,10 @@ import "gateon/v1/advisory.proto";
 
 service ApiService {
   rpc GetStatus(GetStatusRequest) returns (GetStatusResponse);
+  // GetUpdateStatus reports what the last release check found (ADR 0085).
+  rpc GetUpdateStatus(GetUpdateStatusRequest) returns (GetUpdateStatusResponse);
+  // CheckForUpdate asks the release source now, and reports what it found.
+  rpc CheckForUpdate(CheckForUpdateRequest) returns (CheckForUpdateResponse);
   rpc ListTraces(ListTracesRequest) returns (ListTracesResponse);
   rpc GetTrace(GetTraceRequest) returns (GetTraceResponse);
   rpc QueryTraces(QueryTracesRequest) returns (QueryTracesResponse);
