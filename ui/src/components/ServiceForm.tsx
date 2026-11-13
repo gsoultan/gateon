@@ -539,13 +539,14 @@ export function ServiceForm({
                     { label: "Round Robin (by weight)", value: "roundRobin" },
                     { label: "Least Connections (ignores weights)", value: "leastConn" },
                     { label: "Weighted Round Robin (same as Round Robin)", value: "weightedRoundRobin" },
+                    { label: "Predictive (lowest latency)", value: "aiPredictive" },
                   ];
               return (
                 <Tooltip
                   label={
                     isL4
                       ? "Round Robin: rotate targets. Least Connections: prefer least busy (TCP only). TCP and UDP services ignore weights."
-                      : "Round Robin: rotate, each target in proportion to its weight. Least Connections: prefer the least busy target; weights are not used."
+                      : "Round Robin: rotate, each target in proportion to its weight. Least Connections: prefer the least busy target; weights are not used. Predictive: prefer the target answering fastest, counting requests in flight and weighing a sudden slowdown; weights are not used."
                   }
                 >
                   <div>

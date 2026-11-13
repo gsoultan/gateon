@@ -32,6 +32,65 @@ Until the project's release key is published, a newer version is shown as
 *not verified*; releases from then on are signed, and a gateway built with the
 key refuses a release list that is not.
 
+### The Diagnostics "TITAN Evolution Core · ACTIVE" badge is gone, and the cards under it report what they measure
+
+The badge was a string literal shown whenever the API answered; there was no
+subsystem behind it. The section is now headed **Data path & runtime** and each
+card carries its own status:
+
+- **Resource Governor** said STABLE whenever the gateway had a governor: at 95%
+  memory, when a reading had failed (shown as 0%), and for a loop that was not
+  running. It now reads STABLE, UNDER PRESSURE, NO READING, STARTING or OFF from
+  what the loop last measured. Asking for the status no longer takes a reading
+  of its own, which used to shorten the loop's next CPU window to however long
+  ago the dashboard last asked.
+- **Predictive AI** said ON because a model was loaded, which it always is. It
+  now says IN USE with the number of services balanced by the Predictive
+  policy, or NOT IN USE.
+- **Kernel shun list** is a card of its own. The count used to sit on the
+  Predictive AI card, which has nothing to do with it.
+
+**Who is affected:** anyone reading the diagnostics API or the live snapshot.
+`titan.governor.active` is true only while the loop runs, and
+`resourceGovernorEnabled` in the snapshot follows it. The snapshot's
+`pqcEnabled` was a literal `true`; it now follows `GODEBUG=tlsmlkem=0` as
+`titan.pqc_enabled` already did. New fields: `titan.ai_policy_service_count`
+and, on `titan.governor`, `under_pressure`, `sampled`, `readings_unavailable`,
+`memory_threshold_percent`, `cpu_threshold_percent` and `memory_yardstick`.
+
+### `ai_predictive` sees a slowdown under a second, and prices a backend by when it answers
+
+Two things made the predictive balancer less accurate than its name:
+
+- The forecast scored a latency jump against the level **plus one**. Latencies
+  are in seconds, so for any backend answering in under a second the score
+  measured the jump in absolute seconds: a backend going from 20 ms to 200 ms
+  weighed 7% more, and only a jump of over 1.5 s counted as a spike at all. The
+  score is now relative to the backend's own level, so a tenfold jump weighs
+  the same at 2 ms, 20 ms and 2 s. The built-in WASM model is rebuilt to match.
+- Each response's **whole duration** was fed to the balancer, body included. A
+  backend that answers in 5 ms and then streams (server-sent events, a
+  download, a long poll) was priced at however long the client kept reading.
+  It is now priced by when its response headers went out.
+
+The policy can also be chosen in the dashboard's service form (**Predictive
+(lowest latency)**); before, it could only be set through the API.
+
+**Who is affected:** services using `ai_predictive` or `intelligent`. Traffic
+moves away from a backend that has just slowed down sooner than before, and
+streaming backends are no longer starved. A custom `--ai-model` is unaffected
+by the first change (it computes its own score) and gains from the second.
+
+### A TCP or UDP service can no longer be saved with `ai_predictive`
+
+The L4 balancer knows round robin and least connections. A TCP or UDP service
+saved with `ai_predictive` or `intelligent` showed that policy and was balanced
+round robin.
+
+**Who is affected:** such services are refused on their next save with a
+message naming the policy; choose round robin or least connections. A service
+already stored keeps running round robin, as it always did.
+
 ### "Apply fix" asks for the permission of what it changes
 
 A security finding's **Apply fix** needs only `diagnostics:write`, but several

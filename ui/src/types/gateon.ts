@@ -862,6 +862,8 @@ export type TitanStats = {
   shunnedIpCount: number;
   pqcEnabled: boolean;
   governor?: ResourceGovernorStats;
+  // How many HTTP services balance with the Predictive policy.
+  aiPolicyServiceCount?: number;
 };
 
 export type ResourceGovernorStats = {
@@ -870,6 +872,12 @@ export type ResourceGovernorStats = {
   cpuHooksCount: number;
   memoryPressurePercent: number;
   cpuPressurePercent: number;
+  underPressure?: boolean;
+  sampled?: boolean;
+  readingsUnavailable?: boolean;
+  memoryThresholdPercent?: number;
+  cpuThresholdPercent?: number;
+  memoryYardstick?: string;
 };
 
 export type EbpfStats = {
