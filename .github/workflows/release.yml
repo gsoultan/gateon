@@ -203,6 +203,11 @@ jobs:
         run: |
           if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
             echo "::notice::dry run - building every artifact, publishing none"
+            # A dry run is versioned after its branch, and the version is part
+            # of every file name. A branch such as feature/x made the archives
+            # dist/gateon_feature/x-next_linux_amd64.tar.gz: a subdirectory the
+            # upload below does not match, so the image dry run found no tarball.
+            export GORELEASER_CURRENT_TAG="${GORELEASER_CURRENT_TAG//\//-}"
             GATEON_RELEASE_SIGN_EPHEMERAL=1 goreleaser release --snapshot --clean --skip=publish
           elif [ -z "$(go run ./scripts/releasesign keys)" ]; then
             echo "::warning::no release key is committed in internal/selfupdate/release_keys.txt - publishing this release unsigned; see doc/releasing.md"
