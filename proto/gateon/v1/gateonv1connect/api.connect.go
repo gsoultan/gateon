@@ -38,6 +38,12 @@ const (
 const (
 	// ApiServiceGetStatusProcedure is the fully-qualified name of the ApiService's GetStatus RPC.
 	ApiServiceGetStatusProcedure = "/gateon.v1.ApiService/GetStatus"
+	// ApiServiceGetUpdateStatusProcedure is the fully-qualified name of the ApiService's
+	// GetUpdateStatus RPC.
+	ApiServiceGetUpdateStatusProcedure = "/gateon.v1.ApiService/GetUpdateStatus"
+	// ApiServiceCheckForUpdateProcedure is the fully-qualified name of the ApiService's CheckForUpdate
+	// RPC.
+	ApiServiceCheckForUpdateProcedure = "/gateon.v1.ApiService/CheckForUpdate"
 	// ApiServiceListTracesProcedure is the fully-qualified name of the ApiService's ListTraces RPC.
 	ApiServiceListTracesProcedure = "/gateon.v1.ApiService/ListTraces"
 	// ApiServiceGetTraceProcedure is the fully-qualified name of the ApiService's GetTrace RPC.
@@ -211,6 +217,10 @@ const (
 // ApiServiceClient is a client for the gateon.v1.ApiService service.
 type ApiServiceClient interface {
 	GetStatus(context.Context, *connect.Request[v1.GetStatusRequest]) (*connect.Response[v1.GetStatusResponse], error)
+	// GetUpdateStatus reports what the last release check found (ADR 0085).
+	GetUpdateStatus(context.Context, *connect.Request[v1.GetUpdateStatusRequest]) (*connect.Response[v1.GetUpdateStatusResponse], error)
+	// CheckForUpdate asks the release source now, and reports what it found.
+	CheckForUpdate(context.Context, *connect.Request[v1.CheckForUpdateRequest]) (*connect.Response[v1.CheckForUpdateResponse], error)
 	ListTraces(context.Context, *connect.Request[v1.ListTracesRequest]) (*connect.Response[v1.ListTracesResponse], error)
 	GetTrace(context.Context, *connect.Request[v1.GetTraceRequest]) (*connect.Response[v1.GetTraceResponse], error)
 	QueryTraces(context.Context, *connect.Request[v1.QueryTracesRequest]) (*connect.Response[v1.QueryTracesResponse], error)
@@ -306,6 +316,18 @@ func NewApiServiceClient(httpClient connect.HTTPClient, baseURL string, opts ...
 			httpClient,
 			baseURL+ApiServiceGetStatusProcedure,
 			connect.WithSchema(apiServiceMethods.ByName("GetStatus")),
+			connect.WithClientOptions(opts...),
+		),
+		getUpdateStatus: connect.NewClient[v1.GetUpdateStatusRequest, v1.GetUpdateStatusResponse](
+			httpClient,
+			baseURL+ApiServiceGetUpdateStatusProcedure,
+			connect.WithSchema(apiServiceMethods.ByName("GetUpdateStatus")),
+			connect.WithClientOptions(opts...),
+		),
+		checkForUpdate: connect.NewClient[v1.CheckForUpdateRequest, v1.CheckForUpdateResponse](
+			httpClient,
+			baseURL+ApiServiceCheckForUpdateProcedure,
+			connect.WithSchema(apiServiceMethods.ByName("CheckForUpdate")),
 			connect.WithClientOptions(opts...),
 		),
 		listTraces: connect.NewClient[v1.ListTracesRequest, v1.ListTracesResponse](
@@ -686,6 +708,8 @@ func NewApiServiceClient(httpClient connect.HTTPClient, baseURL string, opts ...
 // apiServiceClient implements ApiServiceClient.
 type apiServiceClient struct {
 	getStatus                         *connect.Client[v1.GetStatusRequest, v1.GetStatusResponse]
+	getUpdateStatus                   *connect.Client[v1.GetUpdateStatusRequest, v1.GetUpdateStatusResponse]
+	checkForUpdate                    *connect.Client[v1.CheckForUpdateRequest, v1.CheckForUpdateResponse]
 	listTraces                        *connect.Client[v1.ListTracesRequest, v1.ListTracesResponse]
 	getTrace                          *connect.Client[v1.GetTraceRequest, v1.GetTraceResponse]
 	queryTraces                       *connect.Client[v1.QueryTracesRequest, v1.QueryTracesResponse]
@@ -753,6 +777,16 @@ type apiServiceClient struct {
 // GetStatus calls gateon.v1.ApiService.GetStatus.
 func (c *apiServiceClient) GetStatus(ctx context.Context, req *connect.Request[v1.GetStatusRequest]) (*connect.Response[v1.GetStatusResponse], error) {
 	return c.getStatus.CallUnary(ctx, req)
+}
+
+// GetUpdateStatus calls gateon.v1.ApiService.GetUpdateStatus.
+func (c *apiServiceClient) GetUpdateStatus(ctx context.Context, req *connect.Request[v1.GetUpdateStatusRequest]) (*connect.Response[v1.GetUpdateStatusResponse], error) {
+	return c.getUpdateStatus.CallUnary(ctx, req)
+}
+
+// CheckForUpdate calls gateon.v1.ApiService.CheckForUpdate.
+func (c *apiServiceClient) CheckForUpdate(ctx context.Context, req *connect.Request[v1.CheckForUpdateRequest]) (*connect.Response[v1.CheckForUpdateResponse], error) {
+	return c.checkForUpdate.CallUnary(ctx, req)
 }
 
 // ListTraces calls gateon.v1.ApiService.ListTraces.
@@ -1068,6 +1102,10 @@ func (c *apiServiceClient) TestAIProvider(ctx context.Context, req *connect.Requ
 // ApiServiceHandler is an implementation of the gateon.v1.ApiService service.
 type ApiServiceHandler interface {
 	GetStatus(context.Context, *connect.Request[v1.GetStatusRequest]) (*connect.Response[v1.GetStatusResponse], error)
+	// GetUpdateStatus reports what the last release check found (ADR 0085).
+	GetUpdateStatus(context.Context, *connect.Request[v1.GetUpdateStatusRequest]) (*connect.Response[v1.GetUpdateStatusResponse], error)
+	// CheckForUpdate asks the release source now, and reports what it found.
+	CheckForUpdate(context.Context, *connect.Request[v1.CheckForUpdateRequest]) (*connect.Response[v1.CheckForUpdateResponse], error)
 	ListTraces(context.Context, *connect.Request[v1.ListTracesRequest]) (*connect.Response[v1.ListTracesResponse], error)
 	GetTrace(context.Context, *connect.Request[v1.GetTraceRequest]) (*connect.Response[v1.GetTraceResponse], error)
 	QueryTraces(context.Context, *connect.Request[v1.QueryTracesRequest]) (*connect.Response[v1.QueryTracesResponse], error)
@@ -1159,6 +1197,18 @@ func NewApiServiceHandler(svc ApiServiceHandler, opts ...connect.HandlerOption) 
 		ApiServiceGetStatusProcedure,
 		svc.GetStatus,
 		connect.WithSchema(apiServiceMethods.ByName("GetStatus")),
+		connect.WithHandlerOptions(opts...),
+	)
+	apiServiceGetUpdateStatusHandler := connect.NewUnaryHandler(
+		ApiServiceGetUpdateStatusProcedure,
+		svc.GetUpdateStatus,
+		connect.WithSchema(apiServiceMethods.ByName("GetUpdateStatus")),
+		connect.WithHandlerOptions(opts...),
+	)
+	apiServiceCheckForUpdateHandler := connect.NewUnaryHandler(
+		ApiServiceCheckForUpdateProcedure,
+		svc.CheckForUpdate,
+		connect.WithSchema(apiServiceMethods.ByName("CheckForUpdate")),
 		connect.WithHandlerOptions(opts...),
 	)
 	apiServiceListTracesHandler := connect.NewUnaryHandler(
@@ -1537,6 +1587,10 @@ func NewApiServiceHandler(svc ApiServiceHandler, opts ...connect.HandlerOption) 
 		switch r.URL.Path {
 		case ApiServiceGetStatusProcedure:
 			apiServiceGetStatusHandler.ServeHTTP(w, r)
+		case ApiServiceGetUpdateStatusProcedure:
+			apiServiceGetUpdateStatusHandler.ServeHTTP(w, r)
+		case ApiServiceCheckForUpdateProcedure:
+			apiServiceCheckForUpdateHandler.ServeHTTP(w, r)
 		case ApiServiceListTracesProcedure:
 			apiServiceListTracesHandler.ServeHTTP(w, r)
 		case ApiServiceGetTraceProcedure:
@@ -1672,6 +1726,14 @@ type UnimplementedApiServiceHandler struct{}
 
 func (UnimplementedApiServiceHandler) GetStatus(context.Context, *connect.Request[v1.GetStatusRequest]) (*connect.Response[v1.GetStatusResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gateon.v1.ApiService.GetStatus is not implemented"))
+}
+
+func (UnimplementedApiServiceHandler) GetUpdateStatus(context.Context, *connect.Request[v1.GetUpdateStatusRequest]) (*connect.Response[v1.GetUpdateStatusResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gateon.v1.ApiService.GetUpdateStatus is not implemented"))
+}
+
+func (UnimplementedApiServiceHandler) CheckForUpdate(context.Context, *connect.Request[v1.CheckForUpdateRequest]) (*connect.Response[v1.CheckForUpdateResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gateon.v1.ApiService.CheckForUpdate is not implemented"))
 }
 
 func (UnimplementedApiServiceHandler) ListTraces(context.Context, *connect.Request[v1.ListTracesRequest]) (*connect.Response[v1.ListTracesResponse], error) {

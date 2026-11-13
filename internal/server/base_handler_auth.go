@@ -139,6 +139,7 @@ func isGateonManagementAPIPath(path string) bool {
 		"/v1/api-tokens",
 		"/v1/client-authorities",
 		"/v1/system",
+		"/v1/update",
 		"/v1/openapi",
 	}
 	for _, p := range mgmtPrefixes {

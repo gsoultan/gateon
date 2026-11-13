@@ -79,8 +79,12 @@ func predict(length uint32) float64 {
 		return 0
 	}
 
-	// Normalize score: how many times it exceeded the trend
-	score := diff / (abs(level) + 1.0)
+	// Normalize score: the jump relative to the forecast level, so it means
+	// the same at 2 ms as at 2 s. The floor (a microsecond, in the seconds
+	// the gateway feeds) only keeps a series at zero finite; it was 1, which
+	// made any sub-second jump score as nothing. Keep in step with
+	// NativePredictor's levelFloor.
+	score := diff / (abs(level) + 1e-6)
 
 	// Normalize to 0-1 range using sigmoid approximation
 	// centered around significant deviation

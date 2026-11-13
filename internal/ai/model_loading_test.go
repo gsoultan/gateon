@@ -105,6 +105,8 @@ func TestDefaultModelMatchesTheNativePredictor(t *testing.T) {
 		{100, 100, 100, 100, 500},
 		{100, 110, 120, 130, 400},
 		{0.02, 0.02, 0.02, 2.0},
+		{0.02, 0.02, 0.02, 0.02, 0.2}, // a tenfold jump below a second (levelFloor)
+		{0.02, 0.022, 0.018, 0.021},   // jitter
 		{0.5, 0.5},
 		{1},
 	} {

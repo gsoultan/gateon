@@ -6,6 +6,7 @@ package resource
 import (
 	"context"
 	"errors"
+	"math"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -81,7 +82,30 @@ type Governor struct {
 	// lastScavenge is when the memory scavengers last ran in the current spell
 	// of pressure, in UnixNano; 0 outside one.
 	lastScavenge atomic.Int64
+
+	// running is true while Start's loop is.
+	running atomic.Bool
+	// What the loop last measured, for Status. Written by the loop only.
+	lastMemory, lastCPU atomicPercent
 }
+
+// atomicPercent is one reading the loop took: a percentage, or a failure to
+// read one.
+type atomicPercent struct {
+	bits    atomic.Uint64 // math.Float64bits of the percentage
+	taken   atomic.Bool   // a reading has been attempted
+	failing atomic.Bool   // the last attempt could not read the value
+}
+
+func (a *atomicPercent) store(percent float64, err error) {
+	a.failing.Store(err != nil)
+	if err == nil {
+		a.bits.Store(math.Float64bits(percent))
+	}
+	a.taken.Store(true)
+}
+
+func (a *atomicPercent) load() float64 { return math.Float64frombits(a.bits.Load()) }
 
 // NewGovernor creates a new resource governor with default monitoring interval.
 func NewGovernor() *Governor {
@@ -113,6 +137,8 @@ func (g *Governor) RegisterCPUHook(name string, hook ScavengeHook) {
 func (g *Governor) Start(ctx context.Context) {
 	ticker := time.NewTicker(g.interval)
 	defer ticker.Stop()
+	g.running.Store(true)
+	defer g.running.Store(false)
 	g.logStart(ctx)
 
 	for {
@@ -176,6 +202,7 @@ func (g *Governor) checkMemory(ctx context.Context) {
 
 func (g *Governor) checkCPU(ctx context.Context) {
 	used, err := g.cpuUsage(ctx)
+	g.lastCPU.store(used, err)
 	if err != nil {
 		return
 	}
@@ -203,17 +230,56 @@ func (g *Governor) snapshot(hooks map[string]ScavengeHook) map[string]ScavengeHo
 	return out
 }
 
-// GetStatus returns the current stats of the resource governor.
-func (g *Governor) GetStatus(ctx context.Context) (active bool, memHooks, cpuHooks int, memPressure, cpuPressure float64) {
-	g.mu.RLock()
-	memHooks = len(g.memoryHooks)
-	cpuHooks = len(g.cpuHooks)
-	g.mu.RUnlock()
+// Status is what the governor last measured and whether it is measuring.
+type Status struct {
+	// Running is true while the monitoring loop runs. The dashboard read
+	// "active" from a GetStatus that answered true whether or not the loop had
+	// ever started.
+	Running bool
+	// Sampled is true once both memory and CPU have been read; until then a
+	// percentage is a zero nobody measured. Memory is read as the loop starts
+	// and CPU on its first tick, so for one interval only memory is known.
+	Sampled bool
+	// Unreadable is true when the last memory or CPU reading failed. The
+	// percentages then read 0, which is not "no pressure".
+	Unreadable bool
 
-	active = true
-	memPressure, _, _ = g.sampleMemory(ctx)
-	cpuPressure, _ = g.cpuUsage(ctx)
-	return
+	MemoryHooks, CPUHooks int
+
+	MemoryPercent, CPUPercent float64
+	// MemoryThreshold and CPUThreshold are the percentages above which the
+	// hooks run.
+	MemoryThreshold, CPUThreshold float64
+	// MemoryYardstick names the budget MemoryPercent is measured against.
+	MemoryYardstick string
+}
+
+// UnderPressure reports whether the last readings were above a threshold, the
+// condition in which the governor runs its hooks.
+func (s Status) UnderPressure() bool {
+	return s.MemoryPercent > s.MemoryThreshold || s.CPUPercent > s.CPUThreshold
+}
+
+// Status reports what the loop last measured. It does not sample: a CPU
+// reading is the usage since the previous one, process-wide, so a status
+// request that took its own would shorten the loop's next window to however
+// long ago the dashboard last asked.
+func (g *Governor) Status() Status {
+	g.mu.RLock()
+	memHooks, cpuHooks := len(g.memoryHooks), len(g.cpuHooks)
+	g.mu.RUnlock()
+	return Status{
+		Running:         g.running.Load(),
+		Sampled:         g.lastMemory.taken.Load() && g.lastCPU.taken.Load(),
+		Unreadable:      g.lastMemory.failing.Load() || g.lastCPU.failing.Load(),
+		MemoryHooks:     memHooks,
+		CPUHooks:        cpuHooks,
+		MemoryPercent:   g.lastMemory.load(),
+		CPUPercent:      g.lastCPU.load(),
+		MemoryThreshold: memoryPressurePercent,
+		CPUThreshold:    cpuPressurePercent,
+		MemoryYardstick: g.MemoryYardstick(),
+	}
 }
 
 // sampleMemory takes one memory sample and remembers what it was measured
@@ -221,6 +287,7 @@ func (g *Governor) GetStatus(ctx context.Context) (active bool, memHooks, cpuHoo
 func (g *Governor) sampleMemory(ctx context.Context) (float64, string, error) {
 	used, yardstick, err := g.memUsage(ctx)
 	g.yardstick.Store(&yardstick)
+	g.lastMemory.store(used, err)
 	return used, yardstick, err
 }
 

@@ -26,6 +26,7 @@ import { CommandSearchButton } from "../CommandPalette/CommandSearchButton";
 import { ConnectionStatus } from "../ConnectionStatus";
 import { AttentionBadge } from "../Overview/AttentionBadge";
 import { SIGN_OUT_SCOPE } from "../signOut";
+import { UpdateNotice } from "./UpdateNotice";
 import classes from "./layout.module.css";
 
 const ROLE_COLOR: Record<string, string> = { admin: "red", operator: "blue" };
@@ -142,6 +143,7 @@ export function AppHeader(props: AppHeaderProps) {
         <Box visibleFrom="sm">
           <CommandSearchButton />
         </Box>
+        <UpdateNotice />
         <AttentionBadge />
         <StatusMenu refreshing={refreshing} onRefresh={onRefresh} />
         <Tooltip label="Docs">

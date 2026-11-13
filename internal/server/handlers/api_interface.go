@@ -51,4 +51,6 @@ type GlobalAndAuthAPI interface {
 	AnalyzeConfig(ctx context.Context, req *gateonv1.AnalyzeConfigRequest) (*gateonv1.AnalyzeConfigResponse, error)
 	AnalyzeLogs(ctx context.Context, req *gateonv1.AnalyzeLogsRequest) (*gateonv1.AnalyzeLogsResponse, error)
 	TestAIProvider(ctx context.Context, req *gateonv1.TestAIProviderRequest) (*gateonv1.TestAIProviderResponse, error)
+	GetUpdateStatus(ctx context.Context, req *gateonv1.GetUpdateStatusRequest) (*gateonv1.GetUpdateStatusResponse, error)
+	CheckForUpdate(ctx context.Context, req *gateonv1.CheckForUpdateRequest) (*gateonv1.CheckForUpdateResponse, error)
 }

@@ -95,7 +95,8 @@ ADRs follow a lightweight [MADR](https://adr.github.io/madr/)-style format:
 | [0082](./0082-one-switch-archives-every-log-on-retention.md) | One switch archives every log on retention | Accepted |
 | [0083](./0083-the-kernel-is-shielded-from-handshakes-the-waf-never-sees.md) | The kernel is shielded from handshakes the WAF never sees | Accepted |
 | [0084](./0084-a-tcp-route-enforces-the-ip-filter-it-lists.md) | A TCP route enforces the IP filter it lists | Accepted |
-| [0085](./0085-cloudflare-ca-certificates-are-built-in.md) | Cloudflare's CA certificates are built in | Accepted |
+| [0085](./0085-a-gateway-learns-of-a-new-release-from-a-signed-list.md) | A gateway learns of a new release from a signed list | Accepted |
+| [0086](./0086-cloudflare-ca-certificates-are-built-in.md) | Cloudflare's CA certificates are built in | Accepted |
 
 ## Conventions
 

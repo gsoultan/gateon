@@ -25,6 +25,7 @@ import (
 	"github.com/gsoultan/gateon/internal/middleware/security"
 	wafmw "github.com/gsoultan/gateon/internal/middleware/security/waf"
 	"github.com/gsoultan/gateon/internal/security/reputation"
+	"github.com/gsoultan/gateon/internal/selfupdate"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
@@ -285,9 +286,15 @@ func (s *ApiService) applyEveryGlobalChange(store config.GlobalConfigStore) {
 	if !ok {
 		return
 	}
-	src.Subscribe(func(_, newCfg *gateonv1.GlobalConfig) {
-		if newCfg != nil {
-			s.applyGlobalConfig(newCfg)
+	src.Subscribe(func(oldCfg, newCfg *gateonv1.GlobalConfig) {
+		if newCfg == nil {
+			return
+		}
+		s.applyGlobalConfig(newCfg)
+		// A release check switched back on, or pointed at another source,
+		// answers now rather than at the next daily tick (ADR 0085).
+		if s.Updates != nil && !proto.Equal(oldCfg.GetUpdate(), newCfg.GetUpdate()) {
+			s.Updates.Kick()
 		}
 	})
 	s.appliesOnChange = true
@@ -366,6 +373,12 @@ func validateGlobalSave(stored, proposed *gateonv1.GlobalConfig) error {
 	// A provider the advisory could never call saved with success and then
 	// fell back to the local analysis on every request (ADR 0070).
 	if err := llm.Validate(proposed.GetAi()); err != nil {
+		return status.Error(codes.InvalidArgument, err.Error())
+	}
+	// The release source is a host the gateway connects to on its own, and
+	// what it serves is what the dashboard offers as the next version
+	// (ADR 0085).
+	if err := selfupdate.ValidateSource(proposed.GetUpdate().GetSourceUrl()); err != nil {
 		return status.Error(codes.InvalidArgument, err.Error())
 	}
 	if err := security.ValidateGeoIPSave(stored.GetGeoip(), proposed.GetGeoip()); err != nil {

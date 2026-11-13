@@ -20,6 +20,7 @@ const SECTION_COMPONENTS: Record<SettingsTab, LazyExoticComponent<ComponentType<
   network: lazy(() => import("../components/settings/tabs/NetworkTab")),
   storage: lazy(() => import("../components/settings/tabs/StorageTab")),
   integrations: lazy(() => import("../components/settings/tabs/IntegrationsTab")),
+  updates: lazy(() => import("../components/settings/tabs/UpdatesTab")),
 };
 
 const sectionFallback = <Skeleton height={320} radius="md" />;
@@ -34,7 +35,7 @@ type SettingsSearch = {
 /**
  * The cards a search matches, each a link to its section at that card. The
  * list replaces the section while a query is typed, so the answer to "where
- * is the ClamAV switch" is one keystroke away rather than six tabs.
+ * is the ClamAV switch" is one keystroke away rather than seven tabs.
  */
 function SearchResults({ query, onPick }: { query: string; onPick: (tab: SettingsTab, section: string) => void }) {
   const results = useMemo(() => searchSettings(query), [query]);
@@ -110,7 +111,7 @@ export default function SettingsPage() {
     <Stack gap="xl">
       <PageHeader
         title="Settings"
-        description="The gateway's configuration in six sections. Every change is saved once, from the bar at the foot of the page."
+        description="The gateway's configuration in seven sections. Every change is saved once, from the bar at the foot of the page."
         actions={
           <TextInput
             placeholder="Search settings"
