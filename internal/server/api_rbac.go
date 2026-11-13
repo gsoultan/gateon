@@ -133,6 +133,9 @@ var apiPermissions = map[string]apiPermission{
 	gateonv1connect.ApiServiceListTLSOptionsProcedure:  readOn(auth.ResourceTLSOptions),
 	gateonv1connect.ApiServiceUpdateTLSOptionProcedure: writeOn(auth.ResourceTLSOptions),
 	gateonv1connect.ApiServiceDeleteTLSOptionProcedure: writeOn(auth.ResourceTLSOptions),
+	// The built-in CA catalog is what a certificate's or client authority's
+	// ca_file may name, so it reads like the certificates it is chosen for.
+	gateonv1connect.ApiServiceListBuiltinCertificateAuthoritiesProcedure: readOn(auth.ResourceCerts),
 
 	// Global config. POST/PUT /v1/global, via handleUpdateGlobal.
 	gateonv1connect.ApiServiceGetGlobalConfigProcedure:    readOn(auth.ResourceGlobal),

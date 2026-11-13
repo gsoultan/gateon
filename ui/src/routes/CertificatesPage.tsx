@@ -12,6 +12,7 @@ import { usePermissions } from '../hooks/usePermissions'
 import { useGlobalConfigDraft } from '../hooks/useGlobalConfigDraft'
 import { ConfirmDeleteModal } from '../components/ConfirmDelete'
 import { PageHeader } from "../components/layout";
+import { BuiltinCAPicker } from "../components/BuiltinCAPicker";
 
 // embedded: rendered as a tab of a page that already has a title, so only
 // the description and the actions are shown.
@@ -411,14 +412,16 @@ export default function CertificatesPage({ embedded = false }: { embedded?: bool
           />
           <TextInput 
             label="CA / Intermediate File (optional)" 
-            description="Intermediates are appended to the served chain during SNI, so you don't need to pre-bundle a full-chain cert."
-            placeholder="certs/cloudflare-origin-ecc-ca.pem"
+            description="Intermediates are appended to the served chain during SNI, so you don't need to pre-bundle a full-chain cert. Cloudflare's origin CAs are built in."
+            placeholder="builtin:cloudflare-origin-ca-ecc or certs/ca.pem"
             value={editingCert?.caFile || ''} 
             onChange={(e) => editingCert && setEditingCert({ ...editingCert, caFile: e.currentTarget.value })} 
             radius="md" 
             leftSection={<IconShieldLock size={16} />}
+            rightSectionWidth={96}
             rightSection={
-              <Group gap={4} mr={4}>
+              <Group gap={4} mr={4} wrap="nowrap">
+                <BuiltinCAPicker use="server-chain" onSelect={(ref) => editingCert && setEditingCert({ ...editingCert, caFile: ref })} />
                 <Tooltip label="Paste CA Certificate">
                   <ActionIcon variant="subtle" color="blue" onClick={() => { setPastingField('caFile'); openPaste(); }} aria-label="Paste CA certificate">
                     <IconClipboard size={16} />

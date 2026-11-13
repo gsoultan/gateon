@@ -40,6 +40,7 @@ type GlobalAndAuthAPI interface {
 	MitigateThreat(ctx context.Context, req *gateonv1.MitigateThreatRequest) (*gateonv1.MitigateThreatResponse, error)
 	RemoveMitigatedThreat(ctx context.Context, req *gateonv1.RemoveMitigatedThreatRequest) (*gateonv1.RemoveMitigatedThreatResponse, error)
 	GetCloudflareIPs(ctx context.Context, req *gateonv1.GetCloudflareIPsRequest) (*gateonv1.GetCloudflareIPsResponse, error)
+	ListBuiltinCertificateAuthorities(ctx context.Context, req *gateonv1.ListBuiltinCertificateAuthoritiesRequest) (*gateonv1.ListBuiltinCertificateAuthoritiesResponse, error)
 	InstallClamav(ctx context.Context, req *gateonv1.InstallClamavRequest) (*gateonv1.InstallClamavResponse, error)
 	UninstallClamav(ctx context.Context, req *gateonv1.UninstallClamavRequest) (*gateonv1.UninstallClamavResponse, error)
 	RunDeepScan(ctx context.Context, req *gateonv1.RunDeepScanRequest) (*gateonv1.RunDeepScanResponse, error)

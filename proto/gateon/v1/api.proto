@@ -50,6 +50,7 @@ service ApiService {
   rpc ListTLSOptions(ListTLSOptionsRequest) returns (ListTLSOptionsResponse);
   rpc UpdateTLSOption(UpdateTLSOptionRequest) returns (UpdateTLSOptionResponse);
   rpc DeleteTLSOption(DeleteTLSOptionRequest) returns (DeleteTLSOptionResponse);
+  rpc ListBuiltinCertificateAuthorities(ListBuiltinCertificateAuthoritiesRequest) returns (ListBuiltinCertificateAuthoritiesResponse);
 
   rpc Login(LoginRequest) returns (LoginResponse);
   rpc IsSetupRequired(IsSetupRequiredRequest) returns (IsSetupRequiredResponse);

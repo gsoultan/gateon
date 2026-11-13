@@ -6,7 +6,9 @@ package api
 import (
 	"context"
 	"fmt"
+	"time"
 
+	"github.com/gsoultan/gateon/internal/tls/builtinca"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
@@ -43,4 +45,65 @@ func (s *ApiService) DeleteTLSOption(ctx context.Context, req *gateonv1.DeleteTL
 	}
 	s.logAudit(ctx, "delete", "tls_option", fmt.Sprintf("Deleted TLS option %s", req.Id))
 	return &gateonv1.DeleteTLSOptionResponse{Success: true}, nil
+}
+
+// builtinCAExpiryWindow matches the window the certificate validation warns
+// in, so the list and a certificate using the CA agree on "expiring soon".
+const builtinCAExpiryWindow = 90 * 24 * time.Hour
+
+// ListBuiltinCertificateAuthorities lists the CA certificates compiled into
+// the binary, with the expiry and fingerprint of each, so a stale one is seen
+// in the dashboard rather than in a failed handshake.
+func (s *ApiService) ListBuiltinCertificateAuthorities(_ context.Context, req *gateonv1.ListBuiltinCertificateAuthoritiesRequest) (*gateonv1.ListBuiltinCertificateAuthoritiesResponse, error) {
+	all, err := BuiltinCertificateAuthorities(time.Now())
+	if err != nil {
+		return nil, err
+	}
+	page, size := listPage(req.GetPage(), req.GetPageSize())
+	total := int32(len(all)) // #nosec G115 -- a fixed catalog of a handful of entries.
+	if size == 0 {           // unset: everything, as the stores answer it
+		return &gateonv1.ListBuiltinCertificateAuthoritiesResponse{Authorities: all, TotalCount: total, Page: page}, nil
+	}
+	start := min(int64(page)*int64(size), int64(total))
+	end := min(start+int64(size), int64(total))
+	return &gateonv1.ListBuiltinCertificateAuthoritiesResponse{
+		Authorities: all[start:end], TotalCount: total, Page: page, PageSize: size,
+	}, nil
+}
+
+// BuiltinCertificateAuthorities describes every built-in CA as of now. An
+// embedded certificate that fails its pinned fingerprint is an error, not an
+// entry: the catalog is either exactly what was published or it is refused.
+func BuiltinCertificateAuthorities(now time.Time) ([]*gateonv1.BuiltinCertificateAuthority, error) {
+	authorities := builtinca.All()
+	out := make([]*gateonv1.BuiltinCertificateAuthority, 0, len(authorities))
+	for _, a := range authorities {
+		cert, err := a.Certificate()
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, &gateonv1.BuiltinCertificateAuthority{
+			Ref:               a.Ref,
+			Name:              a.Name,
+			Use:               builtinCAUse(a.Use),
+			KeyAlgorithm:      cert.PublicKeyAlgorithm.String(),
+			Subject:           cert.Subject.String(),
+			NotAfter:          cert.NotAfter.UTC().Format(time.RFC3339),
+			Sha256Fingerprint: a.SHA256,
+			Expired:           now.After(cert.NotAfter),
+			ExpiringSoon:      cert.NotAfter.Sub(now) < builtinCAExpiryWindow,
+		})
+	}
+	return out, nil
+}
+
+func builtinCAUse(u builtinca.Use) gateonv1.BuiltinCertificateAuthorityUse {
+	switch u {
+	case builtinca.UseServerChain:
+		return gateonv1.BuiltinCertificateAuthorityUse_BUILTIN_CERTIFICATE_AUTHORITY_USE_SERVER_CHAIN
+	case builtinca.UseClientCA:
+		return gateonv1.BuiltinCertificateAuthorityUse_BUILTIN_CERTIFICATE_AUTHORITY_USE_CLIENT_CA
+	default:
+		return gateonv1.BuiltinCertificateAuthorityUse_BUILTIN_CERTIFICATE_AUTHORITY_USE_UNSPECIFIED
+	}
 }

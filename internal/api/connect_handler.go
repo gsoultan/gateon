@@ -320,3 +320,11 @@ func connectCode(err error) error {
 	}
 	return connect.NewError(connect.Code(st.Code()), errors.New(st.Message()))
 }
+
+func (h *ConnectHandler) ListBuiltinCertificateAuthorities(ctx context.Context, req *connect.Request[gateonv1.ListBuiltinCertificateAuthoritiesRequest]) (*connect.Response[gateonv1.ListBuiltinCertificateAuthoritiesResponse], error) {
+	res, err := h.s.ListBuiltinCertificateAuthorities(ctx, req.Msg)
+	if err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(res), nil
+}

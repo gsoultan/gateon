@@ -12,6 +12,7 @@ import { useGlobalConfigDraft } from '../hooks/useGlobalConfigDraft'
 import { ConfirmDeleteModal } from '../components/ConfirmDelete'
 import { AdminOnlyNote } from '../components/settings/adminOnly/AdminOnlyNote'
 import { PageHeader } from "../components/layout";
+import { BuiltinCAPicker } from "../components/BuiltinCAPicker";
 
 // embedded: rendered as a tab of a page that already has a title, so only
 // the description and the actions are shown.
@@ -296,8 +297,10 @@ export default function ClientAuthoritiesPage({ embedded = false }: { embedded?:
             onChange={(e) => editingCA && setEditingCA({ ...editingCA, caFile: e.currentTarget.value })} 
             radius="md" 
             leftSection={<IconLockCheck size={16} />}
+            rightSectionWidth={96}
             rightSection={
-              <Group gap={4} mr={4}>
+              <Group gap={4} mr={4} wrap="nowrap">
+                <BuiltinCAPicker use="client-ca" onSelect={(ref) => editingCA && setEditingCA({ ...editingCA, caFile: ref })} />
                 <Tooltip label="Paste CA Certificate">
                   <ActionIcon variant="subtle" color="blue" onClick={openPaste} aria-label="Paste CA certificate">
                     <IconClipboard size={16} />

@@ -54,3 +54,46 @@ message TLSOption {
   // Note: IDs must reference entries in Global TLS -> Client Authorities.
   repeated string client_authority_ids = 10;
 }
+
+// BuiltinCertificateAuthorityUse says what a built-in CA is for. It is a hint
+// for choosing one; any CA can be named in any ca_file setting.
+enum BuiltinCertificateAuthorityUse {
+  BUILTIN_CERTIFICATE_AUTHORITY_USE_UNSPECIFIED = 0;
+  // A CA whose certificates gateon serves: named as a Certificate's ca_file,
+  // it is appended to the served chain.
+  BUILTIN_CERTIFICATE_AUTHORITY_USE_SERVER_CHAIN = 1;
+  // A CA that signs client certificates gateon verifies: named as a
+  // ClientAuthority's ca_file.
+  BUILTIN_CERTIFICATE_AUTHORITY_USE_CLIENT_CA = 2;
+}
+
+// BuiltinCertificateAuthority is a CA certificate compiled into the gateon
+// binary. Put `ref` in Certificate.ca_file, ClientAuthority.ca_file or
+// TlsClientConfig.ca_file in place of a path; nothing is downloaded.
+message BuiltinCertificateAuthority {
+  string ref = 1;  // e.g. "builtin:cloudflare-origin-ca-ecc"
+  string name = 2;
+  BuiltinCertificateAuthorityUse use = 3;
+  // Output only: the public-key algorithm, as crypto/x509 names it.
+  string key_algorithm = 4;
+  string subject = 5;
+  string not_after = 6;  // RFC 3339
+  // SHA-256 of the DER certificate, lowercase hex. Compare it with the
+  // fingerprint of the file the CA's owner publishes.
+  string sha256_fingerprint = 7;
+  bool expired = 8;
+  // True when the certificate expires within 90 days, or has expired.
+  bool expiring_soon = 9;
+}
+
+message ListBuiltinCertificateAuthoritiesRequest {
+  int32 page = 1;
+  int32 page_size = 2;
+}
+
+message ListBuiltinCertificateAuthoritiesResponse {
+  repeated BuiltinCertificateAuthority authorities = 1;
+  int32 total_count = 2;
+  int32 page = 3;
+  int32 page_size = 4;
+}

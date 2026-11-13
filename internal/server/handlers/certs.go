@@ -19,6 +19,7 @@ import (
 	"github.com/gsoultan/gateon/internal/auth"
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/logger"
+	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
 // Upload bounds for the certificate endpoint. certUploadMemoryBytes is what
@@ -56,6 +57,21 @@ func registerCertHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI) {
 
 		data, _ := json.Marshal(certs)
 		_, _ = w.Write(data)
+	})
+	// The CA certificates compiled into the binary, for naming in a ca_file
+	// instead of uploading one. Same service method as the RPC.
+	mux.HandleFunc("GET /v1/certs/builtin", func(w http.ResponseWriter, r *http.Request) {
+		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceCerts) {
+			return
+		}
+		page, pageSize, _ := ParsePagination(r)
+		res, err := svc.ListBuiltinCertificateAuthorities(r.Context(), &gateonv1.ListBuiltinCertificateAuthoritiesRequest{Page: page, PageSize: pageSize})
+		if err != nil {
+			logger.L.LogError("failed to list built-in certificate authorities", "error", err)
+			WriteHTTPError(w, http.StatusInternalServerError, "built-in certificate authorities are unavailable")
+			return
+		}
+		WriteProtoResponse(w, http.StatusOK, res)
 	})
 	mux.HandleFunc("POST /v1/certs/upload", func(w http.ResponseWriter, r *http.Request) {
 		if !RequirePermission(w, r, auth.ActionWrite, auth.ResourceCerts) {

@@ -5,15 +5,15 @@
 // @generated from file gateon/v1/tls.proto (package gateon.v1, syntax proto3)
 /* eslint-disable */
 
-import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
-import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
+import type { GenEnum, GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
+import { enumDesc, fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
 import type { Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file gateon/v1/tls.proto.
  */
 export const file_gateon_v1_tls: GenFile = /*@__PURE__*/
-  fileDesc("ChNnYXRlb24vdjEvdGxzLnByb3RvEglnYXRlb24udjEiSAoVTGlzdFRMU09wdGlvbnNSZXF1ZXN0EgwKBHBhZ2UYASABKAUSEQoJcGFnZV9zaXplGAIgASgFEg4KBnNlYXJjaBgDIAEoCSJ5ChZMaXN0VExTT3B0aW9uc1Jlc3BvbnNlEikKC3Rsc19vcHRpb25zGAEgAygLMhQuZ2F0ZW9uLnYxLlRMU09wdGlvbhITCgt0b3RhbF9jb3VudBgCIAEoBRIMCgRwYWdlGAMgASgFEhEKCXBhZ2Vfc2l6ZRgEIAEoBSJCChZVcGRhdGVUTFNPcHRpb25SZXF1ZXN0EigKCnRsc19vcHRpb24YASABKAsyFC5nYXRlb24udjEuVExTT3B0aW9uIioKF1VwZGF0ZVRMU09wdGlvblJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgiJAoWRGVsZXRlVExTT3B0aW9uUmVxdWVzdBIKCgJpZBgBIAEoCSIqChdEZWxldGVUTFNPcHRpb25SZXNwb25zZRIPCgdzdWNjZXNzGAEgASgIIvcBCglUTFNPcHRpb24SCgoCaWQYASABKAkSDAoEbmFtZRgCIAEoCRIXCg9taW5fdGxzX3ZlcnNpb24YAyABKAkSFwoPbWF4X3Rsc192ZXJzaW9uGAQgASgJEhUKDWNpcGhlcl9zdWl0ZXMYBSADKAkSIwobcHJlZmVyX3NlcnZlcl9jaXBoZXJfc3VpdGVzGAYgASgIEhgKEGNsaWVudF9hdXRoX3R5cGUYByABKAkSEgoKc25pX3N0cmljdBgIIAEoCBIWCg5hbHBuX3Byb3RvY29scxgJIAMoCRIcChRjbGllbnRfYXV0aG9yaXR5X2lkcxgKIAMoCUKTAQoNY29tLmdhdGVvbi52MUIIVGxzUHJvdG9QAVozZ2l0aHViLmNvbS9nc291bHRhbi9nYXRlb24vcHJvdG8vZ2F0ZW9uL3YxO2dhdGVvbnYxogIDR1hYqgIJR2F0ZW9uLlYxygIJR2F0ZW9uXFYx4gIVR2F0ZW9uXFYxXEdQQk1ldGFkYXRh6gIKR2F0ZW9uOjpWMWIGcHJvdG8z");
+  fileDesc("ChNnYXRlb24vdjEvdGxzLnByb3RvEglnYXRlb24udjEiSAoVTGlzdFRMU09wdGlvbnNSZXF1ZXN0EgwKBHBhZ2UYASABKAUSEQoJcGFnZV9zaXplGAIgASgFEg4KBnNlYXJjaBgDIAEoCSJ5ChZMaXN0VExTT3B0aW9uc1Jlc3BvbnNlEikKC3Rsc19vcHRpb25zGAEgAygLMhQuZ2F0ZW9uLnYxLlRMU09wdGlvbhITCgt0b3RhbF9jb3VudBgCIAEoBRIMCgRwYWdlGAMgASgFEhEKCXBhZ2Vfc2l6ZRgEIAEoBSJCChZVcGRhdGVUTFNPcHRpb25SZXF1ZXN0EigKCnRsc19vcHRpb24YASABKAsyFC5nYXRlb24udjEuVExTT3B0aW9uIioKF1VwZGF0ZVRMU09wdGlvblJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgiJAoWRGVsZXRlVExTT3B0aW9uUmVxdWVzdBIKCgJpZBgBIAEoCSIqChdEZWxldGVUTFNPcHRpb25SZXNwb25zZRIPCgdzdWNjZXNzGAEgASgIIvcBCglUTFNPcHRpb24SCgoCaWQYASABKAkSDAoEbmFtZRgCIAEoCRIXCg9taW5fdGxzX3ZlcnNpb24YAyABKAkSFwoPbWF4X3Rsc192ZXJzaW9uGAQgASgJEhUKDWNpcGhlcl9zdWl0ZXMYBSADKAkSIwobcHJlZmVyX3NlcnZlcl9jaXBoZXJfc3VpdGVzGAYgASgIEhgKEGNsaWVudF9hdXRoX3R5cGUYByABKAkSEgoKc25pX3N0cmljdBgIIAEoCBIWCg5hbHBuX3Byb3RvY29scxgJIAMoCRIcChRjbGllbnRfYXV0aG9yaXR5X2lkcxgKIAMoCSLvAQobQnVpbHRpbkNlcnRpZmljYXRlQXV0aG9yaXR5EgsKA3JlZhgBIAEoCRIMCgRuYW1lGAIgASgJEjYKA3VzZRgDIAEoDjIpLmdhdGVvbi52MS5CdWlsdGluQ2VydGlmaWNhdGVBdXRob3JpdHlVc2USFQoNa2V5X2FsZ29yaXRobRgEIAEoCRIPCgdzdWJqZWN0GAUgASgJEhEKCW5vdF9hZnRlchgGIAEoCRIaChJzaGEyNTZfZmluZ2VycHJpbnQYByABKAkSDwoHZXhwaXJlZBgIIAEoCBIVCg1leHBpcmluZ19zb29uGAkgASgIIksKKExpc3RCdWlsdGluQ2VydGlmaWNhdGVBdXRob3JpdGllc1JlcXVlc3QSDAoEcGFnZRgBIAEoBRIRCglwYWdlX3NpemUYAiABKAUingEKKUxpc3RCdWlsdGluQ2VydGlmaWNhdGVBdXRob3JpdGllc1Jlc3BvbnNlEjsKC2F1dGhvcml0aWVzGAEgAygLMiYuZ2F0ZW9uLnYxLkJ1aWx0aW5DZXJ0aWZpY2F0ZUF1dGhvcml0eRITCgt0b3RhbF9jb3VudBgCIAEoBRIMCgRwYWdlGAMgASgFEhEKCXBhZ2Vfc2l6ZRgEIAEoBSq4AQoeQnVpbHRpbkNlcnRpZmljYXRlQXV0aG9yaXR5VXNlEjEKLUJVSUxUSU5fQ0VSVElGSUNBVEVfQVVUSE9SSVRZX1VTRV9VTlNQRUNJRklFRBAAEjIKLkJVSUxUSU5fQ0VSVElGSUNBVEVfQVVUSE9SSVRZX1VTRV9TRVJWRVJfQ0hBSU4QARIvCitCVUlMVElOX0NFUlRJRklDQVRFX0FVVEhPUklUWV9VU0VfQ0xJRU5UX0NBEAJCkwEKDWNvbS5nYXRlb24udjFCCFRsc1Byb3RvUAFaM2dpdGh1Yi5jb20vZ3NvdWx0YW4vZ2F0ZW9uL3Byb3RvL2dhdGVvbi92MTtnYXRlb252MaICA0dYWKoCCUdhdGVvbi5WMcoCCUdhdGVvblxWMeICFUdhdGVvblxWMVxHUEJNZXRhZGF0YeoCCkdhdGVvbjo6VjFiBnByb3RvMw");
 
 /**
  * @generated from message gateon.v1.ListTLSOptionsRequest
@@ -212,4 +212,165 @@ export type TLSOption = Message<"gateon.v1.TLSOption"> & {
  */
 export const TLSOptionSchema: GenMessage<TLSOption> = /*@__PURE__*/
   messageDesc(file_gateon_v1_tls, 6);
+
+/**
+ * BuiltinCertificateAuthority is a CA certificate compiled into the gateon
+ * binary. Put `ref` in Certificate.ca_file, ClientAuthority.ca_file or
+ * TlsClientConfig.ca_file in place of a path; nothing is downloaded.
+ *
+ * @generated from message gateon.v1.BuiltinCertificateAuthority
+ */
+export type BuiltinCertificateAuthority = Message<"gateon.v1.BuiltinCertificateAuthority"> & {
+  /**
+   * e.g. "builtin:cloudflare-origin-ca-ecc"
+   *
+   * @generated from field: string ref = 1;
+   */
+  ref: string;
+
+  /**
+   * @generated from field: string name = 2;
+   */
+  name: string;
+
+  /**
+   * @generated from field: gateon.v1.BuiltinCertificateAuthorityUse use = 3;
+   */
+  use: BuiltinCertificateAuthorityUse;
+
+  /**
+   * Output only: the public-key algorithm, as crypto/x509 names it.
+   *
+   * @generated from field: string key_algorithm = 4;
+   */
+  keyAlgorithm: string;
+
+  /**
+   * @generated from field: string subject = 5;
+   */
+  subject: string;
+
+  /**
+   * RFC 3339
+   *
+   * @generated from field: string not_after = 6;
+   */
+  notAfter: string;
+
+  /**
+   * SHA-256 of the DER certificate, lowercase hex. Compare it with the
+   * fingerprint of the file the CA's owner publishes.
+   *
+   * @generated from field: string sha256_fingerprint = 7;
+   */
+  sha256Fingerprint: string;
+
+  /**
+   * @generated from field: bool expired = 8;
+   */
+  expired: boolean;
+
+  /**
+   * True when the certificate expires within 90 days, or has expired.
+   *
+   * @generated from field: bool expiring_soon = 9;
+   */
+  expiringSoon: boolean;
+};
+
+/**
+ * Describes the message gateon.v1.BuiltinCertificateAuthority.
+ * Use `create(BuiltinCertificateAuthoritySchema)` to create a new message.
+ */
+export const BuiltinCertificateAuthoritySchema: GenMessage<BuiltinCertificateAuthority> = /*@__PURE__*/
+  messageDesc(file_gateon_v1_tls, 7);
+
+/**
+ * @generated from message gateon.v1.ListBuiltinCertificateAuthoritiesRequest
+ */
+export type ListBuiltinCertificateAuthoritiesRequest = Message<"gateon.v1.ListBuiltinCertificateAuthoritiesRequest"> & {
+  /**
+   * @generated from field: int32 page = 1;
+   */
+  page: number;
+
+  /**
+   * @generated from field: int32 page_size = 2;
+   */
+  pageSize: number;
+};
+
+/**
+ * Describes the message gateon.v1.ListBuiltinCertificateAuthoritiesRequest.
+ * Use `create(ListBuiltinCertificateAuthoritiesRequestSchema)` to create a new message.
+ */
+export const ListBuiltinCertificateAuthoritiesRequestSchema: GenMessage<ListBuiltinCertificateAuthoritiesRequest> = /*@__PURE__*/
+  messageDesc(file_gateon_v1_tls, 8);
+
+/**
+ * @generated from message gateon.v1.ListBuiltinCertificateAuthoritiesResponse
+ */
+export type ListBuiltinCertificateAuthoritiesResponse = Message<"gateon.v1.ListBuiltinCertificateAuthoritiesResponse"> & {
+  /**
+   * @generated from field: repeated gateon.v1.BuiltinCertificateAuthority authorities = 1;
+   */
+  authorities: BuiltinCertificateAuthority[];
+
+  /**
+   * @generated from field: int32 total_count = 2;
+   */
+  totalCount: number;
+
+  /**
+   * @generated from field: int32 page = 3;
+   */
+  page: number;
+
+  /**
+   * @generated from field: int32 page_size = 4;
+   */
+  pageSize: number;
+};
+
+/**
+ * Describes the message gateon.v1.ListBuiltinCertificateAuthoritiesResponse.
+ * Use `create(ListBuiltinCertificateAuthoritiesResponseSchema)` to create a new message.
+ */
+export const ListBuiltinCertificateAuthoritiesResponseSchema: GenMessage<ListBuiltinCertificateAuthoritiesResponse> = /*@__PURE__*/
+  messageDesc(file_gateon_v1_tls, 9);
+
+/**
+ * BuiltinCertificateAuthorityUse says what a built-in CA is for. It is a hint
+ * for choosing one; any CA can be named in any ca_file setting.
+ *
+ * @generated from enum gateon.v1.BuiltinCertificateAuthorityUse
+ */
+export enum BuiltinCertificateAuthorityUse {
+  /**
+   * @generated from enum value: BUILTIN_CERTIFICATE_AUTHORITY_USE_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * A CA whose certificates gateon serves: named as a Certificate's ca_file,
+   * it is appended to the served chain.
+   *
+   * @generated from enum value: BUILTIN_CERTIFICATE_AUTHORITY_USE_SERVER_CHAIN = 1;
+   */
+  SERVER_CHAIN = 1,
+
+  /**
+   * A CA that signs client certificates gateon verifies: named as a
+   * ClientAuthority's ca_file.
+   *
+   * @generated from enum value: BUILTIN_CERTIFICATE_AUTHORITY_USE_CLIENT_CA = 2;
+   */
+  CLIENT_CA = 2,
+}
+
+/**
+ * Describes the enum gateon.v1.BuiltinCertificateAuthorityUse.
+ */
+export const BuiltinCertificateAuthorityUseSchema: GenEnum<BuiltinCertificateAuthorityUse> = /*@__PURE__*/
+  enumDesc(file_gateon_v1_tls, 0);
 
