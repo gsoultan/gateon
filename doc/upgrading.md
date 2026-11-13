@@ -11,6 +11,20 @@ here after the fact.
 
 ## Unreleased
 
+### Cloudflare's CA certificates are built in, and a `ca_file` starting `builtin:` names one
+
+Cloudflare's Origin CA roots (RSA and ECC) and its Authenticated Origin Pulls
+CA ship inside the binary. Any `ca_file` (a certificate's, a Client
+Authority's, a service's backend TLS) may say `builtin:cloudflare-origin-ca-rsa`,
+`builtin:cloudflare-origin-ca-ecc` or `builtin:cloudflare-origin-pull-ca`
+instead of a path, and the dashboard offers them beside the paste and upload
+buttons. See ADR 0086. A certificate whose `ca_file` holds a CA that has expired
+or expires within 90 days now carries a validation warning saying so.
+
+**Who is affected:** a `ca_file` that is a relative path beginning `builtin:`
+is now read as a built-in reference and refused if it names none; rename the
+file. Anything else is additive.
+
 ### The gateway checks for a newer release once a day
 
 A gateway now asks its release source whether a newer version exists: about a

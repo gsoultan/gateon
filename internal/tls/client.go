@@ -8,7 +8,6 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
-	"os"
 
 	"github.com/gsoultan/gateon/internal/config"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
@@ -47,10 +46,7 @@ func CreateTLSClientConfig(cfg *gateonv1.TlsClientConfig) (*tls.Config, error) {
 	}
 
 	if cfg.CaFile != "" {
-		caFile := config.ResolvePath(cfg.CaFile)
-		// #nosec G304 -- an operator-configured CA bundle path, resolved through
-		// config.ResolvePath. Naming a trust anchor is the point of the setting.
-		caData, err := os.ReadFile(caFile)
+		caData, err := readCAFile(resolveCAPath(cfg.CaFile))
 		if err != nil {
 			return nil, fmt.Errorf("failed to read CA file: %w", err)
 		}

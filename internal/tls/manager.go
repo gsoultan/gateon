@@ -18,9 +18,11 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/logger"
+	"github.com/gsoultan/gateon/internal/tls/builtinca"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 	"golang.org/x/crypto/acme"
 	"golang.org/x/crypto/acme/autocert"
@@ -128,7 +130,7 @@ func (m *Manager) SetCache(cache autocert.Cache) {
 func (m *Manager) LoadCertificate(certFile, keyFile, caFile string) (*tls.Certificate, *x509.CertPool, error) {
 	certFile = config.ResolvePath(certFile)
 	keyFile = config.ResolvePath(keyFile)
-	caFile = config.ResolvePath(caFile)
+	caFile = resolveCAPath(caFile)
 
 	cacheKey := certFile + "|" + keyFile + "|" + caFile
 	m.mu.RLock()
@@ -148,8 +150,7 @@ func (m *Manager) LoadCertificate(certFile, keyFile, caFile string) (*tls.Certif
 
 	var clientCAs *x509.CertPool
 	if caFile != "" {
-		// #nosec G304 -- operator-configured client CA bundle for mTLS.
-		caData, err := os.ReadFile(caFile)
+		caData, err := readCAFile(caFile)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to read CA file: %w", err)
 		}
@@ -200,6 +201,10 @@ func (m *Manager) validateCertificate(cert *tls.Certificate, caData []byte, cert
 	m.checkRSAKeySize(leaf, certFile, res)
 	m.checkSHA1(leaf, certFile, res)
 	m.checkAlgorithmMismatch(leaf, caData, certFile, caFile, res)
+	for _, msg := range caExpiryWarnings(caData, time.Now()) {
+		logger.L.LogWarn(msg, "cert_file", certFile, "ca_file", caFile)
+		res.Warnings = append(res.Warnings, msg)
+	}
 	m.addCipherSuiteRecommendations(leaf, certFile, res)
 
 	return res
@@ -281,7 +286,7 @@ func (m *Manager) ValidateCertificateFiles(certFile, keyFile, caFile string) (*g
 	}
 	var caData []byte
 	if caFile != "" {
-		caData, err = os.ReadFile(config.ResolvePath(caFile))
+		caData, err = readCAFile(resolveCAPath(caFile))
 		if err != nil {
 			return nil, fmt.Errorf("failed to read CA file: %w", err)
 		}
@@ -289,11 +294,67 @@ func (m *Manager) ValidateCertificateFiles(certFile, keyFile, caFile string) (*g
 	return m.validateCertificate(&cert, caData, certFile, caFile), nil
 }
 
+// caExpiryWindow is how far ahead a CA's expiry is reported. A built-in CA
+// only changes with a gateon release, so the warning has to come early enough
+// to take one.
+const caExpiryWindow = 90 * 24 * time.Hour
+
+// caExpiryWarnings reports each CA in caData that has expired or expires
+// within caExpiryWindow of now. A chain completed by an expired CA fails every
+// strict client, and a client-CA pool built from one rejects every client,
+// so the dashboard says so instead of the handshake.
+func caExpiryWarnings(caData []byte, now time.Time) []string {
+	var out []string
+	for rest := caData; ; {
+		var block *pem.Block
+		block, rest = pem.Decode(rest)
+		if block == nil {
+			return out
+		}
+		if block.Type != "CERTIFICATE" {
+			continue
+		}
+		ca, err := x509.ParseCertificate(block.Bytes)
+		if err != nil {
+			continue
+		}
+		name := ca.Subject.String()
+		switch {
+		case now.After(ca.NotAfter):
+			out = append(out, fmt.Sprintf("CA certificate %q expired on %s.", name, ca.NotAfter.UTC().Format(time.DateOnly)))
+		case ca.NotAfter.Sub(now) < caExpiryWindow:
+			out = append(out, fmt.Sprintf("CA certificate %q expires on %s.", name, ca.NotAfter.UTC().Format(time.DateOnly)))
+		}
+	}
+}
+
+// resolveCAPath resolves a ca_file setting. A built-in reference is returned
+// as it is: it names an embedded certificate, and resolving it as a relative
+// path could turn it into a file of the same name in the data directory.
+func resolveCAPath(caFile string) string {
+	if builtinca.IsRef(caFile) {
+		return caFile
+	}
+	return config.ResolvePath(caFile)
+}
+
+// readCAFile reads the PEM an already-resolved ca_file setting names: an
+// embedded certificate for a built-in reference, a file for anything else.
+// An unknown built-in reference is an error and is never read as a path.
+func readCAFile(caFile string) ([]byte, error) {
+	if builtinca.IsRef(caFile) {
+		return builtinca.Read(caFile)
+	}
+	// #nosec G304 -- operator-configured CA bundle path, resolved by
+	// resolveCAPath. Naming a trust anchor is the point of the setting.
+	return os.ReadFile(caFile)
+}
+
 func (m *Manager) LoadCAData(caFile string) ([]byte, error) {
 	if caFile == "" {
 		return nil, nil
 	}
-	caFile = config.ResolvePath(caFile)
+	caFile = resolveCAPath(caFile)
 
 	m.mu.RLock()
 	if data, ok := m.caData[caFile]; ok {
@@ -302,8 +363,7 @@ func (m *Manager) LoadCAData(caFile string) ([]byte, error) {
 	}
 	m.mu.RUnlock()
 
-	// #nosec G304 -- operator-configured CA bundle, cached above by path.
-	caData, err := os.ReadFile(caFile)
+	caData, err := readCAFile(caFile)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read CA file: %w", err)
 	}
@@ -319,7 +379,7 @@ func (m *Manager) LoadCA(caFile string) (*x509.CertPool, error) {
 	if caFile == "" {
 		return nil, nil
 	}
-	caFile = config.ResolvePath(caFile)
+	caFile = resolveCAPath(caFile)
 
 	m.mu.RLock()
 	if pool, ok := m.pools[caFile]; ok {
