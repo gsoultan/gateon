@@ -321,6 +321,13 @@ func TestAuthorizeProcedure(t *testing.T) {
 		{"viewer allowed log analysis", claims(auth.RoleViewer), procedureFor("AnalyzeLogs"), false},
 		{"viewer denied AI provider test", claims(auth.RoleViewer), procedureFor("TestAIProvider"), true},
 
+		// The release check (ADR 0085): every role reads the status the
+		// header notice shows; only a role that may change the settings
+		// makes the gateway ask its release source.
+		{"viewer allowed update status", claims(auth.RoleViewer), procedureFor("GetUpdateStatus"), false},
+		{"viewer denied update check", claims(auth.RoleViewer), procedureFor("CheckForUpdate"), true},
+		{"operator allowed update check", claims(auth.RoleOperator), procedureFor("CheckForUpdate"), false},
+
 		{"operator allowed mitigate", claims(auth.RoleOperator), procedureFor("MitigateThreat"), false},
 		{"operator allowed route write", claims(auth.RoleOperator), procedureFor("UpdateRoute"), false},
 		{"admin allowed user write", claims(auth.RoleAdmin), procedureFor("UpdateUser"), false},

@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
 // SPDX-License-Identifier: MIT
 
-export const SETTINGS_TABS = ["general", "gateway", "security", "network", "storage", "integrations"] as const;
+export const SETTINGS_TABS = ["general", "gateway", "security", "network", "storage", "integrations", "updates"] as const;
 export type SettingsTab = (typeof SETTINGS_TABS)[number];
 
 /** What each section is called and what it holds, in the order of the sub-nav. */
@@ -12,6 +12,7 @@ export const SETTINGS_SECTIONS: ReadonlyArray<{ id: SettingsTab; label: string; 
   { id: "network", label: "Network", description: "Failover between gateways and the kernel offload." },
   { id: "storage", label: "Storage and retention", description: "Logs, how long each record is kept, and the archives." },
   { id: "integrations", label: "Integrations", description: "Redis, OpenTelemetry, alerting and the AI provider." },
+  { id: "updates", label: "Updates", description: "The version this gateway runs, and whether a newer one is out." },
 ];
 
 // asSettingsTab reads the ?tab= search param. Anything it does not name,

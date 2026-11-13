@@ -31,3 +31,92 @@ message GetStatusResponse {
   // If true, the profile is pinned by GATEON_PROFILE environment variable.
   bool profile_pinned = 18;
 }
+
+// UpdateCheckState is where the release check stands.
+enum UpdateCheckState {
+  UPDATE_CHECK_STATE_UNSPECIFIED = 0;
+  // No check has finished since the gateway started.
+  UPDATE_CHECK_STATE_PENDING = 1;
+  // The last check read a release the gateway accepts.
+  UPDATE_CHECK_STATE_OK = 2;
+  // The last check failed; failure says how.
+  UPDATE_CHECK_STATE_FAILED = 3;
+  // Checking is switched off, in the settings or by GATEON_UPDATE_CHECK.
+  UPDATE_CHECK_STATE_DISABLED = 4;
+}
+
+// UpdateSignature is what the gateway could establish about the release list
+// it read.
+enum UpdateSignature {
+  UPDATE_SIGNATURE_UNSPECIFIED = 0;
+  // Signed by a release key compiled into this binary.
+  UPDATE_SIGNATURE_VERIFIED = 1;
+  // This binary was built with no release key, so nothing can be verified.
+  UPDATE_SIGNATURE_NO_KEY = 2;
+}
+
+// UpdateFailure is why a check failed.
+enum UpdateFailure {
+  UPDATE_FAILURE_UNSPECIFIED = 0;
+  // The release source did not answer, or answered with an error.
+  UPDATE_FAILURE_UNREACHABLE = 1;
+  // The release list carries no signature from a key this binary trusts.
+  UPDATE_FAILURE_SIGNATURE = 2;
+  // The release list is not one the gateway can read.
+  UPDATE_FAILURE_MALFORMED = 3;
+  // The configured release source is not one the gateway will fetch.
+  UPDATE_FAILURE_SOURCE = 4;
+}
+
+// InstallKind is how this gateway was installed, which decides how it is
+// upgraded.
+enum InstallKind {
+  INSTALL_KIND_UNSPECIFIED = 0;
+  // A systemd service, from the package or `gateon install`.
+  INSTALL_KIND_SYSTEMD = 1;
+  // A container outside Kubernetes.
+  INSTALL_KIND_CONTAINER = 2;
+  // A pod in Kubernetes.
+  INSTALL_KIND_KUBERNETES = 3;
+  // Anything else: a binary started by hand, or a Windows service.
+  INSTALL_KIND_OTHER = 4;
+}
+
+// UpdateStatus is what the gateway knows about newer releases (ADR 0085).
+message UpdateStatus {
+  // The running version, as GetStatusResponse.version reports it.
+  string current_version = 1;
+  // The newest release the source lists, "1.8.3". Empty until a check has
+  // succeeded, and after one that failed on its signature.
+  string latest_version = 2;
+  // latest_version is newer than current_version. Never true for a build
+  // that is not a release, whose version cannot be compared.
+  bool update_available = 3;
+  UpdateSignature signature = 4;
+  // When the last check finished, in Unix seconds. 0: none has.
+  int64 checked_at = 5;
+  UpdateCheckState state = 6;
+  UpdateFailure failure = 7;
+  // The release notes of latest_version. Empty with it.
+  string release_notes_url = 8;
+  // The release source in force.
+  string source_url = 9;
+  InstallKind install_kind = 10;
+  // GATEON_UPDATE_CHECK switched checking off, so the setting cannot turn it
+  // back on.
+  bool disabled_by_env = 11;
+  // current_version is a release version. False for a development build.
+  bool release_build = 12;
+}
+
+message GetUpdateStatusRequest {}
+
+message GetUpdateStatusResponse {
+  UpdateStatus status = 1;
+}
+
+message CheckForUpdateRequest {}
+
+message CheckForUpdateResponse {
+  UpdateStatus status = 1;
+}

@@ -5,15 +5,15 @@
 // @generated from file gateon/v1/status.proto (package gateon.v1, syntax proto3)
 /* eslint-disable */
 
-import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
-import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
+import type { GenEnum, GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
+import { enumDesc, fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
 import type { Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file gateon/v1/status.proto.
  */
 export const file_gateon_v1_status: GenFile = /*@__PURE__*/
-  fileDesc("ChZnYXRlb24vdjEvc3RhdHVzLnByb3RvEglnYXRlb24udjEiEgoQR2V0U3RhdHVzUmVxdWVzdCKyAwoRR2V0U3RhdHVzUmVzcG9uc2USDgoGc3RhdHVzGAEgASgJEg8KB3ZlcnNpb24YAiABKAkSDgoGdXB0aW1lGAMgASgDEhQKDG1lbW9yeV91c2FnZRgEIAEoAxIUCgxyb3V0ZXNfY291bnQYBSABKAUSFgoOc2VydmljZXNfY291bnQYBiABKAUSGgoSZW50cnlfcG9pbnRzX2NvdW50GAcgASgFEhkKEW1pZGRsZXdhcmVzX2NvdW50GAggASgFEhEKCWNwdV91c2FnZRgJIAEoARIcChRtZW1vcnlfdXNhZ2VfcGVyY2VudBgKIAEoARIRCgljcHVfY29yZXMYCyABKAUSFwoPbWVtb3J5X3RvdGFsX2diGAwgASgBEhgKEHN0b3JhZ2VfdXNhZ2VfZ2IYDSABKAESGAoQc3RvcmFnZV90b3RhbF9nYhgOIAEoARIdChVzdG9yYWdlX3VzYWdlX3BlcmNlbnQYDyABKAESGAoQY2xhbWF2X2luc3RhbGxlZBgQIAEoCBIPCgdwcm9maWxlGBEgASgJEhYKDnByb2ZpbGVfcGlubmVkGBIgASgIQpYBCg1jb20uZ2F0ZW9uLnYxQgtTdGF0dXNQcm90b1ABWjNnaXRodWIuY29tL2dzb3VsdGFuL2dhdGVvbi9wcm90by9nYXRlb24vdjE7Z2F0ZW9udjGiAgNHWFiqAglHYXRlb24uVjHKAglHYXRlb25cVjHiAhVHYXRlb25cVjFcR1BCTWV0YWRhdGHqAgpHYXRlb246OlYxYgZwcm90bzM");
+  fileDesc("ChZnYXRlb24vdjEvc3RhdHVzLnByb3RvEglnYXRlb24udjEiEgoQR2V0U3RhdHVzUmVxdWVzdCKyAwoRR2V0U3RhdHVzUmVzcG9uc2USDgoGc3RhdHVzGAEgASgJEg8KB3ZlcnNpb24YAiABKAkSDgoGdXB0aW1lGAMgASgDEhQKDG1lbW9yeV91c2FnZRgEIAEoAxIUCgxyb3V0ZXNfY291bnQYBSABKAUSFgoOc2VydmljZXNfY291bnQYBiABKAUSGgoSZW50cnlfcG9pbnRzX2NvdW50GAcgASgFEhkKEW1pZGRsZXdhcmVzX2NvdW50GAggASgFEhEKCWNwdV91c2FnZRgJIAEoARIcChRtZW1vcnlfdXNhZ2VfcGVyY2VudBgKIAEoARIRCgljcHVfY29yZXMYCyABKAUSFwoPbWVtb3J5X3RvdGFsX2diGAwgASgBEhgKEHN0b3JhZ2VfdXNhZ2VfZ2IYDSABKAESGAoQc3RvcmFnZV90b3RhbF9nYhgOIAEoARIdChVzdG9yYWdlX3VzYWdlX3BlcmNlbnQYDyABKAESGAoQY2xhbWF2X2luc3RhbGxlZBgQIAEoCBIPCgdwcm9maWxlGBEgASgJEhYKDnByb2ZpbGVfcGlubmVkGBIgASgIIoADCgxVcGRhdGVTdGF0dXMSFwoPY3VycmVudF92ZXJzaW9uGAEgASgJEhYKDmxhdGVzdF92ZXJzaW9uGAIgASgJEhgKEHVwZGF0ZV9hdmFpbGFibGUYAyABKAgSLQoJc2lnbmF0dXJlGAQgASgOMhouZ2F0ZW9uLnYxLlVwZGF0ZVNpZ25hdHVyZRISCgpjaGVja2VkX2F0GAUgASgDEioKBXN0YXRlGAYgASgOMhsuZ2F0ZW9uLnYxLlVwZGF0ZUNoZWNrU3RhdGUSKQoHZmFpbHVyZRgHIAEoDjIYLmdhdGVvbi52MS5VcGRhdGVGYWlsdXJlEhkKEXJlbGVhc2Vfbm90ZXNfdXJsGAggASgJEhIKCnNvdXJjZV91cmwYCSABKAkSLAoMaW5zdGFsbF9raW5kGAogASgOMhYuZ2F0ZW9uLnYxLkluc3RhbGxLaW5kEhcKD2Rpc2FibGVkX2J5X2VudhgLIAEoCBIVCg1yZWxlYXNlX2J1aWxkGAwgASgIIhgKFkdldFVwZGF0ZVN0YXR1c1JlcXVlc3QiQgoXR2V0VXBkYXRlU3RhdHVzUmVzcG9uc2USJwoGc3RhdHVzGAEgASgLMhcuZ2F0ZW9uLnYxLlVwZGF0ZVN0YXR1cyIXChVDaGVja0ZvclVwZGF0ZVJlcXVlc3QiQQoWQ2hlY2tGb3JVcGRhdGVSZXNwb25zZRInCgZzdGF0dXMYASABKAsyFy5nYXRlb24udjEuVXBkYXRlU3RhdHVzKrEBChBVcGRhdGVDaGVja1N0YXRlEiIKHlVQREFURV9DSEVDS19TVEFURV9VTlNQRUNJRklFRBAAEh4KGlVQREFURV9DSEVDS19TVEFURV9QRU5ESU5HEAESGQoVVVBEQVRFX0NIRUNLX1NUQVRFX09LEAISHQoZVVBEQVRFX0NIRUNLX1NUQVRFX0ZBSUxFRBADEh8KG1VQREFURV9DSEVDS19TVEFURV9ESVNBQkxFRBAEKm8KD1VwZGF0ZVNpZ25hdHVyZRIgChxVUERBVEVfU0lHTkFUVVJFX1VOU1BFQ0lGSUVEEAASHQoZVVBEQVRFX1NJR05BVFVSRV9WRVJJRklFRBABEhsKF1VQREFURV9TSUdOQVRVUkVfTk9fS0VZEAIqpgEKDVVwZGF0ZUZhaWx1cmUSHgoaVVBEQVRFX0ZBSUxVUkVfVU5TUEVDSUZJRUQQABIeChpVUERBVEVfRkFJTFVSRV9VTlJFQUNIQUJMRRABEhwKGFVQREFURV9GQUlMVVJFX1NJR05BVFVSRRACEhwKGFVQREFURV9GQUlMVVJFX01BTEZPUk1FRBADEhkKFVVQREFURV9GQUlMVVJFX1NPVVJDRRAEKpYBCgtJbnN0YWxsS2luZBIcChhJTlNUQUxMX0tJTkRfVU5TUEVDSUZJRUQQABIYChRJTlNUQUxMX0tJTkRfU1lTVEVNRBABEhoKFklOU1RBTExfS0lORF9DT05UQUlORVIQAhIbChdJTlNUQUxMX0tJTkRfS1VCRVJORVRFUxADEhYKEklOU1RBTExfS0lORF9PVEhFUhAEQpYBCg1jb20uZ2F0ZW9uLnYxQgtTdGF0dXNQcm90b1ABWjNnaXRodWIuY29tL2dzb3VsdGFuL2dhdGVvbi9wcm90by9nYXRlb24vdjE7Z2F0ZW9udjGiAgNHWFiqAglHYXRlb24uVjHKAglHYXRlb25cVjHiAhVHYXRlb25cVjFcR1BCTWV0YWRhdGHqAgpHYXRlb246OlYxYgZwcm90bzM");
 
 /**
  * @generated from message gateon.v1.GetStatusRequest
@@ -133,4 +133,329 @@ export type GetStatusResponse = Message<"gateon.v1.GetStatusResponse"> & {
  */
 export const GetStatusResponseSchema: GenMessage<GetStatusResponse> = /*@__PURE__*/
   messageDesc(file_gateon_v1_status, 1);
+
+/**
+ * UpdateStatus is what the gateway knows about newer releases (ADR 0085).
+ *
+ * @generated from message gateon.v1.UpdateStatus
+ */
+export type UpdateStatus = Message<"gateon.v1.UpdateStatus"> & {
+  /**
+   * The running version, as GetStatusResponse.version reports it.
+   *
+   * @generated from field: string current_version = 1;
+   */
+  currentVersion: string;
+
+  /**
+   * The newest release the source lists, "1.8.3". Empty until a check has
+   * succeeded, and after one that failed on its signature.
+   *
+   * @generated from field: string latest_version = 2;
+   */
+  latestVersion: string;
+
+  /**
+   * latest_version is newer than current_version. Never true for a build
+   * that is not a release, whose version cannot be compared.
+   *
+   * @generated from field: bool update_available = 3;
+   */
+  updateAvailable: boolean;
+
+  /**
+   * @generated from field: gateon.v1.UpdateSignature signature = 4;
+   */
+  signature: UpdateSignature;
+
+  /**
+   * When the last check finished, in Unix seconds. 0: none has.
+   *
+   * @generated from field: int64 checked_at = 5;
+   */
+  checkedAt: bigint;
+
+  /**
+   * @generated from field: gateon.v1.UpdateCheckState state = 6;
+   */
+  state: UpdateCheckState;
+
+  /**
+   * @generated from field: gateon.v1.UpdateFailure failure = 7;
+   */
+  failure: UpdateFailure;
+
+  /**
+   * The release notes of latest_version. Empty with it.
+   *
+   * @generated from field: string release_notes_url = 8;
+   */
+  releaseNotesUrl: string;
+
+  /**
+   * The release source in force.
+   *
+   * @generated from field: string source_url = 9;
+   */
+  sourceUrl: string;
+
+  /**
+   * @generated from field: gateon.v1.InstallKind install_kind = 10;
+   */
+  installKind: InstallKind;
+
+  /**
+   * GATEON_UPDATE_CHECK switched checking off, so the setting cannot turn it
+   * back on.
+   *
+   * @generated from field: bool disabled_by_env = 11;
+   */
+  disabledByEnv: boolean;
+
+  /**
+   * current_version is a release version. False for a development build.
+   *
+   * @generated from field: bool release_build = 12;
+   */
+  releaseBuild: boolean;
+};
+
+/**
+ * Describes the message gateon.v1.UpdateStatus.
+ * Use `create(UpdateStatusSchema)` to create a new message.
+ */
+export const UpdateStatusSchema: GenMessage<UpdateStatus> = /*@__PURE__*/
+  messageDesc(file_gateon_v1_status, 2);
+
+/**
+ * @generated from message gateon.v1.GetUpdateStatusRequest
+ */
+export type GetUpdateStatusRequest = Message<"gateon.v1.GetUpdateStatusRequest"> & {
+};
+
+/**
+ * Describes the message gateon.v1.GetUpdateStatusRequest.
+ * Use `create(GetUpdateStatusRequestSchema)` to create a new message.
+ */
+export const GetUpdateStatusRequestSchema: GenMessage<GetUpdateStatusRequest> = /*@__PURE__*/
+  messageDesc(file_gateon_v1_status, 3);
+
+/**
+ * @generated from message gateon.v1.GetUpdateStatusResponse
+ */
+export type GetUpdateStatusResponse = Message<"gateon.v1.GetUpdateStatusResponse"> & {
+  /**
+   * @generated from field: gateon.v1.UpdateStatus status = 1;
+   */
+  status?: UpdateStatus | undefined;
+};
+
+/**
+ * Describes the message gateon.v1.GetUpdateStatusResponse.
+ * Use `create(GetUpdateStatusResponseSchema)` to create a new message.
+ */
+export const GetUpdateStatusResponseSchema: GenMessage<GetUpdateStatusResponse> = /*@__PURE__*/
+  messageDesc(file_gateon_v1_status, 4);
+
+/**
+ * @generated from message gateon.v1.CheckForUpdateRequest
+ */
+export type CheckForUpdateRequest = Message<"gateon.v1.CheckForUpdateRequest"> & {
+};
+
+/**
+ * Describes the message gateon.v1.CheckForUpdateRequest.
+ * Use `create(CheckForUpdateRequestSchema)` to create a new message.
+ */
+export const CheckForUpdateRequestSchema: GenMessage<CheckForUpdateRequest> = /*@__PURE__*/
+  messageDesc(file_gateon_v1_status, 5);
+
+/**
+ * @generated from message gateon.v1.CheckForUpdateResponse
+ */
+export type CheckForUpdateResponse = Message<"gateon.v1.CheckForUpdateResponse"> & {
+  /**
+   * @generated from field: gateon.v1.UpdateStatus status = 1;
+   */
+  status?: UpdateStatus | undefined;
+};
+
+/**
+ * Describes the message gateon.v1.CheckForUpdateResponse.
+ * Use `create(CheckForUpdateResponseSchema)` to create a new message.
+ */
+export const CheckForUpdateResponseSchema: GenMessage<CheckForUpdateResponse> = /*@__PURE__*/
+  messageDesc(file_gateon_v1_status, 6);
+
+/**
+ * UpdateCheckState is where the release check stands.
+ *
+ * @generated from enum gateon.v1.UpdateCheckState
+ */
+export enum UpdateCheckState {
+  /**
+   * @generated from enum value: UPDATE_CHECK_STATE_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * No check has finished since the gateway started.
+   *
+   * @generated from enum value: UPDATE_CHECK_STATE_PENDING = 1;
+   */
+  PENDING = 1,
+
+  /**
+   * The last check read a release the gateway accepts.
+   *
+   * @generated from enum value: UPDATE_CHECK_STATE_OK = 2;
+   */
+  OK = 2,
+
+  /**
+   * The last check failed; failure says how.
+   *
+   * @generated from enum value: UPDATE_CHECK_STATE_FAILED = 3;
+   */
+  FAILED = 3,
+
+  /**
+   * Checking is switched off, in the settings or by GATEON_UPDATE_CHECK.
+   *
+   * @generated from enum value: UPDATE_CHECK_STATE_DISABLED = 4;
+   */
+  DISABLED = 4,
+}
+
+/**
+ * Describes the enum gateon.v1.UpdateCheckState.
+ */
+export const UpdateCheckStateSchema: GenEnum<UpdateCheckState> = /*@__PURE__*/
+  enumDesc(file_gateon_v1_status, 0);
+
+/**
+ * UpdateSignature is what the gateway could establish about the release list
+ * it read.
+ *
+ * @generated from enum gateon.v1.UpdateSignature
+ */
+export enum UpdateSignature {
+  /**
+   * @generated from enum value: UPDATE_SIGNATURE_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * Signed by a release key compiled into this binary.
+   *
+   * @generated from enum value: UPDATE_SIGNATURE_VERIFIED = 1;
+   */
+  VERIFIED = 1,
+
+  /**
+   * This binary was built with no release key, so nothing can be verified.
+   *
+   * @generated from enum value: UPDATE_SIGNATURE_NO_KEY = 2;
+   */
+  NO_KEY = 2,
+}
+
+/**
+ * Describes the enum gateon.v1.UpdateSignature.
+ */
+export const UpdateSignatureSchema: GenEnum<UpdateSignature> = /*@__PURE__*/
+  enumDesc(file_gateon_v1_status, 1);
+
+/**
+ * UpdateFailure is why a check failed.
+ *
+ * @generated from enum gateon.v1.UpdateFailure
+ */
+export enum UpdateFailure {
+  /**
+   * @generated from enum value: UPDATE_FAILURE_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * The release source did not answer, or answered with an error.
+   *
+   * @generated from enum value: UPDATE_FAILURE_UNREACHABLE = 1;
+   */
+  UNREACHABLE = 1,
+
+  /**
+   * The release list carries no signature from a key this binary trusts.
+   *
+   * @generated from enum value: UPDATE_FAILURE_SIGNATURE = 2;
+   */
+  SIGNATURE = 2,
+
+  /**
+   * The release list is not one the gateway can read.
+   *
+   * @generated from enum value: UPDATE_FAILURE_MALFORMED = 3;
+   */
+  MALFORMED = 3,
+
+  /**
+   * The configured release source is not one the gateway will fetch.
+   *
+   * @generated from enum value: UPDATE_FAILURE_SOURCE = 4;
+   */
+  SOURCE = 4,
+}
+
+/**
+ * Describes the enum gateon.v1.UpdateFailure.
+ */
+export const UpdateFailureSchema: GenEnum<UpdateFailure> = /*@__PURE__*/
+  enumDesc(file_gateon_v1_status, 2);
+
+/**
+ * InstallKind is how this gateway was installed, which decides how it is
+ * upgraded.
+ *
+ * @generated from enum gateon.v1.InstallKind
+ */
+export enum InstallKind {
+  /**
+   * @generated from enum value: INSTALL_KIND_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * A systemd service, from the package or `gateon install`.
+   *
+   * @generated from enum value: INSTALL_KIND_SYSTEMD = 1;
+   */
+  SYSTEMD = 1,
+
+  /**
+   * A container outside Kubernetes.
+   *
+   * @generated from enum value: INSTALL_KIND_CONTAINER = 2;
+   */
+  CONTAINER = 2,
+
+  /**
+   * A pod in Kubernetes.
+   *
+   * @generated from enum value: INSTALL_KIND_KUBERNETES = 3;
+   */
+  KUBERNETES = 3,
+
+  /**
+   * Anything else: a binary started by hand, or a Windows service.
+   *
+   * @generated from enum value: INSTALL_KIND_OTHER = 4;
+   */
+  OTHER = 4,
+}
+
+/**
+ * Describes the enum gateon.v1.InstallKind.
+ */
+export const InstallKindSchema: GenEnum<InstallKind> = /*@__PURE__*/
+  enumDesc(file_gateon_v1_status, 3);
 

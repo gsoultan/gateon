@@ -33,6 +33,7 @@ import (
 	"github.com/gsoultan/gateon/internal/resource"
 	"github.com/gsoultan/gateon/internal/security/posture"
 	"github.com/gsoultan/gateon/internal/security/waf"
+	"github.com/gsoultan/gateon/internal/selfupdate"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	"github.com/gsoultan/gateon/internal/telemetry/repid"
 	gtls "github.com/gsoultan/gateon/internal/tls"
@@ -1896,6 +1897,29 @@ func (s *ApiService) AnalyzeLogs(ctx context.Context, req *gateonv1.AnalyzeLogsR
 func (s *ApiService) TestAIProvider(ctx context.Context, _ *gateonv1.TestAIProviderRequest) (*gateonv1.TestAIProviderResponse, error) {
 	r := s.advisory().Test(ctx, s.liveGlobalConfig(ctx).GetAi())
 	return &gateonv1.TestAIProviderResponse{Ok: r.OK, Engine: r.Engine, Message: r.Message}, nil
+}
+
+// GetUpdateStatus reports what the last release check found (ADR 0085).
+func (s *ApiService) GetUpdateStatus(context.Context, *gateonv1.GetUpdateStatusRequest) (*gateonv1.GetUpdateStatusResponse, error) {
+	if s.Updates == nil {
+		return &gateonv1.GetUpdateStatusResponse{Status: s.noUpdateChecker()}, nil
+	}
+	return &gateonv1.GetUpdateStatusResponse{Status: s.Updates.Status().Proto()}, nil
+}
+
+// CheckForUpdate asks the release source now. The checker spaces its
+// fetches, so calling this in a loop asks the source no faster.
+func (s *ApiService) CheckForUpdate(ctx context.Context, _ *gateonv1.CheckForUpdateRequest) (*gateonv1.CheckForUpdateResponse, error) {
+	if s.Updates == nil {
+		return &gateonv1.CheckForUpdateResponse{Status: s.noUpdateChecker()}, nil
+	}
+	return &gateonv1.CheckForUpdateResponse{Status: s.Updates.Check(ctx).Proto()}, nil
+}
+
+// noUpdateChecker is the status of a service built without a release checker:
+// nothing is asked, so the check is reported as switched off.
+func (s *ApiService) noUpdateChecker() *gateonv1.UpdateStatus {
+	return selfupdate.Status{Current: s.Version, State: selfupdate.StateDisabled}.Proto()
 }
 
 func (s *ApiService) advisory() *advisory.Service {

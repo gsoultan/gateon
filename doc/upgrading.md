@@ -11,6 +11,27 @@ here after the fact.
 
 ## Unreleased
 
+### The gateway checks for a newer release once a day
+
+A gateway now asks its release source whether a newer version exists: about a
+minute after it starts and then every 24 hours, it makes two small `GET`
+requests to `https://github.com/gsoultan/gateon/releases` for the latest
+release's `checksums.txt` and `checksums.txt.sig` (ADR 0085). It sends nothing
+about the gateway. The result is shown under **Settings, Updates** and as a
+notice in the dashboard header, and exported as `gateon_update_available`.
+Nothing is downloaded or installed.
+
+**Who is affected:** every install makes a new outbound request. To stop it,
+turn off **Check for new releases** under Settings, Updates, or set
+`GATEON_UPDATE_CHECK=false`, which wins over the setting. A host with no route
+to GitHub needs neither: the check fails quietly and Settings says the release
+source could not be reached. `GATEON_UPDATE_SOURCE` (or the setting) points the
+check at a mirror, and `GATEON_UPDATE_CHECK_INTERVAL` changes how often.
+
+Until the project's release key is published, a newer version is shown as
+*not verified*; releases from then on are signed, and a gateway built with the
+key refuses a release list that is not.
+
 ### The Diagnostics "TITAN Evolution Core · ACTIVE" badge is gone, and the cards under it report what they measure
 
 The badge was a string literal shown whenever the API answered; there was no

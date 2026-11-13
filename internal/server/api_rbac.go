@@ -165,6 +165,14 @@ var apiPermissions = map[string]apiPermission{
 	gateonv1connect.ApiServiceAnalyzeLogsProcedure:    readOn(auth.ResourceDiagnostics),
 	gateonv1connect.ApiServiceTestAIProviderProcedure: writeOn(auth.ResourceGlobal),
 
+	// The release check (ADR 0085), GET /v1/update/status and POST
+	// /v1/update/check. The status is what the header's notice reads, so
+	// anyone who may read the gateway's status reads it. Checking makes the
+	// gateway call out, so it takes the right to change the settings that
+	// say where.
+	gateonv1connect.ApiServiceGetUpdateStatusProcedure: readOn(auth.ResourceDiagnostics),
+	gateonv1connect.ApiServiceCheckForUpdateProcedure:  writeOn(auth.ResourceGlobal),
+
 	// Diagnostics reads. GET /v1/status, /v1/diagnostics, /v1/audit/*,
 	// /v1/diag/security-threats, /v1/security/reputations, /v1/traces.
 	gateonv1connect.ApiServiceGetStatusProcedure:                  readOn(auth.ResourceDiagnostics),

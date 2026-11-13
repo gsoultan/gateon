@@ -61,6 +61,23 @@ message GlobalConfig {
   // Assistant findings (ADR 0070). Off unless enabled; the local analysis
   // runs either way and is what the dashboard shows when the provider fails.
   AIConfig ai = 21;
+  // Whether the gateway looks for a newer release, and where (ADR 0085).
+  UpdateConfig update = 22;
+}
+
+// UpdateConfig decides whether the gateway asks for the newest release and
+// which server it asks. Administrator-only: it names a host the gateway
+// connects to on its own, and the release that host describes is what the
+// dashboard offers.
+message UpdateConfig {
+  // The daily check is on unless this is set. GATEON_UPDATE_CHECK=0 turns it
+  // off whatever this says.
+  bool check_disabled = 1;
+  // Where releases are published. Empty uses GATEON_UPDATE_SOURCE, then
+  // https://github.com/gsoultan/gateon/releases. Must be https://, except for
+  // a mirror on this host's loopback address. The gateway reads
+  // <source>/latest/download/checksums.txt and checksums.txt.sig from it.
+  string source_url = 2;
 }
 
 // AIConfig selects the language model the dashboard's AI features may ask.

@@ -17,6 +17,7 @@ import (
 	"github.com/gsoultan/gateon/internal/security"
 	"github.com/gsoultan/gateon/internal/security/reputation"
 	"github.com/gsoultan/gateon/internal/security/waf"
+	"github.com/gsoultan/gateon/internal/selfupdate"
 	"github.com/gsoultan/gateon/internal/tls"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
@@ -67,4 +68,19 @@ type ApiServiceConfig struct {
 	// admits any address (internal/server/entrypoint), for the AI Advisory.
 	// The listener code stays out of this package; nil reports it closed.
 	ManagementWorldOpen func(*gateonv1.ManagementConfig) bool
+
+	// Updates looks for newer releases (ADR 0085). Nil reports the release
+	// check as switched off, which is what a service built without one does.
+	Updates UpdateChecker
+}
+
+// UpdateChecker is the release check GetUpdateStatus and CheckForUpdate
+// serve. *selfupdate.Checker is the one that runs.
+type UpdateChecker interface {
+	// Status reports what is known without asking the release source.
+	Status() selfupdate.Status
+	// Check asks the release source now.
+	Check(ctx context.Context) selfupdate.Status
+	// Kick brings the background check forward: the settings changed.
+	Kick()
 }

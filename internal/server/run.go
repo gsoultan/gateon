@@ -34,6 +34,7 @@ import (
 	"github.com/gsoultan/gateon/internal/security"
 	"github.com/gsoultan/gateon/internal/security/reputation"
 	"github.com/gsoultan/gateon/internal/security/waf"
+	"github.com/gsoultan/gateon/internal/selfupdate"
 	"github.com/gsoultan/gateon/internal/server/entrypoint"
 	"github.com/gsoultan/gateon/internal/server/handlers"
 	"github.com/gsoultan/gateon/internal/server/readiness"
@@ -135,6 +136,10 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 	// handler's domain service below, and the Connect/gRPC service here.
 	mwFactory := middleware.NewFactory(s.RedisClient, s.GlobalStore, s.EbpfManager, ipReputation, ".")
 	setupToken := newSetupToken()
+	// Looks for a newer release once a day, and only looks (ADR 0085). It
+	// reads the saved settings at each check, so a change needs no restart.
+	updates := selfupdate.New(s.Version, func() *gateonv1.UpdateConfig { return s.GlobalStore.Get(ctx).GetUpdate() })
+	wg.Go(func() { updates.Run(ctx) })
 	apiService := api.NewApiService(api.ApiServiceConfig{
 		Lifetime:           ctx,
 		Version:            s.Version,
@@ -161,6 +166,7 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 		SetupToken:          setupToken,
 		Throttles:           findingLimiter(rlLimiter),
 		ManagementWorldOpen: entrypoint.ManagementListenerWorldOpen,
+		Updates:             updates,
 	})
 	announceSetupToken(ctx, apiService, setupToken)
 	if gov != nil {

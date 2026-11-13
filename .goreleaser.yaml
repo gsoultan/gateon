@@ -91,6 +91,28 @@ snapshot:
 checksum:
   name_template: checksums.txt
 
+# Sign the release list (ADR 0085). A gateway believes a release only when
+# checksums.txt.sig verifies under a key compiled into that gateway, and
+# checksums.txt names the SHA-256 of every other file, so this one signature
+# covers the whole release. It is an Ed25519 signature made and checked with
+# the standard library: no cosign, no gpg, nothing for the gateway to shell
+# out to. The key comes from the GATEON_RELEASE_SIGNING_KEY secret;
+# releasesign refuses a key internal/selfupdate/release_keys.txt does not
+# list, so a release cannot go out signed with a key no gateway trusts.
+signs:
+  - id: checksums
+    artifacts: checksum
+    cmd: go
+    args:
+      - run
+      - ./scripts/releasesign
+      - sign
+      - -in
+      - "${artifact}"
+      - -out
+      - "${signature}"
+    signature: "${artifact}.sig"
+
 # Generate a CycloneDX SBOM for each released archive (requires syft on the
 # runner; the GoReleaser action image ships it). Attached as release artifacts.
 sboms:

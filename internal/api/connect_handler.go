@@ -85,6 +85,22 @@ func (h *ConnectHandler) TestAIProvider(ctx context.Context, req *connect.Reques
 	return connect.NewResponse(res), nil
 }
 
+func (h *ConnectHandler) GetUpdateStatus(ctx context.Context, req *connect.Request[gateonv1.GetUpdateStatusRequest]) (*connect.Response[gateonv1.GetUpdateStatusResponse], error) {
+	res, err := h.s.GetUpdateStatus(ctx, req.Msg)
+	if err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(res), nil
+}
+
+func (h *ConnectHandler) CheckForUpdate(ctx context.Context, req *connect.Request[gateonv1.CheckForUpdateRequest]) (*connect.Response[gateonv1.CheckForUpdateResponse], error) {
+	res, err := h.s.CheckForUpdate(ctx, req.Msg)
+	if err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(res), nil
+}
+
 func (h *ConnectHandler) VerifyAuditChain(ctx context.Context, req *connect.Request[gateonv1.VerifyAuditChainRequest]) (*connect.Response[gateonv1.VerifyAuditChainResponse], error) {
 	res, err := h.s.VerifyAuditChain(ctx, req.Msg)
 	if err != nil {
