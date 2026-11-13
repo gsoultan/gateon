@@ -16,6 +16,10 @@ mock.module("../../../store/useAuthStore", () => ({
 mock.module("../../../services/client", () => ({ api: {} }));
 mock.module("../../../hooks/useUpdateStatus", () => ({
   useUpdateStatus: () => ({ data: { disabledByEnv } }),
+  // The whole module is replaced for every test file in the run, so the
+  // stand-in carries each hook another file's component imports.
+  useCheckForUpdate: () => ({}),
+  useInstallUpdate: () => ({}),
 }));
 
 const { ADMIN_ONLY_REASON } = await import("../../../hooks/usePermissions");

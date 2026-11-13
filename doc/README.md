@@ -16,6 +16,7 @@ Setup guides and configuration references.
 | [deployment-sizing.md](./deployment-sizing.md) | What the 2 core / 2 GB target was measured to mean, how to re-measure it, and the runtime budget knobs |
 | [storage-retention.md](./storage-retention.md) | Persistent stores, retention/disk-reclamation behavior, and tunable cache-size/disk-usage settings |
 | [backup-restore.md](./backup-restore.md) | What to back up and in what order, why `GATEON_ENCRYPTION_KEY` is the item no file-based backup contains, and how to prove a restore works |
+| [self-upgrade.md](./self-upgrade.md) | Upgrading a gateway from its dashboard, from the command line or automatically; what the root helper checks; what to do when an upgrade fails |
 | [releasing.md](./releasing.md) | How a release is signed, how to create, rotate and recover the release key, and what a mirror has to serve |
 | [security-posture.md](./security-posture.md) | File Integrity Monitoring (FIM) configuration and the `GET /v1/security/posture` endpoint (WAF/ClamAV/FIM freshness) |
 | [waf-origins.md](./waf-origins.md) | Declaring `waf.origins` so off-origin redirect and SSRF detection stay active — and why a path-routed gateway derives none |

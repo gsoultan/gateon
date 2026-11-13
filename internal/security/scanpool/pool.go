@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 // Package scanpool sends files to clamd scanners and reads back their
-// verdicts. It is the first step of ADR 0089: one or more scanner addresses
+// verdicts. It is the first step of ADR 0091: one or more scanner addresses
 // behind one Scan call, with each scanner's health tracked from what it does.
 //
 // A Pool starts no goroutine and takes no lock. Health is a few atomics per

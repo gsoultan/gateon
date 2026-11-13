@@ -1,4 +1,4 @@
-# 88. ClamAV on the host is an administrator's decision
+# 90. ClamAV on the host is an administrator's decision
 
 Date: 2026-11-13
 
@@ -55,7 +55,7 @@ administrator-only, on the same rule and the same code as ADR 0040.**
 
 The route role is not given a way to name a remote scanner behind an
 administrator's approval. One global answer to "where do uploads go" is the
-property; ADR 0089 extends that answer from one address to a pool.
+property; ADR 0091 extends that answer from one address to a pool.
 
 ## Consequences
 
@@ -64,5 +64,5 @@ property; ADR 0089 extends that answer from one address to a pool.
 - The dashboard warns before an install on a host under 4 GB: clamd keeps about
   1 GB resident, which on a 2 GB gateway is half of what the proxy has.
 - Not changed: the install still runs as the gateway's user with whatever
-  docker or sudo access that user has. ADR 0089 proposes moving the scanner
+  docker or sudo access that user has. ADR 0091 proposes moving the scanner
   off the gateway, which removes the reason to hold that access at all.

@@ -101,6 +101,14 @@ func (h *ConnectHandler) CheckForUpdate(ctx context.Context, req *connect.Reques
 	return connect.NewResponse(res), nil
 }
 
+func (h *ConnectHandler) InstallUpdate(ctx context.Context, req *connect.Request[gateonv1.InstallUpdateRequest]) (*connect.Response[gateonv1.InstallUpdateResponse], error) {
+	res, err := h.s.InstallUpdate(ctx, req.Msg)
+	if err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(res), nil
+}
+
 func (h *ConnectHandler) VerifyAuditChain(ctx context.Context, req *connect.Request[gateonv1.VerifyAuditChainRequest]) (*connect.Response[gateonv1.VerifyAuditChainResponse], error) {
 	res, err := h.s.VerifyAuditChain(ctx, req.Msg)
 	if err != nil {

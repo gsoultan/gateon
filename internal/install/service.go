@@ -190,12 +190,19 @@ func installLinux(binPath string) error {
 	if err := runCmd(exec.Command("systemctl", "restart", "gateon")); err != nil {
 		return err
 	}
+	// The helper that lets the gateway be upgraded from its dashboard
+	// (ADR 0087). After the gateway, so that a host where this fails still
+	// has a running gateway and a clear message.
+	if err := installUpgradeUnits(binPath); err != nil {
+		return fmt.Errorf("the gateway is installed and running, but its upgrade helper is not: %w", err)
+	}
 
 	fmt.Printf("Gateon installed as systemd service.\n")
 	fmt.Printf("  Config dir: %s\n", configDir)
 	fmt.Printf("  State dir:  %s\n", stateDir)
 	fmt.Printf("  status: systemctl status gateon\n")
 	fmt.Printf("  logs:   journalctl -u gateon -f\n")
+	fmt.Printf("  upgrade: sudo gateon upgrade, or Settings > Updates in the dashboard\n")
 	return nil
 }
 
@@ -206,6 +213,9 @@ func uninstallLinux() error {
 
 	_ = exec.Command("systemctl", "stop", "gateon").Run()
 	_ = exec.Command("systemctl", "disable", "gateon").Run()
+	if err := uninstallUpgradeUnits(); err != nil {
+		return err
+	}
 	if err := runCmd(exec.Command("systemctl", "daemon-reload")); err != nil {
 		return err
 	}

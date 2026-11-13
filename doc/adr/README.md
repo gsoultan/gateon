@@ -97,8 +97,9 @@ ADRs follow a lightweight [MADR](https://adr.github.io/madr/)-style format:
 | [0084](./0084-a-tcp-route-enforces-the-ip-filter-it-lists.md) | A TCP route enforces the IP filter it lists | Accepted |
 | [0085](./0085-a-gateway-learns-of-a-new-release-from-a-signed-list.md) | A gateway learns of a new release from a signed list | Accepted |
 | [0086](./0086-cloudflare-ca-certificates-are-built-in.md) | Cloudflare's CA certificates are built in | Accepted |
-| [0088](./0088-clamav-on-the-host-is-an-administrators-decision.md) | ClamAV on the host is an administrator's decision | Accepted |
-| [0089](./0089-uploads-are-scanned-on-scanner-workers.md) | Uploads are scanned on scanner workers | Accepted (staged) |
+| [0087](./0087-a-root-helper-installs-what-the-gateway-verified.md) | A root helper installs what the gateway verified, and puts the old binary back | Accepted |
+| [0090](./0090-clamav-on-the-host-is-an-administrators-decision.md) | ClamAV on the host is an administrator's decision | Accepted |
+| [0091](./0091-uploads-are-scanned-on-scanner-workers.md) | Uploads are scanned on scanner workers | Accepted (staged) |
 
 ## Conventions
 

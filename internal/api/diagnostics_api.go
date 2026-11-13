@@ -7,6 +7,7 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"net"
@@ -34,11 +35,14 @@ import (
 	"github.com/gsoultan/gateon/internal/security/posture"
 	"github.com/gsoultan/gateon/internal/security/waf"
 	"github.com/gsoultan/gateon/internal/selfupdate"
+	"github.com/gsoultan/gateon/internal/selfupdate/upgrade"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	"github.com/gsoultan/gateon/internal/telemetry/repid"
 	gtls "github.com/gsoultan/gateon/internal/tls"
 	"github.com/gsoultan/gateon/pkg/proxy"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -1902,18 +1906,62 @@ func (s *ApiService) TestAIProvider(ctx context.Context, _ *gateonv1.TestAIProvi
 // GetUpdateStatus reports what the last release check found (ADR 0085).
 func (s *ApiService) GetUpdateStatus(context.Context, *gateonv1.GetUpdateStatusRequest) (*gateonv1.GetUpdateStatusResponse, error) {
 	if s.Updates == nil {
-		return &gateonv1.GetUpdateStatusResponse{Status: s.noUpdateChecker()}, nil
+		return &gateonv1.GetUpdateStatusResponse{Status: s.withUpgrade(s.noUpdateChecker())}, nil
 	}
-	return &gateonv1.GetUpdateStatusResponse{Status: s.Updates.Status().Proto()}, nil
+	return &gateonv1.GetUpdateStatusResponse{Status: s.withUpgrade(s.Updates.Status().Proto())}, nil
+}
+
+// withUpgrade adds what is known about installing releases (ADR 0087).
+func (s *ApiService) withUpgrade(st *gateonv1.UpdateStatus) *gateonv1.UpdateStatus {
+	if s.Upgrades == nil {
+		st.Upgrade = &gateonv1.UpgradeStatus{Blocker: gateonv1.UpgradeBlocker_UPGRADE_BLOCKER_ORCHESTRATED}
+		return st
+	}
+	st.Upgrade = s.Upgrades.View().Proto()
+	return st
+}
+
+// InstallUpdate starts installing a release (ADR 0087). An administrator
+// only, on every transport: the RBAC table asks for the right to change the
+// global settings, and this asks for the role, because what it starts ends
+// with root replacing the gateway's binary.
+func (s *ApiService) InstallUpdate(ctx context.Context, req *gateonv1.InstallUpdateRequest) (*gateonv1.InstallUpdateResponse, error) {
+	if err := s.requireAdmin(ctx); err != nil {
+		return nil, err
+	}
+	if s.Upgrades == nil || s.Updates == nil {
+		return nil, status.Error(codes.FailedPrecondition, upgrade.ErrBlocked.Error())
+	}
+	by := ""
+	if claims, _ := callerClaims(ctx); claims != nil {
+		by = claims.Username
+	}
+	if err := s.Upgrades.Install(req.GetVersion(), by, false); err != nil {
+		return nil, installRefusal(err)
+	}
+	s.logAudit(ctx, "install_update", "global", "upgrade to "+req.GetVersion()+" requested")
+	return &gateonv1.InstallUpdateResponse{Status: s.withUpgrade(s.Updates.Status().Proto())}, nil
+}
+
+// installRefusal renders a refusal to start an install. Each is a state of
+// the gateway the caller can read and act on, so none is Internal.
+func installRefusal(err error) error {
+	switch {
+	case errors.Is(err, upgrade.ErrBusy):
+		return status.Error(codes.Aborted, err.Error())
+	case errors.Is(err, upgrade.ErrBlocked), errors.Is(err, upgrade.ErrNotOffered):
+		return status.Error(codes.FailedPrecondition, err.Error())
+	}
+	return status.Error(codes.Internal, "the upgrade could not be started")
 }
 
 // CheckForUpdate asks the release source now. The checker spaces its
 // fetches, so calling this in a loop asks the source no faster.
 func (s *ApiService) CheckForUpdate(ctx context.Context, _ *gateonv1.CheckForUpdateRequest) (*gateonv1.CheckForUpdateResponse, error) {
 	if s.Updates == nil {
-		return &gateonv1.CheckForUpdateResponse{Status: s.noUpdateChecker()}, nil
+		return &gateonv1.CheckForUpdateResponse{Status: s.withUpgrade(s.noUpdateChecker())}, nil
 	}
-	return &gateonv1.CheckForUpdateResponse{Status: s.Updates.Check(ctx).Proto()}, nil
+	return &gateonv1.CheckForUpdateResponse{Status: s.withUpgrade(s.Updates.Check(ctx).Proto())}, nil
 }
 
 // noUpdateChecker is the status of a service built without a release checker:

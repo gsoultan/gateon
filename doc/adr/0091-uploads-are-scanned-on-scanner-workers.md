@@ -1,4 +1,4 @@
-# 89. Uploads are scanned on scanner workers
+# 91. Uploads are scanned on scanner workers
 
 Date: 2026-11-13
 
@@ -18,7 +18,7 @@ things about that are wrong for the hosts Gateon targets.
    signature database resident, about 1 GB. On the 2-core / 2 GB host the
    2026-11-13 review measured, the gateway under attack already reached the
    cgroup limit on its own. The dashboard's install button puts clamd there
-   anyway, and to do it the gateway's user needs docker or sudo (ADR 0088).
+   anyway, and to do it the gateway's user needs docker or sudo (ADR 0090).
 2. **One address is one point of failure.** When it is down every scanned
    route either refuses uploads or forwards them unscanned (`fail_open`), per
    route, with nothing in the dashboard saying which is happening.
@@ -42,7 +42,7 @@ the package commands as equal choices. **A worker needs no Docker and no
 Gateon software.**
 
 - `waf.clamav.scanners` is a list of `{name, address}`, administrator-only
-  (ADR 0088's rule: it is where uploads go). `clamav_addr` remains as a
+  (ADR 0090's rule: it is where uploads go). `clamav_addr` remains as a
   one-entry pool, so existing installs are unchanged.
 - **Bound:** at most 16 workers. Each has a fixed-size connection pool, and
   the existing per-route `MaxConcurrentScans` semaphore still bounds in-flight
@@ -152,7 +152,7 @@ must ship with; one that cannot be answered blocks the step it belongs to.
 | A worker address resolves to a different host later (DNS change) | Resolved at connect, as today. The periodic EICAR check is what notices a host that is no longer a scanner. |
 | A scanned file reaches a worker over a network someone can read | Plaintext is stated in the dashboard next to the address. Not solved by this ADR. |
 | Config file edited on disk with 500 workers, or a bad address | The bound (16) and the address grammar are enforced at load as well as at save; the excess is refused with the reason, and scanning continues on the valid entries. |
-| An operator, or a route's middleware, tries to add a worker | Refused: ADR 0088. Tested on REST, gRPC and Connect. |
+| An operator, or a route's middleware, tries to add a worker | Refused: ADR 0090. Tested on REST, gRPC and Connect. |
 
 ### Base64 in JSON
 

@@ -1,0 +1,16 @@
+# Starts the upgrade helper when the gateway asks for a release to be
+# installed (ADR 0087). The gateway cannot replace its own binary: it leaves
+# a request in its state directory, and this unit is how root notices.
+#
+# Disabling this unit switches self-upgrade off for the host. The dashboard
+# then offers the command to run instead of a button.
+[Unit]
+Description=Gateon - watch for an upgrade request
+Documentation=https://github.com/gsoultan/gateon
+
+[Path]
+PathExists=/var/lib/gateon/upgrade/request.json
+Unit=gateon-upgrade.service
+
+[Install]
+WantedBy=multi-user.target

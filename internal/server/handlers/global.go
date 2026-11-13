@@ -1115,4 +1115,35 @@ func registerUpdateHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI) {
 		}
 		WriteProtoResponse(w, http.StatusOK, res.GetStatus())
 	})
+	// Installing (ADR 0087). The service requires an administrator; the
+	// permission here is the one the RBAC table gives the RPC.
+	mux.HandleFunc("POST /v1/update/install", func(w http.ResponseWriter, r *http.Request) {
+		if !RequirePermission(w, r, auth.ActionWrite, auth.ResourceGlobal) {
+			return
+		}
+		var req gateonv1.InstallUpdateRequest
+		if !DecodeProtoRequest(w, r, &req) {
+			return
+		}
+		res, err := svc.InstallUpdate(r.Context(), &req)
+		if err != nil {
+			writeInstallRefusal(w, err)
+			return
+		}
+		WriteProtoResponse(w, http.StatusAccepted, res.GetStatus())
+	})
+}
+
+// writeInstallRefusal answers a refused install with the status its reason
+// has on the other transports. The messages are the service's own fixed
+// sentences; nothing in them comes from a release source.
+func writeInstallRefusal(w http.ResponseWriter, err error) {
+	switch status.Code(err) {
+	case codes.PermissionDenied:
+		WriteHTTPError(w, http.StatusForbidden, status.Convert(err).Message())
+	case codes.FailedPrecondition, codes.Aborted:
+		WriteHTTPError(w, http.StatusConflict, status.Convert(err).Message())
+	default:
+		WriteHTTPError(w, http.StatusInternalServerError, "the upgrade could not be started")
+	}
 }

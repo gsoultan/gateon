@@ -27,6 +27,7 @@ import (
 	hostsecurity "github.com/gsoultan/gateon/internal/security"
 	"github.com/gsoultan/gateon/internal/security/reputation"
 	"github.com/gsoultan/gateon/internal/selfupdate"
+	"github.com/gsoultan/gateon/internal/selfupdate/upgrade"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
@@ -384,6 +385,12 @@ func validateGlobalSave(stored, proposed *gateonv1.GlobalConfig) error {
 	}
 	// The image is an argument to `docker run` on the gateway's own host.
 	if err := hostsecurity.ValidateClamAVImage(proposed.GetWaf().GetClamav().GetDockerImage()); err != nil {
+		return status.Error(codes.InvalidArgument, err.Error())
+	}
+	// A maintenance window that cannot be read would be skipped in favour of
+	// the default one, and the gateway would restart at an hour nobody chose
+	// (ADR 0087).
+	if err := upgrade.ValidateConfig(proposed.GetUpdate()); err != nil {
 		return status.Error(codes.InvalidArgument, err.Error())
 	}
 	if err := security.ValidateGeoIPSave(stored.GetGeoip(), proposed.GetGeoip()); err != nil {
