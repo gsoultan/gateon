@@ -5,11 +5,14 @@ package security
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"mime"
 	"mime/multipart"
+	"net"
 	"net/http"
+	"net/url"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -745,6 +748,51 @@ func isHighRiskMismatch(ext, magicExt string) bool {
 		if imageExts[ext] {
 			return true
 		}
+	}
+	return false
+}
+
+// errRouteScannerNotLocal is the refusal of a route's own clamav_addr that
+// names another machine.
+var errRouteScannerNotLocal = errors.New("a route's own scanner must be on this host (a unix socket or a " +
+	"loopback address): every upload the route scans is sent there. A scanner on another machine is set " +
+	"by an administrator in the global WAF settings, which this route uses when it names none")
+
+// CheckFileSecuritySave refuses, at save, a file_security middleware whose own
+// clamav_addr is on another machine.
+//
+// Whoever is named there receives every upload the route scans and answers
+// whether it is clean. A middleware is an operator's to write, so the key let
+// the operator role send a route's uploads to a server of its choosing and
+// have them waved through. The global address is an administrator's
+// (globalbound classes it Boundary); the route's own may only point at this
+// host. Refused at save and not in Create, so a stored middleware predating
+// the rule keeps scanning as it did until it is next edited.
+func CheckFileSecuritySave(cfg map[string]string) error {
+	addr := strings.TrimSpace(cfg["clamav_addr"])
+	if addr == "" || scannerIsLocal(addr) {
+		return nil
+	}
+	return kind.CfgError("clamav_addr", addr, errRouteScannerNotLocal)
+}
+
+// scannerIsLocal reports whether addr, in the two forms clamd reads
+// (unix:///path and tcp://host:port), is on this host.
+func scannerIsLocal(addr string) bool {
+	u, err := url.Parse(addr)
+	if err != nil {
+		return false
+	}
+	switch u.Scheme {
+	case "unix":
+		return true
+	case "tcp":
+		host := u.Hostname()
+		if host == "localhost" {
+			return true
+		}
+		ip := net.ParseIP(host)
+		return ip != nil && ip.IsLoopback()
 	}
 	return false
 }

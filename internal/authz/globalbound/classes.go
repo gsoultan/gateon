@@ -148,7 +148,7 @@ var classes = map[protoreflect.FullName]Class{
 	"gateon.v1.WafConfig.bot_management":                Section,
 	"gateon.v1.WafConfig.allowed_admin_ips":             Operational,
 	"gateon.v1.WafConfig.auto_update_rules":             Operational,
-	"gateon.v1.WafConfig.clamav_addr":                   Operational,
+	"gateon.v1.WafConfig.clamav_addr":                   Boundary, // every scanned upload is sent there, and it answers "clean"
 	"gateon.v1.WafConfig.clamav":                        Section,
 	"gateon.v1.WafConfig.entropy_threshold":             Operational,
 	"gateon.v1.WafConfig.disable_entropy":               Operational,
@@ -181,12 +181,17 @@ var classes = map[protoreflect.FullName]Class{
 	"gateon.v1.BotManagementConfig.challenge_timeout_seconds": Operational,
 	"gateon.v1.BotManagementConfig.secret_key":                Operational,
 
-	"gateon.v1.ClamavConfig.installation_mode":        Operational,
-	"gateon.v1.ClamavConfig.auto_install":             Operational,
-	"gateon.v1.ClamavConfig.docker_image":             Operational,
+	// What the gateway installs and runs on its own host, and where it sends
+	// every upload it scans, are an administrator's to decide. They were
+	// Operational, so the operator role could have the gateway `docker run`
+	// an image of its choosing, or name its own server as the scanner and
+	// receive each uploaded file along with the power to call it clean.
+	"gateon.v1.ClamavConfig.installation_mode":        Boundary,
+	"gateon.v1.ClamavConfig.auto_install":             Boundary,
+	"gateon.v1.ClamavConfig.docker_image":             Boundary,
 	"gateon.v1.ClamavConfig.full_scan_schedule":       Operational,
 	"gateon.v1.ClamavConfig.low_resource_mode":        Operational,
-	"gateon.v1.ClamavConfig.clamav_addr":              Operational,
+	"gateon.v1.ClamavConfig.clamav_addr":              Boundary,
 	"gateon.v1.ClamavConfig.database_update_schedule": Operational,
 	"gateon.v1.ClamavConfig.app_update_schedule":      Operational,
 

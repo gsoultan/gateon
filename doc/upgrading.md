@@ -11,6 +11,32 @@ here after the fact.
 
 ## Unreleased
 
+### Only an administrator installs ClamAV or changes where uploads are scanned
+
+Installing or removing ClamAV from the dashboard runs docker or a package manager on
+the gateway's own host, and the scanner address is where every scanned upload is sent
+and whose answer of "clean" is believed. Both were open to the operator role, which
+holds `global:write`. They are administrator-only now, on REST, gRPC and the dashboard:
+
+- `POST /v1/security/clamav/install` and `/uninstall` (and the `InstallClamav` and
+  `UninstallClamav` RPCs) answer 403 / `PermissionDenied` to anyone but an administrator.
+- A save of the global settings that changes `waf.clamav_addr`, or `waf.clamav`'s
+  `clamav_addr`, `docker_image`, `installation_mode` or `auto_install`, is refused for an
+  operator and names the field. Scan schedules and low-resource mode stay operator-editable.
+- `waf.clamav.docker_image` must be an image reference. A value that starts with a dash
+  or contains a space is refused at save and again before docker is run.
+- A route's `file_security` middleware may name a scanner only on the gateway itself:
+  `unix://...`, or `tcp://` on `localhost` or a loopback address. A remote scanner is the
+  global setting, which an administrator owns.
+
+**What to check:** if a `file_security` middleware has a `clamav_addr` on another host,
+it keeps working as stored, but the next save of that middleware is refused. Move the
+address to Settings › Security (as an administrator) and clear it on the route. If
+operators install ClamAV for you today, an administrator has to do it from now on.
+
+The settings page also warns, before an install, when the host has under 4 GB of
+memory: ClamAV keeps about 1 GB resident for its signatures.
+
 ### Cloudflare's CA certificates are built in, and a `ca_file` starting `builtin:` names one
 
 Cloudflare's Origin CA roots (RSA and ECC) and its Authenticated Origin Pulls
