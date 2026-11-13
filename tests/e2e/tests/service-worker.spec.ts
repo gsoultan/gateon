@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
+import { apiSignIn } from './two-factor';
 
 /**
  * The dashboard's service worker is scoped to "/" on the management origin, and
@@ -25,7 +26,7 @@ test.setTimeout(120000);
 const ADMIN = { username: 'admin', password: 'e2e-horse-battery-42' };
 
 async function login(page: Page, as: { username: string; password: string } = ADMIN) {
-  const res = await page.request.post('/v1/login', { data: as });
+  const res = await apiSignIn(page.request, as.username, as.password);
   expect(res.ok(), `login failed: ${res.status()}`).toBe(true);
 }
 

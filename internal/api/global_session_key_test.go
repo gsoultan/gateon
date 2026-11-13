@@ -14,6 +14,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/gsoultan/gateon/internal/auth"
+	"github.com/gsoultan/gateon/internal/auth/authtest"
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/db/dbtest"
 	"github.com/gsoultan/gateon/internal/logger"
@@ -38,7 +39,7 @@ func sessionKeyFixture(t *testing.T) (*ApiService, *auth.Manager, string, string
 	if err := m.UpsertUser(&gateonv1.User{Username: "admin", Password: "correct-horse-battery", Role: auth.RoleAdmin}); err != nil {
 		t.Fatal(err)
 	}
-	token, _, err := m.Authenticate("admin", "correct-horse-battery", "")
+	token, _, err := authtest.TrySignIn(m, "admin", "correct-horse-battery", "")
 	if err != nil {
 		t.Fatal(err)
 	}

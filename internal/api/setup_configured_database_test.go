@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/gsoultan/gateon/internal/auth"
+	"github.com/gsoultan/gateon/internal/auth/authtest"
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/db"
 	"github.com/gsoultan/gateon/internal/db/dbtest"
@@ -63,7 +64,7 @@ func restartedAdministrator(t *testing.T, dir, user, password string) error {
 		t.Fatalf("open the database global.json names: %v", err)
 	}
 	defer func() { _ = mgr.Close() }()
-	_, _, err = mgr.Authenticate(user, password, "")
+	_, err = authtest.PasswordStep(mgr, user, password, "")
 	return err
 }
 

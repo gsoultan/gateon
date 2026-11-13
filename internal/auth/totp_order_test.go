@@ -62,14 +62,16 @@ func bcryptOnce(t *testing.T, hash []byte) time.Duration {
 }
 
 // TestTheTOTPClockIsTheOneCodesAreCheckedAgainst: a code generated for an
-// instant verifies when the manager's clock says that instant, however long
-// ago it was, and one generated two windows away does not.
+// instant verifies when the manager's clock says that instant, however far
+// from the wall clock it is, and one generated two windows away does not. The
+// instant is an hour ahead: enrolling spent the present step, and a step at or
+// before a spent one is refused (review L1).
 func TestTheTOTPClockIsTheOneCodesAreCheckedAgainst(t *testing.T) {
 	m := newTestManager(t)
 	id := createUser(t, m, "admin", ownerPass)
 	secret, _ := enroll(t, m, id, ownerPass)
 
-	at := time.Now().Add(-time.Hour)
+	at := time.Now().Add(time.Hour)
 	m.SetClock(func() time.Time { return at })
 	stale, err := totp.GenerateCode(secret, at.Add(-90*time.Second))
 	if err != nil {
@@ -83,6 +85,6 @@ func TestTheTOTPClockIsTheOneCodesAreCheckedAgainst(t *testing.T) {
 		t.Fatal(err)
 	}
 	if ok, _, _, err := m.Verify2FA(challengeFor(t, m, id), id, code); err != nil || !ok {
-		t.Fatalf("a code for the manager's clock, an hour ago: ok=%v err=%v", ok, err)
+		t.Fatalf("a code for the manager's clock, an hour ahead: ok=%v err=%v", ok, err)
 	}
 }

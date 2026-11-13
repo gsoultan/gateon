@@ -6,9 +6,6 @@ package auth
 import (
 	"errors"
 	"testing"
-	"time"
-
-	"github.com/pquerna/otp/totp"
 )
 
 func TestAuthenticateRejectsDisabledAccount(t *testing.T) {
@@ -16,7 +13,7 @@ func TestAuthenticateRejectsDisabledAccount(t *testing.T) {
 	id := createUser(t, m, "mallory", "pw-123456-long")
 
 	// A normal login works before disabling.
-	if _, _, err := m.Authenticate("mallory", "pw-123456-long", ""); err != nil {
+	if _, _, err := passwordStep(m, "mallory", "pw-123456-long", ""); err != nil {
 		t.Fatalf("expected successful login before disable, got %v", err)
 	}
 
@@ -25,7 +22,7 @@ func TestAuthenticateRejectsDisabledAccount(t *testing.T) {
 	}
 
 	// Correct password must still be rejected once disabled.
-	token, _, err := m.Authenticate("mallory", "pw-123456-long", "")
+	token, _, err := passwordStep(m, "mallory", "pw-123456-long", "")
 	if !errors.Is(err, ErrAccountDisabled) {
 		t.Fatalf("expected ErrAccountDisabled, got %v", err)
 	}
@@ -37,7 +34,7 @@ func TestAuthenticateRejectsDisabledAccount(t *testing.T) {
 	if err := m.SetUserDisabled(id, false); err != nil {
 		t.Fatalf("SetUserDisabled(false): %v", err)
 	}
-	if _, _, err := m.Authenticate("mallory", "pw-123456-long", ""); err != nil {
+	if _, _, err := passwordStep(m, "mallory", "pw-123456-long", ""); err != nil {
 		t.Fatalf("expected login to succeed after re-enable, got %v", err)
 	}
 }
@@ -90,7 +87,7 @@ func TestEnrollPending2FACompletesAndClearsPending(t *testing.T) {
 	}
 
 	// Completing verification enables 2FA and clears the pending flag.
-	code, err := totp.GenerateCode(secret, time.Now())
+	code, err := freshCode(t, m, secret)
 	if err != nil {
 		t.Fatalf("GenerateCode: %v", err)
 	}
@@ -117,13 +114,15 @@ func TestEnrollPending2FACompletesAndClearsPending(t *testing.T) {
 	}
 }
 
-func TestEnrollPendingRejectedWhenNotPending(t *testing.T) {
+func TestEnrollPendingRejectedOnceEnrolled(t *testing.T) {
 	m := newTestManager(t)
-	createUser(t, m, "peggy", "pw-123456-long")
+	id := createUser(t, m, "peggy", "pw-123456-long")
+	enroll(t, m, id, "pw-123456-long")
 
-	// No pending flag set: the unauthenticated enroll path must refuse, so it
-	// can't be abused to (re)generate a TOTP secret for an arbitrary account.
+	// Every account without a second factor enrols here (ADR 0087), flagged or
+	// not. One that has a factor must not: with the password alone this path
+	// would replace it with one the caller controls.
 	if _, _, _, _, err := m.EnrollPending2FA("peggy", "pw-123456-long", ""); !errors.Is(err, ErrInvalidCredentials) {
-		t.Fatalf("expected ErrInvalidCredentials when not pending, got %v", err)
+		t.Fatalf("expected ErrInvalidCredentials for an enrolled account, got %v", err)
 	}
 }

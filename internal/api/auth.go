@@ -38,8 +38,8 @@ func (s *ApiService) Login(ctx context.Context, req *gateonv1.LoginRequest) (*ga
 				TwoFactorChallenge: auth.ChallengeFrom(err),
 			}, nil
 		}
-		// Administrator mandated 2FA but the user hasn't enrolled: signal the client
-		// to run first-time enrollment. No token/cookie is issued yet.
+		// The account has no second factor yet, and every account must have one
+		// (ADR 0087): the client runs first-time enrolment. No session yet.
 		if errors.Is(err, auth.ErrTwoFactorSetupRequired) {
 			return &gateonv1.LoginResponse{
 				User:                   user,
@@ -139,9 +139,36 @@ func (s *ApiService) Verify2FA(ctx context.Context, req *gateonv1.Verify2FAReque
 	} else {
 		s.logAudit(ctx, "verify_2fa_failed", "user", fmt.Sprintf("Invalid 2FA code for user: %s", req.Id))
 	}
+	// The gRPC second step answers a browser as Login did: never with the
+	// token in the body (see calledFromBrowser). REST withholds it itself.
+	if calledFromBrowser(ctx) {
+		token = ""
+	}
 	return &gateonv1.Verify2FAResponse{
 		Success: success,
 		Token:   token,
 		User:    user,
 	}, nil
+}
+
+// Enroll2FA starts the first-time enrolment of an account with no second
+// factor, during sign-in, as POST /v1/auth/2fa/enroll does: the password step
+// again, under the sign-in's lockout and from the caller's address, then a new
+// secret and recovery codes, not yet enabled. Verify2FA with the challenge
+// Login answered completes it and issues the session (ADR 0087).
+func (s *ApiService) Enroll2FA(ctx context.Context, req *gateonv1.Enroll2FARequest) (*gateonv1.Enroll2FAResponse, error) {
+	if !auth.Available(s.Auth) {
+		return nil, errors.New("auth service not initialized")
+	}
+	secret, qr, codes, id, err := s.Auth.EnrollPending2FA(req.GetUsername(), req.GetPassword(), callerAddr(ctx))
+	if err != nil {
+		if signInRefused(err) {
+			s.logAudit(ctx, "enroll_2fa_refused", "user",
+				fmt.Sprintf("2FA enrolment at sign-in refused for user: %s", req.GetUsername()))
+			request.MarkRefusedContext(ctx, request.RefusalAuthentication)
+		}
+		return nil, err
+	}
+	s.logAudit(ctx, "enroll_2fa", "user", fmt.Sprintf("User began 2FA enrolment at sign-in: %s", req.GetUsername()))
+	return &gateonv1.Enroll2FAResponse{Id: id, Secret: secret, QrCodeUrl: qr, RecoveryCodes: codes}, nil
 }

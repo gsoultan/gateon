@@ -6,9 +6,6 @@ package auth
 import (
 	"errors"
 	"testing"
-	"time"
-
-	"github.com/pquerna/otp/totp"
 )
 
 // TestResetTwoFactorRemovesTheFactorAndEndsTheSessions is MGMT-N5 (ADR 0057):
@@ -69,7 +66,7 @@ func (e engineManager) signInWithBothFactors(t *testing.T, name, password, id, s
 	}
 	// The next period's code: enroll spent this period's, and a code is
 	// accepted once.
-	code, err := totp.GenerateCode(secret, time.Now().Add(30*time.Second))
+	code, err := freshCode(t, e.m, secret)
 	if err != nil {
 		t.Fatalf("GenerateCode: %v", err)
 	}

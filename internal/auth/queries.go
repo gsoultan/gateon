@@ -34,7 +34,7 @@ const (
 	// binding (see revocation.go). Kept narrow so the per-verify cache miss is
 	// as cheap as possible and so the password hash is never pulled into a
 	// wider struct that might get logged or serialized.
-	QuerySessionBindingByID = "SELECT password, role, disabled, session_epoch FROM users WHERE id = ?"
+	QuerySessionBindingByID = "SELECT password, role, disabled, session_epoch, two_factor_enabled FROM users WHERE id = ?"
 
 	// QueryAdvanceSessionEpoch is a sign-out: it moves the account to its next
 	// epoch, which every session issued before it no longer matches.
@@ -51,6 +51,10 @@ const (
 	// are bound.
 	QueryUpdatePassword = "UPDATE users SET password = ? WHERE id = ?"
 	QueryUpdate2FA      = "UPDATE users SET two_factor_enabled = ?, two_factor_secret = ?, recovery_codes = ? WHERE id = ?"
+	// QuerySpendTwoFactorStep records that a TOTP code for a time step was
+	// accepted, and matches no row when that step or a later one already was:
+	// the code has been used. See Manager.spendTOTP.
+	QuerySpendTwoFactorStep = "UPDATE users SET two_factor_last_step = ? WHERE id = ? AND two_factor_last_step < ?"
 
 	// QueryResetTwoFactor is an administrator's reset of another account's
 	// second factor (ADR 0057), in one statement so no half of it can land

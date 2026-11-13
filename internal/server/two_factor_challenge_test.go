@@ -9,11 +9,11 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
+
+	"github.com/gsoultan/gateon/internal/auth/authtest"
 
 	"github.com/gsoultan/gateon/internal/auth"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
-	"github.com/pquerna/otp/totp"
 )
 
 // The second step of a sign-in, POST /v1/auth/2fa/verify, is served before
@@ -46,6 +46,9 @@ type mgmtAnswer struct {
 type mgmtClient struct {
 	t *testing.T
 	h http.Handler
+	// addr is the client's address, 127.0.0.1 when empty. The sign-in budget
+	// is per address (ADR 0053).
+	addr string
 }
 
 func (c mgmtClient) do(method, path, body, bearer string) *httptest.ResponseRecorder {
@@ -53,6 +56,9 @@ func (c mgmtClient) do(method, path, body, bearer string) *httptest.ResponseReco
 	req := httptest.NewRequest(method, "http://127.0.0.1:8080"+path, strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.RemoteAddr = "127.0.0.1:5555"
+	if c.addr != "" {
+		req.RemoteAddr = c.addr + ":5555"
+	}
 	if bearer != "" {
 		req.Header.Set("Authorization", "Bearer "+bearer)
 	}
@@ -86,40 +92,40 @@ func (c mgmtClient) verify(id, code, challenge string) *httptest.ResponseRecorde
 	return c.do(http.MethodPost, "/v1/auth/2fa/verify", body, "")
 }
 
-// enrolled is an account with 2FA turned on through the dashboard's own
-// self-service path, and what its owner holds.
+// enrolled is an account with 2FA turned on through the sign-in page's own
+// first-time enrolment, and what its owner holds.
 type enrolled struct {
 	id, secret string
 	codes      []string
-	session    string // issued before enrolment; still valid after it
+	session    string // issued by the enrolment's first code
 }
 
-// enrolRoot turns on 2FA for the seeded administrator the way the dashboard
-// does: sign in, start setup with the password, verify a code from the new
-// authenticator with the challenge setup handed back.
+// enrolRoot turns on 2FA for the seeded administrator the way the sign-in page
+// does: every account must have a second factor (ADR 0087), so the password
+// step answers with a challenge and no session, the page enrols with the
+// password again, and the first code from the new authenticator signs in.
 func enrolRoot(c mgmtClient) enrolled {
 	c.t.Helper()
 	signedIn := c.login("root", challengeTestPassword)
-	if signedIn.Token == "" {
-		c.t.Fatalf("root has no 2FA yet and should get a session: %+v", signedIn)
+	if signedIn.Token != "" || !signedIn.TwoFactorSetupRequired || signedIn.TwoFactorChallenge == "" {
+		c.t.Fatalf("root has no 2FA yet and should be sent to enrol, with no session: %+v", signedIn)
 	}
-	id := signedIn.User.GetId()
-	rr := c.do(http.MethodPost, "/v1/auth/2fa/setup",
-		`{"id":"`+id+`","password":"`+challengeTestPassword+`"}`, signedIn.Token)
+	rr := c.do(http.MethodPost, "/v1/auth/2fa/enroll",
+		`{"username":"root","password":"`+challengeTestPassword+`"}`, "")
 	if rr.Code != http.StatusOK {
-		c.t.Fatalf("setup: status %d: %s", rr.Code, rr.Body.String())
+		c.t.Fatalf("enroll: status %d: %s", rr.Code, rr.Body.String())
 	}
 	setup := c.decode(rr)
-	code := totpNow(c.t, setup.Secret)
-	if rr := c.verify(id, code, setup.Challenge); rr.Code != http.StatusOK {
-		c.t.Fatalf("self-enrolment verify: status %d: %s", rr.Code, rr.Body.String())
+	rr = c.verify(setup.ID, totpNow(c.t, setup.Secret), signedIn.TwoFactorChallenge)
+	if rr.Code != http.StatusOK {
+		c.t.Fatalf("first code: status %d: %s", rr.Code, rr.Body.String())
 	}
-	return enrolled{id: id, secret: setup.Secret, codes: setup.RecoveryCodes, session: signedIn.Token}
+	return enrolled{id: setup.ID, secret: setup.Secret, codes: setup.RecoveryCodes, session: c.decode(rr).Token}
 }
 
 func totpNow(t *testing.T, secret string) string {
 	t.Helper()
-	code, err := totp.GenerateCode(secret, time.Now())
+	code, err := authtest.Code(secret)
 	if err != nil {
 		t.Fatalf("totp: %v", err)
 	}
@@ -297,6 +303,9 @@ func TestRefusedChallengesDoNotLockTheAccount(t *testing.T) {
 	for range auth.MaxFailedAttempts + 1 {
 		assertChallengeRefused(t, c.verify(root.id, "000000", ""))
 	}
+	// From another address: the enrolment and the refused steps spent this
+	// one's sign-in budget, which is not what this test is about.
+	c.addr = "192.0.2.77"
 	answer := c.login("root", challengeTestPassword)
 	if !answer.TwoFactorRequired {
 		t.Fatalf("sign-in after refused second steps: %+v", answer)

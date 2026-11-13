@@ -7,11 +7,9 @@ import (
 	"errors"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/gsoultan/gateon/internal/logger"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
-	"github.com/pquerna/otp/totp"
 )
 
 const testSymmetricKey = "0123456789abcdef0123456789abcdef"
@@ -47,7 +45,8 @@ func enroll(t *testing.T, m *Manager, id, password string) (secret string, codes
 		t.Fatalf("Setup2FA: %v", err)
 	}
 	secret, codes = e.Secret, e.RecoveryCodes
-	code, err := totp.GenerateCode(secret, time.Now())
+	rememberSecret(id, secret)
+	code, err := freshCode(t, m, secret)
 	if err != nil {
 		t.Fatalf("GenerateCode: %v", err)
 	}

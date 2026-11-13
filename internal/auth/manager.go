@@ -159,16 +159,12 @@ func (m *Manager) Authenticate(username, password, source string) (string, *gate
 	if user.TwoFactorEnabled {
 		return m.owedSecondFactor(user, ErrTwoFactorRequired)
 	}
-
-	// An administrator mandated 2FA but the user has not enrolled yet: do not issue
-	// a session. The client must run first-time TOTP enrollment (EnrollPending2FA,
-	// then Verify2FA with the challenge) before login completes. The user id is
-	// returned (no secret) so the client knows which account to enroll.
-	if user.TwoFactorPending {
-		return m.owedSecondFactor(user, ErrTwoFactorSetupRequired)
-	}
-
-	return m.issueToken(user)
+	// Every account has a second factor (ADR 0087), so a password never ends a
+	// sign-in. An account without one enrols now: EnrollPending2FA, then
+	// Verify2FA with the challenge, and only that last step issues a session.
+	// This used to happen only for accounts an administrator had flagged
+	// (two_factor_pending); every other account signed in with the password.
+	return m.owedSecondFactor(user, ErrTwoFactorSetupRequired)
 }
 
 // loginRow is the account a password sign-in names, as the first factor reads it.
@@ -397,6 +393,12 @@ func (m *Manager) owedSecondFactor(user *gateonv1.User, owed error) (string, *ga
 const TokenLifetime = 8 * time.Hour
 
 func (m *Manager) issueToken(user *gateonv1.User) (string, *gateonv1.User, error) {
+	// No session for an account without a second factor, whatever path asks
+	// (ADR 0087). The session binding refuses one too, so a session minted
+	// anyway -- by the previous release, before the rule -- does not verify.
+	if !user.TwoFactorEnabled {
+		return "", nil, ErrTwoFactorSetupRequired
+	}
 	// Bind the token to the account state it was issued against, so any later
 	// change to that state invalidates it. Read through the cache-backed helper
 	// rather than recomputing here: it is the same value VerifyToken will
@@ -871,10 +873,12 @@ func (m *Manager) EnrollPending2FA(username, password, source string) (string, s
 	if err != nil {
 		return "", "", nil, "", err
 	}
-	// Enrollment via this unauthenticated path is only for accounts an admin
-	// mandated 2FA for and that haven't enrolled. Anything else must go through the
-	// authenticated self-service Setup2FA endpoint.
-	if row.user.TwoFactorEnabled || !row.user.TwoFactorPending {
+	// Enrolment via this unauthenticated path is for accounts that have no
+	// second factor yet, which is every such account now that one is required
+	// (ADR 0087). An enrolled account replaces its factor through the
+	// authenticated Setup2FA, which keeps the old one until the new one is
+	// confirmed; here the password alone would replace it.
+	if row.user.TwoFactorEnabled {
 		return "", "", nil, "", ErrInvalidCredentials
 	}
 	id := row.user.Id
@@ -902,6 +906,13 @@ func (m *Manager) Setup2FA(id, password string) (Enrolment, error) {
 	if err := m.confirmPassword(id, password); err != nil {
 		return Enrolment{}, err
 	}
+	username, enrolled, err := m.enrolmentAccount(id)
+	if err != nil {
+		return Enrolment{}, err
+	}
+	if enrolled {
+		return m.stageReplacement(id, username)
+	}
 	secret, qr, codes, err := m.beginTOTPEnrolment(id)
 	if err != nil {
 		return Enrolment{}, err
@@ -911,6 +922,21 @@ func (m *Manager) Setup2FA(id, password string) (Enrolment, error) {
 		return Enrolment{}, err
 	}
 	return Enrolment{Secret: secret, QRCodeURL: qr, RecoveryCodes: codes, Challenge: challenge}, nil
+}
+
+// stageReplacement is Setup2FA for an account that already has a second
+// factor: the new one travels in the challenge and replaces the old one only
+// when Verify2FA confirms a code from it. See stagedFactor.
+func (m *Manager) stageReplacement(id, username string) (Enrolment, error) {
+	f, err := m.newFactor(username)
+	if err != nil {
+		return Enrolment{}, err
+	}
+	challenge, err := m.issueChallengeFor(id, time.Now(), f.staged)
+	if err != nil {
+		return Enrolment{}, err
+	}
+	return Enrolment{Secret: f.secret, QRCodeURL: f.qr, RecoveryCodes: f.codes, Challenge: challenge}, nil
 }
 
 // Enrolment is what Setup2FA hands the account starting a TOTP enrolment.
@@ -974,58 +1000,85 @@ func (m *Manager) confirmPassword(id, password string) error {
 // beginTOTPEnrolment generates a TOTP secret and recovery codes for account id
 // and stores them, not yet enabled; Verify2FA enables them. Every caller must
 // already have established the account's first factor: Setup2FA by the
-// password, EnrollPending2FA by the password during a mandated sign-in.
+// password, EnrollPending2FA by the password during a sign-in. It is only for
+// an account with no second factor: an enrolled one stages its replacement
+// (see stagedFactor), because writing here turns the working one off.
 func (m *Manager) beginTOTPEnrolment(id string) (string, string, []string, error) {
-	var user gateonv1.User
-	var hashed, role, recoveryCodes string
-	var failedAttempts int
-	var lockedUntil sql.NullTime
-
-	q := m.dialect.Rebind(QueryUserByID)
-	err := m.db.QueryRow(q, id).Scan(&user.Id, &user.Username, &hashed, &role, &failedAttempts, &lockedUntil,
-		&user.TwoFactorEnabled, &user.TwoFactorSecret, &recoveryCodes, &user.Disabled, &user.TwoFactorPending)
+	username, _, err := m.enrolmentAccount(id)
 	if err != nil {
 		return "", "", nil, err
 	}
-
-	key, err := totp.Generate(totp.GenerateOpts{
-		Issuer:      "Gateon",
-		AccountName: user.Username,
-	})
+	f, err := m.newFactor(username)
 	if err != nil {
 		return "", "", nil, err
 	}
-
-	// Generate cryptographically strong recovery codes; store only their hashes.
-	var plainCodes, hashedCodes []string
-	err = m.withHashSlot(func() (err error) {
-		plainCodes, hashedCodes, err = generateRecoveryCodes()
-		return err
-	})
-	if err != nil {
-		return "", "", nil, err
-	}
-
-	// Encrypt the TOTP secret at rest and store it, not yet enabled, under a key
-	// a rotation cannot swap until the write is done.
+	// Stored, not yet enabled, under a key a rotation cannot swap until the
+	// write is done: the secret was encrypted under it by newFactor, so it is
+	// encrypted again here inside the lock.
 	m.secondFactorMu.RLock()
-	encSecret, err := encryptSecret(m.keys.Load().enc, key.Secret())
+	enc, err := encryptSecret(m.keys.Load().enc, f.secret)
 	if err == nil {
-		_, err = m.db.Exec(m.dialect.Rebind(QueryUpdate2FA), false, encSecret, strings.Join(hashedCodes, ","), id)
+		_, err = m.db.Exec(m.dialect.Rebind(QueryUpdate2FA), false, enc, f.staged.hashedCodes, id)
 	}
 	m.secondFactorMu.RUnlock()
 	if err != nil {
 		return "", "", nil, err
 	}
+	return f.secret, f.qr, f.codes, nil
+}
 
-	var png []byte
-	png, err = qrcode.Encode(key.URL(), qrcode.Medium, 256)
+// enrolmentAccount is the username of account id and whether it already has
+// a second factor.
+func (m *Manager) enrolmentAccount(id string) (string, bool, error) {
+	var user gateonv1.User
+	var hashed, role, recoveryCodes string
+	var failedAttempts int
+	var lockedUntil sql.NullTime
+	err := m.db.QueryRow(m.dialect.Rebind(QueryUserByID), id).Scan(&user.Id, &user.Username, &hashed, &role,
+		&failedAttempts, &lockedUntil, &user.TwoFactorEnabled, &user.TwoFactorSecret, &recoveryCodes,
+		&user.Disabled, &user.TwoFactorPending)
 	if err != nil {
-		return "", "", nil, err
+		return "", false, err
 	}
+	return user.Username, user.TwoFactorEnabled, nil
+}
 
-	qrBase64 := "data:image/png;base64," + base64.StdEncoding.EncodeToString(png)
-	return key.Secret(), qrBase64, plainCodes, nil
+// newFactor is a fresh second factor for username: the TOTP secret, its QR
+// code, recovery codes, and the forms they are stored in. Nothing is written.
+type newFactor struct {
+	secret string
+	qr     string
+	codes  []string
+	staged stagedFactor
+}
+
+func (m *Manager) newFactor(username string) (newFactor, error) {
+	key, err := totp.Generate(totp.GenerateOpts{Issuer: "Gateon", AccountName: username})
+	if err != nil {
+		return newFactor{}, err
+	}
+	// Generate cryptographically strong recovery codes; store only their hashes.
+	var plainCodes, hashedCodes []string
+	if err := m.withHashSlot(func() (err error) {
+		plainCodes, hashedCodes, err = generateRecoveryCodes()
+		return err
+	}); err != nil {
+		return newFactor{}, err
+	}
+	enc, err := encryptSecret(m.keys.Load().enc, key.Secret())
+	if err != nil {
+		return newFactor{}, err
+	}
+	png, err := qrcode.Encode(key.URL(), qrcode.Medium, 256)
+	if err != nil {
+		return newFactor{}, err
+	}
+	return newFactor{
+		secret: key.Secret(),
+		qr:     "data:image/png;base64," + base64.StdEncoding.EncodeToString(png),
+		codes:  plainCodes,
+		staged: stagedFactor{encSecret: enc, hashedCodes: strings.Join(hashedCodes, ",")},
+	}, nil
 }
 
 // completeSecondFactor issues the session for a correct second factor. A
@@ -1054,7 +1107,8 @@ func (m *Manager) completeSecondFactor(user *gateonv1.User) (bool, string, *gate
 // caller who has shown the password gets as far as the code, and only there do
 // wrong codes count. See ADR 0039.
 func (m *Manager) Verify2FA(challenge, id, code string) (bool, string, *gateonv1.User, error) {
-	if err := m.checkChallenge(challenge, id); err != nil {
+	staged, err := m.parseChallenge(challenge, id)
+	if err != nil {
 		return false, "", nil, err
 	}
 	// Held while the stored secret is read, decrypted and written back, so a
@@ -1067,7 +1121,7 @@ func (m *Manager) Verify2FA(challenge, id, code string) (bool, string, *gateonv1
 	var lockedUntil sql.NullTime
 
 	q := m.dialect.Rebind(QueryUserByID)
-	err := m.db.QueryRow(q, id).Scan(&user.Id, &user.Username, &hashed, &role, &failedAttempts, &lockedUntil,
+	err = m.db.QueryRow(q, id).Scan(&user.Id, &user.Username, &hashed, &role, &failedAttempts, &lockedUntil,
 		&user.TwoFactorEnabled, &user.TwoFactorSecret, &recoveryCodes, &user.Disabled, &user.TwoFactorPending)
 	if err != nil {
 		return false, "", nil, err
@@ -1082,6 +1136,10 @@ func (m *Manager) Verify2FA(challenge, id, code string) (bool, string, *gateonv1
 	// step no longer clears this count (ADR 0050).
 	if lockedUntil.Valid && time.Now().Before(lockedUntil.Time) {
 		return false, "", nil, ErrAccountLocked
+	}
+
+	if staged.encSecret != "" {
+		return m.confirmReplacement(&user, staged, failedAttempts, code)
 	}
 
 	// The stored secret is encrypted at rest; user keeps the stored form for
@@ -1114,9 +1172,66 @@ func (m *Manager) Verify2FA(challenge, id, code string) (bool, string, *gateonv1
 	return false, "", nil, ErrInvalidTwoFactorCode
 }
 
-// totpOpts are totp.Validate's defaults: 30-second steps, six digits, SHA-1,
-// and one step of skew either way.
-var totpOpts = totp.ValidateOpts{Period: 30, Skew: 1, Digits: otp.DigitsSix, Algorithm: otp.AlgorithmSHA1}
+// confirmReplacement is Verify2FA for a re-enrolment challenge: code must come
+// from the staged authenticator, which then replaces the account's factor and
+// recovery codes. Recovery codes do not confirm it -- the new ones have never
+// been used, and the old ones prove nothing about the new authenticator.
+// Called with secondFactorMu read-held.
+func (m *Manager) confirmReplacement(user *gateonv1.User, staged stagedFactor, failedAttempts int, code string) (bool, string, *gateonv1.User, error) {
+	plain, err := decryptSecret(m.keys.Load().enc, staged.encSecret)
+	if err != nil || plain == "" {
+		return false, "", nil, ErrInvalidChallenge
+	}
+	if ok, err := m.spendTOTP(user.Id, plain, code); err != nil || !ok {
+		if err != nil {
+			return false, "", nil, err
+		}
+		m.handleFailedLogin(user.Username, failedAttempts)
+		return false, "", nil, ErrInvalidTwoFactorCode
+	}
+	if _, err := m.db.Exec(m.dialect.Rebind(QueryUpdate2FA), true, staged.encSecret, staged.hashedCodes, user.Id); err != nil {
+		return false, "", nil, err
+	}
+	user.TwoFactorEnabled = true
+	return m.completeSecondFactor(user)
+}
+
+// totpPeriod is the TOTP time step. Codes are accepted for their own step and
+// one either side, as totp.Validate's defaults do, to allow for clock drift.
+const totpPeriod = 30 * time.Second
+
+// totpStepOpts check a code against exactly one step: totp.Validate's
+// defaults (six digits, SHA-1) with no skew, so spendTOTP knows which step a
+// code belongs to.
+var totpStepOpts = totp.ValidateOpts{Period: 30, Skew: 0, Digits: otp.DigitsSix, Algorithm: otp.AlgorithmSHA1}
+
+// spendTOTP reports whether code is a TOTP code from plainSecret for the
+// current step or one either side, and one account id has not already spent:
+// each step's code signs in once.
+//
+// It used to accept a code for as long as it was valid, however many times it
+// was presented, so a code read over a shoulder, out of a proxy's log or a
+// screen share signed in again for up to ninety seconds by whoever also had
+// the password (review L1). The step is recorded in the database by a
+// conditional UPDATE, which only one request -- on one replica -- can win: a
+// second presentation of the code, or of any earlier one, matches no row.
+func (m *Manager) spendTOTP(id, plainSecret, code string) (bool, error) {
+	now := m.now().UTC()
+	for _, skew := range []time.Duration{0, -totpPeriod, totpPeriod} {
+		at := now.Add(skew)
+		if ok, _ := totp.ValidateCustom(code, plainSecret, at, totpStepOpts); !ok {
+			continue
+		}
+		step := at.Unix() / int64(totpPeriod/time.Second)
+		res, err := m.db.Exec(m.dialect.Rebind(QuerySpendTwoFactorStep), step, id, step)
+		if err != nil {
+			return false, err
+		}
+		n, err := res.RowsAffected()
+		return err == nil && n == 1, err
+	}
+	return false, nil
+}
 
 // acceptCode reports whether code is the account's current TOTP code -- which
 // completes an enrolment -- or one of its unused recovery codes, which it
@@ -1131,7 +1246,11 @@ var totpOpts = totp.ValidateOpts{Period: 30, Skew: 1, Digits: otp.DigitsSix, Alg
 // (a TOTP code is six digits, a recovery code is not), so the order changes
 // nothing else.
 func (m *Manager) acceptCode(user *gateonv1.User, plainSecret, recoveryCodes, code string) (bool, error) {
-	if ok, _ := totp.ValidateCustom(code, plainSecret, m.now().UTC(), totpOpts); ok {
+	ok, err := m.spendTOTP(user.Id, plainSecret, code)
+	if err != nil {
+		return false, err
+	}
+	if ok {
 		return true, m.completeEnrolment(user, recoveryCodes)
 	}
 	// Recovery codes are only valid once 2FA is fully enabled, never during the
@@ -1182,6 +1301,11 @@ func (m *Manager) completeEnrolment(user *gateonv1.User, recoveryCodes string) e
 	if _, err := m.db.Exec(q, true, user.TwoFactorSecret, recoveryCodes, user.Id); err != nil {
 		return err
 	}
+	// The session binding reads whether the account has a second factor
+	// (ADR 0087), so the cached one is stale now; the session issued next is
+	// bound to the enrolled state.
+	user.TwoFactorEnabled = true
+	m.revokeSessions(user.Id)
 	if user.TwoFactorPending {
 		return m.setTwoFactorPending(user.Id, false)
 	}

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 import { test, expect } from '@playwright/test';
+import { apiSignIn } from './two-factor';
 
 /**
  * The dashboard is served from the same origin as the gateway's Prometheus
@@ -23,9 +24,7 @@ test('the Metrics page survives a reload without a service worker', async ({ bro
   const context = await browser.newContext({ serviceWorkers: 'block' });
   const page = await context.newPage();
   try {
-    const login = await page.request.post('/v1/login', {
-      data: { username: 'admin', password: 'e2e-horse-battery-42' },
-    });
+    const login = await apiSignIn(page.request, 'admin', 'e2e-horse-battery-42');
     expect(login.ok(), `login failed: ${login.status()}`).toBe(true);
 
     await page.goto('/');

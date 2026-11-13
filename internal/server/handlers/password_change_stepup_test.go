@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/gsoultan/gateon/internal/auth"
+	"github.com/gsoultan/gateon/internal/auth/authtest"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
@@ -30,10 +31,10 @@ func (f stepUpFixture) as(t *testing.T, method, path, body string) *httptest.Res
 // other password the test used.
 func (f stepUpFixture) assertPassword(t *testing.T, username, want, not string) {
 	t.Helper()
-	if _, _, err := f.m.Authenticate(username, want, ""); err != nil {
+	if _, err := authtest.PasswordStep(f.m, username, want, ""); err != nil {
 		t.Errorf("%s cannot sign in with %q: %v", username, want, err)
 	}
-	if _, _, err := f.m.Authenticate(username, not, ""); !errors.Is(err, auth.ErrInvalidCredentials) {
+	if _, err := authtest.PasswordStep(f.m, username, not, ""); !errors.Is(err, auth.ErrInvalidCredentials) {
 		t.Errorf("%s signing in with %q: err = %v, want ErrInvalidCredentials", username, not, err)
 	}
 }
@@ -68,7 +69,7 @@ func TestOwnPasswordChangeCountsWrongPasswordsLikeSignIn(t *testing.T) {
 	if rr := f.as(t, http.MethodPost, "/v1/users/password", right); rr.Code != http.StatusTooManyRequests {
 		t.Errorf("right password on a locked account: status %d, want 429: %s", rr.Code, rr.Body.String())
 	}
-	if _, _, err := f.m.Authenticate("alice", stepUpPassword, ""); err != nil {
+	if _, err := authtest.PasswordStep(f.m, "alice", stepUpPassword, ""); err != nil {
 		t.Errorf("sign-in after %d wrong current passwords: err = %v, want a session: the prompt locks itself, not the sign-in (ADR 0050)", auth.MaxFailedAttempts, err)
 	}
 }

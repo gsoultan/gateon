@@ -219,8 +219,12 @@ func isLoginPath(path string) bool {
 // QR code and the recovery codes, so it authenticates and then refuses any id
 // but the caller's own.
 //
+// ApiService/Enroll2FA and ApiService/Verify2FA are those same two steps over
+// gRPC, and now exist: every account has a second factor (ADR 0087), so Login
+// alone never signs a gRPC client in.
+//
 // A set rather than a chain of ||, so the entries can be enumerated and
-// checked. Two of them named procedures that do not exist --
+// checked. Two of them named procedures that did not exist then --
 // ApiService/Enroll2FA and ApiService/Verify2FA, which have REST equivalents
 // but no RPC. They matched nothing, so they were harmless; they would have
 // stopped being harmless the moment someone added those RPCs, because the
@@ -235,6 +239,8 @@ var publicAuthPaths = map[string]struct{}{
 	"/gateon.v1.ApiService/IsSetupRequired": {},
 	"/v1/auth/2fa/enroll":                   {},
 	"/v1/auth/2fa/verify":                   {},
+	"/gateon.v1.ApiService/Enroll2FA":       {},
+	"/gateon.v1.ApiService/Verify2FA":       {},
 }
 
 // isPublicAuthPath returns true for setup, health, status, or login — these skip Paseto auth.
@@ -271,6 +277,8 @@ var passwordCheckPaths = map[string]struct{}{
 	"/gateon.v1.ApiService/Login":           {},
 	"/v1/auth/2fa/enroll":                   {},
 	"/v1/auth/2fa/verify":                   {},
+	"/gateon.v1.ApiService/Enroll2FA":       {},
+	"/gateon.v1.ApiService/Verify2FA":       {},
 	"/v1/setup":                             {},
 	"/v1/setup/test-db":                     {},
 	"/gateon.v1.ApiService/Setup":           {},

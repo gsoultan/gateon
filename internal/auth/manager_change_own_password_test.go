@@ -18,7 +18,7 @@ func TestChangeOwnPasswordNeedsTheCurrentPassword(t *testing.T) {
 	if err := m.ChangeOwnPassword(id, "wrong-pass", "new-passphrase"); !errors.Is(err, ErrInvalidCredentials) {
 		t.Fatalf("wrong current password: err = %v, want ErrInvalidCredentials", err)
 	}
-	if _, _, err := m.Authenticate("mia", "old-passphrase", ""); err != nil {
+	if _, _, err := passwordStep(m, "mia", "old-passphrase", ""); err != nil {
 		t.Fatalf("a refused change changed the password: %v", err)
 	}
 
@@ -38,10 +38,10 @@ func TestChangeOwnPasswordWithTheCurrentPassword(t *testing.T) {
 	if err := m.ChangeOwnPassword(id, "old-passphrase", "new-passphrase"); err != nil {
 		t.Fatalf("ChangeOwnPassword: %v", err)
 	}
-	if _, _, err := m.Authenticate("noah", "new-passphrase", ""); err != nil {
+	if _, _, err := passwordStep(m, "noah", "new-passphrase", ""); err != nil {
 		t.Errorf("the new password does not sign in: %v", err)
 	}
-	if _, _, err := m.Authenticate("noah", "old-passphrase", ""); !errors.Is(err, ErrInvalidCredentials) {
+	if _, _, err := passwordStep(m, "noah", "old-passphrase", ""); !errors.Is(err, ErrInvalidCredentials) {
 		t.Errorf("the old password still signs in: %v", err)
 	}
 }

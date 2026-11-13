@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 import { test, expect, type APIRequestContext, type Locator, type Page } from '@playwright/test';
+import { apiSignIn } from './two-factor';
 
 /**
  * Users: create an account, change its role, disable and enable it, and
@@ -34,7 +35,7 @@ async function login(playwright: Playwright, username: string, password: string,
     baseURL: 'http://localhost:8080',
     extraHTTPHeaders: { 'X-Forwarded-For': client },
   });
-  const res = await ctx.post('/v1/login', { data: { username, password } });
+  const res = await apiSignIn(ctx, username, password);
   return { status: res.status(), ctx };
 }
 
@@ -237,7 +238,7 @@ test.describe('Users', () => {
       await page.goto('/users');
       const row = userRow(page, edited);
       await expect(row).toContainText('Disabled');
-      await expect(row).toContainText('2FA pending');
+      await expect(row).toContainText('2FA at next sign-in');
 
       await page.getByRole('button', { name: `Edit user ${edited}` }).click();
       const edit = page.getByRole('dialog', { name: 'Edit User' });
@@ -251,7 +252,7 @@ test.describe('Users', () => {
       // the rest of the row, so the old row cannot answer for the new one.
       await expect(row).toContainText('operator');
       await expect(row, 'changing the role enabled the account').toContainText('Disabled');
-      await expect(row, 'changing the role dropped the required 2FA').toContainText('2FA pending');
+      await expect(row, 'changing the role dropped the required 2FA').toContainText('2FA at next sign-in');
       expect(
         await loginStatus(playwright, edited, PASSWORD, '198.51.100.63'),
         'the disabled account logged in after its role was changed',
