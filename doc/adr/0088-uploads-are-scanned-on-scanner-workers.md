@@ -107,6 +107,59 @@ nobody declared, at a CPU cost on every JSON request and with a real
 false-positive surface. If built it is a separate, tiered, off-by-default
 setting with its own measurements.
 
+## Negative cases
+
+What a hostile client, a hostile or broken worker, or a mistake does to each
+part, and the answer the design owes. Each line is a test the implementation
+must ship with; one that cannot be answered blocks the step it belongs to.
+
+### The scanner pool
+
+| Case | Answer |
+| :--- | :--- |
+| A worker accepts the connection and never answers | The route's scan timeout ends it; the scan is retried once elsewhere inside the same deadline, never a second full timeout. Repeated timeouts count as health failures. |
+| A worker answers `PING` but fails every scan (signatures missing, out of memory) | A failed scan counts against health the same as a failed check, so a worker that is "up" but useless leaves the pool. |
+| A worker answers garbage, or a truncated reply | Anything that is not exactly clamd's `OK` or `FOUND` is a failed scan, never "clean". The reply is read with a size cap. |
+| A worker always answers "clean" (compromised, or the wrong service on that port) | Not detectable per request. The add-worker EICAR test is repeated by the health checker on a slow interval; a worker that stops detecting it is removed and reported. This is why the address is administrator-only. |
+| A worker's signatures are weeks old | Signature age is read with `VERSION`. Past a threshold (default 7 days) the worker is shown as stale and, as a setting, treated as unhealthy. |
+| A health check flaps | Two-failure / two-success thresholds; state changes are rate-limited in the log and the event stream so a flapping worker cannot flood either. |
+| All workers lost during an upload burst | `when_unavailable` applies per request. Requests are refused or passed immediately; they do not queue waiting for a worker, so memory stays bounded by the scan semaphore. |
+| Many slow scans at once (large files, slow worker) | The per-route semaphore bounds buffered bytes. A request that cannot get a slot within the wait budget is answered by `when_unavailable`, not held. |
+| An administrator enters a worker address that is the cloud metadata service or the gateway's own management port | The add-worker test must see clamd's EICAR answer before saving, so an address that is not clamd is never stored. No response body from the address is shown in the dashboard beyond version and verdict. |
+| A worker address resolves to a different host later (DNS change) | Resolved at connect, as today. The periodic EICAR check is what notices a host that is no longer a scanner. |
+| A scanned file reaches a worker over a network someone can read | Plaintext is stated in the dashboard next to the address. Not solved by this ADR. |
+| Config file edited on disk with 500 workers, or a bad address | The bound (16) and the address grammar are enforced at load as well as at save; the excess is refused with the reason, and scanning continues on the valid entries. |
+| An operator, or a route's middleware, tries to add a worker | Refused: ADR 0087. Tested on REST, gRPC and Connect. |
+
+### Base64 in JSON
+
+| Case | Answer |
+| :--- | :--- |
+| The same key twice (`{"file": clean, "file": malware}`) | Backends disagree on first or last. Every occurrence is scanned; in `block` a duplicated file field is itself refused. |
+| The key written with escapes (`"f\u0069le"`) | Keys are compared after JSON unescaping. |
+| The value is base64 of base64, or base64 of a gzip or zip | Decoded once: that is what the backend stores. ClamAV unpacks archives itself. A second base64 layer is scanned as the text it is and noted in the ADR's limits; the field is the contract. |
+| Whitespace, line breaks, `-_` vs `+/`, missing padding, a `data:` prefix | Every decoding a lenient backend applies is tried. If two decodings give different bytes, both are scanned. |
+| Bytes after valid base64 (`TVqQ...==garbage`) | Not valid base64 as a whole: recorded in `report`, refused in `block`. A decoder that stops at the padding is exactly the mismatch to avoid. |
+| The file is in a field nobody named | Not scanned, and the dashboard says "only the fields listed are scanned" beside the setting. This is the stated limit. |
+| The named field is an array of 10,000 files, or nesting 10,000 deep | Bounds from config: maximum files per request, maximum JSON depth, total decoded bytes per request. Over a bound: recorded in `report`, refused in `block`. |
+| A 50 MB JSON body with no file in it, sent to burn CPU | The walk is one streaming pass with no decoding unless a named field is found, bounded by the route's body cap. Benchmarked; if it cannot be shown allocation-free for the no-match case the feature is tiered. |
+| Content-Type lies (`text/plain` with a JSON body, or `application/json` with something else) | Backends differ on whether they trust the header. Scanning follows the route's setting, not the header: a route with `json_file_fields` attempts the walk on any body that parses as JSON. A body that does not parse is not a JSON upload and passes as today. |
+| JSON that Go parses one way and the backend another (comments, trailing commas, duplicate keys, big numbers, invalid UTF-8) | The same class as the multipart mismatches already handled. A body the strict walker rejects but that carries a named key as text is recorded in `report` and refused in `block`. Fuzzed against at least two other parsers' accept sets. |
+| `Content-Encoding: gzip` on the request | Checked against how `file_security` handles compressed multipart today before building; the two must give the same answer. Decompression is bounded or the body is treated as unscannable. |
+| Chunked body with no length | Read up to the scan cap, as multipart is today. |
+| A clean file ClamAV wrongly flags | `report` shows it before `block` is on. In `block`, the refusal names the signature so an administrator can allowlist that signature, not turn scanning off. |
+| `report` mode left on forever | The dashboard shows the route as "reporting, not blocking" with the count it would have blocked, so it cannot be mistaken for protection. |
+| The scanner is down in `report` mode | Recorded as unscanned and forwarded. `report` never refuses, whatever `when_unavailable` says. |
+| The security event stores the file name or the JSON value | Attacker-controlled text: truncated, stored as text, rendered escaped in the dashboard. The file's bytes are never stored. |
+
+### What stays possible after all of it
+
+A file encrypted or password-protected, a file split across requests and
+assembled by the backend, a file fetched by the backend from a URL in the
+request, and malware no signature knows. A scanner at the gateway reduces what
+reaches the backend; it does not replace the backend treating an upload as
+hostile.
+
 ## Consequences
 
 - A 2 GB gateway can scan uploads without giving half its memory to clamd, and
