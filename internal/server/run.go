@@ -146,20 +146,8 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 	// the maintenance window when that is switched on (ADR 0087). It only
 	// downloads and verifies; the root-owned helper replaces the binary.
 	upgradeDirs := upgrade.Dirs{Data: config.DataDir(), State: upgrade.DefaultStateDir}
-	upgrades := upgrade.NewInstaller(upgrade.Options{
-		Version:  s.Version,
-		DataDir:  upgradeDirs.Data,
-		StateDir: upgradeDirs.State,
-		Checker:  updates,
-		Config:   func() *gateonv1.UpdateConfig { return s.GlobalStore.Get(ctx).GetUpdate() },
-		Stager: upgrade.Stager{
-			DataDir: upgradeDirs.Data,
-			Keys:    selfupdate.ReleaseKeys(),
-			Fetch:   selfupdate.NewDownloader(s.Version),
-			Arch:    runtime.GOARCH,
-		},
-		HasKey: len(selfupdate.ReleaseKeys()) > 0,
-	})
+	upgrades := newUpgradeInstaller(s.Version, upgradeDirs, updates,
+		func() *gateonv1.UpdateConfig { return s.GlobalStore.Get(ctx).GetUpdate() })
 	wg.Go(func() { upgrades.Run(ctx) })
 	apiService := api.NewApiService(api.ApiServiceConfig{
 		Lifetime:           ctx,
@@ -403,6 +391,27 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 	// would find its guest closed. The drain's context, for the reason above.
 	transform.CloseWasmModules(shutdownCtx) //nolint:contextcheck // ctx has already fired; see shutdownCtx.
 	logger.L.LogInfo("shutdown complete")
+}
+
+// newUpgradeInstaller builds the gateway's half of an install for the
+// running version: what downloads, verifies and asks, with this build's own
+// release keys.
+func newUpgradeInstaller(version string, dirs upgrade.Dirs, checker *selfupdate.Checker, cfg func() *gateonv1.UpdateConfig) *upgrade.Installer {
+	keys := selfupdate.ReleaseKeys()
+	return upgrade.NewInstaller(upgrade.Options{
+		Version:  version,
+		DataDir:  dirs.Data,
+		StateDir: dirs.State,
+		Checker:  checker,
+		Config:   cfg,
+		Stager: upgrade.Stager{
+			DataDir: dirs.Data,
+			Keys:    keys,
+			Fetch:   selfupdate.NewDownloader(version),
+			Arch:    runtime.GOARCH,
+		},
+		HasKey: len(keys) > 0,
+	})
 }
 
 // gatewayReady is what /readyz answers 200 for.

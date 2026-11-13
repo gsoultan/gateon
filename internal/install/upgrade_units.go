@@ -12,10 +12,8 @@ import (
 
 // The upgrade helper's units (ADR 0087), beside the gateway's.
 const (
-	upgradePathUnit        = "gateon-upgrade.path"
-	upgradeServiceUnit     = "gateon-upgrade.service"
-	upgradePathUnitPath    = "/lib/systemd/system/" + upgradePathUnit
-	upgradeServiceUnitPath = "/lib/systemd/system/" + upgradeServiceUnit
+	upgradePathUnit    = "gateon-upgrade.path"
+	upgradeServiceUnit = "gateon-upgrade.service"
 	// upgradeRequest is the file the gateway leaves to ask for an install:
 	// upgrade.SpoolName and upgrade.RequestFile under the state directory.
 	upgradeRequest = "upgrade/request.json"
@@ -80,28 +78,41 @@ func renderUpgradeServiceUnit(binPath string) string {
 	return fmt.Sprintf(upgradeServiceTemplate, binPath, stateDir, filepath.Dir(binPath), stateDir)
 }
 
+// The two seams the tests replace, so that none of them writes a unit into
+// the machine running them or calls its service manager.
+var (
+	unitDir      = "/lib/systemd/system"
+	runSystemctl = func(args ...string) error {
+		// #nosec G204 -- every argument is a constant.
+		return runCmd(exec.Command("systemctl", args...))
+	}
+)
+
 // installUpgradeUnits writes the helper's units and enables the watcher.
 func installUpgradeUnits(binPath string) error {
 	units := map[string]string{
-		upgradePathUnitPath:    renderUpgradePathUnit(),
-		upgradeServiceUnitPath: renderUpgradeServiceUnit(binPath),
+		upgradePathUnit:    renderUpgradePathUnit(),
+		upgradeServiceUnit: renderUpgradeServiceUnit(binPath),
 	}
-	for path, content := range units {
+	for name, content := range units {
+		path := filepath.Join(unitDir, name)
 		// #nosec G306 -- systemd requires unit files to be world-readable.
 		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 			return fmt.Errorf("write %s: %w", path, err)
 		}
 	}
-	if err := runCmd(exec.Command("systemctl", "daemon-reload")); err != nil {
+	if err := runSystemctl("daemon-reload"); err != nil {
 		return err
 	}
-	return runCmd(exec.Command("systemctl", "enable", "--now", upgradePathUnit))
+	return runSystemctl("enable", "--now", upgradePathUnit)
 }
 
-// uninstallUpgradeUnits stops the watcher and removes both units.
+// uninstallUpgradeUnits stops the watcher and removes both units. A watcher
+// that was never enabled is not an error: the units go either way.
 func uninstallUpgradeUnits() error {
-	_ = exec.Command("systemctl", "disable", "--now", upgradePathUnit).Run()
-	for _, path := range []string{upgradePathUnitPath, upgradeServiceUnitPath} {
+	_ = runSystemctl("disable", "--now", upgradePathUnit)
+	for _, name := range []string{upgradePathUnit, upgradeServiceUnit} {
+		path := filepath.Join(unitDir, name)
 		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 			return fmt.Errorf("remove %s: %w", path, err)
 		}

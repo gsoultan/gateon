@@ -4,7 +4,10 @@
 package install
 
 import (
+	"errors"
+	"os"
 	"path"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -169,5 +172,86 @@ func TestRemovingThePackageSwitchesTheWatcherOff(t *testing.T) {
 		if got := watcherCalls(h); !slices.Equal(got, []string{"disable --now " + upgradePathUnit}) {
 			t.Errorf("postremove %s: %q", arg, got)
 		}
+	}
+}
+
+// fakeSystemd points the installer at a scratch unit directory and records
+// what it asks of systemctl. Not parallel: the seams are package state.
+func fakeSystemd(t *testing.T, fail string) (dir string, calls *[]string) {
+	t.Helper()
+	oldDir, oldRun := unitDir, runSystemctl
+	t.Cleanup(func() { unitDir, runSystemctl = oldDir, oldRun })
+	unitDir, calls = t.TempDir(), &[]string{}
+	runSystemctl = func(args ...string) error {
+		call := strings.Join(args, " ")
+		*calls = append(*calls, call)
+		if fail != "" && strings.HasPrefix(call, fail) {
+			return errors.New("systemctl " + call + ": exit status 1")
+		}
+		return nil
+	}
+	return unitDir, calls
+}
+
+func TestTheInstallerWritesBothUnitsThenEnablesTheWatcher(t *testing.T) {
+	dir, calls := fakeSystemd(t, "")
+	if err := installUpgradeUnits("/opt/gateon/gateon"); err != nil {
+		t.Fatal(err)
+	}
+	for name, want := range map[string]string{
+		upgradePathUnit:    renderUpgradePathUnit(),
+		upgradeServiceUnit: renderUpgradeServiceUnit("/opt/gateon/gateon"),
+	} {
+		got, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil || string(got) != want {
+			t.Errorf("%s was not written as rendered: %v", name, err)
+		}
+	}
+	// Reload first: systemd cannot enable a unit it has not read.
+	want := []string{"daemon-reload", "enable --now " + upgradePathUnit}
+	if !slices.Equal(*calls, want) {
+		t.Fatalf("systemctl was asked %q, want %q", *calls, want)
+	}
+	for _, call := range *calls {
+		if strings.Contains(call, upgradeServiceUnit) {
+			t.Fatalf("the helper itself was enabled or started: %q", call)
+		}
+	}
+}
+
+func TestAnInstallerThatCannotEnableTheWatcherSaysSo(t *testing.T) {
+	for _, step := range []string{"daemon-reload", "enable"} {
+		_, _ = fakeSystemd(t, step)
+		if err := installUpgradeUnits("/usr/bin/gateon"); err == nil {
+			t.Errorf("a failed %s was reported as an installed helper", step)
+		}
+	}
+	oldDir := unitDir
+	t.Cleanup(func() { unitDir = oldDir })
+	unitDir = filepath.Join(t.TempDir(), "missing")
+	if err := installUpgradeUnits("/usr/bin/gateon"); err == nil {
+		t.Error("units that could not be written were reported as installed")
+	}
+}
+
+func TestUninstallRemovesBothUnitsEvenWhenTheWatcherWasNeverEnabled(t *testing.T) {
+	dir, calls := fakeSystemd(t, "disable")
+	if err := installUpgradeUnits("/usr/bin/gateon"); err != nil {
+		t.Fatal(err)
+	}
+	*calls = nil
+	if err := uninstallUpgradeUnits(); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(*calls, []string{"disable --now " + upgradePathUnit}) {
+		t.Fatalf("systemctl was asked %q", *calls)
+	}
+	left, err := os.ReadDir(dir)
+	if err != nil || len(left) != 0 {
+		t.Fatalf("units left behind: %v (%v)", left, err)
+	}
+	// A second uninstall finds nothing to remove and is not an error.
+	if err := uninstallUpgradeUnits(); err != nil {
+		t.Fatalf("uninstalling twice: %v", err)
 	}
 }
