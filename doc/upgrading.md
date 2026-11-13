@@ -11,6 +11,30 @@ here after the fact.
 
 ## Unreleased
 
+### An upload is clean only when ClamAV says so
+
+`file_security` read clamd's reply looking for `FOUND` and treated everything else as a
+clean file. Three things were therefore forwarded as scanned and clean, on routes set to
+refuse what they cannot scan:
+
+- a file clamd refused to scan, for example a stream larger than its `StreamMaxLength`
+  (`INSTREAM size limit exceeded. ERROR`);
+- any upload when clamd closed the connection without answering;
+- every upload when `clamav_addr` pointed at something that was not clamd.
+
+Only `stream: OK` is clean now. Anything else is a scanner failure, and the route does
+what it already does when the scanner is down: refuses with 503 by default, or forwards
+and logs when `fail_open` is set.
+
+**What to check:** set clamd's `StreamMaxLength` to at least the largest upload a
+scanned route accepts (`max_file_size`, and the gateway's scan cap, 64 MiB unless
+`GATEON_FILE_SCAN_MAX_MB` says otherwise). Uploads between the two sizes were passing
+unscanned; they are refused until the limits agree. The log line is
+`ClamAV scan failed` with clamd's own reason.
+
+The scanner client was also replaced (ADR 0089, step 1). A scanner that accepts a
+connection and stops reading can no longer hold a request past `scan_timeout`.
+
 ### Only an administrator installs ClamAV or changes where uploads are scanned
 
 Installing or removing ClamAV from the dashboard runs docker or a package manager on

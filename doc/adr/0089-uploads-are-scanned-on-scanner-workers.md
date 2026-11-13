@@ -1,11 +1,13 @@
-# 88. Uploads are scanned on scanner workers
+# 89. Uploads are scanned on scanner workers
 
 Date: 2026-11-13
 
 ## Status
 
-Proposed. Nothing in this ADR is built. The dashboard design it describes is
-the "ClamAV scanner workers" mock-up reviewed on 2026-11-13.
+Accepted (staged). Step 1 of the plan is built: `internal/security/scanpool`,
+used by `file_security` behind the single address it has always had. Steps 2
+to 4 are not built. The dashboard design is the "ClamAV scanner workers"
+mock-up reviewed on 2026-11-13.
 
 ## Context
 
@@ -16,7 +18,7 @@ things about that are wrong for the hosts Gateon targets.
    signature database resident, about 1 GB. On the 2-core / 2 GB host the
    2026-11-13 review measured, the gateway under attack already reached the
    cgroup limit on its own. The dashboard's install button puts clamd there
-   anyway, and to do it the gateway's user needs docker or sudo (ADR 0087).
+   anyway, and to do it the gateway's user needs docker or sudo (ADR 0088).
 2. **One address is one point of failure.** When it is down every scanned
    route either refuses uploads or forwards them unscanned (`fail_open`), per
    route, with nothing in the dashboard saying which is happening.
@@ -40,14 +42,33 @@ the package commands as equal choices. **A worker needs no Docker and no
 Gateon software.**
 
 - `waf.clamav.scanners` is a list of `{name, address}`, administrator-only
-  (ADR 0087's rule: it is where uploads go). `clamav_addr` remains as a
+  (ADR 0088's rule: it is where uploads go). `clamav_addr` remains as a
   one-entry pool, so existing installs are unchanged.
 - **Bound:** at most 16 workers. Each has a fixed-size connection pool, and
   the existing per-route `MaxConcurrentScans` semaphore still bounds in-flight
   scans and therefore buffered bytes.
-- **Health:** a background checker sends clamd's `PING` and `VERSION` every 10 s
-  with a 2 s timeout. Two consecutive failures mark a worker unhealthy, two
-  successes bring it back. No health check runs on the request path.
+- **Health, from two sources that must not be confused.** A scan that fails
+  because the worker could not be reached, hung up, or answered something
+  that is not a verdict counts against it: two in a row and it is passed over
+  for 10 s, after which a scan may try it again and one good scan restores it.
+  A scan that fails because of the *file* -- clamd answered `ERROR`, or no
+  verdict came inside the deadline -- counts for nothing, and is not retried
+  elsewhere. A client chooses what it uploads; if an oversized stream or an
+  archive that takes a minute to unpack could mark a worker unhealthy, a
+  client could empty the pool and then upload whatever `when_unavailable`
+  lets through. The price is that a worker which accepts connections and
+  never answers is invisible to scans. That is the checker's job:
+- **The checker** sends clamd's `PING` every 10 s with a 2 s timeout
+  (`Pool.Probe`), and on a slower interval the EICAR test string. It is built
+  as a function and is not yet scheduled: the pool starts no goroutine, and
+  the schedule belongs to something with a lifetime and a shutdown. That
+  owner arrives with the `scanners` list in step 2. No health check runs on
+  the request path.
+- **Only OK is clean.** `stream: OK` is a clean file and `stream: <name> FOUND`
+  is a detection; every other reply, and no reply, is an error. Before step 1
+  the reply was searched for `FOUND` and everything else was taken as clean:
+  a file clamd refused to scan, a connection that closed, and an address that
+  was not clamd at all each forwarded the upload as scanned.
 - **Selection:** least in-flight among healthy workers. A scan that fails on
   one worker is retried once on another, inside the route's existing scan
   timeout, never beyond it.
@@ -118,7 +139,9 @@ must ship with; one that cannot be answered blocks the step it belongs to.
 | Case | Answer |
 | :--- | :--- |
 | A worker accepts the connection and never answers | The route's scan timeout ends it; the scan is retried once elsewhere inside the same deadline, never a second full timeout. Repeated timeouts count as health failures. |
-| A worker answers `PING` but fails every scan (signatures missing, out of memory) | A failed scan counts against health the same as a failed check, so a worker that is "up" but useless leaves the pool. |
+| A worker answers `PING` but fails every scan (signatures missing, out of memory) | clamd's `ERROR` reply is never clean, so nothing is forwarded as scanned. It does not count against health from scans (next row); the periodic EICAR check is what removes a worker that is "up" but useless. |
+| A client uploads files built to make scans fail or time out, to empty the pool | Outcomes a client can cause never change a worker's health and are never retried on a second worker. Built and tested in step 1. |
+| A worker accepts the connection and stops reading | Every read and write carries the scan's deadline. The library this replaced set none on writes, so a file larger than the socket buffers blocked for good and held a scan slot. Built and tested in step 1. |
 | A worker answers garbage, or a truncated reply | Anything that is not exactly clamd's `OK` or `FOUND` is a failed scan, never "clean". The reply is read with a size cap. |
 | A worker always answers "clean" (compromised, or the wrong service on that port) | Not detectable per request. The add-worker EICAR test is repeated by the health checker on a slow interval; a worker that stops detecting it is removed and reported. This is why the address is administrator-only. |
 | A worker's signatures are weeks old | Signature age is read with `VERSION`. Past a threshold (default 7 days) the worker is shown as stale and, as a setting, treated as unhealthy. |
@@ -129,7 +152,7 @@ must ship with; one that cannot be answered blocks the step it belongs to.
 | A worker address resolves to a different host later (DNS change) | Resolved at connect, as today. The periodic EICAR check is what notices a host that is no longer a scanner. |
 | A scanned file reaches a worker over a network someone can read | Plaintext is stated in the dashboard next to the address. Not solved by this ADR. |
 | Config file edited on disk with 500 workers, or a bad address | The bound (16) and the address grammar are enforced at load as well as at save; the excess is refused with the reason, and scanning continues on the valid entries. |
-| An operator, or a route's middleware, tries to add a worker | Refused: ADR 0087. Tested on REST, gRPC and Connect. |
+| An operator, or a route's middleware, tries to add a worker | Refused: ADR 0088. Tested on REST, gRPC and Connect. |
 
 ### Base64 in JSON
 
@@ -177,8 +200,10 @@ hostile.
 
 ## Plan
 
-1. Pool and health checker behind the existing single address (no behaviour
-   change), with the one-down / all-down / mid-rollout tests.
+1. **Done.** The pool behind the existing single address, with the one-down,
+   all-down, recovery, hung-worker and hostile-reply tests, and a fuzz target
+   on the reply parser. One behaviour changes on purpose: a reply that is not
+   `OK` is no longer clean (`doc/upgrading.md`).
 2. `scanners` list, `when_unavailable`, add-worker test, and the dashboard
    screens from the mock-up.
 3. `json_file_fields` in `report` mode only, with the fuzz targets and the
