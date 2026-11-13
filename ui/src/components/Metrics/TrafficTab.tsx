@@ -259,10 +259,10 @@ export default function TrafficTab() {
         setIsWorkerCalculating(false);
       }
     }).catch(err => {
+      // An unmount terminates the worker, which rejects this on purpose.
+      if (controller.signal.aborted) return;
       console.error("Dashboard worker error:", err);
-      if (!controller.signal.aborted) {
-        setIsWorkerCalculating(false);
-      }
+      setIsWorkerCalculating(false);
     });
 
     return () => controller.abort();

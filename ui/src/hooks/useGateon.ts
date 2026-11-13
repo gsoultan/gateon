@@ -52,4 +52,3 @@ export { useDiagnostics } from "./useDiagnostics";
 export { useApplyRecommendation } from "./useApplyRecommendation";
 export { useWafRules } from "./useWafRules";
 export { useDashboardWorker } from "./useDashboardWorker";
-export { useSSEWorker } from "./useSSEWorker";

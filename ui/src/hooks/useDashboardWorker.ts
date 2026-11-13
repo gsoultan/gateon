@@ -4,7 +4,7 @@
 import { useCallback, useMemo } from "react";
 import { useWorker } from "./useWorker";
 
-// Vite handles ?worker suffix
+// Vite bundles the worker from the new URL(..., import.meta.url) form.
 const dashboardWorkerFactory = () => new Worker(
   new URL("../workers/dashboard.worker.ts", import.meta.url),
   { type: "module" }
