@@ -283,6 +283,10 @@ func (s *ApiService) UninstallClamav(ctx context.Context, req *gateonv1.Uninstal
 // one if the answer is no. A status read that mutates is a trap: the Security
 // Hub called it on mount, so opening the page launched a full filesystem scan
 // on any host with ClamAV installed, and wrote an audit entry saying so.
+//
+// LastScan is empty until a scan has run. It was Go's zero time, which the
+// Security page printed as "Last scan: Jan 1, 00:00" on a gateway that had
+// never scanned.
 func (s *ApiService) GetClamavScanStatus(_ context.Context, _ *gateonv1.GetClamavScanStatusRequest) (*gateonv1.GetClamavScanStatusResponse, error) {
 	if s.ClamAVManager == nil {
 		return &gateonv1.GetClamavScanStatusResponse{Success: false, Message: "ClamAV manager not initialized"}, nil
@@ -293,7 +297,7 @@ func (s *ApiService) GetClamavScanStatus(_ context.Context, _ *gateonv1.GetClama
 		Success: true,
 		Status: &gateonv1.DeepScanStatus{
 			IsRunning:  status.IsRunning,
-			LastScan:   status.LastScan.Format(time.RFC3339),
+			LastScan:   rfc3339OrEmpty(status.LastScan),
 			LastError:  status.LastError,
 			LastResult: status.LastResult,
 		},
@@ -326,7 +330,7 @@ func (s *ApiService) RunDeepScan(ctx context.Context, _ *gateonv1.RunDeepScanReq
 		Message: "Deep scan operation processed",
 		Status: &gateonv1.DeepScanStatus{
 			IsRunning:  status.IsRunning,
-			LastScan:   status.LastScan.Format(time.RFC3339),
+			LastScan:   rfc3339OrEmpty(status.LastScan),
 			LastError:  status.LastError,
 			LastResult: status.LastResult,
 		},
