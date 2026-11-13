@@ -52,3 +52,22 @@ export function routeSwitchOn(
   }
   return { on: ROUTE_DEFAULT_ON.has(key), inherited: false };
 }
+
+/**
+ * The WAFs a stored rule runs in: a rule of paranoia level N is compiled only
+ * into a WAF whose own level is N or higher (Store.CompiledRules), and into no
+ * WAF that is off.
+ *
+ * The Rules tab showed "Enabled" for any rule switched on, so a rule saved at
+ * level 2 on a gateway whose WAFs all run at level 1 read as protecting while
+ * no request was ever checked against it.
+ */
+export function wafsRunningRule(view: EffectiveWafView, ruleParanoia: number): string[] {
+  const runs = (w: EffectiveWaf) => w.mode !== "off" && w.paranoiaLevel >= ruleParanoia;
+  const names: string[] = [];
+  if (runs(view.global)) names.push("the gateway-wide WAF");
+  for (const r of view.routeWafs) {
+    if (runs(r.effective)) names.push(r.name || r.id);
+  }
+  return names;
+}
