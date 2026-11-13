@@ -18,6 +18,7 @@ import (
 	"github.com/gsoultan/gateon/internal/security/reputation"
 	"github.com/gsoultan/gateon/internal/security/waf"
 	"github.com/gsoultan/gateon/internal/selfupdate"
+	"github.com/gsoultan/gateon/internal/selfupdate/upgrade"
 	"github.com/gsoultan/gateon/internal/tls"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
@@ -72,6 +73,20 @@ type ApiServiceConfig struct {
 	// Updates looks for newer releases (ADR 0085). Nil reports the release
 	// check as switched off, which is what a service built without one does.
 	Updates UpdateChecker
+
+	// Upgrades installs releases (ADR 0087). Nil reports installing as
+	// something this gateway cannot do.
+	Upgrades UpgradeInstaller
+}
+
+// UpgradeInstaller is the gateway's half of installing a release.
+// *upgrade.Installer is the one that runs.
+type UpgradeInstaller interface {
+	// View reports whether a release can be installed and how the install
+	// in hand, or the last one, stands.
+	View() upgrade.View
+	// Install starts installing version on behalf of by.
+	Install(version, by string, automatic bool) error
 }
 
 // UpdateChecker is the release check GetUpdateStatus and CheckForUpdate

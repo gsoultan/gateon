@@ -88,12 +88,18 @@ describe("how each kind of install takes a new version", () => {
     expect(upgradeSteps(InstallKind.KUBERNETES, "1.8.3").command).toContain("image.tag=1.8.3");
   });
 
-  test("a host install is sent to the release page, with no command to paste", () => {
-    for (const kind of [InstallKind.SYSTEMD, InstallKind.OTHER, InstallKind.UNSPECIFIED]) {
+  test("a hand-started binary is sent to the release page, with no command to paste", () => {
+    for (const kind of [InstallKind.OTHER, InstallKind.UNSPECIFIED]) {
       const steps = upgradeSteps(kind, "1.8.3");
       expect(steps.command).toBeUndefined();
       expect(steps.text).toContain("release page");
     }
+  });
+
+  test("a systemd service is sent to the Install section and to the command that does the same", () => {
+    const steps = upgradeSteps(InstallKind.SYSTEMD, "1.8.3");
+    expect(steps.command).toBe("sudo gateon upgrade");
+    expect(steps.text).toContain("Install section below");
   });
 
   test("every kind has a name", () => {

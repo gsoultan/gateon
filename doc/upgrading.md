@@ -25,6 +25,43 @@ or expires within 90 days now carries a validation warning saying so.
 is now read as a built-in reference and refused if it names none; rename the
 file. Anything else is additive.
 
+### A SQLite database is copied before a release migrates it
+
+When a gateway starts on a database that an earlier version used and has
+migrations to apply, it now copies a SQLite database to
+`<database>.pre-upgrade.bak` first (ADR 0087). One copy is kept; the next
+migrating upgrade replaces it. A fresh install, and a start with nothing to
+migrate, copy nothing. PostgreSQL is not copied.
+
+**Who is affected:** every SQLite install, at each upgrade that carries a
+migration, however the upgrade is done. The copy needs free disk equal to the
+size of the database and the gateway does not serve until it is made, so a
+large database lengthens that one start. **If the copy cannot be made the
+gateway refuses to migrate and exits**, naming the path and the variable
+below, rather than migrating with nothing to go back to.
+
+**To switch it off:** `GATEON_MIGRATION_BACKUP=false`. A failed self-upgrade
+that migrated is then not rolled back.
+
+### A gateway can install a release itself
+
+A gateon installed as a systemd service can now be upgraded from **Settings,
+Updates**, with `sudo gateon upgrade`, or automatically inside a maintenance
+window, and puts the previous version back if the new one does not become
+ready (ADR 0087, [self-upgrade.md](self-upgrade.md)). The package ships two
+new units, `gateon-upgrade.path` and `gateon-upgrade.service`; the second
+runs as root, verifies the release's signature again and replaces
+`/usr/bin/gateon`.
+
+**Who is affected:** nobody until they use it. Upgrading to this release with
+a package manager installs the units and leaves the watcher **disabled**;
+Settings shows `sudo systemctl enable --now gateon-upgrade.path` in place of
+an Upgrade button until you run it. A first install enables it. Automatic
+install is off everywhere and stays off until switched on.
+
+**What is not changed:** a container or a pod is still upgraded by changing
+its image, and the restart still refuses connections for a few seconds.
+
 ### The gateway checks for a newer release once a day
 
 A gateway now asks its release source whether a newer version exists: about a

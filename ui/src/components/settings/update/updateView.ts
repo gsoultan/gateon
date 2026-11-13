@@ -118,7 +118,8 @@ export function upgradeSteps(kind: InstallKind, latestVersion: string): { text: 
       };
     case InstallKind.SYSTEMD:
       return {
-        text: "Download the package for this host from the release page and install it over the current one. The service is restarted on the new version. Read the release notes first: they list every change that needs action.",
+        text: "Install it from the Install section below, or run this on the host. Either way the release is verified, the service restarts on the new version, and the current one is put back if the new one does not become ready. Read the release notes first: they list every change that needs action.",
+        command: "sudo gateon upgrade",
       };
     default:
       return {

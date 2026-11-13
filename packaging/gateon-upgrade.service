@@ -1,0 +1,49 @@
+# Installs a gateon release the gateway downloaded (ADR 0087). Runs as root,
+# because /usr/bin/gateon is root's; started by gateon-upgrade.path, never
+# enabled on its own.
+#
+# The helper trusts nothing the gateway's account wrote except bytes signed
+# by a release key compiled into the binary already installed. See
+# doc/self-upgrade.md.
+[Unit]
+Description=Gateon - install a verified release
+Documentation=https://github.com/gsoultan/gateon
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/gateon upgrade-helper --data-dir /var/lib/gateon
+
+# GATEON_UPGRADE_READY_TIMEOUT and GATEON_PROFILE, where the gateway reads
+# them from.
+EnvironmentFile=-/etc/default/gateon
+
+# The status and history the dashboard reads, and the binary an upgrade
+# replaced. World-readable, writable by root alone.
+StateDirectory=gateon-upgrade
+StateDirectoryMode=0755
+
+# A oneshot is killed at the default start timeout of 90 seconds, which is
+# shorter than a drain, a database copy and a readiness wait. The helper
+# bounds each of those itself.
+TimeoutStartSec=45min
+
+# Root, and confined all the same: the helper writes the binary's directory,
+# the gateway's state directory and its own, and has no use for a network.
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/usr/bin -/var/lib/gateon
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+PrivateNetwork=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectClock=true
+ProtectHostname=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX
+SystemCallArchitectures=native

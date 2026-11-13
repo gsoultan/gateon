@@ -107,6 +107,126 @@ message UpdateStatus {
   bool disabled_by_env = 11;
   // current_version is a release version. False for a development build.
   bool release_build = 12;
+  // Whether this gateway can install a release, the install in hand or the
+  // last one, and what came before it (ADR 0087).
+  UpgradeStatus upgrade = 13;
+}
+
+// UpdateScope is how far from the running release an automatic install may
+// go.
+enum UpdateScope {
+  // Patch releases only, as UPDATE_SCOPE_PATCH. GATEON_UPDATE_AUTO_SCOPE
+  // names another default.
+  UPDATE_SCOPE_UNSPECIFIED = 0;
+  // 1.8.2 to 1.8.3, never to 1.9.0.
+  UPDATE_SCOPE_PATCH = 1;
+  // To any release of the same major version.
+  UPDATE_SCOPE_MINOR = 2;
+  // To any newer release.
+  UPDATE_SCOPE_MAJOR = 3;
+}
+
+// UpgradePhase is where an install stands.
+enum UpgradePhase {
+  // Nothing has been installed by this gateway and nothing is being.
+  UPGRADE_PHASE_UNSPECIFIED = 0;
+  // The gateway is downloading the release and checking its signature.
+  UPGRADE_PHASE_DOWNLOADING = 1;
+  // The release is verified and waiting for the root-owned helper.
+  UPGRADE_PHASE_REQUESTED = 2;
+  // The helper is verifying the release again and replacing the binary.
+  UPGRADE_PHASE_INSTALLING = 3;
+  // The new binary is in place; the helper waits for it to report ready.
+  UPGRADE_PHASE_RESTARTING = 4;
+  // The new binary did not become ready; the previous one is being put back.
+  UPGRADE_PHASE_ROLLING_BACK = 5;
+  UPGRADE_PHASE_SUCCEEDED = 6;
+  // The previous binary is back in place.
+  UPGRADE_PHASE_ROLLED_BACK = 7;
+  // Nothing was installed. reason says why.
+  UPGRADE_PHASE_REFUSED = 8;
+  // The new binary is installed, did not report ready, and was not rolled
+  // back. reason says why.
+  UPGRADE_PHASE_FAILED = 9;
+}
+
+// UpgradeReason is why an install was refused, rolled back or left failed.
+enum UpgradeReason {
+  UPGRADE_REASON_UNSPECIFIED = 0;
+  // The release list is not signed by a key the installed binary trusts.
+  UPGRADE_REASON_SIGNATURE = 1;
+  // The archive is not the one the signed list names.
+  UPGRADE_REASON_CHECKSUM = 2;
+  // The release list or the archive cannot be read.
+  UPGRADE_REASON_MALFORMED = 3;
+  // The release is not newer than the installed one.
+  UPGRADE_REASON_NOT_NEWER = 4;
+  // The installed binary carries no release key.
+  UPGRADE_REASON_NO_KEY = 5;
+  // The binary could not be put in place.
+  UPGRADE_REASON_INSTALL = 6;
+  // The new binary did not report ready in time.
+  UPGRADE_REASON_NOT_READY = 7;
+  // The new binary changed a database that cannot be put back (PostgreSQL,
+  // or SQLite with the pre-migration copy switched off), so the previous
+  // binary was not put back either.
+  UPGRADE_REASON_MIGRATED = 8;
+  // The release could not be downloaded.
+  UPGRADE_REASON_DOWNLOAD = 9;
+  // The helper did not pick the request up: gateon-upgrade.path is not
+  // enabled.
+  UPGRADE_REASON_HELPER = 10;
+}
+
+// UpgradeBlocker is why this gateway cannot install a release itself.
+enum UpgradeBlocker {
+  // It can.
+  UPGRADE_BLOCKER_UNSPECIFIED = 0;
+  // A container, a pod, or a binary started by hand: whatever started it
+  // decides its version.
+  UPGRADE_BLOCKER_ORCHESTRATED = 1;
+  // A systemd service without the upgrade helper units.
+  UPGRADE_BLOCKER_NO_HELPER = 2;
+  // Built with no release key, so it can verify nothing.
+  UPGRADE_BLOCKER_NO_KEY = 3;
+  // Not a release build, so no release is newer than it.
+  UPGRADE_BLOCKER_DEVELOPMENT_BUILD = 4;
+}
+
+// UpgradeRecord is one install.
+message UpgradeRecord {
+  UpgradePhase phase = 1;
+  UpgradeReason reason = 2;
+  // The release being installed, and the one it replaces.
+  string target_version = 3;
+  string previous_version = 4;
+  // Unix seconds. finished_at is 0 while the install is running.
+  int64 started_at = 5;
+  int64 finished_at = 6;
+  // Who asked, as the gateway recorded it. Empty for an automatic install.
+  string requested_by = 7;
+  bool automatic = 8;
+  // The previous gateway was told to put back the SQLite copy taken before
+  // the migration, and reported ready after doing so.
+  bool database_restored = 9;
+}
+
+// UpgradeStatus is what the gateway knows about installing releases.
+message UpgradeStatus {
+  UpgradeBlocker blocker = 1;
+  // The install in hand, or the last one. Unset when there has been none.
+  UpgradeRecord current = 2;
+  // Finished installs, newest first, at most twenty.
+  repeated UpgradeRecord history = 3;
+  // The automatic-install policy in force, after the environment and the
+  // profile's defaults.
+  bool auto_install = 4;
+  // GATEON_UPDATE_AUTO_INSTALL decided auto_install, so the setting cannot.
+  bool auto_install_by_env = 5;
+  UpdateScope auto_install_scope = 6;
+  // The maintenance window in force, "HH:MM" local time.
+  string window_start = 7;
+  string window_end = 8;
 }
 
 message GetUpdateStatusRequest {}
@@ -118,5 +238,17 @@ message GetUpdateStatusResponse {
 message CheckForUpdateRequest {}
 
 message CheckForUpdateResponse {
+  UpdateStatus status = 1;
+}
+
+// InstallUpdateRequest asks the gateway to install a release (ADR 0087).
+message InstallUpdateRequest {
+  // The release to install, "1.8.3". It must be the newest release the last
+  // check verified: the caller names what they were shown, and a release
+  // that appeared since is not installed in its place.
+  string version = 1;
+}
+
+message InstallUpdateResponse {
   UpdateStatus status = 1;
 }

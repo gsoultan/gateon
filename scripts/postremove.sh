@@ -15,6 +15,7 @@ case "$1" in
 esac
 
 if command -v systemctl >/dev/null 2>&1; then
+  systemctl disable --now gateon-upgrade.path 2>/dev/null || true
   systemctl stop gateon 2>/dev/null || true
   systemctl disable gateon 2>/dev/null || true
   systemctl daemon-reload || true
