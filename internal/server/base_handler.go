@@ -19,6 +19,7 @@ import (
 	"github.com/gsoultan/gateon/internal/router"
 	"github.com/gsoultan/gateon/internal/server/entrypoint"
 	"github.com/gsoultan/gateon/internal/server/mgmtorigin"
+	"github.com/gsoultan/gateon/internal/telemetry"
 	"github.com/rs/cors"
 )
 
@@ -87,9 +88,9 @@ func CreateBaseHandler(
 		middleware.Nonce(),
 		traffic.Compress(),
 		middleware.SecurityHeaders(middleware.SecurityHeadersConfig{Preset: "recommended", ExtraImgSrc: managementImgSrc}),
-		security.XSSRecognition("gateon-management"),
-		security.SQLiRecognition("gateon-management"),
-		security.ThreatRecognition("gateon-management"),
+		security.XSSRecognition(telemetry.ManagementRoute),
+		security.SQLiRecognition(telemetry.ManagementRoute),
+		security.ThreatRecognition(telemetry.ManagementRoute),
 		traffic.ManagementInflight(500), // probes take no slot (MGMT-N4)
 	)(internalHandler)
 

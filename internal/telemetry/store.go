@@ -1426,14 +1426,14 @@ func (s *pathStatsStore) syncDailyBaselines(isDayRollover bool) {
 	// Active threats today
 	qActive := s.dialect.Rebind(QueryGetActiveThreatsToday)
 	var activeCount int64
-	if err := s.db.QueryRow(qActive, startOfDay.Format(threatTimestampLayout)).Scan(&activeCount); err == nil {
+	if err := s.db.QueryRow(qActive, threatsSince).Scan(&activeCount); err == nil {
 		s.currentActiveToday.Store(uint64(activeCount))
 	}
 
 	// Mitigated threats today
 	qMitigated := s.dialect.Rebind(QueryGetMitigatedThreatsToday)
 	var mitigatedCount int64
-	if err := s.db.QueryRow(qMitigated, startOfDay.Format(threatTimestampLayout)).Scan(&mitigatedCount); err == nil {
+	if err := s.db.QueryRow(qMitigated, threatsSince).Scan(&mitigatedCount); err == nil {
 		s.currentMitigatedToday.Store(uint64(mitigatedCount))
 	}
 }
