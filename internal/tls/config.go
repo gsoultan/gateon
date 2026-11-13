@@ -5,6 +5,8 @@ package tls
 
 import (
 	"context"
+	"os"
+	"strings"
 
 	"golang.org/x/crypto/acme/autocert"
 )
@@ -24,4 +26,21 @@ type Config struct {
 	Acme              AcmeConfig
 	Cache             autocert.Cache
 	HostPolicy        func(ctx context.Context, host string) error
+}
+
+// OffersPostQuantumKeyExchange reports whether TLS 1.3 handshakes offer the
+// hybrid ML-KEM key exchanges. They are Go's default and nothing in the
+// gateway sets CurvePreferences, so they are offered unless
+// GODEBUG=tlsmlkem=0 turned them off. That is all the post-quantum
+// cryptography the gateway does: no certificate or signature uses ML-DSA.
+//
+// The Diagnostics API and the live metrics snapshot both report it; the
+// snapshot said true unconditionally, under a comment claiming ML-DSA too.
+func OffersPostQuantumKeyExchange() bool {
+	for _, setting := range strings.Split(os.Getenv("GODEBUG"), ",") {
+		if strings.TrimSpace(setting) == "tlsmlkem=0" {
+			return false
+		}
+	}
+	return true
 }

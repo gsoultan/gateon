@@ -71,6 +71,7 @@ import { SecurityAnomalyModal } from "../components/SecurityAnomalyModal";
 import { useDisclosure } from "@mantine/hooks";
 import { usePermissions } from "../hooks/usePermissions";
 import { dependencySummary } from "../components/Diagnostics/dependencySummary";
+import { governorBadge, predictorBadge } from "../components/Diagnostics/runtimeStatus";
 import { PageHeader } from "../components/layout";
 
 const MiddlewareBadge: React.FC<{ mw: MiddlewareDiagnostic }> = ({ mw }) => (
@@ -292,6 +293,9 @@ const DiagnosticsPage: React.FC = () => {
     return [...data.dependencies].sort((a, b) => a.name.localeCompare(b.name));
   }, [data?.dependencies]);
   const dependencyBadge = dependencySummary(sortedDependencies);
+  const governorStats = data?.system?.titan?.governor;
+  const governor = governorBadge(governorStats);
+  const predictor = predictorBadge(data?.system?.titan ?? { aiPredictorEnabled: false });
 
   const sortedEntrypoints = useMemo(() => {
     if (!data?.entrypoints) return [];
@@ -394,15 +398,17 @@ const DiagnosticsPage: React.FC = () => {
           </SimpleGrid>
         </Stack>
 
-        {/* TITAN Evolution Intelligence */}
+        {/* Data path & runtime. This was headed "TITAN Evolution Core" with a
+            badge reading ACTIVE: a string literal, shown whenever the API
+            answered at all. There is no such subsystem -- these are five
+            unrelated readouts, and each card carries its own status. */}
         {data?.system?.titan && (
           <Stack gap="sm">
             <Group gap="xs">
               <IconBolt size={20} color={theme.colors.orange[6]} />
-              <Text fw={800} size="sm" style={{ textTransform: "uppercase", letterSpacing: 1 }}>TITAN Evolution Core</Text>
-              <Badge variant="filled" color="orange" size="xs">ACTIVE</Badge>
+              <Text fw={800} size="sm" style={{ textTransform: "uppercase", letterSpacing: 1 }}>Data path &amp; runtime</Text>
             </Group>
-            <SimpleGrid cols={{ base: 1, sm: 2, lg: 4 }} spacing="md">
+            <SimpleGrid cols={{ base: 1, sm: 2, lg: 3, xl: 5 }} spacing="md">
               <Paper withBorder p="md" radius="lg" shadow="xs" style={{ position: 'relative', overflow: 'hidden' }}>
                 <Box pos="absolute" top={-10} right={-10} opacity={0.1}>
                   <IconCpu size={80} />
@@ -431,15 +437,33 @@ const DiagnosticsPage: React.FC = () => {
                 </Box>
                 <Stack gap={4}>
                   <Group justify="space-between">
-                    <Tooltip label="The latency forecast the ai_predictive load-balancing policy weighs backends by. Load a custom WASM model with --ai-model.">
+                    <Tooltip label="A load balancer policy, not a traffic filter. A service set to Predictive sends each request to the target answering fastest, counting requests in flight, and weighs a target up to twice as slow when its latest answer jumps above its trend. It does nothing for services on any other policy. Load a custom WASM model with --ai-model.">
                       <Text size="xs" c="dimmed" fw={800} style={{ textTransform: "uppercase", cursor: 'help' }}>Predictive AI</Text>
                     </Tooltip>
-                    <Badge size="xs" color={data.system.titan.aiPredictorEnabled ? "indigo" : "gray"}>
-                      {data.system.titan.aiPredictorEnabled ? "ON" : "OFF"}
+                    <Badge size="xs" color={predictor.color}>{predictor.label}</Badge>
+                  </Group>
+                  <Text fw={900} size="xl">{data.system.titan.aiModelStatus || "Not loaded"}</Text>
+                  <Text size="10px" c="dimmed">{predictor.detail}</Text>
+                </Stack>
+              </Paper>
+
+              <Paper withBorder p="md" radius="lg" shadow="xs" style={{ position: 'relative', overflow: 'hidden' }}>
+                <Box pos="absolute" top={-10} right={-10} opacity={0.1}>
+                  <IconShield size={80} />
+                </Box>
+                <Stack gap={4}>
+                  <Group justify="space-between">
+                    <Tooltip label="Addresses the gateway's own detections asked the kernel to drop (XDP), before their packets reach the proxy. This count used to sit on the Predictive AI card, which has nothing to do with it.">
+                      <Text size="xs" c="dimmed" fw={800} style={{ textTransform: "uppercase", cursor: 'help' }}>Kernel shun list</Text>
+                    </Tooltip>
+                    <Badge size="xs" color={data.system.ebpf?.enabled ? "teal" : "gray"}>
+                      {data.system.ebpf?.enabled ? "ATTACHED" : "OFF"}
                     </Badge>
                   </Group>
-                  <Text fw={900} size="xl">{data.system.titan.aiModelStatus || "Inactive"}</Text>
-                  <Text size="10px" c="dimmed">Shunned: {data.system.titan.shunnedIpCount} IPs</Text>
+                  <Text fw={900} size="xl">{data.system.ebpf?.shunnedIpsCount ?? 0} IPs</Text>
+                  <Text size="10px" c="dimmed">
+                    {data.system.ebpf?.enabled ? "Dropped in the kernel by XDP" : "XDP is not attached on this host"}
+                  </Text>
                 </Stack>
               </Paper>
 
@@ -469,16 +493,20 @@ const DiagnosticsPage: React.FC = () => {
                 </Box>
                 <Stack gap={4}>
                   <Group justify="space-between">
-                    <Text size="xs" c="dimmed" fw={800} style={{ textTransform: "uppercase" }}>Resource Governor</Text>
-                    <Badge size="xs" color={data.system.titan.governor?.active ? "teal" : "gray"}>
-                      {data.system.titan.governor?.active ? "STABLE" : "OFF"}
-                    </Badge>
+                    <Tooltip label={`Checks memory and CPU every few seconds. Above ${governorStats?.memoryThresholdPercent ?? 80}% memory it purges the proxy cache and trims telemetry; above ${governorStats?.cpuThresholdPercent ?? 90}% CPU it runs the CPU hooks.`}>
+                      <Text size="xs" c="dimmed" fw={800} style={{ textTransform: "uppercase", cursor: 'help' }}>Resource Governor</Text>
+                    </Tooltip>
+                    <Badge size="xs" color={governor.color}>{governor.label}</Badge>
                   </Group>
                   <Text fw={900} size="xl">
-                    {safeToFixed(data.system.titan.governor?.memoryPressurePercent, 1)}% / {safeToFixed(data.system.titan.governor?.cpuPressurePercent, 1)}%
+                    {governorStats?.active && governorStats.sampled && !governorStats.readingsUnavailable
+                      ? `${safeToFixed(governorStats.memoryPressurePercent, 1)}% / ${safeToFixed(governorStats.cpuPressurePercent, 1)}%`
+                      : "– / –"}
                   </Text>
                   <Text size="10px" c="dimmed">
-                    Scavengers: {data.system.titan.governor?.memoryHooksCount} Memory / {data.system.titan.governor?.cpuHooksCount} CPU
+                    {governor.label === "STABLE" || governor.label === "UNDER PRESSURE"
+                      ? `Memory${governorStats?.memoryYardstick ? ` (of ${governorStats.memoryYardstick})` : ""} / CPU · hooks: ${governorStats?.memoryHooksCount ?? 0} memory, ${governorStats?.cpuHooksCount ?? 0} CPU`
+                      : governor.detail}
                   </Text>
                 </Stack>
               </Paper>

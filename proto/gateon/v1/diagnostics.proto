@@ -347,14 +347,34 @@ message TitanStats {
   int32 shunned_ip_count = 9;
   bool pqc_enabled = 7;
   ResourceGovernorStats governor = 8;
+  // ai_policy_service_count is how many HTTP services balance with the
+  // ai_predictive (or intelligent) policy -- the only place the predictor's
+  // forecast is used. ai_predictor_enabled says only that it is loaded.
+  int32 ai_policy_service_count = 10;
 }
 
 message ResourceGovernorStats {
+  // active is true while the monitoring loop runs. It used to be true whenever
+  // the governor existed, and the dashboard showed that as STABLE.
   bool active = 1;
   int32 memory_hooks_count = 2;
   int32 cpu_hooks_count = 3;
+  // The loop's last readings. They are 0 until sampled is true and are not to
+  // be read as "no pressure" while readings_unavailable is.
   double memory_pressure_percent = 4;
   double cpu_pressure_percent = 5;
+  // under_pressure: a last reading was above its threshold, so the governor
+  // is running its hooks.
+  bool under_pressure = 6;
+  bool sampled = 7;
+  // readings_unavailable: the last memory or CPU reading failed.
+  bool readings_unavailable = 8;
+  // The percentages above which the hooks run.
+  double memory_threshold_percent = 9;
+  double cpu_threshold_percent = 10;
+  // memory_yardstick names what memory_pressure_percent is a percentage of:
+  // the Go memory limit, the cgroup's memory.max, or the host's memory.
+  string memory_yardstick = 11;
 }
 
 message EbpfStats {
