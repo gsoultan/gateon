@@ -13,7 +13,7 @@ import type { User } from "../types/gateon";
  * The caller's own account is self-service, from the enrolment modal, which
  * asks for the password -- the gateway refuses a reset of one's own account.
  *
- * Every account must have a second factor (ADR 0087), so one that has not
+ * Every account must have a second factor (ADR 0088), so one that has not
  * enrolled sets one up at its next sign-in whatever anyone does here. The
  * "require" and "cancel requirement" controls it used to offer toggled a flag
  * the sign-in no longer reads: cancelling did not let the account sign in

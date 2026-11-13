@@ -6,6 +6,7 @@ package selfupdate
 import (
 	"bufio"
 	"bytes"
+	"crypto/ed25519"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -104,4 +105,28 @@ func archiveVersion(name string) (Version, bool) {
 		return Version{}, false
 	}
 	return ParseVersion(ver)
+}
+
+// ErrNoKey is a build with no release key. It can verify nothing, so it
+// installs nothing.
+var ErrNoKey = errors.New("this build carries no release key, so it cannot verify a release")
+
+// ArchiveName is the archive of release v for a Linux machine of goarch, as
+// the release list names it.
+func ArchiveName(v Version, goarch string) string {
+	return archivePrefix + v.String() + archiveOS + goarch + archiveSuffix
+}
+
+// VerifyRelease reads a release list only if sig is a signature over it by
+// one of keys. It is what stands between a downloaded file and an install:
+// the gateway calls it before asking for one, and the helper that installs
+// calls it again on the same bytes, trusting nothing the gateway concluded.
+func VerifyRelease(keys []ed25519.PublicKey, sums, sig []byte) (Release, error) {
+	if len(keys) == 0 {
+		return Release{}, ErrNoKey
+	}
+	if err := Verify(keys, sums, sig); err != nil {
+		return Release{}, err
+	}
+	return ParseChecksums(sums)
 }

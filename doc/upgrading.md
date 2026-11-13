@@ -11,6 +11,23 @@ here after the fact.
 
 ## Unreleased
 
+### Every account signs in with a second factor
+
+Two-factor authentication is required for every account, on the dashboard,
+REST and gRPC, and there is no setting to turn it off (ADR 0088). An account
+without an authenticator sets one up at its next sign-in: password, then the QR
+code and recovery codes, then the first code. Each TOTP code is accepted once
+(migration 72 records the last one used). gRPC clients finish a sign-in with
+the new `ApiService/Enroll2FA` and `ApiService/Verify2FA`.
+
+**Who is affected:** every account without 2FA is signed out once and enrols
+at its next sign-in; accounts that already have 2FA stay signed in.
+Administrators should sign in soon after upgrading. A script or gRPC client
+that signed in with `Login` alone must now complete the second step. A first
+sign-in costs three requests from the per-address sign-in budget instead of
+one, and signing in twice within the same 30 seconds needs the next code.
+Metrics scrape tokens are unaffected.
+
 ### Cloudflare's CA certificates are built in, and a `ca_file` starting `builtin:` names one
 
 Cloudflare's Origin CA roots (RSA and ECC) and its Authenticated Origin Pulls
@@ -24,6 +41,43 @@ or expires within 90 days now carries a validation warning saying so.
 **Who is affected:** a `ca_file` that is a relative path beginning `builtin:`
 is now read as a built-in reference and refused if it names none; rename the
 file. Anything else is additive.
+
+### A SQLite database is copied before a release migrates it
+
+When a gateway starts on a database that an earlier version used and has
+migrations to apply, it now copies a SQLite database to
+`<database>.pre-upgrade.bak` first (ADR 0087). One copy is kept; the next
+migrating upgrade replaces it. A fresh install, and a start with nothing to
+migrate, copy nothing. PostgreSQL is not copied.
+
+**Who is affected:** every SQLite install, at each upgrade that carries a
+migration, however the upgrade is done. The copy needs free disk equal to the
+size of the database and the gateway does not serve until it is made, so a
+large database lengthens that one start. **If the copy cannot be made the
+gateway refuses to migrate and exits**, naming the path and the variable
+below, rather than migrating with nothing to go back to.
+
+**To switch it off:** `GATEON_MIGRATION_BACKUP=false`. A failed self-upgrade
+that migrated is then not rolled back.
+
+### A gateway can install a release itself
+
+A gateon installed as a systemd service can now be upgraded from **Settings,
+Updates**, with `sudo gateon upgrade`, or automatically inside a maintenance
+window, and puts the previous version back if the new one does not become
+ready (ADR 0087, [self-upgrade.md](self-upgrade.md)). The package ships two
+new units, `gateon-upgrade.path` and `gateon-upgrade.service`; the second
+runs as root, verifies the release's signature again and replaces
+`/usr/bin/gateon`.
+
+**Who is affected:** nobody until they use it. Upgrading to this release with
+a package manager installs the units and leaves the watcher **disabled**;
+Settings shows `sudo systemctl enable --now gateon-upgrade.path` in place of
+an Upgrade button until you run it. A first install enables it. Automatic
+install is off everywhere and stays off until switched on.
+
+**What is not changed:** a container or a pod is still upgraded by changing
+its image, and the restart still refuses connections for a few seconds.
 
 ### The gateway checks for a newer release once a day
 

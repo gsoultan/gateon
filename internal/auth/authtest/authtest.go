@@ -3,7 +3,7 @@
 
 // Package authtest signs accounts in for tests outside internal/auth.
 //
-// Every account has a second factor (ADR 0087), so a password no longer ends a
+// Every account has a second factor (ADR 0088), so a password no longer ends a
 // sign-in: the first one enrols an authenticator and the session comes from
 // its first code. Tests that only need a session -- to call an RPC, to watch it
 // be revoked -- get one from SignIn, which runs the sign-in the dashboard runs.

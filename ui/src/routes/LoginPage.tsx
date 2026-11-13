@@ -127,7 +127,7 @@ export default function LoginPage() {
         } else if (data.twoFactorSetupRequired) {
           setChallenge(data.twoFactorChallenge ?? "");
           // The account has no second factor yet, and every account must
-          // have one (ADR 0087). Begin first-time enrolment (re-uses the
+          // have one (ADR 0088). Begin first-time enrolment (re-uses the
           // just-entered password); the session comes from the first code.
           await startEnrollment(values.username, values.password);
         } else {

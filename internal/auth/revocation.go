@@ -37,7 +37,7 @@ type accountState struct {
 	// sessionEpoch counts the account's sign-outs; see EndSessions.
 	sessionEpoch int64
 	// twoFactorEnabled is whether the account has a second factor. No session
-	// is issued without one (ADR 0087); see binding.
+	// is issued without one (ADR 0088); see binding.
 	twoFactorEnabled bool
 }
 
@@ -80,7 +80,7 @@ func (a accountState) binding() string {
 	if a.sessionEpoch > 0 {
 		writeField(h, strconv.FormatInt(a.sessionEpoch, 10))
 	}
-	// An account without a second factor is the sixth input (ADR 0087). It is
+	// An account without a second factor is the sixth input (ADR 0088). It is
 	// written only in that state, so an enrolled account's digest is the one
 	// the previous release minted and the upgrade ends none of its sessions,
 	// while every password-only session that release issued -- to an account

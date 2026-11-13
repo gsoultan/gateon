@@ -91,7 +91,7 @@ func signInOverGRPC(t *testing.T, h http.Handler, contentType string, browser bo
 //
 // Root cause: the second step existed only as REST endpoints, so the Login RPC
 // answered an account with a second factor a challenge nothing on gRPC would
-// take. Every account has one now (ADR 0087), which made that every sign-in.
+// take. Every account has one now (ADR 0088), which made that every sign-in.
 func TestAGRPCClientCanFinishASignIn(t *testing.T) {
 	h, mgr, _ := buildManagementHandler(t)
 	var secret string

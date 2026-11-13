@@ -18,7 +18,7 @@ import (
 var grpcSecrets sync.Map
 
 // grpcSignIn signs username in over gRPC the way a native client must now that
-// every account has a second factor (ADR 0087): Login answers a challenge and
+// every account has a second factor (ADR 0088): Login answers a challenge and
 // no session, Enroll2FA the first time, and Verify2FA's reply carries the
 // session token.
 func grpcSignIn(ctx context.Context, client gateonv1.ApiServiceClient, username, password string) (string, error) {

@@ -13,7 +13,7 @@ import (
 	"github.com/pquerna/otp/totp"
 )
 
-// A password no longer ends a sign-in (ADR 0087). passwordStep is the password
+// A password no longer ends a sign-in (ADR 0088). passwordStep is the password
 // step alone, for tests whose subject is the first factor -- the lockout, the
 // hash gate, a password change -- and which used to read "no error" as "the
 // password was accepted": it answers nil where Authenticate now asks for the

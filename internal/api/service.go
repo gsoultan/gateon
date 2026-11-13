@@ -82,6 +82,8 @@ type ApiService struct {
 
 	// Updates: see ApiServiceConfig. Nil reports the release check as off.
 	Updates UpdateChecker
+	// Upgrades: see ApiServiceConfig. Nil reports installing as unavailable.
+	Upgrades UpgradeInstaller
 
 	// Performance caches for Diagnostics & Security Hub
 	publicIPCache    atomic.Pointer[string]
@@ -374,6 +376,7 @@ func NewApiService(cfg ApiServiceConfig) *ApiService {
 		Throttles:           cfg.Throttles,
 		ManagementWorldOpen: cfg.ManagementWorldOpen,
 		Updates:             cfg.Updates,
+		Upgrades:            cfg.Upgrades,
 	}
 
 	s.applyEveryGlobalChange(cfg.Globals)

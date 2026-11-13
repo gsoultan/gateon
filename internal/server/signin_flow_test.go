@@ -15,7 +15,7 @@ import (
 // signInOverREST runs a whole sign-in through the management plane's REST
 // endpoints, as the sign-in page does: the password, the first-time enrolment
 // when the account has no second factor (every account must have one,
-// ADR 0087), and a code. send carries one POST and returns its answer. It
+// ADR 0088), and a code. send carries one POST and returns its answer. It
 // returns the answer to the step that signed in, which carries the session
 // cookie and, for a client that is not a browser, the token.
 func signInOverREST(t *testing.T, send func(path, body string) *httptest.ResponseRecorder, username, password string) *httptest.ResponseRecorder {

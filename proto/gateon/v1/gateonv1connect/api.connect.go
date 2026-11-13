@@ -44,6 +44,9 @@ const (
 	// ApiServiceCheckForUpdateProcedure is the fully-qualified name of the ApiService's CheckForUpdate
 	// RPC.
 	ApiServiceCheckForUpdateProcedure = "/gateon.v1.ApiService/CheckForUpdate"
+	// ApiServiceInstallUpdateProcedure is the fully-qualified name of the ApiService's InstallUpdate
+	// RPC.
+	ApiServiceInstallUpdateProcedure = "/gateon.v1.ApiService/InstallUpdate"
 	// ApiServiceListTracesProcedure is the fully-qualified name of the ApiService's ListTraces RPC.
 	ApiServiceListTracesProcedure = "/gateon.v1.ApiService/ListTraces"
 	// ApiServiceGetTraceProcedure is the fully-qualified name of the ApiService's GetTrace RPC.
@@ -225,6 +228,10 @@ type ApiServiceClient interface {
 	GetUpdateStatus(context.Context, *connect.Request[v1.GetUpdateStatusRequest]) (*connect.Response[v1.GetUpdateStatusResponse], error)
 	// CheckForUpdate asks the release source now, and reports what it found.
 	CheckForUpdate(context.Context, *connect.Request[v1.CheckForUpdateRequest]) (*connect.Response[v1.CheckForUpdateResponse], error)
+	// InstallUpdate downloads, verifies and asks the root-owned helper to
+	// install the named release (ADR 0087). Administrators only. It answers
+	// as soon as the download has started; GetUpdateStatus reports progress.
+	InstallUpdate(context.Context, *connect.Request[v1.InstallUpdateRequest]) (*connect.Response[v1.InstallUpdateResponse], error)
 	ListTraces(context.Context, *connect.Request[v1.ListTracesRequest]) (*connect.Response[v1.ListTracesResponse], error)
 	GetTrace(context.Context, *connect.Request[v1.GetTraceRequest]) (*connect.Response[v1.GetTraceResponse], error)
 	QueryTraces(context.Context, *connect.Request[v1.QueryTracesRequest]) (*connect.Response[v1.QueryTracesResponse], error)
@@ -253,7 +260,7 @@ type ApiServiceClient interface {
 	Login(context.Context, *connect.Request[v1.LoginRequest]) (*connect.Response[v1.LoginResponse], error)
 	// Enroll2FA and Verify2FA are the second step of a sign-in, as
 	// POST /v1/auth/2fa/enroll and POST /v1/auth/2fa/verify are over REST. Every
-	// account has a second factor (ADR 0087), so Login never answers a session:
+	// account has a second factor (ADR 0088), so Login never answers a session:
 	// without these a gRPC client could not finish signing in at all. Both are
 	// served without a session and spend from the sign-in budget.
 	Enroll2FA(context.Context, *connect.Request[v1.Enroll2FARequest]) (*connect.Response[v1.Enroll2FAResponse], error)
@@ -339,6 +346,12 @@ func NewApiServiceClient(httpClient connect.HTTPClient, baseURL string, opts ...
 			httpClient,
 			baseURL+ApiServiceCheckForUpdateProcedure,
 			connect.WithSchema(apiServiceMethods.ByName("CheckForUpdate")),
+			connect.WithClientOptions(opts...),
+		),
+		installUpdate: connect.NewClient[v1.InstallUpdateRequest, v1.InstallUpdateResponse](
+			httpClient,
+			baseURL+ApiServiceInstallUpdateProcedure,
+			connect.WithSchema(apiServiceMethods.ByName("InstallUpdate")),
 			connect.WithClientOptions(opts...),
 		),
 		listTraces: connect.NewClient[v1.ListTracesRequest, v1.ListTracesResponse](
@@ -733,6 +746,7 @@ type apiServiceClient struct {
 	getStatus                         *connect.Client[v1.GetStatusRequest, v1.GetStatusResponse]
 	getUpdateStatus                   *connect.Client[v1.GetUpdateStatusRequest, v1.GetUpdateStatusResponse]
 	checkForUpdate                    *connect.Client[v1.CheckForUpdateRequest, v1.CheckForUpdateResponse]
+	installUpdate                     *connect.Client[v1.InstallUpdateRequest, v1.InstallUpdateResponse]
 	listTraces                        *connect.Client[v1.ListTracesRequest, v1.ListTracesResponse]
 	getTrace                          *connect.Client[v1.GetTraceRequest, v1.GetTraceResponse]
 	queryTraces                       *connect.Client[v1.QueryTracesRequest, v1.QueryTracesResponse]
@@ -812,6 +826,11 @@ func (c *apiServiceClient) GetUpdateStatus(ctx context.Context, req *connect.Req
 // CheckForUpdate calls gateon.v1.ApiService.CheckForUpdate.
 func (c *apiServiceClient) CheckForUpdate(ctx context.Context, req *connect.Request[v1.CheckForUpdateRequest]) (*connect.Response[v1.CheckForUpdateResponse], error) {
 	return c.checkForUpdate.CallUnary(ctx, req)
+}
+
+// InstallUpdate calls gateon.v1.ApiService.InstallUpdate.
+func (c *apiServiceClient) InstallUpdate(ctx context.Context, req *connect.Request[v1.InstallUpdateRequest]) (*connect.Response[v1.InstallUpdateResponse], error) {
+	return c.installUpdate.CallUnary(ctx, req)
 }
 
 // ListTraces calls gateon.v1.ApiService.ListTraces.
@@ -1141,6 +1160,10 @@ type ApiServiceHandler interface {
 	GetUpdateStatus(context.Context, *connect.Request[v1.GetUpdateStatusRequest]) (*connect.Response[v1.GetUpdateStatusResponse], error)
 	// CheckForUpdate asks the release source now, and reports what it found.
 	CheckForUpdate(context.Context, *connect.Request[v1.CheckForUpdateRequest]) (*connect.Response[v1.CheckForUpdateResponse], error)
+	// InstallUpdate downloads, verifies and asks the root-owned helper to
+	// install the named release (ADR 0087). Administrators only. It answers
+	// as soon as the download has started; GetUpdateStatus reports progress.
+	InstallUpdate(context.Context, *connect.Request[v1.InstallUpdateRequest]) (*connect.Response[v1.InstallUpdateResponse], error)
 	ListTraces(context.Context, *connect.Request[v1.ListTracesRequest]) (*connect.Response[v1.ListTracesResponse], error)
 	GetTrace(context.Context, *connect.Request[v1.GetTraceRequest]) (*connect.Response[v1.GetTraceResponse], error)
 	QueryTraces(context.Context, *connect.Request[v1.QueryTracesRequest]) (*connect.Response[v1.QueryTracesResponse], error)
@@ -1169,7 +1192,7 @@ type ApiServiceHandler interface {
 	Login(context.Context, *connect.Request[v1.LoginRequest]) (*connect.Response[v1.LoginResponse], error)
 	// Enroll2FA and Verify2FA are the second step of a sign-in, as
 	// POST /v1/auth/2fa/enroll and POST /v1/auth/2fa/verify are over REST. Every
-	// account has a second factor (ADR 0087), so Login never answers a session:
+	// account has a second factor (ADR 0088), so Login never answers a session:
 	// without these a gRPC client could not finish signing in at all. Both are
 	// served without a session and spend from the sign-in budget.
 	Enroll2FA(context.Context, *connect.Request[v1.Enroll2FARequest]) (*connect.Response[v1.Enroll2FAResponse], error)
@@ -1251,6 +1274,12 @@ func NewApiServiceHandler(svc ApiServiceHandler, opts ...connect.HandlerOption) 
 		ApiServiceCheckForUpdateProcedure,
 		svc.CheckForUpdate,
 		connect.WithSchema(apiServiceMethods.ByName("CheckForUpdate")),
+		connect.WithHandlerOptions(opts...),
+	)
+	apiServiceInstallUpdateHandler := connect.NewUnaryHandler(
+		ApiServiceInstallUpdateProcedure,
+		svc.InstallUpdate,
+		connect.WithSchema(apiServiceMethods.ByName("InstallUpdate")),
 		connect.WithHandlerOptions(opts...),
 	)
 	apiServiceListTracesHandler := connect.NewUnaryHandler(
@@ -1645,6 +1674,8 @@ func NewApiServiceHandler(svc ApiServiceHandler, opts ...connect.HandlerOption) 
 			apiServiceGetUpdateStatusHandler.ServeHTTP(w, r)
 		case ApiServiceCheckForUpdateProcedure:
 			apiServiceCheckForUpdateHandler.ServeHTTP(w, r)
+		case ApiServiceInstallUpdateProcedure:
+			apiServiceInstallUpdateHandler.ServeHTTP(w, r)
 		case ApiServiceListTracesProcedure:
 			apiServiceListTracesHandler.ServeHTTP(w, r)
 		case ApiServiceGetTraceProcedure:
@@ -1792,6 +1823,10 @@ func (UnimplementedApiServiceHandler) GetUpdateStatus(context.Context, *connect.
 
 func (UnimplementedApiServiceHandler) CheckForUpdate(context.Context, *connect.Request[v1.CheckForUpdateRequest]) (*connect.Response[v1.CheckForUpdateResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gateon.v1.ApiService.CheckForUpdate is not implemented"))
+}
+
+func (UnimplementedApiServiceHandler) InstallUpdate(context.Context, *connect.Request[v1.InstallUpdateRequest]) (*connect.Response[v1.InstallUpdateResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gateon.v1.ApiService.InstallUpdate is not implemented"))
 }
 
 func (UnimplementedApiServiceHandler) ListTraces(context.Context, *connect.Request[v1.ListTracesRequest]) (*connect.Response[v1.ListTracesResponse], error) {

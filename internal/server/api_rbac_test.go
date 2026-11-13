@@ -327,6 +327,10 @@ func TestAuthorizeProcedure(t *testing.T) {
 		{"viewer allowed update status", claims(auth.RoleViewer), procedureFor("GetUpdateStatus"), false},
 		{"viewer denied update check", claims(auth.RoleViewer), procedureFor("CheckForUpdate"), true},
 		{"operator allowed update check", claims(auth.RoleOperator), procedureFor("CheckForUpdate"), false},
+		// Installing (ADR 0087) is gated here like a settings save, so a
+		// viewer never reaches it; ApiService then requires an administrator.
+		{"viewer denied install", claims(auth.RoleViewer), procedureFor("InstallUpdate"), true},
+		{"admin allowed install", claims(auth.RoleAdmin), procedureFor("InstallUpdate"), false},
 
 		{"operator allowed mitigate", claims(auth.RoleOperator), procedureFor("MitigateThreat"), false},
 		{"operator allowed route write", claims(auth.RoleOperator), procedureFor("UpdateRoute"), false},

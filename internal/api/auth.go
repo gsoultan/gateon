@@ -39,7 +39,7 @@ func (s *ApiService) Login(ctx context.Context, req *gateonv1.LoginRequest) (*ga
 			}, nil
 		}
 		// The account has no second factor yet, and every account must have one
-		// (ADR 0087): the client runs first-time enrolment. No session yet.
+		// (ADR 0088): the client runs first-time enrolment. No session yet.
 		if errors.Is(err, auth.ErrTwoFactorSetupRequired) {
 			return &gateonv1.LoginResponse{
 				User:                   user,
@@ -155,7 +155,7 @@ func (s *ApiService) Verify2FA(ctx context.Context, req *gateonv1.Verify2FAReque
 // factor, during sign-in, as POST /v1/auth/2fa/enroll does: the password step
 // again, under the sign-in's lockout and from the caller's address, then a new
 // secret and recovery codes, not yet enabled. Verify2FA with the challenge
-// Login answered completes it and issues the session (ADR 0087).
+// Login answered completes it and issues the session (ADR 0088).
 func (s *ApiService) Enroll2FA(ctx context.Context, req *gateonv1.Enroll2FARequest) (*gateonv1.Enroll2FAResponse, error) {
 	if !auth.Available(s.Auth) {
 		return nil, errors.New("auth service not initialized")

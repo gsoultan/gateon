@@ -34,7 +34,7 @@ test('a browser sign-in gets the session only as the HttpOnly cookie', async ({ 
   expect(body.user?.username).toBe('admin');
 
   // The password step sets no session: every account has a second factor
-  // (ADR 0087). The session comes from the code, as the cookie alone.
+  // (ADR 0088). The session comes from the code, as the cookie alone.
   expect(body.twoFactorRequired || body.twoFactorSetupRequired, 'the password alone ended the sign-in').toBe(true);
   expect((await page.context().cookies()).find((c) => c.name === 'gateon_session')?.value ?? '').toBe('');
   const verify = page.waitForResponse(

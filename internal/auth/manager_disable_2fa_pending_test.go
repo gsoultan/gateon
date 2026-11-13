@@ -119,7 +119,7 @@ func TestEnrollPendingRejectedOnceEnrolled(t *testing.T) {
 	id := createUser(t, m, "peggy", "pw-123456-long")
 	enroll(t, m, id, "pw-123456-long")
 
-	// Every account without a second factor enrols here (ADR 0087), flagged or
+	// Every account without a second factor enrols here (ADR 0088), flagged or
 	// not. One that has a factor must not: with the password alone this path
 	// would replace it with one the caller controls.
 	if _, _, _, _, err := m.EnrollPending2FA("peggy", "pw-123456-long", ""); !errors.Is(err, ErrInvalidCredentials) {

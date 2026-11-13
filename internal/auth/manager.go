@@ -159,7 +159,7 @@ func (m *Manager) Authenticate(username, password, source string) (string, *gate
 	if user.TwoFactorEnabled {
 		return m.owedSecondFactor(user, ErrTwoFactorRequired)
 	}
-	// Every account has a second factor (ADR 0087), so a password never ends a
+	// Every account has a second factor (ADR 0088), so a password never ends a
 	// sign-in. An account without one enrols now: EnrollPending2FA, then
 	// Verify2FA with the challenge, and only that last step issues a session.
 	// This used to happen only for accounts an administrator had flagged
@@ -394,7 +394,7 @@ const TokenLifetime = 8 * time.Hour
 
 func (m *Manager) issueToken(user *gateonv1.User) (string, *gateonv1.User, error) {
 	// No session for an account without a second factor, whatever path asks
-	// (ADR 0087). The session binding refuses one too, so a session minted
+	// (ADR 0088). The session binding refuses one too, so a session minted
 	// anyway -- by the previous release, before the rule -- does not verify.
 	if !user.TwoFactorEnabled {
 		return "", nil, ErrTwoFactorSetupRequired
@@ -875,7 +875,7 @@ func (m *Manager) EnrollPending2FA(username, password, source string) (string, s
 	}
 	// Enrolment via this unauthenticated path is for accounts that have no
 	// second factor yet, which is every such account now that one is required
-	// (ADR 0087). An enrolled account replaces its factor through the
+	// (ADR 0088). An enrolled account replaces its factor through the
 	// authenticated Setup2FA, which keeps the old one until the new one is
 	// confirmed; here the password alone would replace it.
 	if row.user.TwoFactorEnabled {
@@ -1302,7 +1302,7 @@ func (m *Manager) completeEnrolment(user *gateonv1.User, recoveryCodes string) e
 		return err
 	}
 	// The session binding reads whether the account has a second factor
-	// (ADR 0087), so the cached one is stale now; the session issued next is
+	// (ADR 0088), so the cached one is stale now; the session issued next is
 	// bound to the enrolled state.
 	user.TwoFactorEnabled = true
 	m.revokeSessions(user.Id)

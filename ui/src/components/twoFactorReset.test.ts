@@ -17,7 +17,7 @@ describe("twoFactorAction", () => {
     expect(twoFactorAction(enrolled, "u-2", true)).toBe("self");
   });
 
-  // Every account enrols at its next sign-in (ADR 0087). The control used to
+  // Every account enrols at its next sign-in (ADR 0088). The control used to
   // offer to require it, or to cancel the requirement -- a flag the sign-in no
   // longer reads -- so it offers nothing for an account that has not enrolled.
   test("an account that has not enrolled is waiting to, and nothing here changes that", () => {

@@ -6,7 +6,7 @@ import { createHmac } from 'crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 
 /**
- * Signing in with the second factor every account must have (ADR 0087).
+ * Signing in with the second factor every account must have (ADR 0088).
  *
  * The password step never ends a sign-in: an account without a second factor
  * enrols an authenticator first, and the session comes from a code. The

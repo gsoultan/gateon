@@ -220,7 +220,7 @@ func isLoginPath(path string) bool {
 // but the caller's own.
 //
 // ApiService/Enroll2FA and ApiService/Verify2FA are those same two steps over
-// gRPC, and now exist: every account has a second factor (ADR 0087), so Login
+// gRPC, and now exist: every account has a second factor (ADR 0088), so Login
 // alone never signs a gRPC client in.
 //
 // A set rather than a chain of ||, so the entries can be enumerated and

@@ -15,7 +15,7 @@ import (
 	"github.com/pquerna/otp/totp"
 )
 
-// Every account has a second factor (ADR 0087). These pin the three places
+// Every account has a second factor (ADR 0088). These pin the three places
 // that is decided: the password step never ends a sign-in, no session is ever
 // minted for an account without one, and a session that exists anyway -- one
 // the previous release minted before the rule -- stops working.

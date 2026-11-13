@@ -101,7 +101,7 @@ type enrolled struct {
 }
 
 // enrolRoot turns on 2FA for the seeded administrator the way the sign-in page
-// does: every account must have a second factor (ADR 0087), so the password
+// does: every account must have a second factor (ADR 0088), so the password
 // step answers with a challenge and no session, the page enrols with the
 // password again, and the first code from the new authenticator signs in.
 func enrolRoot(c mgmtClient) enrolled {

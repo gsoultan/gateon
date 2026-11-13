@@ -22,7 +22,7 @@ const legacyHash = "$2a$10$legacy-hash-for-golden-test"
 // the digest must be that one, byte for byte. Otherwise replacing the binary
 // signs out every administrator mid-session and breaks every API client
 // holding a token. It holds for an account with a second factor; one without
-// has no session to keep (ADR 0087).
+// has no session to keep (ADR 0088).
 func TestAnAccountThatNeverSignedOutKeepsItsPreUpgradeBinding(t *testing.T) {
 	for _, c := range []struct {
 		state accountState
