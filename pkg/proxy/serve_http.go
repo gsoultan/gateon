@@ -60,7 +60,8 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	proxy := h.getOrCreateProxy(state)
 	proxy.ServeHTTP(sw, r)
 
-	h.recordMetrics(state, start, sw.Status)
+	answeredAt, _ := sw.FirstByteAt()
+	h.recordMetrics(state, start, responseOutcome{status: sw.Status, answeredAt: answeredAt})
 }
 
 // withholdManagementCredentials removes from r what would let the backend act
@@ -110,7 +111,16 @@ func (h *ProxyHandler) decrementActiveConn(state *targetState) {
 	}
 }
 
-func (h *ProxyHandler) recordMetrics(state *targetState, start time.Time, status int) {
+// responseOutcome is what recordMetrics learns about one proxied response.
+type responseOutcome struct {
+	status int
+	// answeredAt is when the response's headers went out, zero if they never
+	// did.
+	answeredAt time.Time
+}
+
+func (h *ProxyHandler) recordMetrics(state *targetState, start time.Time, out responseOutcome) {
+	status := out.status
 	duration := time.Since(start)
 	atomic.AddUint64(&state.requestCount, 1)
 	atomic.AddUint64(&state.latencySumUs, uint64(duration.Microseconds()))
@@ -122,11 +132,25 @@ func (h *ProxyHandler) recordMetrics(state *targetState, start time.Time, status
 	// A failed response is priced at failedResponseLatency at least: a backend
 	// answering 503 in a millisecond is not fast, and fed its real duration
 	// the predictive balancer sent it nearly every request.
+	h.lb.RecordLatency(state.url, balancerLatency(start, duration, out).Seconds())
+}
+
+// balancerLatency is how long a backend took to answer, as the balancer
+// prices it: until its headers went out, not until the client finished
+// reading. A backend that answers at once and then streams for minutes is
+// fast; fed the whole duration, the predictive balancer priced it at however
+// long the stream lasted. A response whose headers never went out is priced
+// at its whole duration.
+func balancerLatency(start time.Time, duration time.Duration, out responseOutcome) time.Duration {
+	status := out.status
 	latency := duration
+	if !out.answeredAt.IsZero() && out.answeredAt.After(start) {
+		latency = out.answeredAt.Sub(start)
+	}
 	if status >= 500 {
 		latency = max(latency, failedResponseLatency)
 	}
-	h.lb.RecordLatency(state.url, latency.Seconds())
+	return latency
 }
 
 // failedResponseLatency is the least a 5xx response counts as to a balancer

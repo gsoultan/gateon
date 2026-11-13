@@ -155,6 +155,29 @@ func BenchmarkAIPredictiveLB_NextAndRecord(b *testing.B) {
 	}
 }
 
+// BenchmarkAIPredictiveLB_Parallel is the same request's worth of work from
+// every CPU at once, which is what the proxy does. Each backend's history is
+// behind its own mutex, taken once per response; this is the number that
+// shows whether that lock is a bottleneck on a small host (run with -cpu 2).
+func BenchmarkAIPredictiveLB_Parallel(b *testing.B) {
+	if err := ai.InitGlobalPredictor(context.Background(), ai.DefaultModelWasm); err != nil {
+		b.Fatal(err)
+	}
+	lb := NewAIPredictiveLB([]*gateonv1.Target{
+		{Url: "http://localhost:8001", Weight: 1},
+		{Url: "http://localhost:8002", Weight: 1},
+		{Url: "http://localhost:8003", Weight: 1},
+	})
+	b.ReportAllocs()
+	b.RunParallel(func(pb *testing.PB) {
+		i := 0
+		for pb.Next() {
+			lb.RecordLatency(lb.Next(), 0.01+float64(i%7)*0.001)
+			i++
+		}
+	})
+}
+
 func BenchmarkWeightedRoundRobinLB_Next(b *testing.B) {
 	lb := NewWeightedRoundRobinLB([]*gateonv1.Target{
 		{Url: "http://localhost:8001", Weight: 1},

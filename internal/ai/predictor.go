@@ -130,6 +130,17 @@ func (p *WasmTransformerPredictor) probe(ctx context.Context) error {
 	return nil
 }
 
+// levelFloor keeps the spike score finite for a series sitting at zero. It is
+// a microsecond in the balancer's units (seconds), far below any latency the
+// gateway measures, so the score is the jump relative to the forecast level.
+//
+// It was 1. Latencies are fed in seconds, so for every backend answering in
+// under a second the 1 swamped the level and the score measured the jump in
+// absolute seconds: a tenfold jump from 20 ms to 200 ms scored 0.07, and only
+// a jump of more than 1.5 s ever counted as a spike. The predictor that
+// ai_predictive is named for weighed almost nothing.
+const levelFloor = 1e-6
+
 // NativePredictor is a pure Go implementation of the Holt-Winters spike detection.
 // Used as a high-performance fallback and for the default model to avoid WASM runtime overhead.
 type NativePredictor struct{}
@@ -159,7 +170,7 @@ func (p *NativePredictor) Predict(ctx context.Context, input []float64) (float64
 		return 0, nil
 	}
 
-	score := diff / (math.Abs(level) + 1.0)
+	score := diff / (math.Abs(level) + levelFloor)
 	val := (score - 1.5) * 2.0
 	return 1.0 / (1.0 + math.Exp(-val)), nil
 }

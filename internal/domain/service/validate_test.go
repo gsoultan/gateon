@@ -35,6 +35,12 @@ func TestSaveRefusesASettingTheGatewayWouldNotCarryOut(t *testing.T) {
 			&gateonv1.Service{LoadBalancerPolicy: "ai_predictive", WeightedTargets: targets(0, 1)}, "ai_predictive ignores"},
 		{"weights on a TCP service",
 			&gateonv1.Service{BackendType: "tcp", WeightedTargets: targets(1, 2)}, "tcp service ignores target weights"},
+		{"the predictive balancer on a TCP service, which balanced it round robin",
+			&gateonv1.Service{BackendType: "tcp", LoadBalancerPolicy: "ai_predictive", WeightedTargets: targets(1)},
+			"tcp service cannot use ai_predictive"},
+		{"the predictive balancer on a UDP service, under its other name",
+			&gateonv1.Service{BackendType: "udp", LoadBalancerPolicy: "intelligent", WeightedTargets: targets(1)},
+			"udp service cannot use intelligent"},
 		{"a negative weight",
 			&gateonv1.Service{WeightedTargets: targets(1, -1)}, "weight -1"},
 		{"an HTTP health check with nothing to request, which checked nothing",
@@ -67,6 +73,8 @@ func TestSaveKeepsWhatTheGatewayCarriesOut(t *testing.T) {
 		{LoadBalancerPolicy: "weightedRoundRobin", WeightedTargets: targets(1, 2)},
 		{LoadBalancerPolicy: "least_conn", WeightedTargets: targets(1, 1)},
 		{BackendType: "udp", LoadBalancerPolicy: "leastConn", WeightedTargets: targets(0, 0)},
+		{LoadBalancerPolicy: "aiPredictive", WeightedTargets: targets(1, 1)}, // the dashboard's spelling
+		{BackendType: "http", LoadBalancerPolicy: "ai_predictive", WeightedTargets: targets(1)},
 		{HealthCheckType: gateonv1.HealthCheckType_HEALTH_CHECK_TYPE_HTTP, HealthCheckPath: "/hz", WeightedTargets: targets(1)},
 		{HealthCheckType: gateonv1.HealthCheckType_HEALTH_CHECK_TYPE_TCP, WeightedTargets: targets(1)},
 	} {

@@ -102,6 +102,12 @@ func (w *StatusResponseWriter) TTFB() time.Duration {
 	return w.firstByte.Sub(w.start)
 }
 
+// FirstByteAt is when the response's status line or first body byte was
+// written, and false if nothing has been written yet.
+func (w *StatusResponseWriter) FirstByteAt() (time.Time, bool) {
+	return w.firstByte, w.ttfbRecorded
+}
+
 // StatusRecorded reports whether Write or WriteHeader has been called.
 func (w *StatusResponseWriter) StatusRecorded() bool {
 	return w.ttfbRecorded

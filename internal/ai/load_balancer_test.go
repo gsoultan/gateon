@@ -152,3 +152,47 @@ func TestHistoryIsBoundedAndKeepsTheNewest(t *testing.T) {
 			len(h), h[0], h[len(h)-1], historySize, 2*historySize, 3*historySize-1)
 	}
 }
+
+// TestASpikeIsSeenAtEveryLatencyScale: the forecast scored a jump by its size
+// over the level plus one, which treats "1" as small. Latencies arrive in
+// seconds, so for any backend answering in under a second the "+1" swamped
+// the level: a jump from 20 ms to 200 ms -- ten times slower -- scored 0.07
+// and weighed the backend 7% higher, and only a jump of more than 1.5 s
+// whatever the baseline ever counted as a spike. The score has to depend on
+// how far the latest sample sits from the forecast relative to that
+// forecast, so a tenfold jump is a spike at 2 ms, 20 ms and 2 s alike.
+func TestASpikeIsSeenAtEveryLatencyScale(t *testing.T) {
+	for _, base := range []float64{0.002, 0.02, 0.2, 2} {
+		with, c := newTestStrategy(&NativePredictor{})
+		without, _ := newTestStrategy(nil)
+		for _, x := range []float64{base, base, base, base, base, 10 * base} {
+			with.RecordLatency("b", x)
+			without.RecordLatency("b", x)
+		}
+		w, _ := with.Estimate("b", c.t)
+		wo, _ := without.Estimate("b", c.t)
+		if w < 1.5*wo {
+			t.Errorf("tenfold jump from %v s: estimate with predictor %v, without %v; want the spike to weigh at least 1.5x", base, w, wo)
+		}
+	}
+}
+
+// TestJitterIsNotASpike: the other half of a relative score. A backend
+// wobbling 10% around its average must not be priced as if it were spiking,
+// at any scale.
+func TestJitterIsNotASpike(t *testing.T) {
+	for _, base := range []float64{0.002, 0.02, 2} {
+		with, c := newTestStrategy(&NativePredictor{})
+		without, _ := newTestStrategy(nil)
+		for i := range 50 {
+			x := base * (1 + 0.1*float64(i%3-1))
+			with.RecordLatency("b", x)
+			without.RecordLatency("b", x)
+		}
+		w, _ := with.Estimate("b", c.t)
+		wo, _ := without.Estimate("b", c.t)
+		if w > 1.1*wo {
+			t.Errorf("10%% jitter around %v s: estimate with predictor %v, without %v; want at most 1.1x", base, w, wo)
+		}
+	}
+}
