@@ -40,6 +40,7 @@ import (
 	"github.com/gsoultan/gateon/internal/server/entrypoint"
 	"github.com/gsoultan/gateon/internal/server/handlers"
 	"github.com/gsoultan/gateon/internal/server/readiness"
+	"github.com/gsoultan/gateon/internal/server/sockets"
 	"github.com/gsoultan/gateon/internal/syncutil"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	gtls "github.com/gsoultan/gateon/internal/tls"
@@ -316,12 +317,19 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 	// once at start, not when a request first reaches them (OPS-N4). Off the
 	// start path: it builds every route's middlewares.
 	wg.Go(func() { s.proxyCache().WarnRouteProblems(ctx) })
+	// The sockets the service manager kept open while the previous process
+	// was replaced (ADR 0088): a listener bound where one of them is serves
+	// from it, and the connections that arrived meanwhile are waiting in it.
+	kept := sockets.Inherit()
 	//nolint:contextcheck // listeners stop through shutdownReg, not a context; StartServers takes none.
-	if err := entrypoint.StartServers(s.EpStore, s.Port, baseHandler, internalAPI, tlsConfig, s.TLSManager, &wg, shutdownReg, entrypoint.WrapL4Resolver(l4Resolver), mgmtConfig, s.GlobalStore, pCore); err != nil {
+	if err := entrypoint.StartServers(s.EpStore, s.Port, baseHandler, internalAPI, tlsConfig, s.TLSManager, &wg, shutdownReg, entrypoint.WrapL4Resolver(l4Resolver), mgmtConfig, s.GlobalStore, pCore, kept); err != nil {
 		// Exits non-zero, so a service manager restarts the gateway rather than
 		// leaving it running with no management plane.
 		logger.Fatal("refusing to run without a management plane", "error", err)
 	}
+	// Every entrypoint has taken its socket or bound a new one. What is left
+	// belongs to an entrypoint that no longer exists.
+	kept.DiscardUnclaimed()
 	// Initialize metrics subsystem
 	telemetry.InitStartTime()
 	registerTelemetryProviders(s)

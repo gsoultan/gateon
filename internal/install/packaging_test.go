@@ -14,6 +14,8 @@ import (
 	"testing"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/gsoultan/gateon/internal/server/sockets"
 )
 
 // repoFile reads a file shipped from the repository root. go test runs in this
@@ -309,6 +311,35 @@ func TestThePackagesShipNoWindowsFileAndTheDropIn(t *testing.T) {
 		}
 		if !strings.Contains(cfg, "/usr/share/gateon/systemd/ebpf-ha.conf") {
 			t.Errorf("%s does not ship the eBPF/HA drop-in", file)
+		}
+	}
+}
+
+// TestUnitsLetTheManagerKeepTheListeningSockets: without these two lines
+// the gateway has no notification socket to hand its listeners to, and a
+// restart closes every one of them as it always did (ADR 0088). Nothing
+// fails when they are missing; connections are just refused again.
+func TestUnitsLetTheManagerKeepTheListeningSockets(t *testing.T) {
+	t.Parallel()
+
+	units := map[string]string{
+		"the unit gateon install writes": renderSystemdUnit("/usr/local/bin/gateon"),
+		"packaging/gateon.service":       repoFile(t, "packaging", "gateon.service"),
+	}
+	for name, unit := range units {
+		if got := unitDirective(unit, "NotifyAccess"); len(got) != 1 || got[0] != "main" {
+			t.Errorf("%s: NotifyAccess = %v, want main", name, got)
+		}
+		// The gateway stops handing sockets over at sockets.MaxStored; a
+		// smaller store would silently refuse the ones past its own limit.
+		want := strconv.Itoa(sockets.MaxStored)
+		if got := unitDirective(unit, "FileDescriptorStoreMax"); len(got) != 1 || got[0] != want {
+			t.Errorf("%s: FileDescriptorStoreMax = %v, want %s", name, got, want)
+		}
+		// A stop must close the sockets: a stopped gateway that still took
+		// connections would hold clients that nothing will ever answer.
+		if got := unitDirective(unit, "FileDescriptorStorePreserve"); len(got) != 0 {
+			t.Errorf("%s keeps its sockets when stopped: FileDescriptorStorePreserve = %v", name, got)
 		}
 	}
 }

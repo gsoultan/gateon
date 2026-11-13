@@ -89,7 +89,7 @@ func unwrapTLS(t *testing.T, l net.Listener) net.Listener {
 func TestGatewayListenersAreNotMPTCP(t *testing.T) {
 	requireMPTCPKernel(t)
 
-	plain := &tcpServer{plaintext: true}
+	plain := &tcpServer{plaintext: true, deps: &Deps{}}
 	tlsSrv := &tcpServer{deps: &Deps{TLSConfig: &tls.Config{
 		MinVersion: tls.VersionTLS12,
 		// Never called: the test only binds. tls.Listen refuses a config
@@ -100,8 +100,8 @@ func TestGatewayListenersAreNotMPTCP(t *testing.T) {
 		name   string
 		listen func() (net.Listener, error)
 	}{
-		{"net.Listen (HTTP and management entrypoints)", func() (net.Listener, error) {
-			return net.Listen("tcp", "127.0.0.1:0")
+		{"HTTP and management entrypoints", func() (net.Listener, error) {
+			return (&Deps{}).Sockets.Listen("127.0.0.1:0")
 		}},
 		{"L4 entrypoint, plaintext", func() (net.Listener, error) { return plain.listen("127.0.0.1:0") }},
 		{"L4 entrypoint, TLS", func() (net.Listener, error) { return tlsSrv.listen("127.0.0.1:0") }},

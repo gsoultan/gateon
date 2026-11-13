@@ -20,12 +20,37 @@ the command for that instead.
    key compiled into the binary already installed. It installs only a release
    newer than the installed one.
 4. It copies the installed binary to `/var/lib/gateon-upgrade/previous-gateon`,
-   stops the service, puts the new binary in place and starts the service.
-   **New connections are refused from the stop until the new gateway is
-   listening**, normally a few seconds.
+   puts the new binary in place and restarts the service once. systemd keeps
+   the listening sockets open across that restart, so **a connection made
+   while the gateway restarts waits and is served**. See *Connections during
+   the restart*.
 5. The new gateway reports ready once every listener has bound. If it does not
    within 90 seconds, or systemd restarts it three times, the helper puts the
-   previous binary back and starts it.
+   previous binary back and restarts the service.
+
+## Connections during the restart
+
+The gateway hands each listening socket to systemd when it binds it. systemd
+holds the socket while the gateway is replaced and gives it to the new
+process (ADR 0088).
+
+| Connection | What happens |
+| :--- | :--- |
+| Made while the gateway restarts | Waits, then is served by the new gateway. |
+| A request in flight | Finished by the old gateway before it exits. |
+| Long-lived: WebSocket, SSE, a TCP session, HTTP/3 | Closed when the old gateway's drain ends. The client reconnects. |
+
+This needs `NotifyAccess=main` and `FileDescriptorStoreMax=64` in
+`gateon.service`. The packages and `gateon install` write them from this
+release on. A host upgraded by the helper keeps its old unit; see
+`upgrading.md`. Check with:
+
+```sh
+systemctl show gateon -p NFileDescriptorStore
+```
+
+It prints the number of sockets systemd is holding, one per listener.
+`systemctl stop gateon` closes them.
 
 ## Before the first upgrade
 
@@ -130,6 +155,7 @@ the database from before that release.
 | :--- | :--- | :--- |
 | `GATEON_UPGRADE_READY_TIMEOUT` | `90s` on every profile | How long a new binary has to report ready before the previous one is put back. A Go duration, held between `15s` and `15m`. Read by the helper from `/etc/default/gateon`. |
 | `GATEON_MIGRATION_BACKUP` | on, on every profile | `false` skips the SQLite copy before a migration. |
+| `GATEON_SOCKET_HANDOFF` | on, on every profile | `false` binds every listener afresh at each start, so a restart refuses connections for a few seconds as it did before. |
 | `GATEON_UPDATE_AUTO_INSTALL`, `GATEON_UPDATE_AUTO_SCOPE`, `GATEON_UPDATE_WINDOW` | off, `patch`, `02:00-04:00` | See *Upgrading automatically*. |
 
 ## What it does not do
@@ -138,4 +164,5 @@ the database from before that release.
   needs the package.
 - The package manager's record of the installed version is not updated. A
   later `apt upgrade` or `dnf upgrade` installs over it as usual.
-- It does not keep connections open across the restart yet.
+- It does not carry a live connection from the old gateway to the new one.
+  Long-lived connections are closed at the restart and reconnect.

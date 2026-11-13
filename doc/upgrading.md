@@ -11,6 +11,32 @@ here after the fact.
 
 ## Unreleased
 
+### A restart under systemd no longer refuses connections
+
+The gateway now hands its listening sockets to systemd, which keeps them open
+while the gateway restarts and passes them to the new process (ADR 0088). A
+connection made during a restart waits and is served. The upgrade helper
+restarts the service once instead of stopping and starting it.
+
+**Who is affected:**
+
+- A host upgraded by the helper or by replacing the binary keeps its old
+  `gateon.service`, and restarts as before until the unit has the two new
+  lines. Install the package once, run `sudo gateon install`, or add a
+  drop-in with `sudo systemctl edit gateon`:
+
+  ```ini
+  [Service]
+  NotifyAccess=main
+  FileDescriptorStoreMax=64
+  ```
+
+- A gateway that fails to start now leaves its ports accepting connections
+  that nothing answers, until the service stops or reaches its start limit. A
+  health check that expected "connection refused" from a dead gateway sees a
+  timeout instead. `GATEON_SOCKET_HANDOFF=false` restores the old behaviour.
+- Long-lived connections are still closed at a restart.
+
 ### Cloudflare's CA certificates are built in, and a `ca_file` starting `builtin:` names one
 
 Cloudflare's Origin CA roots (RSA and ECC) and its Authenticated Origin Pulls

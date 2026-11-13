@@ -29,6 +29,7 @@ import (
 	"github.com/gsoultan/gateon/internal/middleware/security"
 	"github.com/gsoultan/gateon/internal/middleware/security/identity"
 	"github.com/gsoultan/gateon/internal/middleware/traffic"
+	"github.com/gsoultan/gateon/internal/server/sockets"
 	"github.com/gsoultan/gateon/internal/syncutil"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	gtls "github.com/gsoultan/gateon/internal/tls"
@@ -80,9 +81,11 @@ func StartServers(
 	mgmt_config *gateonv1.ManagementConfig,
 	global_store config.GlobalConfigStore,
 	phantom PhantomCore,
+	kept *sockets.Store,
 ) error {
 	limiter := entrypointRateLimiter()
 	deps := &Deps{
+		Sockets:          kept,
 		Port:             port,
 		EpStore:          epStore,
 		BaseHandler:      baseHandler,
@@ -181,7 +184,7 @@ func startSecureManagementServer(port string, deps *Deps, wg *syncutil.WaitGroup
 		})
 	}
 
-	l, err := net.Listen("tcp", addr)
+	l, err := deps.Sockets.Listen(addr)
 	if err != nil {
 		return fmt.Errorf("management listener could not bind %s: %w (set GATEON_MANAGEMENT_PORT or "+
 			"management.port to a free port)", addr, err)
@@ -342,10 +345,11 @@ func newTCPServer(ep *gateonv1.EntryPoint, deps *Deps, wg *syncutil.WaitGroup) *
 
 // listen binds addr, over TLS on an entrypoint that terminates it.
 func (s *tcpServer) listen(addr string) (net.Listener, error) {
-	if s.plaintext {
-		return net.Listen("tcp", addr)
+	l, err := s.deps.Sockets.Listen(addr)
+	if err != nil || s.plaintext {
+		return l, err
 	}
-	return tls.Listen("tcp", addr, s.deps.TLSConfig)
+	return tls.NewListener(l, s.deps.TLSConfig), nil
 }
 
 // start serves l until shutdown, which closes it and then ends the
@@ -542,14 +546,8 @@ func startUDPServer(addr string, ep *gateonv1.EntryPoint, deps *Deps, wg *syncut
 	logger.L.LogInfo("starting UDP entrypoint", "addr", addr)
 	bindListener(deps, wg, listenerSpec[*net.UDPConn]{
 		ep: ep.Id, addr: "udp " + addr,
-		listen: func() (*net.UDPConn, error) {
-			laddr, err := net.ResolveUDPAddr("udp", addr)
-			if err != nil {
-				return nil, err
-			}
-			return net.ListenUDP("udp", laddr)
-		},
-		serve: func(conn *net.UDPConn) { serveUDP(conn, ep, deps, wg, shutdownReg) },
+		listen: func() (*net.UDPConn, error) { return deps.Sockets.ListenUDP(addr) },
+		serve:  func(conn *net.UDPConn) { serveUDP(conn, ep, deps, wg, shutdownReg) },
 	})
 }
 
