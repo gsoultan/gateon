@@ -4,7 +4,6 @@
 package challenge
 
 import (
-	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -87,8 +86,10 @@ func serveBotManagement(cfg BotManagementConfig, next http.Handler, w http.Respo
 
 // recordBotThreat files one bot-management refusal for the dashboard.
 func recordBotThreat(r *http.Request, cfg BotManagementConfig, clientIP, label string, score float64, details, severity string) {
+	// No ID: the store gives each refusal its own. "bot-<label>-<route>-<ip>"
+	// was the same for every refusal of one client, so every row after the
+	// first broke the primary key and was dropped.
 	telemetry.RecordSecurityThreat(telemetry.RecordSecurityThreatWithJA4(r, telemetry.SecurityThreat{
-		ID:          fmt.Sprintf("bot-%s-%s-%s", label, cfg.RouteID, clientIP),
 		Type:        "bot_detected",
 		SourceIP:    clientIP,
 		Score:       score,

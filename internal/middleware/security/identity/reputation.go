@@ -67,8 +67,13 @@ func (h *reputationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				"reputation", reputation,
 				"reputation_id", repID)
 
+			// No ID: the store gives each refusal its own. This one was
+			// "rep-block-<route>-<identity>", the same for every refusal of a
+			// client on a route, so the primary key refused every row after the
+			// first and the Threats and Blocks pages showed one block where the
+			// gateway had refused twenty -- while Mitigated Today and the funnel,
+			// counted before the insert, showed all twenty.
 			telemetry.RecordSecurityThreat(telemetry.RecordSecurityThreatWithJA4(r, telemetry.SecurityThreat{
-				ID:          fmt.Sprintf("rep-block-%s-%s", h.routeID, repID),
 				Type:        "reputation_block",
 				SourceIP:    clientIP,
 				Score:       100 - reputation,

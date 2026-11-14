@@ -12,6 +12,8 @@ import (
 	"github.com/gsoultan/gateon/internal/auth"
 	wafmw "github.com/gsoultan/gateon/internal/middleware/security/waf"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // effectiveWAFView is GET /v1/waf/effective: what the global WAF runs, and what
@@ -125,7 +127,7 @@ func registerWafRuleHandlers(mux *http.ServeMux, apiService *api.ApiService) {
 		}
 		res, err := apiService.UpdateWafRule(r.Context(), &req)
 		if err != nil {
-			WriteHTTPError(w, http.StatusInternalServerError, err.Error())
+			writeRuleWriteError(w, err)
 			return
 		}
 		WriteProtoResponse(w, http.StatusOK, res)
@@ -138,9 +140,19 @@ func registerWafRuleHandlers(mux *http.ServeMux, apiService *api.ApiService) {
 		id := r.PathValue("id")
 		res, err := apiService.DeleteWafRule(r.Context(), &gateonv1.DeleteWafRuleRequest{Id: id})
 		if err != nil {
-			WriteHTTPError(w, http.StatusInternalServerError, err.Error())
+			writeRuleWriteError(w, err)
 			return
 		}
 		WriteProtoResponse(w, http.StatusOK, res)
 	})
+}
+
+// writeRuleWriteError answers a failed rule update or delete: a rule that is
+// not there is 404, where it used to be a 200 that said the save had worked.
+func writeRuleWriteError(w http.ResponseWriter, err error) {
+	if status.Code(err) == codes.NotFound {
+		WriteHTTPError(w, http.StatusNotFound, status.Convert(err).Message())
+		return
+	}
+	WriteHTTPError(w, http.StatusInternalServerError, err.Error())
 }

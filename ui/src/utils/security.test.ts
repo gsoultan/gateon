@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 import { describe, expect, test } from "bun:test";
-import { splitScopedBlock } from "./security";
+import { OTHER_THREAT_TYPES, splitScopedBlock, threatTypeBreakdown } from "./security";
 
 // A fingerprint block is a client build on one network (ADR 0026); the Allow
 // dialog names both, so the operator sees exactly whom a release re-admits.
@@ -27,5 +27,36 @@ describe("splitScopedBlock", () => {
     expect(splitScopedBlock("|203.0.113")).toBeNull();
     expect(splitScopedBlock("t13d1516h2|")).toBeNull();
     expect(splitScopedBlock(undefined)).toBeNull();
+  });
+});
+
+// The donut's centre read the sum of the five types the server sends, so with
+// a sixth type it was smaller than the Threats page's count of every threat.
+describe("threatTypeBreakdown", () => {
+  test("adds the types outside the top N as one slice, so the slices make the total", () => {
+    const { slices, total } = threatTypeBreakdown(
+      [
+        { label: "waf_blocked", value: 10 },
+        { label: "reputation_block", value: 5 },
+      ],
+      18,
+    );
+    expect(total).toBe(18);
+    expect(slices.map((s) => [s.name, s.value])).toEqual([
+      ["WAF_BLOCKED", 10],
+      ["REPUTATION_BLOCK", 5],
+      [OTHER_THREAT_TYPES, 3],
+    ]);
+  });
+
+  test("adds no slice when the top types are every threat", () => {
+    const { slices, total } = threatTypeBreakdown([{ label: "waf_blocked", value: 4 }], 4);
+    expect(total).toBe(4);
+    expect(slices).toHaveLength(1);
+  });
+
+  test("falls back to the listed types without a total", () => {
+    expect(threatTypeBreakdown([{ label: "waf_blocked", value: 4 }], undefined).total).toBe(4);
+    expect(threatTypeBreakdown(null, null)).toEqual({ slices: [], total: 0 });
   });
 });

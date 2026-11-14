@@ -53,7 +53,7 @@ import { WAFRulesTab } from '../components/SecurityCenter/WAFRulesTab';
 const ThreatArchiveTab = React.lazy(() => import('../components/SecurityCenter/ThreatArchiveTab'));
 import { PageHeader } from "../components/layout";
 import { useUrlFilters } from "../hooks/useUrlFilters";
-import { getThreatColor } from '../utils/security';
+import { threatTypeBreakdown } from '../utils/security';
 import { resolveTrafficRangeBounds, DAY_MS } from '../utils/dashboard';
 import type { TrafficRangePreset } from '../utils/dashboard';
 
@@ -290,18 +290,12 @@ export default function SecurityCommandCenter() {
     void loadGlobalConfig();
   }, [loadGlobalConfig]);
 
-  const threatTypeData = React.useMemo(() => {
-    if (!metrics?.security?.topThreatTypes) return [];
-    return metrics.security.topThreatTypes.map((t: any) => ({
-      name: (t.label || '').toUpperCase(),
-      value: t.value,
-      color: getThreatColor(t.label)
-    }));
-  }, [metrics]);
-
-  const totalThreats = React.useMemo(() => {
-    return threatTypeData.reduce((acc: number, curr: any) => acc + curr.value, 0);
-  }, [threatTypeData]);
+  // The top types plus one slice for the rest, so the donut's slices add up
+  // to the total in its centre (threatTypeBreakdown).
+  const { slices: threatTypeData, total: totalThreats } = React.useMemo(
+    () => threatTypeBreakdown(metrics?.security?.topThreatTypes, metrics?.security?.totalAnomalies),
+    [metrics?.security?.topThreatTypes, metrics?.security?.totalAnomalies],
+  );
 
   const countryData = React.useMemo(() => {
     if (!metrics?.security?.threatsByCountry) return [];
@@ -408,6 +402,7 @@ export default function SecurityCommandCenter() {
               metrics={metrics ?? null}
               threatTypeData={threatTypeData}
               totalThreats={totalThreats}
+              onViewAllThreats={() => setFilters({ tab: "threats", view: "history" })}
             />
           </Tabs.Panel>
 
@@ -448,6 +443,7 @@ export default function SecurityCommandCenter() {
                   countryData={countryData}
                   threatTypeData={threatTypeData}
                   totalThreats={totalThreats}
+                  rangeLabel={TREND_RANGE_OPTIONS.find((o) => o.value === trendRange)?.label ?? 'Last 24 hours'}
                 />
               )}
               {threatView === "archive" && (

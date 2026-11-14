@@ -25,7 +25,7 @@ import {
   IconShieldOff, 
   IconEye,
   IconFingerprint, 
-  IconRefresh, 
+  IconArrowRight, 
   IconClock,
   IconCpu,
   IconBrain,
@@ -69,6 +69,8 @@ interface OverviewTabProps {
   metrics: MetricsSnapshot | null | undefined;
   threatTypeData: DonutChartDataItem[];
   totalThreats: number;
+  /** Opens the full threat history; the page owns the tab state. */
+  onViewAllThreats?: () => void;
 }
 
 /**
@@ -163,6 +165,7 @@ export function OverviewTab({
   metrics,
   threatTypeData,
   totalThreats,
+  onViewAllThreats,
 }: OverviewTabProps) {
   const [selectedAnomaly, setSelectedAnomaly] = useState<Anomaly | null>(null);
   const [opened, { open, close }] = useDisclosure(false);
@@ -382,7 +385,7 @@ export function OverviewTab({
             </ThemeIcon>
           </Group>
           <Text size="xs" c="dimmed" mt="sm">
-            Threats blocked or challenged since midnight, gateway time.
+            Threats blocked or challenged since 00:00 UTC.
           </Text>
         </Card>
 
@@ -470,9 +473,19 @@ export function OverviewTab({
       </Grid>
 
       <Card withBorder radius="md">
+        {/* Every severity, newest first: it was titled "Critical" and its
+            "View All" button had no action. */}
         <Group justify="space-between" mb="md">
-          <Title order={4}>Recent Critical Events</Title>
-          <Button size="xs" variant="light" leftSection={<IconRefresh size={14} />}>View All</Button>
+          <Title order={4}>Recent Threats</Title>
+          <Button
+            size="xs"
+            variant="light"
+            rightSection={<IconArrowRight size={14} />}
+            onClick={onViewAllThreats}
+            disabled={!onViewAllThreats}
+          >
+            View all
+          </Button>
         </Group>
         <Table.ScrollContainer minWidth={600}>
           <Table verticalSpacing="md" highlightOnHover>
@@ -494,10 +507,10 @@ export function OverviewTab({
                     <Table.Td><Skeleton height={20} radius="sm" /></Table.Td>
                   </Table.Tr>
                 ))
-              ) : metrics.security?.recentAnomalies?.length === 0 ? (
+              ) : (metrics.security?.recentAnomalies ?? []).length === 0 ? (
                 <Table.Tr>
                   <Table.Td colSpan={4}>
-                    <Text ta="center" py="xl" c="dimmed">No recent critical events.</Text>
+                    <Text ta="center" py="xl" c="dimmed">No threats recorded.</Text>
                   </Table.Td>
                 </Table.Tr>
               ) : (

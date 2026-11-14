@@ -94,6 +94,12 @@ func (e endpoint) dial(ctx context.Context, deadline time.Time) (net.Conn, func(
 	d := net.Dialer{Timeout: dialTimeout, Deadline: deadline}
 	conn, err := d.DialContext(ctx, e.network, e.address)
 	if err != nil {
+		// A request cancelled while the dial is still in flight is the
+		// client going away, not the scanner failing: say so, as scan does
+		// once connected, or the caller reads it as a scanner fault.
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, nil, ctxErr
+		}
 		return nil, nil, workerFault("connect: %v", err)
 	}
 	if err := conn.SetDeadline(deadline); err != nil {

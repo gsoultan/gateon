@@ -6,6 +6,7 @@ package api
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strconv"
@@ -13,6 +14,8 @@ import (
 
 	"github.com/gsoultan/gateon/internal/security/waf"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 func (s *ApiService) ListWafRules(ctx context.Context, req *gateonv1.ListWafRulesRequest) (*gateonv1.ListWafRulesResponse, error) {
@@ -105,7 +108,7 @@ func (s *ApiService) UpdateWafRule(ctx context.Context, req *gateonv1.UpdateWafR
 	}
 
 	if err := s.WafRules.UpdateRule(ctx, r); err != nil {
-		return &gateonv1.UpdateWafRuleResponse{Success: false}, err
+		return &gateonv1.UpdateWafRuleResponse{Success: false}, ruleWriteError(err)
 	}
 
 	s.logAudit(ctx, "update", "waf_rule", fmt.Sprintf("Updated WAF rule: %s", r.ID))
@@ -119,12 +122,21 @@ func (s *ApiService) DeleteWafRule(ctx context.Context, req *gateonv1.DeleteWafR
 	}
 
 	if err := s.WafRules.DeleteRule(ctx, req.Id); err != nil {
-		return &gateonv1.DeleteWafRuleResponse{Success: false}, err
+		return &gateonv1.DeleteWafRuleResponse{Success: false}, ruleWriteError(err)
 	}
 
 	s.logAudit(ctx, "delete", "waf_rule", fmt.Sprintf("Deleted WAF rule: %s", req.Id))
 
 	return &gateonv1.DeleteWafRuleResponse{Success: true}, nil
+}
+
+// ruleWriteError is a store error as the API answers it: a rule that is not
+// there is NotFound, which REST answers 404 and the dashboard reports as such.
+func ruleWriteError(err error) error {
+	if errors.Is(err, waf.ErrRuleNotFound) {
+		return status.Error(codes.NotFound, "that WAF rule no longer exists; reload the list")
+	}
+	return err
 }
 
 // ruleBodyToRule fills in the stored form of a rule from the request's rule
