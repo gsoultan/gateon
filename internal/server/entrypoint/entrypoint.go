@@ -18,6 +18,7 @@ import (
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware/security/identity"
 	"github.com/gsoultan/gateon/internal/server/readiness"
+	"github.com/gsoultan/gateon/internal/server/sockets"
 	"github.com/gsoultan/gateon/internal/syncutil"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	"github.com/gsoultan/gateon/internal/telemetry/repid"
@@ -398,6 +399,9 @@ func (a *l4ResolverAdapter) ResolveUDP(ep *gateonv1.EntryPoint) l4.UDPProxy {
 
 // Deps holds dependencies needed to run entrypoints.
 type Deps struct {
+	// Sockets holds the listening sockets kept open across a restart (ADR
+	// 0092). Nil binds every listener afresh.
+	Sockets          *sockets.Store
 	Port             string
 	EpStore          config.EntryPointStore
 	BaseHandler      http.Handler

@@ -15,12 +15,11 @@ import (
 // GatewayUnit is the unit the helper restarts.
 const GatewayUnit = "gateon.service"
 
-// The bounds on one systemctl call. Stop is the long one: it waits for the
-// gateway to drain.
+// The bounds on one systemctl call. A restart is the long one: it waits for
+// the gateway to drain before starting it again.
 const (
-	stopTimeout  = 3 * time.Minute
-	startTimeout = time.Minute
-	showTimeout  = 10 * time.Second
+	restartTimeout = 4 * time.Minute
+	showTimeout    = 10 * time.Second
 )
 
 // Systemd controls the gateway through systemctl.
@@ -39,17 +38,12 @@ func (s Systemd) systemctl(ctx context.Context, timeout time.Duration, args ...s
 	return out, nil
 }
 
-// Stop stops the gateway and waits for it to exit.
-func (s Systemd) Stop(ctx context.Context) error {
-	_, err := s.systemctl(ctx, stopTimeout, "stop", s.Unit)
-	return err
-}
-
-// Start starts the gateway. reset-failed first: it clears the restart
-// counter Restarts reads, and a start limit an earlier failure left behind.
-func (s Systemd) Start(ctx context.Context) error {
+// Restart restarts the gateway and waits for the new process to be started.
+// reset-failed first: it clears the restart counter Restarts reads, and a
+// start limit an earlier failure left behind.
+func (s Systemd) Restart(ctx context.Context) error {
 	_, _ = s.systemctl(ctx, showTimeout, "reset-failed", s.Unit)
-	_, err := s.systemctl(ctx, startTimeout, "start", s.Unit)
+	_, err := s.systemctl(ctx, restartTimeout, "restart", s.Unit)
 	return err
 }
 
