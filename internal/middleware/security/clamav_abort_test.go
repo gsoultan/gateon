@@ -4,7 +4,6 @@
 package security
 
 import (
-	"bytes"
 	"io"
 	"net"
 	"net/http"
@@ -65,6 +64,10 @@ func settledGoroutines(target int) int {
 // torn down, and the response channel scanStream's own goroutine was ranging
 // over never closed. Two goroutines per scanned part, for the life of the
 // process, on exactly the path a slow or hostile upload takes.
+//
+// The scanner client is now scanpool's, which starts no goroutine per scan
+// and bounds every read and write with the scan's deadline. The test stays:
+// what it measures is the property, not the library that once broke it.
 func TestScanStreamReleasesGoroutinesOnTimeout(t *testing.T) {
 	addr := silentClamd(t)
 	cfg := FileSecurityConfig{ClamAVAddr: addr, ScanTimeout: 100 * time.Millisecond}
@@ -72,14 +75,14 @@ func TestScanStreamReleasesGoroutinesOnTimeout(t *testing.T) {
 
 	// One scan first, so the listener's own accept goroutine and any lazy
 	// runtime machinery are already up and not counted as growth.
-	if _, err := scanStream(req, cfg, bytes.NewReader([]byte("seed"))); err == nil {
+	if _, err := scanStream(req, cfg, []byte("seed")); err == nil {
 		t.Fatal("expected the silent collector to time the scan out")
 	}
 	baseline := settledGoroutines(0)
 
 	const scans = 20
 	for range scans {
-		if _, err := scanStream(req, cfg, bytes.NewReader([]byte("payload"))); err == nil {
+		if _, err := scanStream(req, cfg, []byte("payload")); err == nil {
 			t.Fatal("expected the silent collector to time the scan out")
 		}
 	}

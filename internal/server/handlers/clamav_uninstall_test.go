@@ -10,6 +10,9 @@ import (
 	"strings"
 	"testing"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
@@ -112,5 +115,40 @@ func TestUninstallClamavRejectsMalformedBody(t *testing.T) {
 	}
 	if fake.called {
 		t.Error("UninstallClamav was called with an undecodable body")
+	}
+}
+
+// refusingClamavAPI answers both host operations the way ApiService answers a
+// caller who is not an administrator.
+type refusingClamavAPI struct{ GlobalAndAuthAPI }
+
+func (refusingClamavAPI) InstallClamav(context.Context, *gateonv1.InstallClamavRequest) (*gateonv1.InstallClamavResponse, error) {
+	return nil, status.Error(codes.PermissionDenied, "only an administrator may install or remove ClamAV")
+}
+
+func (refusingClamavAPI) UninstallClamav(context.Context, *gateonv1.UninstallClamavRequest) (*gateonv1.UninstallClamavResponse, error) {
+	return nil, status.Error(codes.PermissionDenied, "only an administrator may install or remove ClamAV")
+}
+
+// TestAClamAVRefusalIsForbiddenNotAServerError: REST is the transport the
+// dashboard uses for both operations. A refusal for permission answered 500
+// with the error's text, which reads as the gateway failing rather than the
+// caller lacking the right.
+func TestAClamAVRefusalIsForbiddenNotAServerError(t *testing.T) {
+	for _, path := range []string{"/v1/security/clamav/install", "/v1/security/clamav/uninstall"} {
+		mux := http.NewServeMux()
+		registerGlobalHandlers(mux, refusingClamavAPI{}, &Deps{})
+		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{}`))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+
+		mux.ServeHTTP(rec, authWaived(req))
+
+		if rec.Code != http.StatusForbidden {
+			t.Errorf("%s: status = %d, want 403: %s", path, rec.Code, rec.Body.String())
+		}
+		if !strings.Contains(rec.Body.String(), "only an administrator") {
+			t.Errorf("%s: the refusal does not say why: %s", path, rec.Body.String())
+		}
 	}
 }

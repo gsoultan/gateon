@@ -24,6 +24,7 @@ import (
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware/security"
 	wafmw "github.com/gsoultan/gateon/internal/middleware/security/waf"
+	hostsecurity "github.com/gsoultan/gateon/internal/security"
 	"github.com/gsoultan/gateon/internal/security/reputation"
 	"github.com/gsoultan/gateon/internal/selfupdate"
 	"github.com/gsoultan/gateon/internal/selfupdate/upgrade"
@@ -382,6 +383,10 @@ func validateGlobalSave(stored, proposed *gateonv1.GlobalConfig) error {
 	if err := selfupdate.ValidateSource(proposed.GetUpdate().GetSourceUrl()); err != nil {
 		return status.Error(codes.InvalidArgument, err.Error())
 	}
+	// The image is an argument to `docker run` on the gateway's own host.
+	if err := hostsecurity.ValidateClamAVImage(proposed.GetWaf().GetClamav().GetDockerImage()); err != nil {
+		return status.Error(codes.InvalidArgument, err.Error())
+	}
 	// A maintenance window that cannot be read would be skipped in favour of
 	// the default one, and the gateway would restart at an hour nobody chose
 	// (ADR 0087).
@@ -407,17 +412,41 @@ func validateGlobalSave(stored, proposed *gateonv1.GlobalConfig) error {
 // decides who can reach or sign in to the management plane, whom the gateway
 // trusts, or what record is kept of either. See ADR 0040.
 func (s *ApiService) authorizeGlobalSave(ctx context.Context, stored, proposed *gateonv1.GlobalConfig) error {
+	change := globalbound.Change{Stored: stored, View: config.WithSecretReferences(s.Globals, stored), Proposed: proposed}
+	if err := globalbound.Authorize(s.boundaryCaller(ctx, stored), change); err != nil {
+		return status.Error(codes.PermissionDenied, err.Error())
+	}
+	return nil
+}
+
+// boundaryCaller is the caller as the administrator-only rule sees them,
+// under the configuration in force.
+func (s *ApiService) boundaryCaller(ctx context.Context, stored *gateonv1.GlobalConfig) globalbound.Caller {
 	claims, present := callerClaims(ctx)
-	caller := globalbound.Caller{
+	return globalbound.Caller{
 		Claims:        claims,
 		ClaimsPresent: present,
 		// The condition the management plane authenticates on (needsAuth in
 		// internal/server): with it false the plane is open by configuration.
 		AuthEnforced: stored.GetAuth().GetEnabled() && auth.Available(s.Auth),
 	}
-	change := globalbound.Change{Stored: stored, View: config.WithSecretReferences(s.Globals, stored), Proposed: proposed}
-	if err := globalbound.Authorize(caller, change); err != nil {
-		return status.Error(codes.PermissionDenied, err.Error())
+}
+
+// errHostChangeRequiresAdmin refuses an install or removal of software on the
+// gateway's own host by anyone but an administrator.
+var errHostChangeRequiresAdmin = status.Error(codes.PermissionDenied,
+	"only an administrator may install or remove ClamAV: it runs software on the gateway's own host")
+
+// requireHostAdmin refuses a caller the administrator-only rule restricts.
+// InstallClamav and UninstallClamav run docker or a package manager on the
+// host; global:write, which the operator role holds, was all they asked for.
+func (s *ApiService) requireHostAdmin(ctx context.Context) error {
+	var stored *gateonv1.GlobalConfig
+	if s.Globals != nil {
+		stored = s.Globals.Get(ctx)
+	}
+	if s.boundaryCaller(ctx, stored).Restricted() {
+		return errHostChangeRequiresAdmin
 	}
 	return nil
 }
