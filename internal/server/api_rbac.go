@@ -94,6 +94,8 @@ var (
 var apiPermissions = map[string]apiPermission{
 	// Served before authentication by the base handler.
 	gateonv1connect.ApiServiceLoginProcedure:           publicProc,
+	gateonv1connect.ApiServiceEnroll2FAProcedure:       publicProc,
+	gateonv1connect.ApiServiceVerify2FAProcedure:       publicProc,
 	gateonv1connect.ApiServiceSetupProcedure:           publicProc,
 	gateonv1connect.ApiServiceIsSetupRequiredProcedure: publicProc,
 

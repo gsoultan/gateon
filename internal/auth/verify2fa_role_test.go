@@ -5,10 +5,8 @@ package auth
 
 import (
 	"testing"
-	"time"
 
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
-	"github.com/pquerna/otp/totp"
 )
 
 // A session issued by a 2FA sign-in must carry the account's role, exactly as a
@@ -28,7 +26,7 @@ func TestVerify2FASessionCarriesTheAccountRole(t *testing.T) {
 			secret, codes := enroll(t, m, u.Id, "correct-horse-battery")
 
 			// The next TOTP window, so the code differs from the one enroll used.
-			code, err := totp.GenerateCode(secret, time.Now().Add(30*time.Second))
+			code, err := freshCode(t, m, secret)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -76,7 +74,7 @@ func TestVerify2FARefusesADisabledAccount(t *testing.T) {
 		t.Fatalf("SetUserDisabled: %v", err)
 	}
 
-	code, err := totp.GenerateCode(secret, time.Now().Add(30*time.Second))
+	code, err := freshCode(t, m, secret)
 	if err != nil {
 		t.Fatal(err)
 	}

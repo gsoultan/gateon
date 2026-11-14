@@ -61,6 +61,13 @@ service ApiService {
   rpc ListBuiltinCertificateAuthorities(ListBuiltinCertificateAuthoritiesRequest) returns (ListBuiltinCertificateAuthoritiesResponse);
 
   rpc Login(LoginRequest) returns (LoginResponse);
+  // Enroll2FA and Verify2FA are the second step of a sign-in, as
+  // POST /v1/auth/2fa/enroll and POST /v1/auth/2fa/verify are over REST. Every
+  // account has a second factor (ADR 0088), so Login never answers a session:
+  // without these a gRPC client could not finish signing in at all. Both are
+  // served without a session and spend from the sign-in budget.
+  rpc Enroll2FA(Enroll2FARequest) returns (Enroll2FAResponse);
+  rpc Verify2FA(Verify2FARequest) returns (Verify2FAResponse);
   rpc IsSetupRequired(IsSetupRequiredRequest) returns (IsSetupRequiredResponse);
   rpc Setup(SetupRequest) returns (SetupResponse);
   rpc ChangePassword(ChangePasswordRequest) returns (ChangePasswordResponse);

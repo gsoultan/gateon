@@ -407,6 +407,40 @@ func lookPath(bin string) bool {
 	return err == nil
 }
 
+// maxClamAVImageLen is the longest image reference accepted: a registry host,
+// a repository path and a digest fit in it with room to spare.
+const maxClamAVImageLen = 255
+
+// ValidateClamAVImage refuses a docker_image that is not an image reference.
+// "" is valid: it means the default image.
+//
+// The value is an argument to `docker pull` and `docker run`. No shell is
+// involved, but docker reads an argument that starts with "-" as one of its
+// own flags, so "--privileged" in this field was a flag and not an image.
+// Anything outside the characters a reference is made of is refused with it.
+func ValidateClamAVImage(image string) error {
+	if image == "" {
+		return nil
+	}
+	if len(image) > maxClamAVImageLen {
+		return fmt.Errorf("waf.clamav.docker_image is longer than %d characters", maxClamAVImageLen)
+	}
+	if !isImageRefStart(image[0]) {
+		return errors.New("waf.clamav.docker_image must start with a letter or a digit: it names an image, " +
+			"for example clamav/clamav:1.4")
+	}
+	for i := 1; i < len(image); i++ {
+		if !isImageRefStart(image[i]) && !strings.ContainsRune("._-/:@", rune(image[i])) {
+			return fmt.Errorf("waf.clamav.docker_image may hold only letters, digits and . _ - / : @ (found %q)", image[i])
+		}
+	}
+	return nil
+}
+
+func isImageRefStart(c byte) bool {
+	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9'
+}
+
 func (m *ClamAVManager) ensureDocker(ctx context.Context) error {
 	// Check if docker is installed
 	if _, err := exec.LookPath("docker"); err != nil {
@@ -432,6 +466,11 @@ func (m *ClamAVManager) ensureDocker(ctx context.Context) error {
 	}
 	if image == "" {
 		image = "clamav/clamav:latest"
+	}
+	// Checked again here: a value stored before the save rule existed never
+	// passed it.
+	if err := ValidateClamAVImage(image); err != nil {
+		return err
 	}
 
 	args := []string{"run", "-d", "--name", "gateon-clamav", "-p", "3310:3310"}
@@ -614,9 +653,13 @@ func (m *ClamAVManager) UpdateApplication(ctx context.Context) error {
 		if image == "" {
 			image = "clamav/clamav:latest"
 		}
+		if err := ValidateClamAVImage(image); err != nil {
+			return err
+		}
 		// #nosec G204 -- no shell (exec.CommandContext, not sh -c), and image is
-		// the operator-configured DockerImage defaulting to clamav/clamav:latest.
-		// An operator who can set the ClamAV image can already run containers.
+		// the DockerImage only an administrator can set (globalbound classes it
+		// Boundary), checked by ValidateClamAVImage to be an image reference
+		// and not a docker flag.
 		if out, err := exec.CommandContext(ctx, "docker", "pull", image).CombinedOutput(); err != nil {
 			return m.formatExecError("docker pull", err, out)
 		}

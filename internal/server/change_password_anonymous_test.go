@@ -22,6 +22,7 @@ import (
 
 	"github.com/gsoultan/gateon/internal/api"
 	"github.com/gsoultan/gateon/internal/auth"
+	"github.com/gsoultan/gateon/internal/auth/authtest"
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware"
@@ -104,10 +105,10 @@ func postJSON(t *testing.T, client *http.Client, url, body string) (int, string)
 // the anonymous caller's password does not sign in and the admin's does.
 func requireAdminPasswordUnchanged(t *testing.T, mgr *auth.Manager, transport string) {
 	t.Helper()
-	if _, _, err := mgr.Authenticate("admin", anonChosen, "198.51.100.1"); err == nil {
+	if _, err := authtest.PasswordStep(mgr, "admin", anonChosen, "198.51.100.1"); err == nil {
 		t.Errorf("%s: an anonymous request set the administrator's password", transport)
 	}
-	if _, _, err := mgr.Authenticate("admin", anonAdminPassword, "198.51.100.2"); err != nil {
+	if _, err := authtest.PasswordStep(mgr, "admin", anonAdminPassword, "198.51.100.2"); err != nil {
 		t.Errorf("%s: the administrator's own password no longer works: %v", transport, err)
 	}
 }

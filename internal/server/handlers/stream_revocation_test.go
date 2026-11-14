@@ -17,6 +17,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/gsoultan/gateon/internal/auth"
+	"github.com/gsoultan/gateon/internal/auth/authtest"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
@@ -55,7 +56,7 @@ func newStreamFixture(t *testing.T) *streamFixture {
 	if err := mgr.UpsertUser(&gateonv1.User{Username: "ops", Password: "correct-horse", Role: auth.RoleAdmin}); err != nil {
 		t.Fatal(err)
 	}
-	token, user, err := mgr.Authenticate("ops", "correct-horse", "127.0.0.1")
+	token, user, err := authtest.TrySignIn(mgr, "ops", "correct-horse", "127.0.0.1")
 	if err != nil {
 		t.Fatalf("sign in: %v", err)
 	}

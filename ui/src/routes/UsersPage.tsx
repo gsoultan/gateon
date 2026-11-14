@@ -57,6 +57,7 @@ import {
   resetConfirmation,
   resetRefusalMessage,
   twoFactorAction,
+  twoFactorActionable,
   twoFactorActionLabel,
 } from "../components/twoFactorReset";
 import { api } from "../services/client";
@@ -191,12 +192,6 @@ export default function UsersPage({ embedded = false }: { embedded?: boolean } =
         // administrator never sees a secret: the account enrols again itself.
         setPendingReset(user);
         return;
-      case "require":
-      case "cancel-requirement":
-        // Mandate 2FA (set/clear the pending requirement); the user enrols on
-        // their next login.
-        putUser(user, { twoFactorPending: !user.twoFactorPending });
-        return;
       default:
         return;
     }
@@ -296,11 +291,11 @@ export default function UsersPage({ embedded = false }: { embedded?: boolean } =
             <Badge size="xs" color="green" variant="light">
               2FA
             </Badge>
-          ) : user.twoFactorPending ? (
+          ) : (
             <Badge size="xs" color="orange" variant="light">
-              2FA pending
+              2FA at next sign-in
             </Badge>
-          ) : null}
+          )}
         </Group>
       </Table.Td>
       <Table.Td>
@@ -336,13 +331,11 @@ export default function UsersPage({ embedded = false }: { embedded?: boolean } =
               color={
                 user.twoFactorEnabled
                   ? "green"
-                  : user.twoFactorPending
-                    ? "orange"
-                    : "gray"
+                  : "orange"
               }
               onClick={() => handle2FA(user)}
               aria-label={`Two-factor authentication for ${user.username}`}
-              disabled={twoFactorAction(user, currentUser?.id, isAdmin) === "none"}
+              disabled={!twoFactorActionable(twoFactorAction(user, currentUser?.id, isAdmin))}
             >
               <IconShieldLock size={16} />
             </ActionIcon>
@@ -454,9 +447,9 @@ export default function UsersPage({ embedded = false }: { embedded?: boolean } =
                          {user.disabled && <Badge size="xs" color="red" variant="light">Disabled</Badge>}
                          {user.twoFactorEnabled ? (
                             <Badge size="xs" color="green" variant="light">2FA</Badge>
-                          ) : user.twoFactorPending ? (
-                            <Badge size="xs" color="orange" variant="light">2FA pending</Badge>
-                          ) : null}
+                          ) : (
+                            <Badge size="xs" color="orange" variant="light">2FA at next sign-in</Badge>
+                          )}
                       </Group>
                     </Group>
                     <Divider variant="dashed" />
@@ -474,10 +467,10 @@ export default function UsersPage({ embedded = false }: { embedded?: boolean } =
                       </Tooltip>
                       <ActionIcon
                         variant="light"
-                        color={user.twoFactorEnabled ? "green" : user.twoFactorPending ? "orange" : "gray"}
+                        color={user.twoFactorEnabled ? "green" : "orange"}
                         onClick={() => handle2FA(user)}
               aria-label={`Two-factor authentication for ${user.username}`}
-                        disabled={twoFactorAction(user, currentUser?.id, isAdmin) === "none"}
+                        disabled={!twoFactorActionable(twoFactorAction(user, currentUser?.id, isAdmin))}
                       >
                         <IconShieldLock size={16} />
                       </ActionIcon>

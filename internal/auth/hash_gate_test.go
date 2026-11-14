@@ -51,7 +51,7 @@ func signInStorm(m *Manager, callers int) (busy, refused int64) {
 	for i := range callers {
 		wg.Go(func() {
 			<-start
-			_, _, err := m.Authenticate("nobody-"+strconv.Itoa(i), "a-guess-at-it",
+			_, _, err := passwordStep(m, "nobody-"+strconv.Itoa(i), "a-guess-at-it",
 				"203.0."+strconv.Itoa(i/250)+"."+strconv.Itoa(i%250))
 			switch {
 			case errors.Is(err, ErrBusy):
@@ -117,23 +117,23 @@ func fillGate(t *testing.T, m *Manager) {
 func TestTheOwnerSignsInFromAKnownSourceWhileTheGateIsFull(t *testing.T) {
 	m := newTestManager(t)
 	createUser(t, m, "admin", ownerPass)
-	if _, _, err := m.Authenticate("admin", ownerPass, ownerAddr); err != nil {
+	if _, _, err := passwordStep(m, "admin", ownerPass, ownerAddr); err != nil {
 		t.Fatalf("the owner's first sign-in: %v", err)
 	}
 	w := watchHashes(t)
 	fillGate(t, m)
 
-	if _, _, err := m.Authenticate("admin", ownerPass, attackerAddr); !errors.Is(err, ErrBusy) {
+	if _, _, err := passwordStep(m, "admin", ownerPass, attackerAddr); !errors.Is(err, ErrBusy) {
 		t.Errorf("the right password from a source the account never used, gate full: err = %v, want ErrBusy", err)
 	}
-	if _, _, err := m.Authenticate("nobody", "a-guess-at-it", ownerAddr); !errors.Is(err, ErrBusy) {
+	if _, _, err := passwordStep(m, "nobody", "a-guess-at-it", ownerAddr); !errors.Is(err, ErrBusy) {
 		t.Errorf("an unknown name, gate full: err = %v, want ErrBusy", err)
 	}
 	if n := w.calls.Load(); n != 0 {
 		t.Fatalf("%d hashes ran for attempts refused as busy", n)
 	}
-	token, _, err := m.Authenticate("admin", ownerPass, ownerAddr)
-	if err != nil || token == "" {
-		t.Fatalf("the owner from their known source, gate full: err = %v, want a session", err)
+	_, _, err := passwordStep(m, "admin", ownerPass, ownerAddr)
+	if err != nil {
+		t.Fatalf("the owner from their known source, gate full: err = %v, want the password admitted", err)
 	}
 }
