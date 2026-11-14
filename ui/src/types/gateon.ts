@@ -28,6 +28,29 @@ export type ListWafRulesRequest = {
   category?: string;
 };
 
+/** A rule compiled into the gateway. Read-only: no endpoint changes one. */
+export type BuiltinWafRule = {
+  id: number;
+  name: string;
+  category: string;
+  paranoiaLevel: number;
+  severity: string;
+  confidence: string;
+  phase: string;
+  tags?: string[];
+  /** "block", or "log" for a rule that records a match and lets the request through. */
+  action: string;
+  /** "gwaf" when the detection is a gwaf rule loaded under this ID, else "gateon". */
+  source: string;
+  sourceRuleId?: number;
+};
+
+export type ListBuiltinWafRulesResponse = {
+  rules?: BuiltinWafRule[];
+  total?: number;
+  categories?: string[];
+};
+
 export type CreateWafRuleRequest = {
   rule: Partial<WafRule>;
 };

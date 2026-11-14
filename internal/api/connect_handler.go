@@ -352,3 +352,15 @@ func (h *ConnectHandler) ListBuiltinCertificateAuthorities(ctx context.Context, 
 	}
 	return connect.NewResponse(res), nil
 }
+
+// ListBuiltinWafRules is forwarded here as well as served over REST. The
+// embedded UnimplementedApiServiceHandler answers any RPC this type does not
+// define with "unimplemented", so a method that exists on ApiService and not
+// here is one transport that silently does not have the feature.
+func (h *ConnectHandler) ListBuiltinWafRules(ctx context.Context, req *connect.Request[gateonv1.ListBuiltinWafRulesRequest]) (*connect.Response[gateonv1.ListBuiltinWafRulesResponse], error) {
+	res, err := h.s.ListBuiltinWafRules(ctx, req.Msg)
+	if err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(res), nil
+}

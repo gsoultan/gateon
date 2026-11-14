@@ -77,6 +77,26 @@ func registerWafRuleHandlers(mux *http.ServeMux, apiService *api.ApiService) {
 		WriteProtoResponse(w, http.StatusOK, res)
 	})
 
+	// The rules compiled into the gateway, which the list above cannot show
+	// because they are not rows. There is no write beside it.
+	mux.HandleFunc("GET /v1/waf/rules/builtin", func(w http.ResponseWriter, r *http.Request) {
+		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceWafRules) {
+			return
+		}
+		page, pageSize, search := ParsePagination(r)
+		res, err := apiService.ListBuiltinWafRules(r.Context(), &gateonv1.ListBuiltinWafRulesRequest{
+			Limit:    pageSize,
+			Offset:   page * pageSize,
+			Search:   search,
+			Category: r.URL.Query().Get("category"),
+		})
+		if err != nil {
+			WriteHTTPError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		WriteProtoResponse(w, http.StatusOK, res)
+	})
+
 	mux.HandleFunc("POST /v1/waf/rules", func(w http.ResponseWriter, r *http.Request) {
 		if !RequirePermission(w, r, auth.ActionWrite, auth.ResourceWafRules) {
 			return

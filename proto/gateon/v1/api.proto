@@ -109,6 +109,10 @@ service ApiService {
   rpc CreateWafRule(CreateWafRuleRequest) returns (CreateWafRuleResponse);
   rpc UpdateWafRule(UpdateWafRuleRequest) returns (UpdateWafRuleResponse);
   rpc DeleteWafRule(DeleteWafRuleRequest) returns (DeleteWafRuleResponse);
+  // ListBuiltinWafRules describes the rules compiled into the gateway, which
+  // ListWafRules does not return because they are not rows (ADR 0092). Read-only:
+  // there is no RPC that changes one.
+  rpc ListBuiltinWafRules(ListBuiltinWafRulesRequest) returns (ListBuiltinWafRulesResponse);
 
   // Scrape credentials (ADR 0050). Administrators only.
   rpc ListApiTokens(ListApiTokensRequest) returns (ListApiTokensResponse);

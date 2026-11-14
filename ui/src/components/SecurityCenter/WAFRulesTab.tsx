@@ -21,7 +21,7 @@ import {
   Tooltip,
   Title,
   Pagination,
-  Box,
+  SegmentedControl,
 } from '@mantine/core';
 import { IconEdit, IconTrash, IconPlus, IconShieldCheck, IconInfoCircle, IconSearch } from '@tabler/icons-react';
 import { useWafRules } from '../../hooks/useWafRules';
@@ -29,11 +29,13 @@ import type {WafRule} from '../../types/gateon';
 import { notifications } from '@mantine/notifications';
 import { usePermissions } from '../../hooks/usePermissions';
 import { RuleDefinitionEditor } from './RuleDefinitionEditor';
+import { BuiltinWAFRules } from './BuiltinWAFRules';
 
 export function WAFRulesTab() {
   const { canWrite } = usePermissions();
   const pageSize = 10;
   const [localSearch, setLocalSearch] = useState('');
+  const [view, setView] = useState<'custom' | 'builtin'>('custom');
 
   const { rules, total, params, setParams, isLoading, createRule, updateRule, deleteRule } = useWafRules({
     pageSize: pageSize,
@@ -153,8 +155,25 @@ export function WAFRulesTab() {
       <Group justify="space-between">
         <Stack gap={0}>
           <Title order={4}>WAF Security Rules</Title>
-          <Text size="sm" c="dimmed">Manage custom and adaptive Coraza SecLang rules in the database.</Text>
+          <Text size="sm" c="dimmed">
+            Rules you write run beside the rules built into the gateway.
+          </Text>
         </Stack>
+        <SegmentedControl
+          aria-label="Which rules to show"
+          value={view}
+          onChange={(value) => setView(value === 'builtin' ? 'builtin' : 'custom')}
+          data={[
+            { value: 'custom', label: 'Your rules' },
+            { value: 'builtin', label: 'Built-in' },
+          ]}
+        />
+      </Group>
+
+      {view === 'builtin' ? <BuiltinWAFRules /> : (
+      <>
+      <Group justify="space-between">
+        <Text size="sm" c="dimmed">Stored in the database. You can add, edit and delete these.</Text>
         <Group>
           <TextInput
             placeholder="Search rules..."
@@ -231,7 +250,7 @@ export function WAFRulesTab() {
                 <Table.Td colSpan={6}>
                   <Stack align="center" py="xl" gap="xs">
                     <IconShieldCheck size={48} color="var(--mantine-color-dimmed)" stroke={1} />
-                    <Text c="dimmed">{localSearch ? `No rules matching "${localSearch}"` : "No rules found in database."}</Text>
+                    <Text c="dimmed">{localSearch ? `No rules matching "${localSearch}"` : "You have not written any rules. The built-in rules are running."}</Text>
                   </Stack>
                 </Table.Td>
               </Table.Tr>
@@ -244,6 +263,8 @@ export function WAFRulesTab() {
         <Group justify="center">
           <Pagination total={totalPages} value={activePage} onChange={handlePageChange} />
         </Group>
+      )}
+      </>
       )}
 
       <Modal
