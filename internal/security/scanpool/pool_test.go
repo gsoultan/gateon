@@ -303,3 +303,27 @@ func TestProbeFindsAScannerThatScansCannot(t *testing.T) {
 		t.Error("a scanner that answers again was not brought back")
 	}
 }
+
+// A request that is already gone when its scan starts must say so, not blame
+// the scanner. The dial is where that cancellation lands, and it used to be
+// reported as a connect fault with the cause flattened to text, so the caller
+// saw "scanner fault" for a client that had simply left. The test above hit
+// this whenever its cancel fell between clamd accepting the connection and
+// the client's dial returning; starting cancelled reaches the same path
+// every time.
+func TestARequestCancelledBeforeItsDialIsNotAScannerFault(t *testing.T) {
+	s := newFakeClamd(t, readsAndNeverAnswers)
+	p := mustPool(t, s)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	_, err := p.Scan(ctx, []byte("f"), time.Hour)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
+	}
+	if errors.Is(err, errWorkerFault) {
+		t.Errorf("err = %v: a cancelled dial was reported as the scanner's fault", err)
+	}
+	if !healthOf(t, p, s) {
+		t.Error("a cancelled request was held against the scanner")
+	}
+}
