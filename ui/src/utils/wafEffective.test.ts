@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 import { describe, expect, test } from "bun:test";
-import { routeSwitchOn, type EffectiveWaf } from "../utils/wafEffective";
+import { routeSwitchOn, wafsRunningRule, type EffectiveWaf } from "../utils/wafEffective";
 
 const enforcingGlobal: EffectiveWaf = {
   mode: "enforcing",
@@ -41,5 +41,32 @@ describe("routeSwitchOn", () => {
   test("values are parsed as the gateway parses them", () => {
     expect(routeSwitchOn({ sqli: "yes" }, "sqli", undefined).on).toBe(true);
     expect(routeSwitchOn({ malware_detection: "yes" }, "malware_detection", undefined).on).toBe(false);
+  });
+});
+
+// A rule of paranoia level 2 on a gateway whose WAFs all run at level 1 is
+// compiled into none of them, and the Rules tab said "Enabled".
+describe("wafsRunningRule", () => {
+  const waf = (paranoiaLevel: number, mode: "enforcing" | "audit_only" | "off" = "enforcing") => ({
+    mode,
+    paranoiaLevel,
+    categories: {},
+  });
+
+  test("a rule above every WAF's paranoia level runs nowhere", () => {
+    const view = { global: waf(1), routeWafs: [{ id: "r", name: "Route WAF", effective: waf(1) }] };
+    expect(wafsRunningRule(view, 2)).toEqual([]);
+  });
+
+  test("a rule runs in each WAF whose level reaches it, and in none that is off", () => {
+    const view = {
+      global: waf(3, "off"),
+      routeWafs: [
+        { id: "a", name: "Strict", effective: waf(3) },
+        { id: "b", name: "Lax", effective: waf(1) },
+      ],
+    };
+    expect(wafsRunningRule(view, 2)).toEqual(["Strict"]);
+    expect(wafsRunningRule(view, 1)).toEqual(["Strict", "Lax"]);
   });
 });

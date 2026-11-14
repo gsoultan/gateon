@@ -39,16 +39,26 @@ interface AnalyticsTabProps {
   countryData: CountryData[];
   threatTypeData: DonutChartDataItem[];
   totalThreats: number;
+  /** The trend range chosen above the tab, as its option reads ("Last 7 days"). */
+  rangeLabel: string;
 }
 
-export function AnalyticsTab({ metrics, trendData, countryData, threatTypeData, totalThreats }: AnalyticsTabProps) {
+/**
+ * What each card counts. Only the trend follows the range picker: the
+ * breakdowns are every threat the store retains, and the heaviest hitters are
+ * an in-memory count since 00:00 UTC that a restart clears. The cards gave no
+ * window at all, so one page showed three different periods as if one.
+ */
+const RETAINED = 'Every retained threat; the range above does not apply.';
+
+export function AnalyticsTab({ metrics, trendData, countryData, threatTypeData, totalThreats, rangeLabel }: AnalyticsTabProps) {
   return (
     <Stack gap="lg">
       <Card withBorder radius="md">
         <Group justify="space-between" mb="md">
           <Stack gap={0}>
-            <Title order={4}>Attack Trends (Last 24 Hours)</Title>
-            <Text size="xs" c="dimmed">Time-series analysis of intercepted threats</Text>
+            <Title order={4}>Attack Trends ({rangeLabel})</Title>
+            <Text size="xs" c="dimmed">Threats recorded per hour, or per day for longer ranges, within what the store retains.</Text>
           </Stack>
           <ThemeIcon variant="light" color="blue">
             <IconActivity size={18} />
@@ -80,7 +90,8 @@ export function AnalyticsTab({ metrics, trendData, countryData, threatTypeData, 
       <Grid>
         <Grid.Col span={{ base: 12, lg: 6 }}>
           <Card withBorder radius="md">
-            <Title order={4} mb="md">Geographic Threat Distribution</Title>
+            <Title order={4}>Geographic Threat Distribution</Title>
+            <Text size="xs" c="dimmed" mb="md">{RETAINED}</Text>
             <Box h={300} w="100%" style={{ minWidth: 0 }}>
               <BarChart
                 h={300}
@@ -98,7 +109,8 @@ export function AnalyticsTab({ metrics, trendData, countryData, threatTypeData, 
         </Grid.Col>
         <Grid.Col span={{ base: 12, lg: 6 }}>
           <Card withBorder radius="md">
-            <Title order={4} mb="md">Threat Classification Analysis</Title>
+            <Title order={4}>Threat Classification Analysis</Title>
+            <Text size="xs" c="dimmed" mb="md">{RETAINED}</Text>
             <SimpleGrid cols={2}>
               <Box h={250} w="100%" style={{ minWidth: 0 }}>
                 <DonutChart
@@ -134,7 +146,8 @@ export function AnalyticsTab({ metrics, trendData, countryData, threatTypeData, 
 
       <SimpleGrid cols={{ base: 1, lg: 2 }}>
         <Card withBorder radius="md">
-          <Title order={4} mb="md">Top Attack Sources</Title>
+          <Title order={4}>Top Attack Sources</Title>
+          <Text size="xs" c="dimmed" mb="md">{RETAINED}</Text>
           <Table.ScrollContainer minWidth={300}>
             <Table>
               <Table.Tbody>
@@ -145,7 +158,7 @@ export function AnalyticsTab({ metrics, trendData, countryData, threatTypeData, 
                       <Table.Td ta="right"><Skeleton height={20} width={40} radius="xl" /></Table.Td>
                     </Table.Tr>
                   ))
-                ) : metrics.security?.topThreatSources?.length === 0 ? (
+                ) : (metrics.security?.topThreatSources ?? []).length === 0 ? (
                   <Table.Tr>
                     <Table.Td colSpan={2} ta="center" py="xl">
                       <Text size="sm" c="dimmed">No attack sources detected.</Text>
@@ -220,7 +233,8 @@ export function AnalyticsTab({ metrics, trendData, countryData, threatTypeData, 
         </Card>
 
         <Card withBorder radius="md">
-          <Title order={4} mb="md">Heaviest Hitters (Subnets)</Title>
+          <Title order={4}>Heaviest Hitters (Subnets)</Title>
+          <Text size="xs" c="dimmed" mb="md">Since 00:00 UTC, counted in memory; a restart starts it again.</Text>
           <Stack gap="sm">
             {!metrics ? (
               Array(2).fill(0).map((_, i) => (
@@ -237,7 +251,7 @@ export function AnalyticsTab({ metrics, trendData, countryData, threatTypeData, 
                   </Group>
                 </Box>
               ))
-            ) : metrics.security?.heavyHitters?.length === 0 ? (
+            ) : (metrics.security?.heavyHitters ?? []).length === 0 ? (
               <Text size="sm" c="dimmed" ta="center" py="xl">No malicious subnets detected.</Text>
             ) : (
               metrics.security?.heavyHitters?.map((h: HeavyHitter) => (
@@ -249,10 +263,12 @@ export function AnalyticsTab({ metrics, trendData, countryData, threatTypeData, 
                       </ThemeIcon>
                       <Stack gap={0}>
                         <Text size="sm" fw={700} ff="monospace">{h.network}</Text>
-                        <Text size="xs" c="dimmed">{h.count} threats ({safeToFixed(h.percentage, 1)}%)</Text>
+                        <Text size="xs" c="dimmed">{h.count} threats</Text>
                       </Stack>
                     </Group>
-                    <Badge color="red" variant="filled">CRITICAL</Badge>
+                    {/* The share of today's threats, not a severity: every row
+                        used to read CRITICAL, which nothing computed. */}
+                    <Badge color="red" variant="light">{safeToFixed(h.percentage, 1)}%</Badge>
                   </Group>
                 </Box>
               ))

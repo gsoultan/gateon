@@ -5,6 +5,7 @@ package waf
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 )
@@ -308,5 +309,23 @@ func TestStore_ListRules(t *testing.T) {
 	}
 	if rules[0].Name != "Rule 12" {
 		t.Errorf("expected rule Name 'Rule 12', got %q", rules[0].Name)
+	}
+}
+
+// TestStore_WritesToAMissingRuleSaySo: an update of a rule that is not there
+// matched no row and returned nil, so PUT /v1/waf/rules answered success for a
+// rule deleted in another tab -- the operator was told the rule was saved and
+// nothing enforced it. A delete of one said it had deleted it.
+func TestStore_WritesToAMissingRuleSaySo(t *testing.T) {
+	_ = InitStore("sqlite::memory:")
+	store := GetStore()
+	ctx := context.Background()
+
+	ghost := &Rule{ID: "no-such-rule", Name: "ghost", Enabled: true, ParanoiaLevel: 1, Category: "custom"}
+	if err := store.UpdateRule(ctx, ghost); !errors.Is(err, ErrRuleNotFound) {
+		t.Errorf("UpdateRule of a missing rule: got %v, want ErrRuleNotFound", err)
+	}
+	if err := store.DeleteRule(ctx, ghost.ID); !errors.Is(err, ErrRuleNotFound) {
+		t.Errorf("DeleteRule of a missing rule: got %v, want ErrRuleNotFound", err)
 	}
 }
