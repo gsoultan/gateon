@@ -29,13 +29,13 @@ func TestAStrangerCannotLockTheOwnerOut(t *testing.T) {
 	createUser(t, m, "admin", ownerPass)
 
 	for range MaxFailedAttempts {
-		if _, _, err := m.Authenticate("admin", "a-guess", attackerAddr); !errors.Is(err, ErrInvalidCredentials) {
+		if _, _, err := passwordStep(m, "admin", "a-guess", attackerAddr); !errors.Is(err, ErrInvalidCredentials) {
 			t.Fatalf("attacker's guess: err = %v, want ErrInvalidCredentials", err)
 		}
 	}
-	token, _, err := m.Authenticate("admin", ownerPass, ownerAddr)
-	if err != nil || token == "" {
-		t.Fatalf("the owner, from another address, after a stranger's %d wrong passwords: err = %v, want a session",
+	_, _, err := passwordStep(m, "admin", ownerPass, ownerAddr)
+	if err != nil {
+		t.Fatalf("the owner, from another address, after a stranger's %d wrong passwords: err = %v, want the password admitted",
 			MaxFailedAttempts, err)
 	}
 }
@@ -48,10 +48,10 @@ func TestGuessingFromOneSourceIsStillThrottled(t *testing.T) {
 	createUser(t, m, "admin", ownerPass)
 
 	for range MaxFailedAttempts {
-		_, _, _ = m.Authenticate("admin", "a-guess", attackerAddr)
+		_, _, _ = passwordStep(m, "admin", "a-guess", attackerAddr)
 	}
 	for _, addr := range []string{attackerAddr, "203.0.113.200", "203.0.113.200:61000"} {
-		if _, _, err := m.Authenticate("admin", ownerPass, addr); !errors.Is(err, ErrAccountLocked) {
+		if _, _, err := passwordStep(m, "admin", ownerPass, addr); !errors.Is(err, ErrAccountLocked) {
 			t.Errorf("the right password from %s, in the locked /24: err = %v, want ErrAccountLocked", addr, err)
 		}
 	}
@@ -65,21 +65,21 @@ func TestGuessingFromOneSourceIsStillThrottled(t *testing.T) {
 func TestSpreadGuessingLeavesOnlyKnownSourcesIn(t *testing.T) {
 	m := newTestManager(t)
 	createUser(t, m, "admin", ownerPass)
-	if _, _, err := m.Authenticate("admin", ownerPass, ownerAddr); err != nil {
+	if _, _, err := passwordStep(m, "admin", ownerPass, ownerAddr); err != nil {
 		t.Fatalf("the owner's first sign-in: %v", err)
 	}
 
 	for i := range lockout.AccountLimit {
 		addr := "203.0." + strconv.Itoa(i/(lockout.PairLimit-1)) + ".9"
-		if _, _, err := m.Authenticate("admin", "a-guess", addr); !errors.Is(err, ErrInvalidCredentials) {
+		if _, _, err := passwordStep(m, "admin", "a-guess", addr); !errors.Is(err, ErrInvalidCredentials) {
 			t.Fatalf("spread guess %d from %s: err = %v, want ErrInvalidCredentials", i, addr, err)
 		}
 	}
-	if _, _, err := m.Authenticate("admin", ownerPass, "192.0.2.50"); !errors.Is(err, ErrAccountLocked) {
+	if _, _, err := passwordStep(m, "admin", ownerPass, "192.0.2.50"); !errors.Is(err, ErrAccountLocked) {
 		t.Errorf("the right password from a new source under attack: err = %v, want ErrAccountLocked", err)
 	}
-	if token, _, err := m.Authenticate("admin", ownerPass, ownerAddr); err != nil || token == "" {
-		t.Errorf("the owner from a known source under attack: err = %v, want a session", err)
+	if _, _, err := passwordStep(m, "admin", ownerPass, ownerAddr); err != nil {
+		t.Errorf("the owner from a known source under attack: err = %v, want the password admitted", err)
 	}
 }
 
@@ -90,10 +90,10 @@ func TestKnownSourcesAreRememberedAndBounded(t *testing.T) {
 	id := createUser(t, m, "admin", ownerPass)
 	for i := range maxLoginSources + 3 {
 		addr := "198.51." + strconv.Itoa(i) + ".7"
-		if _, _, err := m.Authenticate("admin", ownerPass, addr); err != nil {
+		if _, _, err := passwordStep(m, "admin", ownerPass, addr); err != nil {
 			t.Fatal(err)
 		}
-		if _, _, err := m.Authenticate("admin", ownerPass, addr); err != nil {
+		if _, _, err := passwordStep(m, "admin", ownerPass, addr); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -114,11 +114,11 @@ func TestUnknownUsernameAnswersLikeARealOne(t *testing.T) {
 	createUser(t, m, "admin", ownerPass)
 	for _, name := range []string{"admin", "no-such-user"} {
 		for range MaxFailedAttempts {
-			if _, _, err := m.Authenticate(name, "a-guess", attackerAddr); !errors.Is(err, ErrInvalidCredentials) {
+			if _, _, err := passwordStep(m, name, "a-guess", attackerAddr); !errors.Is(err, ErrInvalidCredentials) {
 				t.Fatalf("%s: err = %v, want ErrInvalidCredentials", name, err)
 			}
 		}
-		if _, _, err := m.Authenticate(name, "a-guess", attackerAddr); !errors.Is(err, ErrAccountLocked) {
+		if _, _, err := passwordStep(m, name, "a-guess", attackerAddr); !errors.Is(err, ErrAccountLocked) {
 			t.Errorf("%s after %d guesses: err = %v, want ErrAccountLocked", name, MaxFailedAttempts, err)
 		}
 	}
@@ -154,7 +154,7 @@ func medianSignIn(t *testing.T, m *Manager, username string) time.Duration {
 	var d []time.Duration
 	for i := range 3 {
 		start := time.Now()
-		if _, _, err := m.Authenticate(username, "a-guess", "192.0.2."+strconv.Itoa(i)); !errors.Is(err, ErrInvalidCredentials) {
+		if _, _, err := passwordStep(m, username, "a-guess", "192.0.2."+strconv.Itoa(i)); !errors.Is(err, ErrInvalidCredentials) {
 			t.Fatalf("%s: err = %v", username, err)
 		}
 		d = append(d, time.Since(start))

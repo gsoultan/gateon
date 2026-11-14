@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/gsoultan/gateon/internal/auth"
+	"github.com/gsoultan/gateon/internal/auth/authtest"
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/db/dbtest"
 	"github.com/gsoultan/gateon/internal/logger"
@@ -97,7 +98,7 @@ func TestSetupStaysClosedWhenTheUserTableCannotBeRead(t *testing.T) {
 	if second.Success {
 		t.Errorf("Setup ran on a gateway that has an administrator because one read of the user table failed")
 	}
-	if _, _, err := mgr.Authenticate("admin", "attacker-password", ""); !errors.Is(err, auth.ErrInvalidCredentials) {
+	if _, err := authtest.PasswordStep(mgr, "admin", "attacker-password", ""); !errors.Is(err, auth.ErrInvalidCredentials) {
 		t.Errorf("the administrator's password was replaced: Authenticate(attacker-password) = %v", err)
 	}
 	if got := globals.Get(ctx).GetAuth().GetPasetoSecret(); got != strings.Repeat("a", 32) {

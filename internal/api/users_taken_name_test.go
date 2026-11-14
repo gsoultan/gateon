@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/gsoultan/gateon/internal/auth"
+	"github.com/gsoultan/gateon/internal/auth/authtest"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -29,7 +30,7 @@ func TestUpdateUserRPCRefusesATakenUsername(t *testing.T) {
 	if status.Code(err) != codes.AlreadyExists {
 		t.Errorf("Add User under a taken username: err = %v, want code AlreadyExists", err)
 	}
-	if _, _, err := svc.Auth.Authenticate("bob", "the-other-accounts-pw", ""); err != nil {
+	if _, err := authtest.PasswordStep(svc.Auth, "bob", "the-other-accounts-pw", ""); err != nil {
 		t.Errorf("bob's password was replaced: %v", err)
 	}
 	users, _, err := svc.Auth.ListUsers(0, 10, "bob")

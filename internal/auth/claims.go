@@ -120,11 +120,42 @@ func ChallengeFrom(err error) string {
 // It is not single-use: the code it is spent with is the secret, and its holder
 // already had the password.
 func (m *Manager) issueChallenge(id string, now time.Time) (string, error) {
+	return m.issueChallengeFor(id, now, stagedFactor{})
+}
+
+// Claims a re-enrolment challenge carries: the replacement factor, until a
+// code from it is confirmed. See stagedFactor.
+const (
+	stagedSecretClaim = "staged_secret"
+	stagedCodesClaim  = "staged_codes"
+)
+
+// stagedFactor is a replacement second factor for an account that already has
+// one, carried in the re-enrolment challenge rather than written to the
+// account: the encrypted TOTP secret and the hashed recovery codes, exactly as
+// they will be stored once a code from the new authenticator is confirmed.
+//
+// Re-enrolment used to store the new secret with two_factor_enabled = false
+// before any code was checked, so abandoning it left the account signing in
+// with the password alone, and its working authenticator and recovery codes
+// dead. Nothing is written now until Verify2FA confirms the new one. The
+// challenge is encrypted under the session key, so the secret is no more
+// readable in it than in the database, and it dies with the challenge.
+type stagedFactor struct {
+	encSecret   string
+	hashedCodes string
+}
+
+func (m *Manager) issueChallengeFor(id string, now time.Time, staged stagedFactor) (string, error) {
 	binding, err := m.currentBinding(id)
 	if err != nil {
 		return "", err
 	}
 	t := paseto.NewToken()
+	if staged.encSecret != "" {
+		t.SetString(stagedSecretClaim, staged.encSecret)
+		t.SetString(stagedCodesClaim, staged.hashedCodes)
+	}
 	t.SetIssuedAt(now)
 	t.SetNotBefore(now)
 	t.SetExpiration(now.Add(ChallengeLifetime))
@@ -138,25 +169,45 @@ func (m *Manager) issueChallenge(id string, now time.Time) (string, error) {
 // issued for account id under the account's present state. Every refusal is
 // ErrInvalidChallenge.
 func (m *Manager) checkChallenge(challenge, id string) error {
+	_, err := m.parseChallenge(challenge, id)
+	return err
+}
+
+// parseChallenge is checkChallenge, and returns the replacement factor the
+// challenge stages: the zero stagedFactor when it stages none.
+func (m *Manager) parseChallenge(challenge, id string) (stagedFactor, error) {
+	parsed, err := m.validChallenge(challenge, id)
+	if err != nil {
+		return stagedFactor{}, err
+	}
+	enc, err := parsed.GetString(stagedSecretClaim)
+	if err != nil {
+		return stagedFactor{}, nil
+	}
+	codes, _ := parsed.GetString(stagedCodesClaim)
+	return stagedFactor{encSecret: enc, hashedCodes: codes}, nil
+}
+
+func (m *Manager) validChallenge(challenge, id string) (*paseto.Token, error) {
 	if challenge == "" || id == "" {
-		return ErrInvalidChallenge
+		return nil, ErrInvalidChallenge
 	}
 	parsed, err := m.parser.ParseV4Local(m.keys.Load().sign, challenge, challengeImplicit)
 	if err != nil {
-		return ErrInvalidChallenge
+		return nil, ErrInvalidChallenge
 	}
 	if purpose, err := parsed.GetString(PurposeClaim); err != nil || purpose != purposeTwoFactorChallenge {
-		return ErrInvalidChallenge
+		return nil, ErrInvalidChallenge
 	}
 	if sub, err := parsed.GetSubject(); err != nil || subtle.ConstantTimeCompare([]byte(sub), []byte(id)) != 1 {
-		return ErrInvalidChallenge
+		return nil, ErrInvalidChallenge
 	}
 	if exp, err := parsed.GetExpiration(); err != nil || !time.Now().Before(exp) {
-		return ErrInvalidChallenge
+		return nil, ErrInvalidChallenge
 	}
 	binding, err := parsed.GetString(SessionBindingClaim)
 	if err != nil || m.checkSessionBinding(id, binding) != nil {
-		return ErrInvalidChallenge
+		return nil, ErrInvalidChallenge
 	}
-	return nil
+	return parsed, nil
 }

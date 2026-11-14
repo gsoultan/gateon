@@ -11,6 +11,23 @@ here after the fact.
 
 ## Unreleased
 
+### Every account signs in with a second factor
+
+Two-factor authentication is required for every account, on the dashboard,
+REST and gRPC, and there is no setting to turn it off (ADR 0088). An account
+without an authenticator sets one up at its next sign-in: password, then the QR
+code and recovery codes, then the first code. Each TOTP code is accepted once
+(migration 72 records the last one used). gRPC clients finish a sign-in with
+the new `ApiService/Enroll2FA` and `ApiService/Verify2FA`.
+
+**Who is affected:** every account without 2FA is signed out once and enrols
+at its next sign-in; accounts that already have 2FA stay signed in.
+Administrators should sign in soon after upgrading. A script or gRPC client
+that signed in with `Login` alone must now complete the second step. A first
+sign-in costs three requests from the per-address sign-in budget instead of
+one, and signing in twice within the same 30 seconds needs the next code.
+Metrics scrape tokens are unaffected.
+
 ### Cloudflare's CA certificates are built in, and a `ca_file` starting `builtin:` names one
 
 Cloudflare's Origin CA roots (RSA and ECC) and its Authenticated Origin Pulls

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 import { test, expect } from '@playwright/test';
+import { finishSignInPage } from './two-factor';
 
 /**
  * A browser's sign-in is answered with the session as the HttpOnly
@@ -31,6 +32,18 @@ test('a browser sign-in gets the session only as the HttpOnly cookie', async ({ 
   const body = await res.json();
   expect(body.token ?? '', 'the sign-in response handed the page its session token').toBe('');
   expect(body.user?.username).toBe('admin');
+
+  // The password step sets no session: every account has a second factor
+  // (ADR 0088). The session comes from the code, as the cookie alone.
+  expect(body.twoFactorRequired || body.twoFactorSetupRequired, 'the password alone ended the sign-in').toBe(true);
+  expect((await page.context().cookies()).find((c) => c.name === 'gateon_session')?.value ?? '').toBe('');
+  const verify = page.waitForResponse(
+    (r) => new URL(r.url()).pathname === '/v1/auth/2fa/verify' && r.request().method() === 'POST',
+  );
+  await finishSignInPage(page, 'admin');
+  const verified = await verify;
+  expect(verified.status()).toBe(200);
+  expect((await verified.json()).token ?? '', 'the second step handed the page its session token').toBe('');
 
   const session = (await page.context().cookies()).find((c) => c.name === 'gateon_session');
   expect(session?.value, 'sign-in set no session cookie').toBeTruthy();

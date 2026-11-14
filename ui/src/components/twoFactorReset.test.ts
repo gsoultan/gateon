@@ -3,7 +3,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { Code, ConnectError } from "@connectrpc/connect";
-import { resetConfirmation, resetRefusalMessage, twoFactorAction, twoFactorActionLabel } from "./twoFactorReset";
+import { resetConfirmation, resetRefusalMessage, twoFactorAction, twoFactorActionable, twoFactorActionLabel } from "./twoFactorReset";
 
 const enrolled = { id: "u-2", twoFactorEnabled: true, twoFactorPending: false };
 
@@ -17,11 +17,16 @@ describe("twoFactorAction", () => {
     expect(twoFactorAction(enrolled, "u-2", true)).toBe("self");
   });
 
-  test("an account that has not enrolled is required, or its requirement cancelled", () => {
-    expect(twoFactorAction({ ...enrolled, twoFactorEnabled: false }, "u-1", true)).toBe("require");
-    expect(twoFactorAction({ ...enrolled, twoFactorEnabled: false, twoFactorPending: true }, "u-1", true)).toBe(
-      "cancel-requirement",
-    );
+  // Every account enrols at its next sign-in (ADR 0088). The control used to
+  // offer to require it, or to cancel the requirement -- a flag the sign-in no
+  // longer reads -- so it offers nothing for an account that has not enrolled.
+  test("an account that has not enrolled is waiting to, and nothing here changes that", () => {
+    for (const pending of [false, true]) {
+      const action = twoFactorAction({ ...enrolled, twoFactorEnabled: false, twoFactorPending: pending }, "u-1", true);
+      expect(action).toBe("awaiting-enrolment");
+      expect(twoFactorActionable(action)).toBe(false);
+    }
+    expect(twoFactorActionLabel("awaiting-enrolment")).toContain("next sign-in");
   });
 
   test("anyone else can do nothing to another account", () => {

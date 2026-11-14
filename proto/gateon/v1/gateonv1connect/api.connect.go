@@ -116,6 +116,10 @@ const (
 	ApiServiceListBuiltinCertificateAuthoritiesProcedure = "/gateon.v1.ApiService/ListBuiltinCertificateAuthorities"
 	// ApiServiceLoginProcedure is the fully-qualified name of the ApiService's Login RPC.
 	ApiServiceLoginProcedure = "/gateon.v1.ApiService/Login"
+	// ApiServiceEnroll2FAProcedure is the fully-qualified name of the ApiService's Enroll2FA RPC.
+	ApiServiceEnroll2FAProcedure = "/gateon.v1.ApiService/Enroll2FA"
+	// ApiServiceVerify2FAProcedure is the fully-qualified name of the ApiService's Verify2FA RPC.
+	ApiServiceVerify2FAProcedure = "/gateon.v1.ApiService/Verify2FA"
 	// ApiServiceIsSetupRequiredProcedure is the fully-qualified name of the ApiService's
 	// IsSetupRequired RPC.
 	ApiServiceIsSetupRequiredProcedure = "/gateon.v1.ApiService/IsSetupRequired"
@@ -254,6 +258,13 @@ type ApiServiceClient interface {
 	DeleteTLSOption(context.Context, *connect.Request[v1.DeleteTLSOptionRequest]) (*connect.Response[v1.DeleteTLSOptionResponse], error)
 	ListBuiltinCertificateAuthorities(context.Context, *connect.Request[v1.ListBuiltinCertificateAuthoritiesRequest]) (*connect.Response[v1.ListBuiltinCertificateAuthoritiesResponse], error)
 	Login(context.Context, *connect.Request[v1.LoginRequest]) (*connect.Response[v1.LoginResponse], error)
+	// Enroll2FA and Verify2FA are the second step of a sign-in, as
+	// POST /v1/auth/2fa/enroll and POST /v1/auth/2fa/verify are over REST. Every
+	// account has a second factor (ADR 0088), so Login never answers a session:
+	// without these a gRPC client could not finish signing in at all. Both are
+	// served without a session and spend from the sign-in budget.
+	Enroll2FA(context.Context, *connect.Request[v1.Enroll2FARequest]) (*connect.Response[v1.Enroll2FAResponse], error)
+	Verify2FA(context.Context, *connect.Request[v1.Verify2FARequest]) (*connect.Response[v1.Verify2FAResponse], error)
 	IsSetupRequired(context.Context, *connect.Request[v1.IsSetupRequiredRequest]) (*connect.Response[v1.IsSetupRequiredResponse], error)
 	Setup(context.Context, *connect.Request[v1.SetupRequest]) (*connect.Response[v1.SetupResponse], error)
 	ChangePassword(context.Context, *connect.Request[v1.ChangePasswordRequest]) (*connect.Response[v1.ChangePasswordResponse], error)
@@ -497,6 +508,18 @@ func NewApiServiceClient(httpClient connect.HTTPClient, baseURL string, opts ...
 			httpClient,
 			baseURL+ApiServiceLoginProcedure,
 			connect.WithSchema(apiServiceMethods.ByName("Login")),
+			connect.WithClientOptions(opts...),
+		),
+		enroll2FA: connect.NewClient[v1.Enroll2FARequest, v1.Enroll2FAResponse](
+			httpClient,
+			baseURL+ApiServiceEnroll2FAProcedure,
+			connect.WithSchema(apiServiceMethods.ByName("Enroll2FA")),
+			connect.WithClientOptions(opts...),
+		),
+		verify2FA: connect.NewClient[v1.Verify2FARequest, v1.Verify2FAResponse](
+			httpClient,
+			baseURL+ApiServiceVerify2FAProcedure,
+			connect.WithSchema(apiServiceMethods.ByName("Verify2FA")),
 			connect.WithClientOptions(opts...),
 		),
 		isSetupRequired: connect.NewClient[v1.IsSetupRequiredRequest, v1.IsSetupRequiredResponse](
@@ -750,6 +773,8 @@ type apiServiceClient struct {
 	deleteTLSOption                   *connect.Client[v1.DeleteTLSOptionRequest, v1.DeleteTLSOptionResponse]
 	listBuiltinCertificateAuthorities *connect.Client[v1.ListBuiltinCertificateAuthoritiesRequest, v1.ListBuiltinCertificateAuthoritiesResponse]
 	login                             *connect.Client[v1.LoginRequest, v1.LoginResponse]
+	enroll2FA                         *connect.Client[v1.Enroll2FARequest, v1.Enroll2FAResponse]
+	verify2FA                         *connect.Client[v1.Verify2FARequest, v1.Verify2FAResponse]
 	isSetupRequired                   *connect.Client[v1.IsSetupRequiredRequest, v1.IsSetupRequiredResponse]
 	setup                             *connect.Client[v1.SetupRequest, v1.SetupResponse]
 	changePassword                    *connect.Client[v1.ChangePasswordRequest, v1.ChangePasswordResponse]
@@ -936,6 +961,16 @@ func (c *apiServiceClient) ListBuiltinCertificateAuthorities(ctx context.Context
 // Login calls gateon.v1.ApiService.Login.
 func (c *apiServiceClient) Login(ctx context.Context, req *connect.Request[v1.LoginRequest]) (*connect.Response[v1.LoginResponse], error) {
 	return c.login.CallUnary(ctx, req)
+}
+
+// Enroll2FA calls gateon.v1.ApiService.Enroll2FA.
+func (c *apiServiceClient) Enroll2FA(ctx context.Context, req *connect.Request[v1.Enroll2FARequest]) (*connect.Response[v1.Enroll2FAResponse], error) {
+	return c.enroll2FA.CallUnary(ctx, req)
+}
+
+// Verify2FA calls gateon.v1.ApiService.Verify2FA.
+func (c *apiServiceClient) Verify2FA(ctx context.Context, req *connect.Request[v1.Verify2FARequest]) (*connect.Response[v1.Verify2FAResponse], error) {
+	return c.verify2FA.CallUnary(ctx, req)
 }
 
 // IsSetupRequired calls gateon.v1.ApiService.IsSetupRequired.
@@ -1155,6 +1190,13 @@ type ApiServiceHandler interface {
 	DeleteTLSOption(context.Context, *connect.Request[v1.DeleteTLSOptionRequest]) (*connect.Response[v1.DeleteTLSOptionResponse], error)
 	ListBuiltinCertificateAuthorities(context.Context, *connect.Request[v1.ListBuiltinCertificateAuthoritiesRequest]) (*connect.Response[v1.ListBuiltinCertificateAuthoritiesResponse], error)
 	Login(context.Context, *connect.Request[v1.LoginRequest]) (*connect.Response[v1.LoginResponse], error)
+	// Enroll2FA and Verify2FA are the second step of a sign-in, as
+	// POST /v1/auth/2fa/enroll and POST /v1/auth/2fa/verify are over REST. Every
+	// account has a second factor (ADR 0088), so Login never answers a session:
+	// without these a gRPC client could not finish signing in at all. Both are
+	// served without a session and spend from the sign-in budget.
+	Enroll2FA(context.Context, *connect.Request[v1.Enroll2FARequest]) (*connect.Response[v1.Enroll2FAResponse], error)
+	Verify2FA(context.Context, *connect.Request[v1.Verify2FARequest]) (*connect.Response[v1.Verify2FAResponse], error)
 	IsSetupRequired(context.Context, *connect.Request[v1.IsSetupRequiredRequest]) (*connect.Response[v1.IsSetupRequiredResponse], error)
 	Setup(context.Context, *connect.Request[v1.SetupRequest]) (*connect.Response[v1.SetupResponse], error)
 	ChangePassword(context.Context, *connect.Request[v1.ChangePasswordRequest]) (*connect.Response[v1.ChangePasswordResponse], error)
@@ -1394,6 +1436,18 @@ func NewApiServiceHandler(svc ApiServiceHandler, opts ...connect.HandlerOption) 
 		ApiServiceLoginProcedure,
 		svc.Login,
 		connect.WithSchema(apiServiceMethods.ByName("Login")),
+		connect.WithHandlerOptions(opts...),
+	)
+	apiServiceEnroll2FAHandler := connect.NewUnaryHandler(
+		ApiServiceEnroll2FAProcedure,
+		svc.Enroll2FA,
+		connect.WithSchema(apiServiceMethods.ByName("Enroll2FA")),
+		connect.WithHandlerOptions(opts...),
+	)
+	apiServiceVerify2FAHandler := connect.NewUnaryHandler(
+		ApiServiceVerify2FAProcedure,
+		svc.Verify2FA,
+		connect.WithSchema(apiServiceMethods.ByName("Verify2FA")),
 		connect.WithHandlerOptions(opts...),
 	)
 	apiServiceIsSetupRequiredHandler := connect.NewUnaryHandler(
@@ -1674,6 +1728,10 @@ func NewApiServiceHandler(svc ApiServiceHandler, opts ...connect.HandlerOption) 
 			apiServiceListBuiltinCertificateAuthoritiesHandler.ServeHTTP(w, r)
 		case ApiServiceLoginProcedure:
 			apiServiceLoginHandler.ServeHTTP(w, r)
+		case ApiServiceEnroll2FAProcedure:
+			apiServiceEnroll2FAHandler.ServeHTTP(w, r)
+		case ApiServiceVerify2FAProcedure:
+			apiServiceVerify2FAHandler.ServeHTTP(w, r)
 		case ApiServiceIsSetupRequiredProcedure:
 			apiServiceIsSetupRequiredHandler.ServeHTTP(w, r)
 		case ApiServiceSetupProcedure:
@@ -1873,6 +1931,14 @@ func (UnimplementedApiServiceHandler) ListBuiltinCertificateAuthorities(context.
 
 func (UnimplementedApiServiceHandler) Login(context.Context, *connect.Request[v1.LoginRequest]) (*connect.Response[v1.LoginResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gateon.v1.ApiService.Login is not implemented"))
+}
+
+func (UnimplementedApiServiceHandler) Enroll2FA(context.Context, *connect.Request[v1.Enroll2FARequest]) (*connect.Response[v1.Enroll2FAResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gateon.v1.ApiService.Enroll2FA is not implemented"))
+}
+
+func (UnimplementedApiServiceHandler) Verify2FA(context.Context, *connect.Request[v1.Verify2FARequest]) (*connect.Response[v1.Verify2FAResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gateon.v1.ApiService.Verify2FA is not implemented"))
 }
 
 func (UnimplementedApiServiceHandler) IsSetupRequired(context.Context, *connect.Request[v1.IsSetupRequiredRequest]) (*connect.Response[v1.IsSetupRequiredResponse], error) {

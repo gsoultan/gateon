@@ -4,6 +4,7 @@
 import { test, expect, type APIRequestContext, type Locator, type Page, type Route } from '@playwright/test';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { apiSignIn } from './two-factor';
 
 /**
  * The command palette (Ctrl+K / Cmd+K): search every page and a few actions,
@@ -137,7 +138,7 @@ test.describe('Command palette sign out', () => {
 
   /** Logs in, signs out from the palette, and returns the session cookie's value from before. */
   async function signOutFromPalette(page: Page): Promise<string> {
-    const login = await page.request.post('/v1/login', { data: { username: USER, password: PASSWORD } });
+    const login = await apiSignIn(page.request, USER, PASSWORD);
     expect(login.ok(), `login failed: ${login.status()}`).toBe(true);
     const session = (await page.context().cookies()).find((c) => c.name === 'gateon_session');
     expect(session, 'login set no gateon_session cookie').toBeDefined();
@@ -180,10 +181,7 @@ test.describe('Command palette sign out', () => {
   /** Logs in and starts a sign-out from the palette, with /v1/logout answered by `answer`. */
   async function signOutAnswered(page: Page, answer: (route: Route) => Promise<void>) {
     // An address of its own, so these logins count against no other spec's.
-    const login = await page.request.post('/v1/login', {
-      data: { username: USER, password: PASSWORD },
-      headers: { 'X-Forwarded-For': '198.51.100.64' },
-    });
+    const login = await apiSignIn(page.request, USER, PASSWORD, { 'X-Forwarded-For': '198.51.100.64' });
     expect(login.ok(), `login failed: ${login.status()}`).toBe(true);
     await page.route('**/v1/logout', answer);
     const { search } = await openPalette(page);
