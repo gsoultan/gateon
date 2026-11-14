@@ -309,3 +309,65 @@ jobs:
             --ignorefile .trivyignore.yaml \
             --skip-dirs "ui/.bun-cache" \
             --skip-dirs "**/node_modules"
+
+  # The dashboard's npm dependencies, audited against the GitHub advisory
+  # database at the same bar as trivy above (high and critical). bun audit reads
+  # bun.lock directly, so this needs no install and no generated artifacts.
+  bun-audit:
+    name: bun-audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Audit dashboard dependencies
+        working-directory: ui
+        run: bun audit --audit-level=high
+
+  # Dependabot never moves the `go` line in go.mod, and the Go standard library
+  # is where net/http, crypto/tls and the HTTP/2 server live -- the code every
+  # request goes through. govulncheck only fails once an advisory names a
+  # function we call; a Go patch release often ships its security fixes before
+  # the advisory text reaches the database. This reports the gap itself: go.mod
+  # names a patch release older than the newest one on the same minor line.
+  #
+  # Weekly and on demand only. A Go release is not a defect in a pull request,
+  # and turning every open PR red on release day would teach people to ignore
+  # the check.
+  #
+  # The release list comes from the module proxy's toolchain index, the same
+  # source `go` itself downloads toolchains from. If it cannot be read the job
+  # fails rather than passes: a freshness check that skips when offline reports
+  # a currency it never measured.
+  go-toolchain:
+    name: go-toolchain
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Compare go.mod with the newest Go patch release
+        run: |
+          set -euo pipefail
+          current="$(awk '$1 == "go" { print $2; exit }' go.mod)"
+          minor="$(echo "$current" | cut -d. -f1,2)"
+          list="$(curl -fsS --retry 3 https://proxy.golang.org/golang.org/toolchain/@v/list)"
+          latest="$(echo "$list" \
+            | sed -nE "s/^v0\.0\.1-go(${minor//./\\.}\.[0-9]+)\.linux-amd64$/\1/p" \
+            | sort -V | tail -n1)"
+          newest_minor="$(echo "$list" \
+            | sed -nE 's/^v0\.0\.1-go([0-9]+\.[0-9]+)\.[0-9]+\.linux-amd64$/\1/p' \
+            | sort -V | tail -n1)"
+          if [ -z "$latest" ]; then
+            echo "::error::no Go $minor.x release found in the toolchain index; cannot judge go.mod's go $current"
+            exit 1
+          fi
+          echo "go.mod: go $current; newest $minor.x: $latest; newest stable line: $newest_minor"
+          if [ "$current" != "$latest" ]; then
+            echo "::error::go.mod pins Go $current but $latest is out. Patch releases carry standard-library security fixes; bump the go line in go.mod (and the Dockerfile builder if pinned) to $latest."
+            exit 1
+          fi
