@@ -21,7 +21,7 @@ import (
 //
 // # What gateon owns here, and what it does not
 //
-// Detection belongs to gwaf (ADR 0092). A rule that decides "is this request an
+// Detection belongs to gwaf (ADR 0093). A rule that decides "is this request an
 // attack?" from the request alone is defined in gwaf's ruleset/signatures or
 // ruleset/leaks, and an entry here only names it with `from` and adds what is
 // gateon's to decide: the rule ID an install's threat history and exceptions
@@ -227,7 +227,7 @@ type RuleInfo struct {
 	ParanoiaLevel int
 
 	// From is the gwaf rule this one takes its detection from, and zero for a
-	// rule whose detection is written in gateon (ADR 0092).
+	// rule whose detection is written in gateon (ADR 0093).
 	From types.RuleID
 
 	// Action is what a match does: "block", or "log" for a rule that records

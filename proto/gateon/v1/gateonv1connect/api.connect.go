@@ -308,7 +308,7 @@ type ApiServiceClient interface {
 	UpdateWafRule(context.Context, *connect.Request[v1.UpdateWafRuleRequest]) (*connect.Response[v1.UpdateWafRuleResponse], error)
 	DeleteWafRule(context.Context, *connect.Request[v1.DeleteWafRuleRequest]) (*connect.Response[v1.DeleteWafRuleResponse], error)
 	// ListBuiltinWafRules describes the rules compiled into the gateway, which
-	// ListWafRules does not return because they are not rows (ADR 0092). Read-only:
+	// ListWafRules does not return because they are not rows (ADR 0093). Read-only:
 	// there is no RPC that changes one.
 	ListBuiltinWafRules(context.Context, *connect.Request[v1.ListBuiltinWafRulesRequest]) (*connect.Response[v1.ListBuiltinWafRulesResponse], error)
 	// Scrape credentials (ADR 0050). Administrators only.
@@ -1256,7 +1256,7 @@ type ApiServiceHandler interface {
 	UpdateWafRule(context.Context, *connect.Request[v1.UpdateWafRuleRequest]) (*connect.Response[v1.UpdateWafRuleResponse], error)
 	DeleteWafRule(context.Context, *connect.Request[v1.DeleteWafRuleRequest]) (*connect.Response[v1.DeleteWafRuleResponse], error)
 	// ListBuiltinWafRules describes the rules compiled into the gateway, which
-	// ListWafRules does not return because they are not rows (ADR 0092). Read-only:
+	// ListWafRules does not return because they are not rows (ADR 0093). Read-only:
 	// there is no RPC that changes one.
 	ListBuiltinWafRules(context.Context, *connect.Request[v1.ListBuiltinWafRulesRequest]) (*connect.Response[v1.ListBuiltinWafRulesResponse], error)
 	// Scrape credentials (ADR 0050). Administrators only.

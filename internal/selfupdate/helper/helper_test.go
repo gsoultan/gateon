@@ -80,8 +80,10 @@ type service struct {
 	onStart       func(starts int)
 }
 
-func (s *service) Stop(context.Context) error { s.stops++; return nil }
-func (s *service) Start(context.Context) error {
+// Restart is the one operation the helper has: the old process stops and the
+// next one starts with no moment in between where the helper acts.
+func (s *service) Restart(context.Context) error {
+	s.stops++
 	s.starts++
 	if s.onStart != nil {
 		s.onStart(s.starts)
@@ -261,6 +263,40 @@ func TestAVerifiedReleaseIsInstalledAndTheOldBinaryKept(t *testing.T) {
 	}
 	if st.Nonce != "" || history[0].Nonce != "" {
 		t.Fatal("a finished status still carries its nonce")
+	}
+}
+
+// TestTheGatewayIsRestartedOnceWithTheNewBinaryAlreadyInPlace: the service
+// manager keeps the listening sockets open across a restart and closes them
+// when the service is stopped (ADR 0092). A helper that stopped the gateway,
+// swapped the binary and started it would close every listener in between.
+func TestTheGatewayIsRestartedOnceWithTheNewBinaryAlreadyInPlace(t *testing.T) {
+	h := newHost(t)
+	var runningAtRestart []string
+	h.svc.onStart = func(int) {
+		runningAtRestart = append(runningAtRestart, h.installedBinary())
+		h.answer()
+	}
+	if st := h.run(); st.Phase != upgrade.PhaseSucceeded {
+		t.Fatalf("got %+v", st)
+	}
+	if len(runningAtRestart) != 1 || runningAtRestart[0] != "new" {
+		t.Fatalf("the gateway was restarted onto %v, want one restart onto the new binary", runningAtRestart)
+	}
+
+	back := newHost(t)
+	runningAtRestart = nil
+	back.svc.onStart = func(starts int) {
+		runningAtRestart = append(runningAtRestart, back.installedBinary())
+		if starts == 2 {
+			back.answer()
+		}
+	}
+	if st := back.run(); st.Phase != upgrade.PhaseRolledBack {
+		t.Fatalf("got %+v", st)
+	}
+	if len(runningAtRestart) != 2 || runningAtRestart[1] != "old" {
+		t.Fatalf("the rollback restarted onto %v, want a second restart onto the old binary", runningAtRestart)
 	}
 }
 

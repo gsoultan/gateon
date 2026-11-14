@@ -1,4 +1,4 @@
-# 92. Built-in WAF rules take their detection from gwaf
+# 93. Built-in WAF rules take their detection from gwaf
 
 Date: 2026-11-14
 

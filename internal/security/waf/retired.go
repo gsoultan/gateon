@@ -84,7 +84,7 @@ const (
 	replacementNoneNeeded   = "none needed"
 
 	// whyCoreCovers is the reason for the one rule retired when detection moved
-	// to gwaf (ADR 0092). It was replayed, alternative by alternative and target
+	// to gwaf (ADR 0093). It was replayed, alternative by alternative and target
 	// by target, through gwaf's core alone, and core matched every payload it
 	// did under the same switch; TestRetiredAsNativeIsStillRefusedByCore keeps
 	// that true.
@@ -190,7 +190,7 @@ var Retirements = []Retirement{
 		Why: "counting duplicate headers needs a count operator gwaf does not ship; it is enforced before the engine runs.",
 	},
 
-	// Retired when detection moved to gwaf (ADR 0092), not by the SecLang
+	// Retired when detection moved to gwaf (ADR 0093), not by the SecLang
 	// migration. Every other built-in detection rule moved to gwaf and is still
 	// loaded under its old ID. Six more looked like duplicates of core and were
 	// kept, because core answers them under a different switch: turning the Java

@@ -186,7 +186,7 @@ const (
 //
 // ListWafRules reads the rules an operator wrote, which are rows. These are
 // not, so the dashboard's Rules page listed none of what was actually loaded
-// (ADR 0092). The list is the table the engine is built from, not a copy of it.
+// (ADR 0093). The list is the table the engine is built from, not a copy of it.
 func (s *ApiService) ListBuiltinWafRules(_ context.Context, req *gateonv1.ListBuiltinWafRulesRequest) (*gateonv1.ListBuiltinWafRulesResponse, error) {
 	limit := int(req.GetLimit())
 	if limit <= 0 {

@@ -13,7 +13,7 @@ here after the fact.
 
 ### One built-in WAF rule is retired; the rest are unchanged and now listed
 
-The built-in WAF rules take their detection from the gwaf library (ADR 0092). Every
+The built-in WAF rules take their detection from the gwaf library (ADR 0093). Every
 rule keeps its ID, category, paranoia level and action, so stored exceptions and threat
 history resolve as before.
 
@@ -93,6 +93,32 @@ that signed in with `Login` alone must now complete the second step. A first
 sign-in costs three requests from the per-address sign-in budget instead of
 one, and signing in twice within the same 30 seconds needs the next code.
 Metrics scrape tokens are unaffected.
+
+### A restart under systemd no longer refuses connections
+
+The gateway now hands its listening sockets to systemd, which keeps them open
+while the gateway restarts and passes them to the new process (ADR 0092). A
+connection made during a restart waits and is served. The upgrade helper
+restarts the service once instead of stopping and starting it.
+
+**Who is affected:**
+
+- A host upgraded by the helper or by replacing the binary keeps its old
+  `gateon.service`, and restarts as before until the unit has the two new
+  lines. Install the package once, run `sudo gateon install`, or add a
+  drop-in with `sudo systemctl edit gateon`:
+
+  ```ini
+  [Service]
+  NotifyAccess=main
+  FileDescriptorStoreMax=64
+  ```
+
+- A gateway that fails to start now leaves its ports accepting connections
+  that nothing answers, until the service stops or reaches its start limit. A
+  health check that expected "connection refused" from a dead gateway sees a
+  timeout instead. `GATEON_SOCKET_HANDOFF=false` restores the old behaviour.
+- Long-lived connections are still closed at a restart.
 
 ### Cloudflare's CA certificates are built in, and a `ca_file` starting `builtin:` names one
 

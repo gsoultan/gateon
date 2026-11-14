@@ -756,7 +756,7 @@ export const ApiService: GenService<{
   },
   /**
    * ListBuiltinWafRules describes the rules compiled into the gateway, which
-   * ListWafRules does not return because they are not rows (ADR 0092). Read-only:
+   * ListWafRules does not return because they are not rows (ADR 0093). Read-only:
    * there is no RPC that changes one.
    *
    * @generated from rpc gateon.v1.ApiService.ListBuiltinWafRules

@@ -16,7 +16,7 @@ import (
 // repository. Each is here for a reason gwaf's scope line gives: it reads a
 // decision gateon made and handed over through a resolver, or it states what
 // this site allows rather than what an attack looks like. Adding to this list
-// is an architectural decision (ADR 0092), which is why it is a list in a test
+// is an architectural decision (ADR 0093), which is why it is a list in a test
 // and not a property the table can grant itself.
 var definedByGateon = map[uint32]string{
 	1210001: "content policy: gambling keywords are not an attack",

@@ -88,6 +88,8 @@ Group=gateon
 ExecStart=%s
 Restart=on-failure
 RestartSec=5s
+NotifyAccess=main
+FileDescriptorStoreMax=64
 WorkingDirectory=%s
 Environment=GLOBAL_CONFIG_FILE=%s/global.json
 Environment=GATEON_DATA_DIR=%s
