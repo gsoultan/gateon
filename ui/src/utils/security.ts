@@ -37,3 +37,39 @@ export function getSeverityColor(sev: string) {
   if (s === 'low') return 'blue';
   return 'gray';
 }
+
+export interface ThreatTypeSlice {
+  name: string;
+  value: number;
+  color: string;
+}
+
+/** The label of the slice holding every threat type outside the top N. */
+export const OTHER_THREAT_TYPES = "OTHER";
+
+/**
+ * The threat-type donut: the top types the server reports, and one slice for
+ * the rest, so the slices add up to the total in the donut's centre.
+ *
+ * The total used to be the sum of the top five types alone -- the server sends
+ * no more -- so with a sixth type the "N Total" in the centre was smaller than
+ * the number of threats on the Threats page, by whatever the other types held.
+ * The total is the server's count of every retained threat; when it is missing
+ * the top types are all there is to go on.
+ */
+export function threatTypeBreakdown(
+  top: { label: string; value: number }[] | null | undefined,
+  total: number | null | undefined,
+): { slices: ThreatTypeSlice[]; total: number } {
+  const slices = (top ?? []).map((t) => ({
+    name: (t.label || "").toUpperCase(),
+    value: t.value,
+    color: getThreatColor(t.label),
+  }));
+  const listed = slices.reduce((sum, s) => sum + s.value, 0);
+  const all = Math.max(total ?? 0, listed);
+  if (all > listed) {
+    slices.push({ name: OTHER_THREAT_TYPES, value: all - listed, color: "gray.6" });
+  }
+  return { slices, total: all };
+}

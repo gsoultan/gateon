@@ -17,38 +17,41 @@ import (
 
 // install replaces the binary with the staged one, restarts the gateway and
 // waits for it. A gateway that does not come up is answered by recover.
+//
+// The binary is renamed into place while the old gateway is still running
+// from the old file, and the gateway is then restarted in one step. Renaming
+// does not disturb a running process, and a single restart is what lets the
+// service manager keep the listening sockets open in between (ADR 0092).
 func (r *run) install(ctx context.Context, staged string) upgrade.Status {
 	previous := filepath.Join(r.cfg.StateDir, previousFile)
 	if err := copyFile(r.cfg.BinaryPath, previous, binaryMode); err != nil {
 		_ = os.Remove(staged)
 		return r.finish(upgrade.PhaseRefused, upgrade.ReasonInstall, fmt.Errorf("keep the installed binary: %w", err))
 	}
-	if err := r.cfg.Service.Stop(ctx); err != nil {
-		r.cfg.Logf("stopping the gateway reported: %v", err)
-	}
 	r.expect(upgrade.PhaseRestarting, r.status.Target)
 	if err := os.Rename(staged, r.cfg.BinaryPath); err != nil {
+		// Nothing was replaced and nothing was restarted: the gateway is
+		// running as it was.
 		_ = os.Remove(staged)
-		r.start(ctx)
 		return r.finish(upgrade.PhaseRefused, upgrade.ReasonInstall, err)
 	}
-	r.start(ctx)
+	r.restart(ctx)
 	if r.waitReady(ctx) {
 		return r.finish(upgrade.PhaseSucceeded, upgrade.ReasonNone, nil)
 	}
 	return r.recover(ctx)
 }
 
-func (r *run) start(ctx context.Context) {
-	if err := r.cfg.Service.Start(ctx); err != nil {
-		r.cfg.Logf("starting the gateway reported: %v", err)
+func (r *run) restart(ctx context.Context) {
+	if err := r.cfg.Service.Restart(ctx); err != nil {
+		r.cfg.Logf("restarting the gateway reported: %v", err)
 	}
 }
 
 // expect records which gateway the helper is waiting for, under a fresh
-// nonce, and clears what an earlier gateway said. It is called while the
-// service is stopped: the only process that can then read the nonce and
-// answer it is the binary about to be started.
+// nonce, and clears what an earlier gateway said. The gateway still running
+// does not answer it: a gateway answers once, when it starts, and only for
+// its own version, which is not the one expected.
 func (r *run) expect(phase upgrade.Phase, version string) {
 	_ = r.data.Remove(spool(upgrade.ReadyFile))
 	if phase == upgrade.PhaseRestarting {
@@ -141,17 +144,13 @@ func (r *run) recover(ctx context.Context) upgrade.Status {
 	if mig.ran && !mig.restorable {
 		return r.finish(upgrade.PhaseFailed, upgrade.ReasonMigrated, nil)
 	}
-	if err := r.cfg.Service.Stop(ctx); err != nil {
-		r.cfg.Logf("stopping the gateway reported: %v", err)
-	}
 	r.status.RestoreDatabase = mig.ran
 	r.expect(upgrade.PhaseRollingBack, r.status.Previous)
 	previous := filepath.Join(r.cfg.StateDir, previousFile)
 	if err := copyFile(previous, r.cfg.BinaryPath, binaryMode); err != nil {
-		r.start(ctx)
 		return r.finish(upgrade.PhaseFailed, upgrade.ReasonInstall, fmt.Errorf("put the previous binary back: %w", err))
 	}
-	r.start(ctx)
+	r.restart(ctx)
 	if !r.waitReady(ctx) {
 		// Unanswered, so nothing confirms the copy was put back: the outcome
 		// must not say it was.
