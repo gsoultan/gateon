@@ -101,6 +101,7 @@ ADRs follow a lightweight [MADR](https://adr.github.io/madr/)-style format:
 | [0088](./0088-every-account-signs-in-with-a-second-factor.md) | Every account signs in with a second factor | Accepted |
 | [0090](./0090-clamav-on-the-host-is-an-administrators-decision.md) | ClamAV on the host is an administrator's decision | Accepted |
 | [0091](./0091-uploads-are-scanned-on-scanner-workers.md) | Uploads are scanned on scanner workers | Accepted (staged) |
+| [0092](./0092-listening-sockets-stay-open-across-a-restart.md) | Listening sockets stay open across a restart | Accepted |
 
 ## Conventions
 
