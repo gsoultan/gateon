@@ -338,6 +338,12 @@ github.com/grpc-ecosystem/grpc-gateway/v2 v2.29.0 h1:5VipnvEpbqr2gA2VbM+nYVbkIF2
 github.com/grpc-ecosystem/grpc-gateway/v2 v2.29.0/go.mod h1:Hyl3n6Twe1hvtd9XUXDec4pTvgMSEixRuQKPTMH2bNs=
 github.com/gsoultan/gwaf v0.6.8 h1:oJQKJ1g+l3o2WgpTtcmNiCo8FuE5yEdaoJOIBqxmcUg=
 github.com/gsoultan/gwaf v0.6.8/go.mod h1:sMXdJcc2WC9DmaWX5rHDTpmVyaCAMG0wrdnHHxB4qJc=
+github.com/gsoultan/gwaf v0.6.9-0.20261114045339-402b97dec270 h1:kdUHlGR8tDdB2q7eapm3PiHHm7nLK3XSNflAqO+MMbQ=
+github.com/gsoultan/gwaf v0.6.9-0.20261114045339-402b97dec270/go.mod h1:XFQ7Yg4rG7fcTAcenLZ2/BR+Q0111iadFAoqPO0pvkk=
+github.com/gsoultan/gwaf v0.6.9-0.20261114050046-f429ad98ab59 h1:s8e5eA+6blNZBO6l7GdL43/KBX2Q6MeRapTL1Er3jXY=
+github.com/gsoultan/gwaf v0.6.9-0.20261114050046-f429ad98ab59/go.mod h1:XFQ7Yg4rG7fcTAcenLZ2/BR+Q0111iadFAoqPO0pvkk=
+github.com/gsoultan/gwaf v0.6.9-0.20261114050209-f7ebc06f19ca h1:UVNvlwElMBO4X3Kry34VbkA7MpzkksIFvpUNXYkPODk=
+github.com/gsoultan/gwaf v0.6.9-0.20261114050209-f7ebc06f19ca/go.mod h1:XFQ7Yg4rG7fcTAcenLZ2/BR+Q0111iadFAoqPO0pvkk=
 github.com/h2non/filetype v1.1.3 h1:FKkx9QbD7HR/zjK1Ia5XiBsq9zdLi5Kf3zGyFTAFkGg=
 github.com/h2non/filetype v1.1.3/go.mod h1:319b3zT68BvV+WRj7cwy856M2ehB3HqNOt6sy1HndBY=
 github.com/hashicorp/consul/api v1.33.7 h1:apLZVzX7O7BLgHyh4pvczcsBzPmYSVXGKZQbOaA1ae0=

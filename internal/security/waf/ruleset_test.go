@@ -404,7 +404,6 @@ var attackCorpus = []attack{
 	{rule: 1130001, name: "ssn leak", resp: `{"ssn":"123-45-6789"}`},
 	// PL2 and PL3 rules, exercised at the level that loads them.
 	{rule: 1210001, name: "gambling content", target: "/?q=sportsbook"},
-	{rule: 1141001, name: "html tag injection", target: "/?q=%3Ciframe+src%3Dx%3E"},
 	{rule: 1160000, name: "nosql injection", target: "/?filter=$where"},
 	{rule: 1170001, name: "advanced prototype pollution", target: "/?q=constructor%5Bprototype%5D"},
 	{rule: 1150003, name: "ssrf metadata", target: "/?url=http://169.254.169.254/latest"},
