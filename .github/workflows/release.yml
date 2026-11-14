@@ -90,12 +90,12 @@ jobs:
       - name: Checkout
         # Full history: GoReleaser builds its changelog from the commit range
         # since the previous tag, which a shallow clone does not contain.
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
       - name: Setup Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           check-latest: true
@@ -233,7 +233,7 @@ jobs:
       # to download and inspect them is the point of having one.
       - name: Upload dry-run artifacts
         if: github.event_name == 'workflow_dispatch'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: goreleaser-dry-run
           path: |
@@ -295,13 +295,13 @@ jobs:
 
       - name: Checkout
         # Full history and tags: resolve reads the tag list and the tag's commit.
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
       - name: Setup Go
         # For `go version -m`, which reads the tarball binaries' build settings.
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
 
@@ -426,10 +426,10 @@ jobs:
       IMAGE: localhost:5000/gateon
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Setup Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
 
@@ -439,7 +439,7 @@ jobs:
           packaging/image/build.sh parity
 
       - name: Download the dry run's tarballs and checksums
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: goreleaser-dry-run
           path: archives
