@@ -15,7 +15,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file gateon/v1/auth.proto.
  */
 export const file_gateon_v1_auth: GenFile = /*@__PURE__*/
-  fileDesc("ChRnYXRlb24vdjEvYXV0aC5wcm90bxIJZ2F0ZW9uLnYxIjIKDExvZ2luUmVxdWVzdBIQCgh1c2VybmFtZRgBIAEoCRIQCghwYXNzd29yZBgCIAEoCSItChZJc1NldHVwUmVxdWlyZWRSZXF1ZXN0EhMKC3NldHVwX3Rva2VuGAEgASgJIssBChdJc1NldHVwUmVxdWlyZWRSZXNwb25zZRIQCghyZXF1aXJlZBgBIAEoCBIbChNkYXRhYmFzZV9jb25maWd1cmVkGAIgASgIEhcKD2RhdGFiYXNlX2RyaXZlchgDIAEoCRIcChRkYXRhYmFzZV9kZXNjcmlwdGlvbhgEIAEoCRIkChxsb2dnaW5nX2RhdGFiYXNlX2Rlc2NyaXB0aW9uGAUgASgJEiQKHHNlc3Npb25fa2V5X2Zyb21fZW52aXJvbm1lbnQYBiABKAgi1wIKDFNldHVwUmVxdWVzdBIWCg5hZG1pbl91c2VybmFtZRgBIAEoCRIWCg5hZG1pbl9wYXNzd29yZBgCIAEoCRIVCg1wYXNldG9fc2VjcmV0GAMgASgJEhcKD21hbmFnZW1lbnRfYmluZBgEIAEoCRIXCg9tYW5hZ2VtZW50X3BvcnQYBSABKAkSFAoMZGF0YWJhc2VfdXJsGAcgASgJEjIKD2RhdGFiYXNlX2NvbmZpZxgIIAEoCzIZLmdhdGVvbi52MS5EYXRhYmFzZUNvbmZpZxIcChRsb2dnaW5nX2RhdGFiYXNlX3VybBgJIAEoCRI6Chdsb2dnaW5nX2RhdGFiYXNlX2NvbmZpZxgKIAEoCzIZLmdhdGVvbi52MS5EYXRhYmFzZUNvbmZpZxITCgtzZXR1cF90b2tlbhgLIAEoCUoECAYQB1IPbWFuYWdlbWVudF9ob3N0Ii8KDVNldHVwUmVzcG9uc2USDwoHc3VjY2VzcxgBIAEoCBINCgVlcnJvchgCIAEoCSKbAQoNTG9naW5SZXNwb25zZRINCgV0b2tlbhgBIAEoCRIdCgR1c2VyGAIgASgLMg8uZ2F0ZW9uLnYxLlVzZXISGwoTdHdvX2ZhY3Rvcl9yZXF1aXJlZBgDIAEoCBIhChl0d29fZmFjdG9yX3NldHVwX3JlcXVpcmVkGAQgASgIEhwKFHR3b19mYWN0b3JfY2hhbGxlbmdlGAUgASgJIkMKEExpc3RVc2Vyc1JlcXVlc3QSDAoEcGFnZRgBIAEoBRIRCglwYWdlX3NpemUYAiABKAUSDgoGc2VhcmNoGAMgASgJImkKEUxpc3RVc2Vyc1Jlc3BvbnNlEh4KBXVzZXJzGAEgAygLMg8uZ2F0ZW9uLnYxLlVzZXISEwoLdG90YWxfY291bnQYAiABKAUSDAoEcGFnZRgDIAEoBRIRCglwYWdlX3NpemUYBCABKAUiMgoRVXBkYXRlVXNlclJlcXVlc3QSHQoEdXNlchgBIAEoCzIPLmdhdGVvbi52MS5Vc2VyIiUKElVwZGF0ZVVzZXJSZXNwb25zZRIPCgdzdWNjZXNzGAEgASgIIh8KEURlbGV0ZVVzZXJSZXF1ZXN0EgoKAmlkGAEgASgJIiUKEkRlbGV0ZVVzZXJSZXNwb25zZRIPCgdzdWNjZXNzGAEgASgIIicKGVJlc2V0VXNlclR3b0ZhY3RvclJlcXVlc3QSCgoCaWQYASABKAkiLQoaUmVzZXRVc2VyVHdvRmFjdG9yUmVzcG9uc2USDwoHc3VjY2VzcxgBIAEoCCJPChVDaGFuZ2VQYXNzd29yZFJlcXVlc3QSCgoCaWQYASABKAkSEAoIcGFzc3dvcmQYAiABKAkSGAoQY3VycmVudF9wYXNzd29yZBgDIAEoCSIpChZDaGFuZ2VQYXNzd29yZFJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgiwQEKBFVzZXISCgoCaWQYASABKAkSEAoIdXNlcm5hbWUYAiABKAkSEAoIcGFzc3dvcmQYAyABKAkSDAoEcm9sZRgEIAEoCRIaChJ0d29fZmFjdG9yX2VuYWJsZWQYBSABKAgSGQoRdHdvX2ZhY3Rvcl9zZWNyZXQYBiABKAkSFgoOcmVjb3ZlcnlfY29kZXMYByADKAkSEAoIZGlzYWJsZWQYCCABKAgSGgoSdHdvX2ZhY3Rvcl9wZW5kaW5nGAkgASgIIi8KD1NldHVwMkZBUmVxdWVzdBIKCgJpZBgBIAEoCRIQCghwYXNzd29yZBgCIAEoCSJiChBTZXR1cDJGQVJlc3BvbnNlEg4KBnNlY3JldBgBIAEoCRITCgtxcl9jb2RlX3VybBgCIAEoCRIWCg5yZWNvdmVyeV9jb2RlcxgDIAMoCRIRCgljaGFsbGVuZ2UYBCABKAkiXAoRRW5yb2xsMkZBUmVzcG9uc2USCgoCaWQYASABKAkSDgoGc2VjcmV0GAIgASgJEhMKC3FyX2NvZGVfdXJsGAMgASgJEhYKDnJlY292ZXJ5X2NvZGVzGAQgAygJIj8KEFZlcmlmeTJGQVJlcXVlc3QSCgoCaWQYASABKAkSDAoEY29kZRgCIAEoCRIRCgljaGFsbGVuZ2UYAyABKAkiUgoRVmVyaWZ5MkZBUmVzcG9uc2USDwoHc3VjY2VzcxgBIAEoCBINCgV0b2tlbhgCIAEoCRIdCgR1c2VyGAMgASgLMg8uZ2F0ZW9uLnYxLlVzZXIilAEKCEFwaVRva2VuEgoKAmlkGAEgASgJEgwKBG5hbWUYAiABKAkSDgoGc2NvcGVzGAMgAygJEgwKBGhpbnQYBCABKAkSEgoKY3JlYXRlZF9ieRgFIAEoCRISCgpjcmVhdGVkX2F0GAYgASgJEhQKDGxhc3RfdXNlZF9hdBgHIAEoCRISCgpleHBpcmVzX2F0GAggASgJIjcKFExpc3RBcGlUb2tlbnNSZXF1ZXN0EgwKBHBhZ2UYASABKAUSEQoJcGFnZV9zaXplGAIgASgFInIKFUxpc3RBcGlUb2tlbnNSZXNwb25zZRIjCgZ0b2tlbnMYASADKAsyEy5nYXRlb24udjEuQXBpVG9rZW4SEwoLdG90YWxfY291bnQYAiABKAUSDAoEcGFnZRgDIAEoBRIRCglwYWdlX3NpemUYBCABKAUiRwoVQ3JlYXRlQXBpVG9rZW5SZXF1ZXN0EgwKBG5hbWUYASABKAkSDgoGc2NvcGVzGAIgAygJEhAKCHR0bF9kYXlzGAMgASgFIkwKFkNyZWF0ZUFwaVRva2VuUmVzcG9uc2USIgoFdG9rZW4YASABKAsyEy5nYXRlb24udjEuQXBpVG9rZW4SDgoGc2VjcmV0GAIgASgJIiMKFVJldm9rZUFwaVRva2VuUmVxdWVzdBIKCgJpZBgBIAEoCSIpChZSZXZva2VBcGlUb2tlblJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAhClAEKDWNvbS5nYXRlb24udjFCCUF1dGhQcm90b1ABWjNnaXRodWIuY29tL2dzb3VsdGFuL2dhdGVvbi9wcm90by9nYXRlb24vdjE7Z2F0ZW9udjGiAgNHWFiqAglHYXRlb24uVjHKAglHYXRlb25cVjHiAhVHYXRlb25cVjFcR1BCTWV0YWRhdGHqAgpHYXRlb246OlYxYgZwcm90bzM", [file_gateon_v1_common]);
+  fileDesc("ChRnYXRlb24vdjEvYXV0aC5wcm90bxIJZ2F0ZW9uLnYxIjIKDExvZ2luUmVxdWVzdBIQCgh1c2VybmFtZRgBIAEoCRIQCghwYXNzd29yZBgCIAEoCSItChZJc1NldHVwUmVxdWlyZWRSZXF1ZXN0EhMKC3NldHVwX3Rva2VuGAEgASgJIssBChdJc1NldHVwUmVxdWlyZWRSZXNwb25zZRIQCghyZXF1aXJlZBgBIAEoCBIbChNkYXRhYmFzZV9jb25maWd1cmVkGAIgASgIEhcKD2RhdGFiYXNlX2RyaXZlchgDIAEoCRIcChRkYXRhYmFzZV9kZXNjcmlwdGlvbhgEIAEoCRIkChxsb2dnaW5nX2RhdGFiYXNlX2Rlc2NyaXB0aW9uGAUgASgJEiQKHHNlc3Npb25fa2V5X2Zyb21fZW52aXJvbm1lbnQYBiABKAgi1wIKDFNldHVwUmVxdWVzdBIWCg5hZG1pbl91c2VybmFtZRgBIAEoCRIWCg5hZG1pbl9wYXNzd29yZBgCIAEoCRIVCg1wYXNldG9fc2VjcmV0GAMgASgJEhcKD21hbmFnZW1lbnRfYmluZBgEIAEoCRIXCg9tYW5hZ2VtZW50X3BvcnQYBSABKAkSFAoMZGF0YWJhc2VfdXJsGAcgASgJEjIKD2RhdGFiYXNlX2NvbmZpZxgIIAEoCzIZLmdhdGVvbi52MS5EYXRhYmFzZUNvbmZpZxIcChRsb2dnaW5nX2RhdGFiYXNlX3VybBgJIAEoCRI6Chdsb2dnaW5nX2RhdGFiYXNlX2NvbmZpZxgKIAEoCzIZLmdhdGVvbi52MS5EYXRhYmFzZUNvbmZpZxITCgtzZXR1cF90b2tlbhgLIAEoCUoECAYQB1IPbWFuYWdlbWVudF9ob3N0Ii8KDVNldHVwUmVzcG9uc2USDwoHc3VjY2VzcxgBIAEoCBINCgVlcnJvchgCIAEoCSKbAQoNTG9naW5SZXNwb25zZRINCgV0b2tlbhgBIAEoCRIdCgR1c2VyGAIgASgLMg8uZ2F0ZW9uLnYxLlVzZXISGwoTdHdvX2ZhY3Rvcl9yZXF1aXJlZBgDIAEoCBIhChl0d29fZmFjdG9yX3NldHVwX3JlcXVpcmVkGAQgASgIEhwKFHR3b19mYWN0b3JfY2hhbGxlbmdlGAUgASgJIkMKEExpc3RVc2Vyc1JlcXVlc3QSDAoEcGFnZRgBIAEoBRIRCglwYWdlX3NpemUYAiABKAUSDgoGc2VhcmNoGAMgASgJImkKEUxpc3RVc2Vyc1Jlc3BvbnNlEh4KBXVzZXJzGAEgAygLMg8uZ2F0ZW9uLnYxLlVzZXISEwoLdG90YWxfY291bnQYAiABKAUSDAoEcGFnZRgDIAEoBRIRCglwYWdlX3NpemUYBCABKAUiMgoRVXBkYXRlVXNlclJlcXVlc3QSHQoEdXNlchgBIAEoCzIPLmdhdGVvbi52MS5Vc2VyIiUKElVwZGF0ZVVzZXJSZXNwb25zZRIPCgdzdWNjZXNzGAEgASgIIh8KEURlbGV0ZVVzZXJSZXF1ZXN0EgoKAmlkGAEgASgJIiUKEkRlbGV0ZVVzZXJSZXNwb25zZRIPCgdzdWNjZXNzGAEgASgIIicKGVJlc2V0VXNlclR3b0ZhY3RvclJlcXVlc3QSCgoCaWQYASABKAkiLQoaUmVzZXRVc2VyVHdvRmFjdG9yUmVzcG9uc2USDwoHc3VjY2VzcxgBIAEoCCJPChVDaGFuZ2VQYXNzd29yZFJlcXVlc3QSCgoCaWQYASABKAkSEAoIcGFzc3dvcmQYAiABKAkSGAoQY3VycmVudF9wYXNzd29yZBgDIAEoCSIpChZDaGFuZ2VQYXNzd29yZFJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgiwQEKBFVzZXISCgoCaWQYASABKAkSEAoIdXNlcm5hbWUYAiABKAkSEAoIcGFzc3dvcmQYAyABKAkSDAoEcm9sZRgEIAEoCRIaChJ0d29fZmFjdG9yX2VuYWJsZWQYBSABKAgSGQoRdHdvX2ZhY3Rvcl9zZWNyZXQYBiABKAkSFgoOcmVjb3ZlcnlfY29kZXMYByADKAkSEAoIZGlzYWJsZWQYCCABKAgSGgoSdHdvX2ZhY3Rvcl9wZW5kaW5nGAkgASgIIi8KD1NldHVwMkZBUmVxdWVzdBIKCgJpZBgBIAEoCRIQCghwYXNzd29yZBgCIAEoCSJiChBTZXR1cDJGQVJlc3BvbnNlEg4KBnNlY3JldBgBIAEoCRITCgtxcl9jb2RlX3VybBgCIAEoCRIWCg5yZWNvdmVyeV9jb2RlcxgDIAMoCRIRCgljaGFsbGVuZ2UYBCABKAkiNgoQRW5yb2xsMkZBUmVxdWVzdBIQCgh1c2VybmFtZRgBIAEoCRIQCghwYXNzd29yZBgCIAEoCSJcChFFbnJvbGwyRkFSZXNwb25zZRIKCgJpZBgBIAEoCRIOCgZzZWNyZXQYAiABKAkSEwoLcXJfY29kZV91cmwYAyABKAkSFgoOcmVjb3ZlcnlfY29kZXMYBCADKAkiPwoQVmVyaWZ5MkZBUmVxdWVzdBIKCgJpZBgBIAEoCRIMCgRjb2RlGAIgASgJEhEKCWNoYWxsZW5nZRgDIAEoCSJSChFWZXJpZnkyRkFSZXNwb25zZRIPCgdzdWNjZXNzGAEgASgIEg0KBXRva2VuGAIgASgJEh0KBHVzZXIYAyABKAsyDy5nYXRlb24udjEuVXNlciKUAQoIQXBpVG9rZW4SCgoCaWQYASABKAkSDAoEbmFtZRgCIAEoCRIOCgZzY29wZXMYAyADKAkSDAoEaGludBgEIAEoCRISCgpjcmVhdGVkX2J5GAUgASgJEhIKCmNyZWF0ZWRfYXQYBiABKAkSFAoMbGFzdF91c2VkX2F0GAcgASgJEhIKCmV4cGlyZXNfYXQYCCABKAkiNwoUTGlzdEFwaVRva2Vuc1JlcXVlc3QSDAoEcGFnZRgBIAEoBRIRCglwYWdlX3NpemUYAiABKAUicgoVTGlzdEFwaVRva2Vuc1Jlc3BvbnNlEiMKBnRva2VucxgBIAMoCzITLmdhdGVvbi52MS5BcGlUb2tlbhITCgt0b3RhbF9jb3VudBgCIAEoBRIMCgRwYWdlGAMgASgFEhEKCXBhZ2Vfc2l6ZRgEIAEoBSJHChVDcmVhdGVBcGlUb2tlblJlcXVlc3QSDAoEbmFtZRgBIAEoCRIOCgZzY29wZXMYAiADKAkSEAoIdHRsX2RheXMYAyABKAUiTAoWQ3JlYXRlQXBpVG9rZW5SZXNwb25zZRIiCgV0b2tlbhgBIAEoCzITLmdhdGVvbi52MS5BcGlUb2tlbhIOCgZzZWNyZXQYAiABKAkiIwoVUmV2b2tlQXBpVG9rZW5SZXF1ZXN0EgoKAmlkGAEgASgJIikKFlJldm9rZUFwaVRva2VuUmVzcG9uc2USDwoHc3VjY2VzcxgBIAEoCEKUAQoNY29tLmdhdGVvbi52MUIJQXV0aFByb3RvUAFaM2dpdGh1Yi5jb20vZ3NvdWx0YW4vZ2F0ZW9uL3Byb3RvL2dhdGVvbi92MTtnYXRlb252MaICA0dYWKoCCUdhdGVvbi5WMcoCCUdhdGVvblxWMeICFUdhdGVvblxWMVxHUEJNZXRhZGF0YeoCCkdhdGVvbjo6VjFiBnByb3RvMw", [file_gateon_v1_common]);
 
 /**
  * @generated from message gateon.v1.LoginRequest
@@ -261,9 +261,10 @@ export type LoginResponse = Message<"gateon.v1.LoginResponse"> & {
   twoFactorRequired: boolean;
 
   /**
-   * two_factor_setup_required is true when an administrator has mandated 2FA for
-   * this account but the user has not yet enrolled. The client must walk the user
-   * through first-time TOTP enrollment before a session is issued.
+   * two_factor_setup_required is true when the account has no second factor
+   * yet. Every account must have one (ADR 0088): the client walks the user
+   * through first-time TOTP enrolment (Enroll2FA), and the session comes from
+   * the first code (Verify2FA). A password alone never answers a token.
    *
    * @generated from field: bool two_factor_setup_required = 4;
    */
@@ -554,9 +555,11 @@ export type User = Message<"gateon.v1.User"> & {
   disabled: boolean;
 
   /**
-   * two_factor_pending, when true, marks 2FA as mandated by an administrator but
-   * not yet enrolled by the user. The TOTP secret is generated by the user during
-   * self-service enrollment, never by the admin.
+   * two_factor_pending, when true, marks an account an administrator reset or
+   * flagged for enrolment. Every account without a second factor enrols at its
+   * next sign-in whatever this says (ADR 0088); it remains so the dashboard can
+   * tell a reset account from one that never enrolled. The TOTP secret is
+   * generated by the user during self-service enrolment, never by the admin.
    *
    * @generated from field: bool two_factor_pending = 9;
    */
@@ -636,9 +639,36 @@ export const Setup2FAResponseSchema: GenMessage<Setup2FAResponse> = /*@__PURE__*
   messageDesc(file_gateon_v1_auth, 18);
 
 /**
- * Enroll2FAResponse answers POST /v1/auth/2fa/enroll, the first-time enrollment
- * an account makes at login when an administrator has required 2FA. The login
- * page reads it as the generated type, so its field names come from here.
+ * Enroll2FARequest starts the first-time enrolment of an account with no second
+ * factor, during sign-in: the password again, since no session exists yet.
+ * POST /v1/auth/2fa/enroll takes the same body.
+ *
+ * @generated from message gateon.v1.Enroll2FARequest
+ */
+export type Enroll2FARequest = Message<"gateon.v1.Enroll2FARequest"> & {
+  /**
+   * @generated from field: string username = 1;
+   */
+  username: string;
+
+  /**
+   * @generated from field: string password = 2;
+   */
+  password: string;
+};
+
+/**
+ * Describes the message gateon.v1.Enroll2FARequest.
+ * Use `create(Enroll2FARequestSchema)` to create a new message.
+ */
+export const Enroll2FARequestSchema: GenMessage<Enroll2FARequest> = /*@__PURE__*/
+  messageDesc(file_gateon_v1_auth, 19);
+
+/**
+ * Enroll2FAResponse answers Enroll2FA and POST /v1/auth/2fa/enroll, the
+ * first-time enrolment an account without a second factor makes at sign-in.
+ * The login page reads it as the generated type, so its field names come from
+ * here.
  *
  * @generated from message gateon.v1.Enroll2FAResponse
  */
@@ -672,7 +702,7 @@ export type Enroll2FAResponse = Message<"gateon.v1.Enroll2FAResponse"> & {
  * Use `create(Enroll2FAResponseSchema)` to create a new message.
  */
 export const Enroll2FAResponseSchema: GenMessage<Enroll2FAResponse> = /*@__PURE__*/
-  messageDesc(file_gateon_v1_auth, 19);
+  messageDesc(file_gateon_v1_auth, 20);
 
 /**
  * @generated from message gateon.v1.Verify2FARequest
@@ -704,7 +734,7 @@ export type Verify2FARequest = Message<"gateon.v1.Verify2FARequest"> & {
  * Use `create(Verify2FARequestSchema)` to create a new message.
  */
 export const Verify2FARequestSchema: GenMessage<Verify2FARequest> = /*@__PURE__*/
-  messageDesc(file_gateon_v1_auth, 20);
+  messageDesc(file_gateon_v1_auth, 21);
 
 /**
  * @generated from message gateon.v1.Verify2FAResponse
@@ -731,7 +761,7 @@ export type Verify2FAResponse = Message<"gateon.v1.Verify2FAResponse"> & {
  * Use `create(Verify2FAResponseSchema)` to create a new message.
  */
 export const Verify2FAResponseSchema: GenMessage<Verify2FAResponse> = /*@__PURE__*/
-  messageDesc(file_gateon_v1_auth, 21);
+  messageDesc(file_gateon_v1_auth, 22);
 
 /**
  * ApiToken is a long-lived, scoped credential an administrator issues to a
@@ -798,7 +828,7 @@ export type ApiToken = Message<"gateon.v1.ApiToken"> & {
  * Use `create(ApiTokenSchema)` to create a new message.
  */
 export const ApiTokenSchema: GenMessage<ApiToken> = /*@__PURE__*/
-  messageDesc(file_gateon_v1_auth, 22);
+  messageDesc(file_gateon_v1_auth, 23);
 
 /**
  * @generated from message gateon.v1.ListApiTokensRequest
@@ -820,7 +850,7 @@ export type ListApiTokensRequest = Message<"gateon.v1.ListApiTokensRequest"> & {
  * Use `create(ListApiTokensRequestSchema)` to create a new message.
  */
 export const ListApiTokensRequestSchema: GenMessage<ListApiTokensRequest> = /*@__PURE__*/
-  messageDesc(file_gateon_v1_auth, 23);
+  messageDesc(file_gateon_v1_auth, 24);
 
 /**
  * @generated from message gateon.v1.ListApiTokensResponse
@@ -852,7 +882,7 @@ export type ListApiTokensResponse = Message<"gateon.v1.ListApiTokensResponse"> &
  * Use `create(ListApiTokensResponseSchema)` to create a new message.
  */
 export const ListApiTokensResponseSchema: GenMessage<ListApiTokensResponse> = /*@__PURE__*/
-  messageDesc(file_gateon_v1_auth, 24);
+  messageDesc(file_gateon_v1_auth, 25);
 
 /**
  * @generated from message gateon.v1.CreateApiTokenRequest
@@ -884,7 +914,7 @@ export type CreateApiTokenRequest = Message<"gateon.v1.CreateApiTokenRequest"> &
  * Use `create(CreateApiTokenRequestSchema)` to create a new message.
  */
 export const CreateApiTokenRequestSchema: GenMessage<CreateApiTokenRequest> = /*@__PURE__*/
-  messageDesc(file_gateon_v1_auth, 25);
+  messageDesc(file_gateon_v1_auth, 26);
 
 /**
  * @generated from message gateon.v1.CreateApiTokenResponse
@@ -908,7 +938,7 @@ export type CreateApiTokenResponse = Message<"gateon.v1.CreateApiTokenResponse">
  * Use `create(CreateApiTokenResponseSchema)` to create a new message.
  */
 export const CreateApiTokenResponseSchema: GenMessage<CreateApiTokenResponse> = /*@__PURE__*/
-  messageDesc(file_gateon_v1_auth, 26);
+  messageDesc(file_gateon_v1_auth, 27);
 
 /**
  * @generated from message gateon.v1.RevokeApiTokenRequest
@@ -925,7 +955,7 @@ export type RevokeApiTokenRequest = Message<"gateon.v1.RevokeApiTokenRequest"> &
  * Use `create(RevokeApiTokenRequestSchema)` to create a new message.
  */
 export const RevokeApiTokenRequestSchema: GenMessage<RevokeApiTokenRequest> = /*@__PURE__*/
-  messageDesc(file_gateon_v1_auth, 27);
+  messageDesc(file_gateon_v1_auth, 28);
 
 /**
  * @generated from message gateon.v1.RevokeApiTokenResponse
@@ -942,5 +972,5 @@ export type RevokeApiTokenResponse = Message<"gateon.v1.RevokeApiTokenResponse">
  * Use `create(RevokeApiTokenResponseSchema)` to create a new message.
  */
 export const RevokeApiTokenResponseSchema: GenMessage<RevokeApiTokenResponse> = /*@__PURE__*/
-  messageDesc(file_gateon_v1_auth, 28);
+  messageDesc(file_gateon_v1_auth, 29);
 

@@ -36,6 +36,9 @@ type accountState struct {
 	disabled     bool
 	// sessionEpoch counts the account's sign-outs; see EndSessions.
 	sessionEpoch int64
+	// twoFactorEnabled is whether the account has a second factor. No session
+	// is issued without one (ADR 0088); see binding.
+	twoFactorEnabled bool
 }
 
 // binding derives a short, stable fingerprint of the security-relevant state
@@ -76,6 +79,15 @@ func (a accountState) binding() string {
 	}
 	if a.sessionEpoch > 0 {
 		writeField(h, strconv.FormatInt(a.sessionEpoch, 10))
+	}
+	// An account without a second factor is the sixth input (ADR 0088). It is
+	// written only in that state, so an enrolled account's digest is the one
+	// the previous release minted and the upgrade ends none of its sessions,
+	// while every password-only session that release issued -- to an account
+	// that has no second factor -- stops matching and is refused. issueToken
+	// refuses to mint one, and this is what refuses one minted before it did.
+	if !a.twoFactorEnabled {
+		writeField(h, "no-second-factor")
 	}
 	sum := h.Sum(nil)
 	return hex.EncodeToString(sum[:16])
@@ -203,7 +215,7 @@ func (m *Manager) currentBinding(id string) (string, error) {
 
 	var st accountState
 	q := m.dialect.Rebind(QuerySessionBindingByID)
-	if err := m.db.QueryRow(q, id).Scan(&st.passwordHash, &st.role, &st.disabled, &st.sessionEpoch); err != nil {
+	if err := m.db.QueryRow(q, id).Scan(&st.passwordHash, &st.role, &st.disabled, &st.sessionEpoch, &st.twoFactorEnabled); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			// Deleted account. Its tokens must stop working immediately.
 			return "", ErrSessionRevoked

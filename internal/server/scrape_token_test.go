@@ -6,6 +6,7 @@ package server
 import (
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -36,7 +37,10 @@ func issueScrapeToken(t *testing.T, c mgmtClient, adminToken string) (id, secret
 
 func sessionFor(t *testing.T, c mgmtClient, username, password string) string {
 	t.Helper()
-	a := c.login(username, password)
+	rr := signInOverREST(t, func(path, body string) *httptest.ResponseRecorder {
+		return c.do(http.MethodPost, path, body, "")
+	}, username, password)
+	a := c.decode(rr)
 	if a.Token == "" {
 		t.Fatalf("sign-in as %s gave no session", username)
 	}

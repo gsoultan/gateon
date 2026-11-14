@@ -111,14 +111,11 @@ func TestTechDiscovery(t *testing.T) {
 	client := gateonv1.NewApiServiceClient(conn)
 
 	// 4.5 Login to get token
-	loginResp, err := client.Login(context.Background(), &gateonv1.LoginRequest{
-		Username: "admin",
-		Password: "e2e-horse-battery-42",
-	})
+	token, err := grpcSignIn(context.Background(), client, "admin", "e2e-horse-battery-42")
 	if err != nil {
 		t.Fatalf("Login failed: %v", err)
 	}
-	ctx := metadata.NewOutgoingContext(context.Background(), metadata.Pairs("authorization", "Bearer "+loginResp.Token))
+	ctx := metadata.NewOutgoingContext(context.Background(), metadata.Pairs("authorization", "Bearer "+token))
 
 	mockAddr := fmt.Sprintf("http://127.0.0.1:%d", env.Ports["mock_backend"])
 

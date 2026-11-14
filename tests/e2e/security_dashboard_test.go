@@ -112,14 +112,10 @@ func TestSecurityDashboard(t *testing.T) {
 	apiClient := gateonv1.NewApiServiceClient(conn)
 
 	// Login to get token
-	loginResp, err := apiClient.Login(context.Background(), &gateonv1.LoginRequest{
-		Username: "admin",
-		Password: "e2e-horse-battery-42",
-	})
+	token, err := grpcSignIn(context.Background(), apiClient, "admin", "e2e-horse-battery-42")
 	if err != nil {
 		t.Fatalf("Login failed: %v", err)
 	}
-	token := loginResp.Token
 	ctx := metadata.NewOutgoingContext(context.Background(), metadata.Pairs("authorization", "Bearer "+token))
 
 	httpClient := &http.Client{
