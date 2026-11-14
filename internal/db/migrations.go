@@ -1694,6 +1694,22 @@ func init() {
 		}
 		return nil
 	})
+
+	// A TOTP code was accepted for as long as it was valid -- its 30-second
+	// step and one either side -- however many times it was presented, so a
+	// code read over a shoulder or out of a proxy log signed in again with the
+	// password (review L1). two_factor_last_step is the last time step a code
+	// was accepted for; a code for that step or an earlier one is refused. It
+	// is in the shared database, and advanced by a conditional UPDATE, so two
+	// replicas cannot both accept one code. 0 is "none yet": every real step is
+	// far above it.
+	Register(72, "users_two_factor_last_step", func(db *sql.DB, dialect Dialect) error {
+		if dialect.Driver == DriverPostgres {
+			return addColumns(db, dialect,
+				`ALTER TABLE users ADD COLUMN IF NOT EXISTS two_factor_last_step BIGINT NOT NULL DEFAULT 0`)
+		}
+		return addColumns(db, dialect, `ALTER TABLE users ADD COLUMN two_factor_last_step INTEGER NOT NULL DEFAULT 0`)
+	})
 }
 
 // legacyObservedThreatTypes are the types only a control that let the request

@@ -145,6 +145,8 @@ func (f *Factory) checkSave(m *gateonv1.Middleware) error {
 		return security.CheckTarpitSave(cfg)
 	case "waf":
 		return waf.CheckAuditLogPathSave(cfg)
+	case "file_security":
+		return security.CheckFileSecuritySave(cfg)
 	}
 	return nil
 }

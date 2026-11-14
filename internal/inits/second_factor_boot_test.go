@@ -10,11 +10,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gsoultan/gateon/internal/auth/authtest"
+
 	"github.com/gsoultan/gateon/internal/auth"
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/logger"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
-	"github.com/pquerna/otp/totp"
 )
 
 // enrolUnder creates an account on dbPath with a second factor encrypted under
@@ -35,7 +36,7 @@ func enrolUnder(t *testing.T, dbPath, key string) (id, secret string) {
 		t.Fatalf("Setup2FA: %v", err)
 	}
 	secret = enrolment.Secret
-	code, err := totp.GenerateCode(secret, time.Now())
+	code, err := authtest.Code(secret)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,9 +75,8 @@ func TestBootMovesSecondFactorsFromThePreviousSessionKey(t *testing.T) {
 	// sign-in and the second step take -- seconds of production-cost bcrypt,
 	// many times that on a loaded host under -race -- cannot move it out of
 	// its window. It was generated for the wall clock, which could.
-	at := time.Now()
+	code, at, err := authtest.CodeAt(secret)
 	m.SetClock(func() time.Time { return at })
-	code, err := totp.GenerateCode(secret, at)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -4,6 +4,7 @@
 import { test, expect } from '@playwright/test';
 import fs from 'fs';
 import path from 'path';
+import { finishSignInPage } from './two-factor';
 
 // The setup wizard on a gateway whose global.json already names its database
 // and refers to its session key -- what the Helm chart renders from
@@ -66,5 +67,6 @@ test('the wizard keeps the configured database and session key, and says so', as
   await page.getByPlaceholder('Enter your username').fill(admin);
   await page.getByPlaceholder('••••••••').fill(password);
   await page.getByRole('button', { name: /Continue to Dashboard/i }).click();
+  await finishSignInPage(page, admin);
   await expect(page.getByRole('heading', { name: /^Overview$/ })).toBeVisible({ timeout: 60_000 });
 });

@@ -12,14 +12,24 @@ import type { User } from "../types/gateon";
  * could only be deleted (MGMT-N5). It now resets that account's second factor.
  * The caller's own account is self-service, from the enrolment modal, which
  * asks for the password -- the gateway refuses a reset of one's own account.
+ *
+ * Every account must have a second factor (ADR 0088), so one that has not
+ * enrolled sets one up at its next sign-in whatever anyone does here. The
+ * "require" and "cancel requirement" controls it used to offer toggled a flag
+ * the sign-in no longer reads: cancelling did not let the account sign in
+ * with its password alone, so the control said something untrue.
  */
-export type TwoFactorAction = "self" | "reset" | "require" | "cancel-requirement" | "none";
+export type TwoFactorAction = "self" | "reset" | "awaiting-enrolment" | "none";
 
 export function twoFactorAction(user: Pick<User, "id" | "twoFactorEnabled" | "twoFactorPending">, currentUserId: string | undefined, isAdmin: boolean): TwoFactorAction {
   if (currentUserId === user.id) return "self";
-  if (!isAdmin) return "none";
-  if (user.twoFactorEnabled) return "reset";
-  return user.twoFactorPending ? "cancel-requirement" : "require";
+  if (!user.twoFactorEnabled) return "awaiting-enrolment";
+  return isAdmin ? "reset" : "none";
+}
+
+/** Whether the control does anything when pressed. */
+export function twoFactorActionable(action: TwoFactorAction): boolean {
+  return action === "self" || action === "reset";
 }
 
 /** The control's label, for its tooltip. */
@@ -29,10 +39,8 @@ export function twoFactorActionLabel(action: TwoFactorAction): string {
       return "Manage your two-factor authentication";
     case "reset":
       return "Reset this user's two-factor authentication";
-    case "cancel-requirement":
-      return "2FA required — click to cancel requirement";
-    case "require":
-      return "Require this user to set up 2FA";
+    case "awaiting-enrolment":
+      return "Sets up 2FA at their next sign-in: every account must have it";
     default:
       return "Only an administrator can change another user's two-factor authentication";
   }

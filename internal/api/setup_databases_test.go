@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/gsoultan/gateon/internal/auth"
+	"github.com/gsoultan/gateon/internal/auth/authtest"
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/db"
 	"github.com/gsoultan/gateon/internal/logger"
@@ -83,7 +84,7 @@ func TestSetupSavesTheDatabasesTheWizardChose(t *testing.T) {
 		t.Fatalf("open the chosen database: %v", err)
 	}
 	t.Cleanup(func() { _ = mgr.Close() })
-	if _, _, err := mgr.Authenticate("admin", "first-password", ""); err != nil {
+	if _, err := authtest.PasswordStep(mgr, "admin", "first-password", ""); err != nil {
 		t.Errorf("the administrator is not in the chosen database: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "gateon.db")); err == nil {

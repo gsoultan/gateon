@@ -35,7 +35,7 @@ func TestUserEditKeepsThePasswordWhenNoneIsGiven(t *testing.T) {
 	if err := m.UpsertUser(&gateonv1.User{Id: id, Username: "carol", Role: RoleViewer}); err != nil {
 		t.Fatalf("edit without a password: %v", err)
 	}
-	if _, _, err := m.Authenticate("carol", "her-own-passphrase", ""); err != nil {
+	if _, _, err := passwordStep(m, "carol", "her-own-passphrase", ""); err != nil {
 		t.Errorf("the password did not survive an edit that gave none: %v", err)
 	}
 	if err := m.UpsertUser(&gateonv1.User{Id: id, Username: "carol", Password: "short", Role: RoleViewer}); !errors.Is(err, passpolicy.ErrWeak) {
@@ -57,7 +57,7 @@ func TestPasswordChangeRefusesAWeakPassword(t *testing.T) {
 	if err := m.ChangeOwnPassword(id, "her-own-passphrase", "a"); !errors.Is(err, passpolicy.ErrWeak) {
 		t.Errorf("ChangeOwnPassword to %q: err = %v, want a policy refusal", "a", err)
 	}
-	if _, _, err := m.Authenticate("carol", "her-own-passphrase", ""); err != nil {
+	if _, _, err := passwordStep(m, "carol", "her-own-passphrase", ""); err != nil {
 		t.Errorf("a refused change replaced the password: %v", err)
 	}
 }

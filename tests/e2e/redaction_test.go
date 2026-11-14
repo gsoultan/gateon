@@ -259,11 +259,11 @@ func redactAPIClient(t *testing.T, env *TestEnv) (gateonv1.ApiServiceClient, con
 	}
 	t.Cleanup(func() { _ = conn.Close() })
 	client := gateonv1.NewApiServiceClient(conn)
-	login, err := client.Login(t.Context(), &gateonv1.LoginRequest{Username: "admin", Password: "e2e-horse-battery-42"})
+	token, err := grpcSignIn(t.Context(), client, "admin", "e2e-horse-battery-42")
 	if err != nil {
 		t.Fatalf("login: %v", err)
 	}
-	return client, metadata.NewOutgoingContext(t.Context(), metadata.Pairs("authorization", "Bearer "+login.Token))
+	return client, metadata.NewOutgoingContext(t.Context(), metadata.Pairs("authorization", "Bearer "+token))
 }
 
 // storedTraces returns every stored trace in full, as the API serves it,
