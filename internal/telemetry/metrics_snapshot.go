@@ -846,42 +846,66 @@ func buildMitigationFunnel(idx map[string]*dto.MetricFamily) MitigationFunnel {
 }
 
 // Threat types of a request refused because its source is blocked: the
-// address is shunned, or the client build is blocked on its network.
+// address is shunned, the client build is blocked on its network, or the
+// client's reputation fell below the floor.
 const (
-	typeIPMitigation   = "ip_mitigation"
-	typeUserMitigation = "user_mitigation"
+	typeIPMitigation    = "ip_mitigation"
+	typeUserMitigation  = "user_mitigation"
+	typeReputationBlock = "reputation_block"
 )
 
 // mitigationThreatTypes are the advanced-security series that are a blocked
 // source (a shunned address, a blocked client build) rather than a check.
-var mitigationThreatTypes = map[string]bool{typeIPMitigation: true, typeUserMitigation: true, "ip_shunning": true}
+var mitigationThreatTypes = map[string]bool{
+	typeIPMitigation: true, typeUserMitigation: true, typeReputationBlock: true, "ip_shunning": true,
+}
+
+// ManagementRoute is the route label the management plane's own middleware
+// records under. Its requests are not proxied traffic: they are in none of the
+// funnel's outcome counters, so they belong in none of its stages either.
+const ManagementRoute = "gateon-management"
+
+// dataPlane keeps a series of the proxied traffic, and passes the rest of the
+// selection to keep.
+func dataPlane(keep func(*dto.Metric) bool) func(*dto.Metric) bool {
+	return func(m *dto.Metric) bool {
+		if labelValue(m, "route") == ManagementRoute {
+			return false
+		}
+		return keep == nil || keep(m)
+	}
+}
 
 // addFunnelStages fills the per-control refusal counts.
+//
+// Every stage reads the data plane only. A failed dashboard sign-in counted
+// as an "Auth Failures" stage of a funnel whose ingress had no such request,
+// so the stages added up to more than was refused.
 func addFunnelStages(idx map[string]*dto.MetricFamily, f *MitigationFunnel) {
 	// The "restored" series re-adds the persisted WAF blocks of earlier runs at
 	// startup, for the WAF page; the funnel's baseline starts at this run.
-	f.WAFBlocked = sumCounter(idx, "gateon_middleware_waf_blocked_total", func(m *dto.Metric) bool {
+	f.WAFBlocked = sumCounter(idx, "gateon_middleware_waf_blocked_total", dataPlane(func(m *dto.Metric) bool {
 		return labelValue(m, "rule_id") != "restored"
-	})
-	f.FastPathBlocked = sumCounter(idx, "gateon_middleware_fast_path_blocked_total", nil)
-	f.RateLimited = sumCounter(idx, "gateon_middleware_ratelimit_rejected_total", nil)
-	f.GeoIPBlocked = sumCounter(idx, "gateon_middleware_geoip_blocked_total", nil)
-	f.AuthFailures = sumCounter(idx, "gateon_middleware_auth_failures_total", nil)
-	f.HMACFailures = sumCounter(idx, "gateon_middleware_hmac_failures_total", nil)
-	f.FileSecurityBlocked = sumCounter(idx, "gateon_middleware_file_security_blocked_total", nil)
-	f.DeceptionBlocked = sumCounter(idx, "gateon_middleware_deception_blocked_total", nil)
-	f.MitigationBlocked = sumCounter(idx, "gateon_middleware_advanced_security_blocked_total", func(m *dto.Metric) bool {
+	}))
+	f.FastPathBlocked = sumCounter(idx, "gateon_middleware_fast_path_blocked_total", dataPlane(nil))
+	f.RateLimited = sumCounter(idx, "gateon_middleware_ratelimit_rejected_total", dataPlane(nil))
+	f.GeoIPBlocked = sumCounter(idx, "gateon_middleware_geoip_blocked_total", dataPlane(nil))
+	f.AuthFailures = sumCounter(idx, "gateon_middleware_auth_failures_total", dataPlane(nil))
+	f.HMACFailures = sumCounter(idx, "gateon_middleware_hmac_failures_total", dataPlane(nil))
+	f.FileSecurityBlocked = sumCounter(idx, "gateon_middleware_file_security_blocked_total", dataPlane(nil))
+	f.DeceptionBlocked = sumCounter(idx, "gateon_middleware_deception_blocked_total", dataPlane(nil))
+	f.MitigationBlocked = sumCounter(idx, "gateon_middleware_advanced_security_blocked_total", dataPlane(func(m *dto.Metric) bool {
 		return mitigationThreatTypes[labelValue(m, "threat_type")]
-	})
-	f.AdvancedSecurityBlock = sumCounter(idx, "gateon_middleware_advanced_security_blocked_total", func(m *dto.Metric) bool {
+	}))
+	f.AdvancedSecurityBlock = sumCounter(idx, "gateon_middleware_advanced_security_blocked_total", dataPlane(func(m *dto.Metric) bool {
 		return !mitigationThreatTypes[labelValue(m, "threat_type")]
-	})
-	f.BotBlocked = sumCounter(idx, "gateon_middleware_bot_management_total", func(m *dto.Metric) bool {
+	}))
+	f.BotBlocked = sumCounter(idx, "gateon_middleware_bot_management_total", dataPlane(func(m *dto.Metric) bool {
 		return botRefusal(labelValue(m, "outcome"))
-	})
-	f.TurnstileFailures = sumCounter(idx, "gateon_middleware_turnstile_total", func(m *dto.Metric) bool {
+	}))
+	f.TurnstileFailures = sumCounter(idx, "gateon_middleware_turnstile_total", dataPlane(func(m *dto.Metric) bool {
 		return labelValue(m, "outcome") == "fail"
-	})
+	}))
 }
 
 // botRefusal reports whether a bot-management outcome is a request it

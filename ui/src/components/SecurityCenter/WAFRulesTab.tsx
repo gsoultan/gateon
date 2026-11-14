@@ -29,6 +29,34 @@ import type {WafRule} from '../../types/gateon';
 import { notifications } from '@mantine/notifications';
 import { usePermissions } from '../../hooks/usePermissions';
 import { RuleDefinitionEditor } from './RuleDefinitionEditor';
+import { useEffectiveWaf } from '../../hooks/useEffectiveWaf';
+import { wafsRunningRule } from '../../utils/wafEffective';
+
+/**
+ * A rule's status as enforced: switched off, switched on and running in some
+ * WAF, or switched on and above every WAF's paranoia level, which runs nowhere.
+ * runsIn is null until the WAFs are known, and the switch is all there is.
+ */
+export function RuleStatus({ enabled, runsIn, paranoia }: { enabled: boolean; runsIn: string[] | null; paranoia: number }) {
+  if (!enabled) return <Badge color="gray">Disabled</Badge>;
+  if (runsIn === null) return <Badge color="green">Enabled</Badge>;
+  if (runsIn.length === 0) {
+    return (
+      <Tooltip
+        multiline
+        w={300}
+        label={`Paranoia level ${paranoia} is above every WAF on this gateway, so no request is checked against this rule. Lower the rule's level or raise a WAF's.`}
+      >
+        <Badge color="orange">Enabled · runs nowhere</Badge>
+      </Tooltip>
+    );
+  }
+  return (
+    <Tooltip multiline w={300} label={`Runs in ${runsIn.join(', ')}.`}>
+      <Badge color="green">Enabled</Badge>
+    </Tooltip>
+  );
+}
 
 export function WAFRulesTab() {
   const { canWrite } = usePermissions();
@@ -41,6 +69,9 @@ export function WAFRulesTab() {
     search: ''
   });
   
+  // Which WAFs a rule runs in depends on their paranoia levels, so the status
+  // column reads them rather than the switch alone.
+  const { data: effectiveWaf } = useEffectiveWaf();
   const [opened, setOpened] = useState(false);
   const [editingRule, setEditingRule] = useState<Partial<WafRule> | null>(null);
 
@@ -122,9 +153,7 @@ export function WAFRulesTab() {
         </Badge>
       </Table.Td>
       <Table.Td>
-        <Badge color={rule.enabled ? 'green' : 'gray'}>
-          {rule.enabled ? 'Enabled' : 'Disabled'}
-        </Badge>
+        <RuleStatus enabled={rule.enabled} runsIn={effectiveWaf ? wafsRunningRule(effectiveWaf, rule.paranoiaLevel) : null} paranoia={rule.paranoiaLevel} />
       </Table.Td>
       <Table.Td>
         <Group gap={4} justify="right">
@@ -153,7 +182,7 @@ export function WAFRulesTab() {
       <Group justify="space-between">
         <Stack gap={0}>
           <Title order={4}>WAF Security Rules</Title>
-          <Text size="sm" c="dimmed">Manage custom and adaptive Coraza SecLang rules in the database.</Text>
+          <Text size="sm" c="dimmed">Rules you add to the built-in ruleset. A rule runs in every WAF whose paranoia level is at least its own.</Text>
         </Stack>
         <Group>
           <TextInput
