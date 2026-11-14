@@ -11,10 +11,77 @@ here after the fact.
 
 ## Unreleased
 
+### An upload is clean only when ClamAV says so
+
+`file_security` read clamd's reply looking for `FOUND` and treated everything else as a
+clean file. Three things were therefore forwarded as scanned and clean, on routes set to
+refuse what they cannot scan:
+
+- a file clamd refused to scan, for example a stream larger than its `StreamMaxLength`
+  (`INSTREAM size limit exceeded. ERROR`);
+- any upload when clamd closed the connection without answering;
+- every upload when `clamav_addr` pointed at something that was not clamd.
+
+Only `stream: OK` is clean now. Anything else is a scanner failure, and the route does
+what it already does when the scanner is down: refuses with 503 by default, or forwards
+and logs when `fail_open` is set.
+
+**What to check:** set clamd's `StreamMaxLength` to at least the largest upload a
+scanned route accepts (`max_file_size`, and the gateway's scan cap, 64 MiB unless
+`GATEON_FILE_SCAN_MAX_MB` says otherwise). Uploads between the two sizes were passing
+unscanned; they are refused until the limits agree. The log line is
+`ClamAV scan failed` with clamd's own reason.
+
+The scanner client was also replaced (ADR 0091, step 1). A scanner that accepts a
+connection and stops reading can no longer hold a request past `scan_timeout`.
+
+### Only an administrator installs ClamAV or changes where uploads are scanned
+
+Installing or removing ClamAV from the dashboard runs docker or a package manager on
+the gateway's own host, and the scanner address is where every scanned upload is sent
+and whose answer of "clean" is believed. Both were open to the operator role, which
+holds `global:write`. They are administrator-only now, on REST, gRPC and the dashboard:
+
+- `POST /v1/security/clamav/install` and `/uninstall` (and the `InstallClamav` and
+  `UninstallClamav` RPCs) answer 403 / `PermissionDenied` to anyone but an administrator.
+- A save of the global settings that changes `waf.clamav_addr`, or `waf.clamav`'s
+  `clamav_addr`, `docker_image`, `installation_mode` or `auto_install`, is refused for an
+  operator and names the field. Scan schedules and low-resource mode stay operator-editable.
+- `waf.clamav.docker_image` must be an image reference. A value that starts with a dash
+  or contains a space is refused at save and again before docker is run.
+- A route's `file_security` middleware may name a scanner only on the gateway itself:
+  `unix://...`, or `tcp://` on `localhost` or a loopback address. A remote scanner is the
+  global setting, which an administrator owns.
+
+**What to check:** if a `file_security` middleware has a `clamav_addr` on another host,
+it keeps working as stored, but the next save of that middleware is refused. Move the
+address to Settings › Security (as an administrator) and clear it on the route. If
+operators install ClamAV for you today, an administrator has to do it from now on.
+
+The settings page also warns, before an install, when the host has under 4 GB of
+memory: ClamAV keeps about 1 GB resident for its signatures.
+
+### Every account signs in with a second factor
+
+Two-factor authentication is required for every account, on the dashboard,
+REST and gRPC, and there is no setting to turn it off (ADR 0088). An account
+without an authenticator sets one up at its next sign-in: password, then the QR
+code and recovery codes, then the first code. Each TOTP code is accepted once
+(migration 72 records the last one used). gRPC clients finish a sign-in with
+the new `ApiService/Enroll2FA` and `ApiService/Verify2FA`.
+
+**Who is affected:** every account without 2FA is signed out once and enrols
+at its next sign-in; accounts that already have 2FA stay signed in.
+Administrators should sign in soon after upgrading. A script or gRPC client
+that signed in with `Login` alone must now complete the second step. A first
+sign-in costs three requests from the per-address sign-in budget instead of
+one, and signing in twice within the same 30 seconds needs the next code.
+Metrics scrape tokens are unaffected.
+
 ### A restart under systemd no longer refuses connections
 
 The gateway now hands its listening sockets to systemd, which keeps them open
-while the gateway restarts and passes them to the new process (ADR 0088). A
+while the gateway restarts and passes them to the new process (ADR 0092). A
 connection made during a restart waits and is served. The upgrade helper
 restarts the service once instead of stopping and starting it.
 

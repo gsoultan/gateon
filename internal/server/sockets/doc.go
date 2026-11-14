@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 // Package sockets keeps the gateway's listening sockets open while the
-// gateway itself is replaced (ADR 0088).
+// gateway itself is replaced (ADR 0092).
 //
 // A restart used to close every listener and bind it again a moment later.
 // Between the two, a client was refused. Under systemd the gateway now hands

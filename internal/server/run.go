@@ -318,7 +318,7 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 	// start path: it builds every route's middlewares.
 	wg.Go(func() { s.proxyCache().WarnRouteProblems(ctx) })
 	// The sockets the service manager kept open while the previous process
-	// was replaced (ADR 0088): a listener bound where one of them is serves
+	// was replaced (ADR 0092): a listener bound where one of them is serves
 	// from it, and the connections that arrived meanwhile are waiting in it.
 	kept := sockets.Inherit()
 	//nolint:contextcheck // listeners stop through shutdownReg, not a context; StartServers takes none.

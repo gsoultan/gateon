@@ -12,13 +12,12 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/gsoultan/gateon/internal/api"
 	"github.com/gsoultan/gateon/internal/auth"
+	"github.com/gsoultan/gateon/internal/auth/authtest"
 	"github.com/gsoultan/gateon/internal/logger"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
-	"github.com/pquerna/otp/totp"
 )
 
 const stepUpPassword = "right-passphrase"
@@ -107,7 +106,7 @@ func TestTwoFactorSetupCountsWrongPasswordsLikeSignIn(t *testing.T) {
 		t.Errorf("right password on a locked account: status %d, want 429: %s", rr.Code, rr.Body.String())
 	}
 	assertNothingDisclosed(t, rr)
-	if _, _, err := f.m.Authenticate("alice", stepUpPassword, ""); err != nil {
+	if _, err := authtest.PasswordStep(f.m, "alice", stepUpPassword, ""); err != nil {
 		t.Errorf("sign-in after %d wrong step-up passwords: err = %v, want a session: the prompt locks itself, not the sign-in (ADR 0050)", auth.MaxFailedAttempts, err)
 	}
 }
@@ -141,7 +140,7 @@ func (f stepUpFixture) enrol(t *testing.T) string {
 	if got.QRCodeURL == "" || len(got.RecoveryCodes) == 0 {
 		t.Fatalf("setup answered without a QR code or recovery codes: %s", rr.Body.String())
 	}
-	code, err := totp.GenerateCode(got.Secret, time.Now())
+	code, err := authtest.Code(got.Secret)
 	if err != nil {
 		t.Fatalf("GenerateCode: %v", err)
 	}
@@ -164,7 +163,7 @@ func TestTwoFactorSetupRefusedKeepsTheOwnersFactor(t *testing.T) {
 			t.Errorf("setup with password %q was served: %s", password, rr.Body.String())
 		}
 	}
-	code, err := totp.GenerateCode(secret, time.Now())
+	code, err := authtest.Code(secret)
 	if err != nil {
 		t.Fatalf("GenerateCode: %v", err)
 	}

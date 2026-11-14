@@ -33,10 +33,10 @@ func (e engineManager) assertAccount(t *testing.T, username, id, role, password 
 	if len(found) != 1 || found[0].Id != id || found[0].Role != role {
 		t.Errorf("accounts named %s: %v, want one with id %s and role %s", username, found, id, role)
 	}
-	if _, _, err := e.m.Authenticate(username, password, ""); err != nil {
+	if _, _, err := passwordStep(e.m, username, password, ""); err != nil {
 		t.Errorf("%s no longer signs in with its own password: %v", username, err)
 	}
-	if _, _, err := e.m.Authenticate(username, takeoverPassword, ""); !errors.Is(err, ErrInvalidCredentials) {
+	if _, _, err := passwordStep(e.m, username, takeoverPassword, ""); !errors.Is(err, ErrInvalidCredentials) {
 		t.Errorf("the refused write's password opens %s: err %v", username, err)
 	}
 }

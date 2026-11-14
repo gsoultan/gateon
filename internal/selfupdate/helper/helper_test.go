@@ -268,7 +268,7 @@ func TestAVerifiedReleaseIsInstalledAndTheOldBinaryKept(t *testing.T) {
 
 // TestTheGatewayIsRestartedOnceWithTheNewBinaryAlreadyInPlace: the service
 // manager keeps the listening sockets open across a restart and closes them
-// when the service is stopped (ADR 0088). A helper that stopped the gateway,
+// when the service is stopped (ADR 0092). A helper that stopped the gateway,
 // swapped the binary and started it would close every listener in between.
 func TestTheGatewayIsRestartedOnceWithTheNewBinaryAlreadyInPlace(t *testing.T) {
 	h := newHost(t)

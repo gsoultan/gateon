@@ -241,7 +241,7 @@ func (e *httpEntrypoint) startHTTP3(h http.Handler) http.Handler {
 
 // quicSocket is a QUIC listener and the UDP socket under it. The socket is
 // opened here, not by quic-go, so that it can be one kept open across a
-// restart (ADR 0088); quic-go does not close a socket it was handed, so
+// restart (ADR 0092); quic-go does not close a socket it was handed, so
 // Close closes both.
 type quicSocket struct {
 	*quic.EarlyListener

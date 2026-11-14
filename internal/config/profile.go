@@ -331,7 +331,7 @@ type TierDefaults struct {
 	MigrationBackup bool
 	// SocketHandoff is whether the gateway hands its listening sockets to
 	// the service manager so that they stay open across a restart (ADR
-	// 0088). On for every tier: it costs one descriptor per listener in the
+	// 0092). On for every tier: it costs one descriptor per listener in the
 	// manager and nothing on the request path. GATEON_SOCKET_HANDOFF=false
 	// turns it off.
 	SocketHandoff bool

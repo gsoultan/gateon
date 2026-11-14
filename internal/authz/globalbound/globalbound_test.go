@@ -86,6 +86,21 @@ var boundaryCases = []struct {
 	{"ebpf.enabled", func(c *gateonv1.GlobalConfig) { c.Ebpf.Enabled = false }},
 	{"redis.addr", func(c *gateonv1.GlobalConfig) { c.Redis.Addr = "evil.example:6379" }},
 	{"debugger.enabled", func(c *gateonv1.GlobalConfig) { c.Debugger.Enabled = true }},
+	// Where every scanned upload is sent, and what the gateway runs on its
+	// own host to scan it.
+	{"waf.clamav_addr", func(c *gateonv1.GlobalConfig) { c.Waf.ClamavAddr = "tcp://evil.example:3310" }},
+	{"waf.clamav.clamav_addr", func(c *gateonv1.GlobalConfig) {
+		c.Waf.Clamav = &gateonv1.ClamavConfig{ClamavAddr: "tcp://evil.example:3310"}
+	}},
+	{"waf.clamav.docker_image", func(c *gateonv1.GlobalConfig) {
+		c.Waf.Clamav = &gateonv1.ClamavConfig{DockerImage: "evil.example/miner:latest"}
+	}},
+	{"waf.clamav.installation_mode", func(c *gateonv1.GlobalConfig) {
+		c.Waf.Clamav = &gateonv1.ClamavConfig{InstallationMode: gateonv1.ClamavConfig_INSTALLATION_MODE_DOCKER}
+	}},
+	{"waf.clamav.auto_install", func(c *gateonv1.GlobalConfig) {
+		c.Waf.Clamav = &gateonv1.ClamavConfig{AutoInstall: true}
+	}},
 }
 
 func TestOperatorChangingABoundaryFieldIsRefusedAndNamed(t *testing.T) {

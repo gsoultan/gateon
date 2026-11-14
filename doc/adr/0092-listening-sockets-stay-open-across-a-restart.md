@@ -1,4 +1,4 @@
-# 88. Listening sockets stay open across a restart
+# 92. Listening sockets stay open across a restart
 
 Date: 2026-11-13
 

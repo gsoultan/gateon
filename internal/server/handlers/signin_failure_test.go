@@ -11,13 +11,13 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
+
+	"github.com/gsoultan/gateon/internal/auth/authtest"
 
 	"github.com/gsoultan/gateon/internal/api"
 	"github.com/gsoultan/gateon/internal/auth"
 	"github.com/gsoultan/gateon/internal/logger"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
-	"github.com/pquerna/otp/totp"
 )
 
 // dbDownAPI fails every sign-in the way the service does when the user
@@ -125,7 +125,7 @@ func enrolSecondFactor(t *testing.T, dbPath, key string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	code, err := totp.GenerateCode(enrolment.Secret, time.Now())
+	code, err := authtest.Code(enrolment.Secret)
 	if err != nil {
 		t.Fatal(err)
 	}

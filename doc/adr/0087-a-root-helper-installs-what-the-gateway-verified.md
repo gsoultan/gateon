@@ -9,7 +9,7 @@ release and undoing a failed install. The restart it performs is a stop and a
 start, which refuses connections for a few seconds; handing the listening
 sockets to the new process is the third record.
 
-Amended by ADR 0088: the stop and start described below is now one restart,
+Amended by ADR 0092: the stop and start described below is now one restart,
 with the binary renamed into place first.
 
 ## Context

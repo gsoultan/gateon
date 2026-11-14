@@ -47,7 +47,7 @@ func TestAuthenticate(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, _, err := m.Authenticate(tt.username, tt.password, "")
+			_, _, err := passwordStep(m, tt.username, tt.password, "")
 			if !errors.Is(err, tt.wantErr) {
 				t.Errorf("Authenticate() error = %v, wantErr %v", err, tt.wantErr)
 			}
@@ -80,14 +80,14 @@ func TestAccountLockout(t *testing.T) {
 
 	// Fail login MaxFailedAttempts times from one source.
 	for range MaxFailedAttempts {
-		_, _, err := m.Authenticate("admin", "wrong", source)
+		_, _, err := passwordStep(m, "admin", "wrong", source)
 		if err != ErrInvalidCredentials {
 			t.Errorf("expected ErrInvalidCredentials, got %v", err)
 		}
 	}
 
 	// The next attempt from that source is locked, the right password too.
-	_, _, err = m.Authenticate("admin", "lockout-passphrase", source)
+	_, _, err = passwordStep(m, "admin", "lockout-passphrase", source)
 	if err != ErrAccountLocked {
 		t.Errorf("expected ErrAccountLocked, got %v", err)
 	}
@@ -105,7 +105,7 @@ func TestAccountLockout(t *testing.T) {
 
 	// The lock lasts LockoutDuration, then the right password works.
 	now = now.Add(LockoutDuration)
-	_, _, err = m.Authenticate("admin", "lockout-passphrase", source)
+	_, _, err = passwordStep(m, "admin", "lockout-passphrase", source)
 	if err != nil {
 		t.Errorf("expected successful login once the lock ended, got %v", err)
 	}

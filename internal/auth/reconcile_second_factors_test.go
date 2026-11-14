@@ -8,10 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/gsoultan/gateon/internal/logger"
-	"github.com/pquerna/otp/totp"
 )
 
 // A session key changed without the dashboard's rotation -- global.json edited,
@@ -51,7 +49,7 @@ func enrolledUnderOldKey(t *testing.T) (dbPath, id, secret string) {
 
 func signInWithSecondFactor(t *testing.T, m *Manager, id, secret string) error {
 	t.Helper()
-	code, err := totp.GenerateCode(secret, time.Now())
+	code, err := freshCode(t, m, secret)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,7 +141,7 @@ func TestThePreviousKeyNeverVerifiesASession(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "auth.db")
 	old := managerWithKey(t, dbPath, testSymmetricKey)
 	createUser(t, old, "erin", "correct-horse-battery")
-	token, _, err := old.Authenticate("erin", "correct-horse-battery", "")
+	token, _, err := signIn(t, old, "erin", "correct-horse-battery", "")
 	if err != nil {
 		t.Fatal(err)
 	}

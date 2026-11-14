@@ -21,7 +21,7 @@ import (
 // The binary is renamed into place while the old gateway is still running
 // from the old file, and the gateway is then restarted in one step. Renaming
 // does not disturb a running process, and a single restart is what lets the
-// service manager keep the listening sockets open in between (ADR 0088).
+// service manager keep the listening sockets open in between (ADR 0092).
 func (r *run) install(ctx context.Context, staged string) upgrade.Status {
 	previous := filepath.Join(r.cfg.StateDir, previousFile)
 	if err := copyFile(r.cfg.BinaryPath, previous, binaryMode); err != nil {

@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/gsoultan/gateon/internal/auth"
+	"github.com/gsoultan/gateon/internal/auth/authtest"
 	"github.com/gsoultan/gateon/internal/logger"
 )
 
@@ -54,14 +55,14 @@ func TestSeedSignsInAsAdminAdmin(t *testing.T) {
 	if _, err := seedAccount(mgr, dbURL, accounts[0], "admin"); err != nil {
 		t.Fatalf("re-seed: %v", err)
 	}
-	_, user, err := mgr.Authenticate("admin", "admin", "127.0.0.1")
+	user, err := authtest.PasswordStep(mgr, "admin", "admin", "127.0.0.1")
 	if err != nil {
 		t.Fatalf("admin/admin did not sign in: %v", err)
 	}
 	if user.Role != auth.RoleAdmin {
 		t.Errorf("role = %q, want %q", user.Role, auth.RoleAdmin)
 	}
-	if _, _, err := mgr.Authenticate("viewer", "viewer", "127.0.0.1"); err != nil {
+	if _, err := authtest.PasswordStep(mgr, "viewer", "viewer", "127.0.0.1"); err != nil {
 		t.Errorf("viewer/viewer did not sign in: %v", err)
 	}
 }
@@ -75,7 +76,7 @@ func TestSeedRefusesWeakPasswordOutsideDevData(t *testing.T) {
 	if !errors.Is(err, errNotDevDatabase) {
 		t.Fatalf("err = %v, want errNotDevDatabase", err)
 	}
-	if _, _, err := mgr.Authenticate("admin", "admin", "127.0.0.1"); err == nil {
+	if _, err := authtest.PasswordStep(mgr, "admin", "admin", "127.0.0.1"); err == nil {
 		t.Fatal("admin/admin signed in on a database outside dev/.data")
 	}
 }

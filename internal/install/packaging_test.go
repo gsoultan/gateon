@@ -317,7 +317,7 @@ func TestThePackagesShipNoWindowsFileAndTheDropIn(t *testing.T) {
 
 // TestUnitsLetTheManagerKeepTheListeningSockets: without these two lines
 // the gateway has no notification socket to hand its listeners to, and a
-// restart closes every one of them as it always did (ADR 0088). Nothing
+// restart closes every one of them as it always did (ADR 0092). Nothing
 // fails when they are missing; connections are just refused again.
 func TestUnitsLetTheManagerKeepTheListeningSockets(t *testing.T) {
 	t.Parallel()

@@ -21,7 +21,7 @@ type ServiceControl interface {
 	// Restart stops the gateway and starts it again as one operation of the
 	// service manager. One operation, not a stop and then a start: the
 	// manager holds the gateway's listening sockets across a restart and
-	// lets go of them when the service is stopped (ADR 0088).
+	// lets go of them when the service is stopped (ADR 0092).
 	Restart(ctx context.Context) error
 	// Restarts is how often the service manager has restarted the gateway
 	// by itself since Restart, or 0 when that cannot be told.

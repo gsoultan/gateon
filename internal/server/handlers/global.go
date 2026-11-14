@@ -451,7 +451,7 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 
 		resp, err := svc.InstallClamav(r.Context(), &req)
 		if err != nil {
-			WriteHTTPError(w, http.StatusInternalServerError, err.Error())
+			writeServiceRefusal(w, err)
 			return
 		}
 		data, _ := ProtojsonOptions().Marshal(resp)
@@ -488,7 +488,7 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 
 		resp, err := svc.UninstallClamav(r.Context(), &req)
 		if err != nil {
-			WriteHTTPError(w, http.StatusInternalServerError, err.Error())
+			writeServiceRefusal(w, err)
 			return
 		}
 		data, _ := ProtojsonOptions().Marshal(resp)

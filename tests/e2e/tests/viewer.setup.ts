@@ -4,6 +4,7 @@
 import { test as setup, expect } from '@playwright/test';
 import { execSync } from 'child_process';
 import { expectSessionOnlyInCookie } from './session-storage';
+import { finishSignInPage } from './two-factor';
 
 const viewerFile = 'tests/.auth/viewer.json';
 
@@ -16,6 +17,7 @@ setup('authenticate viewer', async ({ page }) => {
   await page.getByPlaceholder('Enter your username').fill('viewer');
   await page.getByPlaceholder('••••••••').fill('e2e-horse-battery-42');
   await page.getByRole('button', { name: /Continue to Dashboard/i }).click();
+  await finishSignInPage(page, 'viewer');
 
   // Wait for dashboard to load
   await expect(page.getByRole('heading', { name: /^Overview$/ })).toBeVisible({ timeout: 60000 });

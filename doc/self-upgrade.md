@@ -32,7 +32,7 @@ the command for that instead.
 
 The gateway hands each listening socket to systemd when it binds it. systemd
 holds the socket while the gateway is replaced and gives it to the new
-process (ADR 0088).
+process (ADR 0092).
 
 | Connection | What happens |
 | :--- | :--- |

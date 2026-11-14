@@ -126,8 +126,9 @@ export default function LoginPage() {
           setStep("2fa");
         } else if (data.twoFactorSetupRequired) {
           setChallenge(data.twoFactorChallenge ?? "");
-          // Administrator mandated 2FA but the user hasn't enrolled. Begin
-          // first-time enrollment (re-uses the just-entered password).
+          // The account has no second factor yet, and every account must
+          // have one (ADR 0088). Begin first-time enrolment (re-uses the
+          // just-entered password); the session comes from the first code.
           await startEnrollment(values.username, values.password);
         } else {
           // The server has already set the HttpOnly gateon_session cookie.
@@ -354,7 +355,7 @@ export default function LoginPage() {
                 {step === "login"
                   ? "Welcome back! Please enter your details."
                   : step === "2fa-setup"
-                    ? "Your administrator requires two-factor authentication. Enroll your device to continue."
+                    ? "Every Gateon account signs in with two-factor authentication. Set up an authenticator app to continue."
                     : "Enter the code from your authenticator app."}
               </Text>
             </Box>

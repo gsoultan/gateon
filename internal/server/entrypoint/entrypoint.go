@@ -400,7 +400,7 @@ func (a *l4ResolverAdapter) ResolveUDP(ep *gateonv1.EntryPoint) l4.UDPProxy {
 // Deps holds dependencies needed to run entrypoints.
 type Deps struct {
 	// Sockets holds the listening sockets kept open across a restart (ADR
-	// 0088). Nil binds every listener afresh.
+	// 0092). Nil binds every listener afresh.
 	Sockets          *sockets.Store
 	Port             string
 	EpStore          config.EntryPointStore
