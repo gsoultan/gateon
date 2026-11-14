@@ -102,6 +102,7 @@ ADRs follow a lightweight [MADR](https://adr.github.io/madr/)-style format:
 | [0090](./0090-clamav-on-the-host-is-an-administrators-decision.md) | ClamAV on the host is an administrator's decision | Accepted |
 | [0091](./0091-uploads-are-scanned-on-scanner-workers.md) | Uploads are scanned on scanner workers | Accepted (staged) |
 | [0092](./0092-listening-sockets-stay-open-across-a-restart.md) | Listening sockets stay open across a restart | Accepted |
+| [0093](./0093-built-in-waf-rules-take-their-detection-from-gwaf.md) | Built-in WAF rules take their detection from gwaf | Accepted |
 
 ## Conventions
 

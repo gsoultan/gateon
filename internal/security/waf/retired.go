@@ -82,6 +82,13 @@ const (
 	replacementThresholdFor = "Policy.thresholdFor"
 	replacementMaxBody      = "maxbody middleware"
 	replacementNoneNeeded   = "none needed"
+
+	// whyCoreCovers is the reason for the one rule retired when detection moved
+	// to gwaf (ADR 0093). It was replayed, alternative by alternative and target
+	// by target, through gwaf's core alone, and core matched every payload it
+	// did under the same switch; TestRetiredAsNativeIsStillRefusedByCore keeps
+	// that true.
+	whyCoreCovers = "gwaf's core ruleset matches every payload this rule did, under the same switch, so a second copy only repeated the check."
 )
 
 // Retirements accounts for every seeded SecLang directive that did not become a
@@ -181,6 +188,17 @@ var Retirements = []Retirement{
 		ID: "1150002", Name: "API: Multiple Content-Type Headers",
 		Disposition: DispositionMiddleware, Replacement: "protocol middleware",
 		Why: "counting duplicate headers needs a count operator gwaf does not ship; it is enforced before the engine runs.",
+	},
+
+	// Retired when detection moved to gwaf (ADR 0093), not by the SecLang
+	// migration. Every other built-in detection rule moved to gwaf and is still
+	// loaded under its old ID. Six more looked like duplicates of core and were
+	// kept, because core answers them under a different switch: turning the Java
+	// rules off would have taken Log4Shell with them.
+	{
+		ID: "1141001", Name: "HTML tag injection",
+		Disposition: DispositionNative, Replacement: "gwaf core rule 3010 (cross-site scripting, structural)",
+		Why: whyCoreCovers,
 	},
 }
 

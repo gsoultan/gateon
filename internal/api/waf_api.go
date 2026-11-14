@@ -4,9 +4,12 @@
 package api
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
+	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/gsoultan/gateon/internal/security/waf"
@@ -178,4 +181,92 @@ func ruleBody(r *waf.Rule) string {
 		return r.Definition
 	}
 	return r.Directive
+}
+
+// maxBuiltinRulePage bounds one page of ListBuiltinWafRules. The table is a
+// hundred rules compiled into the binary, so this is a ceiling on what a caller
+// may ask for and not on what exists.
+const (
+	defaultBuiltinRulePage = 50
+	maxBuiltinRulePage     = 200
+
+	builtinSourceGwaf   = "gwaf"
+	builtinSourceGateon = "gateon"
+)
+
+// ListBuiltinWafRules describes the rules compiled into the gateway.
+//
+// ListWafRules reads the rules an operator wrote, which are rows. These are
+// not, so the dashboard's Rules page listed none of what was actually loaded
+// (ADR 0093). The list is the table the engine is built from, not a copy of it.
+func (s *ApiService) ListBuiltinWafRules(_ context.Context, req *gateonv1.ListBuiltinWafRulesRequest) (*gateonv1.ListBuiltinWafRulesResponse, error) {
+	limit := int(req.GetLimit())
+	if limit <= 0 {
+		limit = defaultBuiltinRulePage
+	}
+	limit = min(limit, maxBuiltinRulePage)
+	offset := max(int(req.GetOffset()), 0)
+
+	catalog := waf.RuleCatalog()
+	matched := make([]waf.RuleInfo, 0, len(catalog))
+	seen := make(map[string]bool)
+	resp := &gateonv1.ListBuiltinWafRulesResponse{}
+	for _, r := range catalog {
+		if !seen[r.Category] {
+			seen[r.Category] = true
+			resp.Categories = append(resp.Categories, r.Category)
+		}
+		if builtinRuleMatches(r, req.GetSearch(), req.GetCategory()) {
+			matched = append(matched, r)
+		}
+	}
+	slices.Sort(resp.Categories)
+	slices.SortFunc(matched, func(a, b waf.RuleInfo) int { return cmp.Compare(a.ID, b.ID) })
+
+	resp.Total = int32(len(matched))
+	for _, r := range matched[min(offset, len(matched)):min(offset+limit, len(matched))] {
+		resp.Rules = append(resp.Rules, builtinRuleProto(r))
+	}
+	return resp, nil
+}
+
+// builtinRuleMatches applies the search and category filters. An empty filter
+// matches everything; "all" is what the dashboard sends for no category.
+func builtinRuleMatches(r waf.RuleInfo, search, category string) bool {
+	if category != "" && category != "all" && !strings.EqualFold(r.Category, category) {
+		return false
+	}
+	search = strings.ToLower(strings.TrimSpace(search))
+	if search == "" {
+		return true
+	}
+	if strings.Contains(strings.ToLower(r.Msg), search) || strings.Contains(strconv.FormatUint(uint64(r.ID), 10), search) {
+		return true
+	}
+	for _, tag := range r.Tags {
+		if strings.Contains(strings.ToLower(tag), search) {
+			return true
+		}
+	}
+	return false
+}
+
+func builtinRuleProto(r waf.RuleInfo) *gateonv1.BuiltinWafRule {
+	source := builtinSourceGateon
+	if r.From != 0 {
+		source = builtinSourceGwaf
+	}
+	return &gateonv1.BuiltinWafRule{
+		Id:            r.ID,
+		Name:          r.Msg,
+		Category:      r.Category,
+		ParanoiaLevel: int32(r.ParanoiaLevel),
+		Severity:      r.Severity.String(),
+		Confidence:    r.Confidence.String(),
+		Phase:         r.Phase.String(),
+		Tags:          r.Tags,
+		Action:        r.Action,
+		Source:        source,
+		SourceRuleId:  uint32(r.From),
+	}
 }
