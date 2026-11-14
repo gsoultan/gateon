@@ -6,9 +6,6 @@ package auth
 import (
 	"errors"
 	"testing"
-	"time"
-
-	"github.com/pquerna/otp/totp"
 )
 
 const rotatedKey = "fedcba9876543210fedcba9876543210"
@@ -26,7 +23,7 @@ func TestUpdateSymmetricKeyKeepsEverySecondFactor(t *testing.T) {
 		t.Fatalf("UpdateSymmetricKey: %v", err)
 	}
 
-	code, err := totp.GenerateCode(secret, time.Now())
+	code, err := freshCode(t, m, secret)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +37,7 @@ func TestUpdateSymmetricKeyKeepsEverySecondFactor(t *testing.T) {
 func TestUpdateSymmetricKeyEndsEverySession(t *testing.T) {
 	m := newTestManager(t)
 	createUser(t, m, "bob", "correct-horse-battery")
-	old, _, err := m.Authenticate("bob", "correct-horse-battery", "")
+	old, _, err := signIn(t, m, "bob", "correct-horse-battery", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,7 +47,7 @@ func TestUpdateSymmetricKeyEndsEverySession(t *testing.T) {
 	if _, err := m.VerifyToken(old); err == nil {
 		t.Fatal("a session signed with the previous key still verifies")
 	}
-	fresh, _, err := m.Authenticate("bob", "correct-horse-battery", "")
+	fresh, _, err := signIn(t, m, "bob", "correct-horse-battery", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +61,7 @@ func TestUpdateSymmetricKeyEndsEverySession(t *testing.T) {
 func TestUpdateSymmetricKeyRefusesAShortKey(t *testing.T) {
 	m := newTestManager(t)
 	createUser(t, m, "carol", "correct-horse-battery")
-	token, _, err := m.Authenticate("carol", "correct-horse-battery", "")
+	token, _, err := signIn(t, m, "carol", "correct-horse-battery", "")
 	if err != nil {
 		t.Fatal(err)
 	}

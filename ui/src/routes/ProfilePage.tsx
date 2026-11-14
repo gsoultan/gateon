@@ -76,12 +76,15 @@ export default function ProfilePage() {
   };
 
   const handle2FASuccess = () => {
+    const replaced = !!user?.twoFactorEnabled;
     if (user) {
       setAuth(token ?? "__cookie__", { ...user, twoFactorEnabled: true });
     }
     notifications.show({
-      title: "Two-factor authentication enabled",
-      message: "Your account is now protected with 2FA.",
+      title: replaced ? "Authenticator replaced" : "Two-factor authentication enabled",
+      message: replaced
+        ? "Sign in with codes from your new authenticator. Your old one and its recovery codes no longer work."
+        : "Your account is now protected with 2FA.",
       color: "green",
       icon: <IconShieldCheck size={16} />,
     });
@@ -229,23 +232,25 @@ export default function ProfilePage() {
                   <Tooltip
                     label={
                       twoFactorEnabled
-                        ? "2FA is already enabled for your account"
+                        ? "Move your sign-in codes to a new authenticator app"
                         : "Set up an authenticator app"
                     }
                   >
                     <Button
                       variant={twoFactorEnabled ? "default" : "filled"}
-                      disabled={twoFactorEnabled || !user}
+                      disabled={!user}
                       onClick={tfaOpen}
                     >
-                      {twoFactorEnabled ? "Active" : "Enable 2FA"}
+                      {twoFactorEnabled ? "Replace authenticator" : "Enable 2FA"}
                     </Button>
                   </Tooltip>
                 </Group>
               </Paper>
               <Text size="xs" c="dimmed">
-                When enabled, you'll need a code from your authenticator app in
-                addition to your password each time you sign in.
+                Every account signs in with a password and a code from an
+                authenticator app. When you replace your authenticator, the
+                current one keeps working until you confirm a code from the new
+                one.
               </Text>
             </Stack>
           </Card>

@@ -208,6 +208,9 @@ func (s *ApiService) InstallClamav(ctx context.Context, req *gateonv1.InstallCla
 	if s.ClamAVManager == nil {
 		return &gateonv1.InstallClamavResponse{Success: false, Message: "ClamAV manager not initialized"}, nil
 	}
+	if err := s.requireHostAdmin(ctx); err != nil {
+		return nil, err
+	}
 
 	// Update global config with the new installation mode
 	var clamav *gateonv1.ClamavConfig
@@ -254,6 +257,9 @@ func (s *ApiService) InstallClamav(ctx context.Context, req *gateonv1.InstallCla
 func (s *ApiService) UninstallClamav(ctx context.Context, req *gateonv1.UninstallClamavRequest) (*gateonv1.UninstallClamavResponse, error) {
 	if s.ClamAVManager == nil {
 		return &gateonv1.UninstallClamavResponse{Success: false, Message: "ClamAV manager not initialized"}, nil
+	}
+	if err := s.requireHostAdmin(ctx); err != nil {
+		return nil, err
 	}
 
 	// Validate prerequisites synchronously so the operator gets an immediate,

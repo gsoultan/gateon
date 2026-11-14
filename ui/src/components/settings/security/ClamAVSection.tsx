@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 import { Text, Stack, TextInput, Button, Group, Divider, Switch, Alert, Select, Menu, Loader } from "@mantine/core";
-import { IconInfoCircle, IconDownload, IconBox, IconChevronDown, IconShieldCheck, IconAdjustments, IconTrash } from "@tabler/icons-react";
+import { IconAlertTriangle, IconInfoCircle, IconDownload, IconBox, IconChevronDown, IconShieldCheck, IconAdjustments, IconTrash } from "@tabler/icons-react";
 import type { StatusResponse, WafConfig } from "../../../types/gateon";
 
 interface ClamAVSectionProps {
@@ -15,6 +15,11 @@ interface ClamAVSectionProps {
   onInstall: (mode: number) => void;
   onUninstall: () => void;
 }
+
+// clamd holds its signature database in memory, about 1 GB, for as long as it
+// runs. Below this much host memory that is a large share of what the gateway
+// itself has to work with.
+const CLAMAV_COMFORTABLE_HOST_GB = 4;
 
 // ClamAV for the WAF's malware detection: whether it is there, installing or
 // removing it, and how the gateway reaches it.
@@ -31,6 +36,18 @@ export function ClamAVSection({
   return (
     <>
       <Divider label="ClamAV Anti-Malware" labelPosition="center" />
+      {status?.memoryTotalGb !== undefined &&
+        status.memoryTotalGb > 0 &&
+        status.memoryTotalGb < CLAMAV_COMFORTABLE_HOST_GB &&
+        !status.clamavInstalled && (
+          <Alert icon={<IconAlertTriangle size="1rem" />} title="This host is small for ClamAV" color="yellow">
+            <Text size="sm">
+              ClamAV keeps about 1 GB in memory while it runs, and this host has{" "}
+              {status.memoryTotalGb.toFixed(1)} GB. Installing it here leaves the gateway less room under
+              load. Run ClamAV on another machine instead and enter its address below.
+            </Text>
+          </Alert>
+        )}
       {waf.malwareDetection && status && !status.clamavInstalled && (
         <Alert icon={<IconInfoCircle size="1rem" />} title="ClamAV Not Detected" color="red">
           <Stack gap="xs">

@@ -9,12 +9,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
-
-	"github.com/pquerna/otp/totp"
 
 	"github.com/gsoultan/gateon/internal/api"
 	"github.com/gsoultan/gateon/internal/auth"
+	"github.com/gsoultan/gateon/internal/auth/authtest"
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware"
@@ -43,7 +41,7 @@ func signInPlane(t *testing.T) (http.Handler, *api.ApiService, string) {
 	if err := mgr.UpsertUser(&gateonv1.User{Username: "admin", Password: anonAdminPassword, Role: auth.RoleAdmin}); err != nil {
 		t.Fatal(err)
 	}
-	_, user, err := mgr.Authenticate("admin", anonAdminPassword, "192.0.2.1")
+	user, err := authtest.PasswordStep(mgr, "admin", anonAdminPassword, "192.0.2.1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +49,7 @@ func signInPlane(t *testing.T) (http.Handler, *api.ApiService, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	code, err := totp.GenerateCode(enrolment.Secret, time.Now())
+	code, err := authtest.Code(enrolment.Secret)
 	if err != nil {
 		t.Fatal(err)
 	}

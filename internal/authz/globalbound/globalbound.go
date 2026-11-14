@@ -57,12 +57,17 @@ type Caller struct {
 	AuthEnforced bool
 }
 
-// restricted reports whether the caller is held to the administrator-only
+// Restricted reports whether the caller is held to the administrator-only
 // rule. A claims value that could not be read establishes nothing, and so is
 // not an administrator. No claims at all means nobody authenticated the
 // request: that is only "the management plane is open by configuration" when
 // authentication is in fact off.
-func (c Caller) restricted() bool {
+//
+// It is exported for an operation that is not a save of the global
+// configuration but sits on the same boundary -- having the gateway install
+// software on its own host -- which asks the same question and must get the
+// same answer.
+func (c Caller) Restricted() bool {
 	if c.ClaimsPresent {
 		return c.Claims == nil || c.Claims.Role != auth.RoleAdmin
 	}
@@ -106,7 +111,7 @@ func (e *RefusalError) Unwrap() error { return ErrRequiresAdmin }
 // whose authentication is off, and a save that leaves every boundary field as
 // stored all return nil.
 func Authorize(c Caller, ch Change) error {
-	if !c.restricted() {
+	if !c.Restricted() {
 		return nil
 	}
 	if fields := ChangedBoundary(ch); len(fields) > 0 {

@@ -21,14 +21,15 @@ const legacyHash = "$2a$10$legacy-hash-for-golden-test"
 // account's epoch is zero -- every account, straight after the migration --
 // the digest must be that one, byte for byte. Otherwise replacing the binary
 // signs out every administrator mid-session and breaks every API client
-// holding a token.
+// holding a token. It holds for an account with a second factor; one without
+// has no session to keep (ADR 0088).
 func TestAnAccountThatNeverSignedOutKeepsItsPreUpgradeBinding(t *testing.T) {
 	for _, c := range []struct {
 		state accountState
 		want  string
 	}{
-		{accountState{passwordHash: legacyHash, role: RoleAdmin}, "ca100404af562ff4180cc78217efd701"},
-		{accountState{passwordHash: legacyHash, role: RoleViewer, disabled: true}, "9adc3d8902d1782dd20731b2b060fb56"},
+		{accountState{passwordHash: legacyHash, role: RoleAdmin, twoFactorEnabled: true}, "ca100404af562ff4180cc78217efd701"},
+		{accountState{passwordHash: legacyHash, role: RoleViewer, disabled: true, twoFactorEnabled: true}, "9adc3d8902d1782dd20731b2b060fb56"},
 	} {
 		if got := c.state.binding(); got != c.want {
 			t.Errorf("role %s, disabled %v: binding %s, want the pre-upgrade %s",
@@ -47,7 +48,7 @@ func TestATokenIssuedBeforeTheUpgradeStillVerifies(t *testing.T) {
 		id := e.create(t, username, "any-password", RoleAdmin)
 		// The row as the previous release left it: the hash its token was
 		// bound to, and the epoch the migration gives every row.
-		q := e.m.Dialect().Rebind("UPDATE users SET password = ? WHERE id = ?")
+		q := e.m.Dialect().Rebind("UPDATE users SET password = ?, two_factor_enabled = TRUE WHERE id = ?")
 		if _, err := e.m.DB().Exec(q, legacyHash, id); err != nil {
 			t.Fatalf("setting the legacy hash: %v", err)
 		}

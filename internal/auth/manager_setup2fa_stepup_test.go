@@ -6,9 +6,6 @@ package auth
 import (
 	"errors"
 	"testing"
-	"time"
-
-	"github.com/pquerna/otp/totp"
 )
 
 // storedTOTPSecret reads the account's stored (encrypted) TOTP secret.
@@ -60,7 +57,7 @@ func TestSetup2FAWrongPasswordsLockTheStepUp(t *testing.T) {
 	if _, err := m.Setup2FA(id, "right-passphrase"); !errors.Is(err, ErrAccountLocked) {
 		t.Errorf("step-up with the right password on a locked account: err = %v, want ErrAccountLocked", err)
 	}
-	if _, _, err := m.Authenticate("heidi", "right-passphrase", "198.51.100.7"); err != nil {
+	if _, _, err := passwordStep(m, "heidi", "right-passphrase", "198.51.100.7"); err != nil {
 		t.Errorf("sign-in after %d wrong step-up passwords: err = %v, want a session", MaxFailedAttempts, err)
 	}
 }
@@ -74,7 +71,7 @@ func TestSignInGuessesDoNotLockTheStepUp(t *testing.T) {
 	id := createUser(t, m, "ivan", "right-passphrase")
 
 	for range MaxFailedAttempts {
-		if _, _, err := m.Authenticate("ivan", "wrong-pass", "203.0.113.9"); !errors.Is(err, ErrInvalidCredentials) {
+		if _, _, err := passwordStep(m, "ivan", "wrong-pass", "203.0.113.9"); !errors.Is(err, ErrInvalidCredentials) {
 			t.Fatalf("wrong sign-in: err = %v", err)
 		}
 	}
@@ -135,7 +132,7 @@ func TestRefusedSetup2FALeavesAnEnrolledAccountsFactorAlone(t *testing.T) {
 	if after := storedTOTPSecret(t, m, id); after != before {
 		t.Fatal("a refused setup replaced the enrolled TOTP secret")
 	}
-	code, err := totp.GenerateCode(secret, time.Now())
+	code, err := freshCode(t, m, secret)
 	if err != nil {
 		t.Fatalf("GenerateCode: %v", err)
 	}

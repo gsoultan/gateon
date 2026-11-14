@@ -5,22 +5,25 @@ package security
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"mime"
 	"mime/multipart"
+	"net"
 	"net/http"
+	"net/url"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/dutchcoders/go-clamd"
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware/kind"
 	"github.com/gsoultan/gateon/internal/request"
+	"github.com/gsoultan/gateon/internal/security/scanpool"
 	"github.com/gsoultan/gateon/internal/security/yara"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	"github.com/h2non/filetype"
@@ -106,6 +109,10 @@ type FileSecurityConfig struct {
 	SignatureBlockSeverity yara.Severity
 	// RouteID is the identifier for the route being protected, used for telemetry.
 	RouteID string
+
+	// scanners is where files are sent, built once from ClamAVAddr when the
+	// middleware is, so a scanner's health is remembered between requests.
+	scanners *scanpool.Pool
 }
 
 func (c FileSecurityConfig) withDefaults() FileSecurityConfig {
@@ -142,6 +149,12 @@ type scanResult struct {
 // (intact) body is forwarded to the upstream handler.
 func FileSecurity(cfg FileSecurityConfig) kind.Middleware {
 	cfg = cfg.withDefaults()
+	if cfg.EnableClamAV && cfg.scanners == nil {
+		// An address that cannot be read leaves this nil, and scanStream
+		// reports it on each scan: the route then refuses or forwards by
+		// FailOpen, as it does for a scanner that is down.
+		cfg.scanners, _ = scanpool.New([]string{cfg.ClamAVAddr})
+	}
 	sem := make(chan struct{}, cfg.MaxConcurrentScans)
 	engine := cfg.buildSignatureEngine()
 	blockSev := cfg.blockSeverity()
@@ -644,69 +657,33 @@ func scanEmbeddedExecutable(r *http.Request, p *multipart.Part, head, content []
 	return scanResult{}
 }
 
-// scanPartWithClamAV streams the full part content to clamd.
+// scanPartWithClamAV sends the full part content to a scanner.
 func scanPartWithClamAV(r *http.Request, p *multipart.Part, content []byte, cfg FileSecurityConfig) scanResult {
-	res, err := scanStream(r, cfg, bytes.NewReader(content))
+	verdict, err := scanStream(r, cfg, content)
 	if err != nil {
 		logger.L.LogError("ClamAV scan failed", "error", err, "filename", p.FileName())
 		return scanResult{scannerErr: err}
 	}
-	if res != nil && res.Status == clamd.RES_FOUND {
+	if verdict.Found {
 		logger.L.LogWarn("Malware detected in upload",
-			"filename", p.FileName(), "virus", res.Description, "client_ip", r.RemoteAddr)
+			"filename", p.FileName(), "virus", verdict.Signature, "client_ip", r.RemoteAddr)
 		return scanResult{blocked: true, status: http.StatusForbidden,
-			message: fmt.Sprintf("Malware detected: %s", res.Description)}
+			message: fmt.Sprintf("Malware detected: %s", verdict.Signature)}
 	}
 	return scanResult{}
 }
 
-// scanStream performs a single bounded ClamAV stream scan.
-func scanStream(r *http.Request, cfg FileSecurityConfig, stream io.Reader) (*clamd.ScanResult, error) {
-	c := clamd.NewClamd(cfg.ClamAVAddr)
-
-	// Closed, never signalled. ScanStream spawns a watcher that is written as
-	//
-	//	for { _, allowRunning := <-abort; if !allowRunning { break } }
-	//	conn.Close()
-	//
-	// so a send of `true` reads as "keep running" and is discarded: the loop
-	// goes straight back to blocking on the channel. Only a *close* makes it
-	// break and tear the connection down. Sending, which is what this did,
-	// therefore aborted nothing -- a scan that timed out or whose client
-	// disconnected ran to completion against clamd, and the watcher blocked on
-	// <-abort for the life of the process. One per scanned part.
-	//
-	// Deferred before the call, not after it: ScanStream can fail at sendEOF,
-	// which is after the watcher is already running, and that path returns an
-	// error with the goroutine live.
-	abort := make(chan bool)
-	defer close(abort)
-
-	response, err := c.ScanStream(stream, abort)
-	if err != nil {
-		return nil, fmt.Errorf("clamd connection failed: %w", err)
-	}
-
-	var found *clamd.ScanResult
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		for res := range response {
-			if res.Status == clamd.RES_FOUND {
-				found = res
-				return
-			}
+// scanStream performs one scan, bounded by cfg.ScanTimeout and by the request.
+// The verdict is clean only when the scanner said so: see scanpool.
+func scanStream(r *http.Request, cfg FileSecurityConfig, content []byte) (scanpool.Verdict, error) {
+	pool := cfg.scanners
+	if pool == nil {
+		var err error
+		if pool, err = scanpool.New([]string{cfg.ClamAVAddr}); err != nil {
+			return scanpool.Verdict{}, err
 		}
-	}()
-
-	select {
-	case <-done:
-		return found, nil
-	case <-time.After(cfg.ScanTimeout):
-		return nil, fmt.Errorf("scan timed out after %s", cfg.ScanTimeout)
-	case <-r.Context().Done():
-		return nil, r.Context().Err()
 	}
+	return pool.Scan(r.Context(), content, cfg.ScanTimeout)
 }
 
 // restoreBody replaces the (consumed) request body with the buffered copy so the
@@ -745,6 +722,51 @@ func isHighRiskMismatch(ext, magicExt string) bool {
 		if imageExts[ext] {
 			return true
 		}
+	}
+	return false
+}
+
+// errRouteScannerNotLocal is the refusal of a route's own clamav_addr that
+// names another machine.
+var errRouteScannerNotLocal = errors.New("a route's own scanner must be on this host (a unix socket or a " +
+	"loopback address): every upload the route scans is sent there. A scanner on another machine is set " +
+	"by an administrator in the global WAF settings, which this route uses when it names none")
+
+// CheckFileSecuritySave refuses, at save, a file_security middleware whose own
+// clamav_addr is on another machine.
+//
+// Whoever is named there receives every upload the route scans and answers
+// whether it is clean. A middleware is an operator's to write, so the key let
+// the operator role send a route's uploads to a server of its choosing and
+// have them waved through. The global address is an administrator's
+// (globalbound classes it Boundary); the route's own may only point at this
+// host. Refused at save and not in Create, so a stored middleware predating
+// the rule keeps scanning as it did until it is next edited.
+func CheckFileSecuritySave(cfg map[string]string) error {
+	addr := strings.TrimSpace(cfg["clamav_addr"])
+	if addr == "" || scannerIsLocal(addr) {
+		return nil
+	}
+	return kind.CfgError("clamav_addr", addr, errRouteScannerNotLocal)
+}
+
+// scannerIsLocal reports whether addr, in the two forms clamd reads
+// (unix:///path and tcp://host:port), is on this host.
+func scannerIsLocal(addr string) bool {
+	u, err := url.Parse(addr)
+	if err != nil {
+		return false
+	}
+	switch u.Scheme {
+	case "unix":
+		return true
+	case "tcp":
+		host := u.Hostname()
+		if host == "localhost" {
+			return true
+		}
+		ip := net.ParseIP(host)
+		return ip != nil && ip.IsLoopback()
 	}
 	return false
 }

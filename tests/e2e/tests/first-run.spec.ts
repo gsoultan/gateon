@@ -4,6 +4,7 @@
 import { test, expect, type Page } from '@playwright/test';
 import fs from 'fs';
 import path from 'path';
+import { finishSignInPage } from './two-factor';
 
 // The first-run wizard, against a gateway that has never been set up: the
 // "first-run" project in playwright.config.ts. Nothing drove it before. From
@@ -75,5 +76,6 @@ test('the wizard tests the database it is given, and saves the one it submits', 
   await page.getByPlaceholder('Enter your username').fill(admin);
   await page.getByPlaceholder('••••••••').fill(password);
   await page.getByRole('button', { name: /Continue to Dashboard/i }).click();
+  await finishSignInPage(page, admin);
   await expect(page.getByRole('heading', { name: /^Overview$/ })).toBeVisible({ timeout: 60_000 });
 });

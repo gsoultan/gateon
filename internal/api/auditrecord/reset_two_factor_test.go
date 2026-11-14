@@ -14,6 +14,7 @@ import (
 
 	"github.com/gsoultan/gateon/internal/api"
 	"github.com/gsoultan/gateon/internal/auth"
+	"github.com/gsoultan/gateon/internal/auth/authtest"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
@@ -36,7 +37,7 @@ func twoAccounts(t *testing.T) (svc *api.ApiService, admin context.Context, user
 			t.Fatalf("UpsertUser: %v", err)
 		}
 	}
-	session, _, err = m.Authenticate("operator", "correct-horse-battery-2", "")
+	session, _, err = authtest.TrySignIn(m, "operator", "correct-horse-battery-2", "")
 	if err != nil {
 		t.Fatalf("the operator signs in: %v", err)
 	}

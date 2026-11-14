@@ -13,9 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pquerna/otp/totp"
-
 	"github.com/gsoultan/gateon/internal/auth"
+	"github.com/gsoultan/gateon/internal/auth/authtest"
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/db/dbtest"
 	"github.com/gsoultan/gateon/internal/inits"
@@ -74,9 +73,8 @@ func (p *pod) signInWithSecondFactor(t *testing.T, id, secret string) string {
 	if !errors.As(err, &step) {
 		t.Fatalf("password step: err = %v; want a second step owed", err)
 	}
-	at := time.Now()
+	code, at, err := authtest.CodeAt(secret)
 	p.mgr.SetClock(func() time.Time { return at })
-	code, err := totp.GenerateCode(secret, at)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,7 +92,7 @@ func (p *pod) enrolSecondFactor(t *testing.T, id string) string {
 	if err != nil {
 		t.Fatalf("Setup2FA: %v", err)
 	}
-	code, err := totp.GenerateCode(enrolment.Secret, time.Now())
+	code, err := authtest.Code(enrolment.Secret)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,7 +144,7 @@ func checkPodsShareTheIdentity(t *testing.T, databaseURL string) {
 	}
 	assertStoredAsReferences(t, filepath.Join(a.dir, "global.json"))
 
-	_, admin, err := a.mgr.Authenticate("admin", podPassword, "198.51.100.7")
+	admin, err := authtest.PasswordStep(a.mgr, "admin", podPassword, "198.51.100.7")
 	if err != nil {
 		t.Fatalf("sign in on A: %v", err)
 	}

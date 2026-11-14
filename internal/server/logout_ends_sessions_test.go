@@ -17,11 +17,9 @@ const sessionCookie = "gateon_session"
 // the gateway set.
 func signInCookie(t *testing.T, h http.Handler, username, password string) string {
 	t.Helper()
-	body := `{"username":"` + username + `","password":"` + password + `"}`
-	rr := serveMgmt(h, http.MethodPost, "/v1/login", body, "")
-	if rr.Code != http.StatusOK {
-		t.Fatalf("signing in as %s: status %d: %s", username, rr.Code, rr.Body.String())
-	}
+	rr := signInOverREST(t, func(path, body string) *httptest.ResponseRecorder {
+		return serveMgmt(h, http.MethodPost, path, body, "")
+	}, username, password)
 	for _, c := range rr.Result().Cookies() {
 		if c.Name == sessionCookie && c.Value != "" {
 			return c.Value

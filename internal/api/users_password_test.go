@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/gsoultan/gateon/internal/auth"
+	"github.com/gsoultan/gateon/internal/auth/authtest"
 	"github.com/gsoultan/gateon/internal/db/dbtest"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware"
@@ -53,7 +54,7 @@ func TestChangePasswordRPCAsksForTheCurrentPassword(t *testing.T) {
 			if status.Code(err) != tc.want {
 				t.Errorf("err = %v, want code %s", err, tc.want)
 			}
-			if _, _, err := svc.Auth.Authenticate("alice", "right-passphrase", ""); err != nil {
+			if _, err := authtest.PasswordStep(svc.Auth, "alice", "right-passphrase", ""); err != nil {
 				t.Errorf("the password changed anyway: %v", err)
 			}
 		})
@@ -80,7 +81,7 @@ func TestChangePasswordRPCWithTheCurrentPassword(t *testing.T) {
 	if err != nil || !resp.GetSuccess() {
 		t.Fatalf("resp = %v, err = %v", resp, err)
 	}
-	if _, _, err := svc.Auth.Authenticate("alice", "new-passphrase", ""); err != nil {
+	if _, err := authtest.PasswordStep(svc.Auth, "alice", "new-passphrase", ""); err != nil {
 		t.Errorf("the new password does not sign in: %v", err)
 	}
 }
@@ -103,7 +104,7 @@ func TestUpdateUserRPCCannotSetTheCallersPassword(t *testing.T) {
 			t.Errorf("UpdateUser(id %q) err = %v, want %s", tc.u.GetId(), err, tc.want)
 		}
 	}
-	if _, _, err := svc.Auth.Authenticate("alice", "right-passphrase", ""); err != nil {
+	if _, err := authtest.PasswordStep(svc.Auth, "alice", "right-passphrase", ""); err != nil {
 		t.Errorf("the password changed anyway: %v", err)
 	}
 }

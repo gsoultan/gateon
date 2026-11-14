@@ -11,7 +11,6 @@ import (
 
 	"aidanwoods.dev/go-paseto"
 	mwauth "github.com/gsoultan/gateon/internal/middleware/auth"
-	"github.com/pquerna/otp/totp"
 )
 
 // challengeFor is the challenge a correct password for id earns now: what
@@ -31,7 +30,7 @@ func enrolledAccount(t *testing.T, m *Manager, username string) (id, code string
 	t.Helper()
 	id = createUser(t, m, username, "correct-horse-battery")
 	secret, _ := enroll(t, m, id, "correct-horse-battery")
-	code, err := totp.GenerateCode(secret, time.Now())
+	code, err := freshCode(t, m, secret)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,7 +80,7 @@ func TestVerify2FARefusesAnotherAccountsChallengeWithTheSameBinding(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	code, err := totp.GenerateCode(secret, time.Now())
+	code, err := freshCode(t, m, secret)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,12 +105,13 @@ func TestVerify2FARefusesAnExpiredChallenge(t *testing.T) {
 func TestVerify2FARefusesASessionAsChallenge(t *testing.T) {
 	m := newTestManager(t)
 	id := createUser(t, m, "alice", "correct-horse-battery")
-	session, _, err := m.Authenticate("alice", "correct-horse-battery", "")
+	session, _, err := signIn(t, m, "alice", "correct-horse-battery", "")
 	if err != nil || session == "" {
-		t.Fatalf("sign-in before enrolment: %v", err)
+		t.Fatalf("sign-in: %v", err)
 	}
-	secret, _ := enroll(t, m, id, "correct-horse-battery")
-	code, err := totp.GenerateCode(secret, time.Now())
+	s, _ := enrolledSecrets.Load(id)
+	secret, _ := s.(string)
+	code, err := freshCode(t, m, secret)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/gsoultan/gateon/internal/auth"
+	"github.com/gsoultan/gateon/internal/auth/authtest"
 	"github.com/gsoultan/gateon/internal/db/dbtest"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware"
@@ -49,10 +50,10 @@ func TestChangePasswordRefusesWhenTheCallerCannotBeRead(t *testing.T) {
 	}
 
 	// The real proof: the victim's password must be unchanged.
-	if _, _, authErr := svc.Auth.Authenticate("victim", "attacker-chosen-password", ""); authErr == nil {
+	if _, authErr := authtest.PasswordStep(svc.Auth, "victim", "attacker-chosen-password", ""); authErr == nil {
 		t.Error("the victim's password was replaced by a caller the guard could not identify")
 	}
-	if _, _, authErr := svc.Auth.Authenticate("victim", "original-passphrase-v", ""); authErr != nil {
+	if _, authErr := authtest.PasswordStep(svc.Auth, "victim", "original-passphrase-v", ""); authErr != nil {
 		t.Errorf("the victim's original password no longer works: %v", authErr)
 	}
 }
