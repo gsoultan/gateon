@@ -41,6 +41,7 @@ import {
 } from "@tabler/icons-react";
 import { useSecurityThreats, useRemoveMitigation, useDiagnostics } from "../../hooks/useGateon";
 import { useTableDensity } from "../../hooks/useTableDensity";
+import { useScopedPage } from "../../hooks/useScopedPage";
 import { SecurityAnomalyModal } from "../SecurityAnomalyModal";
 import { ManualMitigationModal } from "./ManualMitigationModal";
 import TraceVisualizer from "../Diagnostics/TraceVisualizer";
@@ -92,7 +93,10 @@ export function ThreatExplorerTab({ view }: { view?: ThreatView } = {}) {
   const [categoryFilter, setCategoryFilter] = useState<string | null>("all");
   const [mitigatedFilter, setMitigatedFilter] = useState<string | null>(view ?? "detected");
   const [mitigationSubTab, setMitigationSubTab] = useState<string | null>("user");
-  const [page, setPage] = useState(1);
+  // Every filter the query reads, so any change returns to the first page.
+  const [page, setPage] = useScopedPage(
+    JSON.stringify([search, categoryFilter, mitigatedFilter, mitigationSubTab]),
+  );
 
   const { data, isLoading, error, refetch } = useSecurityThreats({
     limit: PAGE_SIZE,
@@ -128,11 +132,6 @@ export function ThreatExplorerTab({ view }: { view?: ThreatView } = {}) {
     const cats = new Set(threats.map((t) => t.category).filter((c): c is string => !!c));
     return ["all", ...Array.from(cats)];
   }, [threats]);
-
-  // Reset to the first page whenever the search or filters change
-  useEffect(() => {
-    setPage(1);
-  }, [search, categoryFilter, mitigatedFilter]);
 
   const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
 

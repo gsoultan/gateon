@@ -21,6 +21,7 @@ import (
 	"github.com/gsoultan/gateon/internal/middleware/security"
 	"github.com/gsoultan/gateon/internal/middleware/security/identity"
 	"github.com/gsoultan/gateon/internal/middleware/traffic"
+	"github.com/gsoultan/gateon/internal/server/sockets"
 	"github.com/gsoultan/gateon/internal/syncutil"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
@@ -222,12 +223,10 @@ func (e *httpEntrypoint) startHTTP3(h http.Handler) http.Handler {
 	tlsConf, quicConf := http3.ConfigureTLSConfig(e.tlsConfig), h3Server.QUICConfig.Clone()
 	// Listened on here rather than by ListenAndServe, so that the listener
 	// the server accepts from is the one that holds the entrypoint's limit.
-	bindListener(e.deps, e.wg, listenerSpec[*quic.EarlyListener]{
+	bindListener(e.deps, e.wg, listenerSpec[*quicSocket]{
 		ep: e.ep.Id, addr: "udp " + addr,
-		listen: func() (*quic.EarlyListener, error) {
-			return quic.ListenAddrEarly(addr, tlsConf, quicConf)
-		},
-		serve: func(ln *quic.EarlyListener) {
+		listen: func() (*quicSocket, error) { return listenQUIC(e.deps.Sockets, addr, tlsConf, quicConf) },
+		serve: func(ln *quicSocket) {
 			e.serveHTTP3(h3Server, ln)
 			serving.Store(true)
 		},
@@ -240,8 +239,37 @@ func (e *httpEntrypoint) startHTTP3(h http.Handler) http.Handler {
 	})
 }
 
+// quicSocket is a QUIC listener and the UDP socket under it. The socket is
+// opened here, not by quic-go, so that it can be one kept open across a
+// restart (ADR 0092); quic-go does not close a socket it was handed, so
+// Close closes both.
+type quicSocket struct {
+	*quic.EarlyListener
+	conn *net.UDPConn
+}
+
+// Close closes the listener and then its socket.
+func (q *quicSocket) Close() error {
+	err := q.EarlyListener.Close()
+	return errors.Join(err, q.conn.Close())
+}
+
+// listenQUIC listens for QUIC on addr, on the kept socket when there is one.
+func listenQUIC(kept *sockets.Store, addr string, tlsConf *tls.Config, quicConf *quic.Config) (*quicSocket, error) {
+	conn, err := kept.ListenUDP(addr)
+	if err != nil {
+		return nil, err
+	}
+	ln, err := quic.ListenEarly(conn, tlsConf, quicConf)
+	if err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
+	return &quicSocket{EarlyListener: ln, conn: conn}, nil
+}
+
 // serveHTTP3 serves h3Server on ln until shutdown.
-func (e *httpEntrypoint) serveHTTP3(h3Server *http3.Server, ln *quic.EarlyListener) {
+func (e *httpEntrypoint) serveHTTP3(h3Server *http3.Server, ln *quicSocket) {
 	addr := e.ep.Address
 	if e.deps.ShutdownRegistry != nil {
 		e.deps.ShutdownRegistry.Register(func(context.Context) error {
@@ -316,7 +344,7 @@ func (e *httpEntrypoint) serveTCP(server *http.Server) {
 	addr := e.ep.Address
 	bindListener(e.deps, e.wg, listenerSpec[net.Listener]{
 		ep: e.ep.Id, addr: addr,
-		listen: func() (net.Listener, error) { return net.Listen("tcp", addr) },
+		listen: func() (net.Listener, error) { return e.deps.Sockets.Listen(addr) },
 		serve:  func(l net.Listener) { e.serveTCPOn(server, l) },
 	})
 }

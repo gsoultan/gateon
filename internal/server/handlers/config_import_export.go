@@ -146,8 +146,7 @@ func registerConfigImportExport(mux *http.ServeMux, d *Deps) {
 			return
 		}
 
-		errs := runConfigImport(r.Context(), d, &exp)
-		writeImportResponse(w, &exp, errs)
+		writeImportResponse(w, runConfigImport(r.Context(), d, &exp))
 	})
 
 	mux.HandleFunc("POST /v1/config/validate", func(w http.ResponseWriter, r *http.Request) {
@@ -206,42 +205,63 @@ func importPreviewRequested(q url.Values) (bool, error) {
 	return dryRun, nil
 }
 
-// runConfigImport saves services, entrypoints, middlewares, and routes; returns collected errors.
-func runConfigImport(ctx context.Context, d *Deps, exp *configExport) []string {
-	var errs []string
-	for _, svc := range exp.Services {
-		if err := d.ServiceService.SaveService(ctx, svc); err != nil {
-			errs = append(errs, "service "+svc.Id+": "+err.Error())
-		}
-	}
-	for _, ep := range exp.EntryPoints {
-		if err := d.EpService.SaveEntryPoint(ctx, ep); err != nil {
-			errs = append(errs, "entrypoint "+ep.Id+": "+err.Error())
-		}
-	}
-	for _, mw := range exp.Middlewares {
-		if err := d.MwService.SaveMiddleware(ctx, mw); err != nil {
-			errs = append(errs, "middleware "+mw.Id+": "+err.Error())
-		}
-	}
-	for _, rt := range exp.Routes {
-		if err := d.RouteService.SaveRoute(ctx, rt); err != nil {
-			errs = append(errs, "route "+rt.Id+": "+err.Error())
-		}
-	}
-	return errs
+// importCounts is how many items of each kind an import wrote.
+type importCounts struct {
+	Routes      int `json:"routes"`
+	Services    int `json:"services"`
+	EntryPoints int `json:"entry_points"`
+	Middlewares int `json:"middlewares"`
 }
 
-// writeImportResponse writes JSON import result (success flag and optional errors).
-func writeImportResponse(w http.ResponseWriter, exp *configExport, errs []string) {
-	w.Header().Set("Content-Type", "application/json")
-	total := len(exp.Routes) + len(exp.Services) + len(exp.EntryPoints) + len(exp.Middlewares)
-	success := len(errs) < total
-	if len(errs) > 0 {
-		_ = json.NewEncoder(w).Encode(map[string]any{"success": success, "errors": errs})
-		return
+func (c importCounts) total() int { return c.Routes + c.Services + c.EntryPoints + c.Middlewares }
+
+// importResult is the answer to an applied import. Applied is part of it
+// because an import is item by item, not all or nothing: a refused middleware
+// does not stop the routes after it. A response that named only the refusals
+// read, to the dashboard and to anyone scripting against it, as an import that
+// had done nothing -- while everything else in the file was already live.
+type importResult struct {
+	Success bool         `json:"success"`
+	Applied importCounts `json:"applied"`
+	Errors  []string     `json:"errors,omitempty"`
+}
+
+// runConfigImport saves services, entrypoints, middlewares, and routes, in
+// that order so each kind finds what it references, and reports what it wrote
+// and what it refused.
+func runConfigImport(ctx context.Context, d *Deps, exp *configExport) importResult {
+	var res importResult
+	importEach(exp.Services, "service", &res.Applied.Services, &res.Errors,
+		func(svc *gateonv1.Service) (string, error) {
+			return svc.GetId(), d.ServiceService.SaveService(ctx, svc)
+		})
+	importEach(exp.EntryPoints, "entrypoint", &res.Applied.EntryPoints, &res.Errors,
+		func(ep *gateonv1.EntryPoint) (string, error) { return ep.GetId(), d.EpService.SaveEntryPoint(ctx, ep) })
+	importEach(exp.Middlewares, "middleware", &res.Applied.Middlewares, &res.Errors,
+		func(mw *gateonv1.Middleware) (string, error) { return mw.GetId(), d.MwService.SaveMiddleware(ctx, mw) })
+	importEach(exp.Routes, "route", &res.Applied.Routes, &res.Errors,
+		func(rt *gateonv1.Route) (string, error) { return rt.GetId(), d.RouteService.SaveRoute(ctx, rt) })
+	// Success means the import changed something, or had nothing to refuse.
+	res.Success = len(res.Errors) == 0 || res.Applied.total() > 0
+	return res
+}
+
+// importEach saves every item, counting each one written and naming each one refused.
+func importEach[T any](items []T, kind string, applied *int, errs *[]string, save func(T) (string, error)) {
+	for _, item := range items {
+		id, err := save(item)
+		if err != nil {
+			*errs = append(*errs, kind+" "+id+": "+err.Error())
+			continue
+		}
+		*applied++
 	}
-	_ = json.NewEncoder(w).Encode(map[string]bool{"success": true})
+}
+
+// writeImportResponse writes the JSON import result.
+func writeImportResponse(w http.ResponseWriter, res importResult) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(res)
 }
 
 // validateConfigExport returns validation errors for the export payload.

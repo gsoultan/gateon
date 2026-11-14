@@ -329,6 +329,12 @@ type TierDefaults struct {
 	// undone. On everywhere; it costs free disk equal to the database.
 	// GATEON_MIGRATION_BACKUP=0 turns it off.
 	MigrationBackup bool
+	// SocketHandoff is whether the gateway hands its listening sockets to
+	// the service manager so that they stay open across a restart (ADR
+	// 0092). On for every tier: it costs one descriptor per listener in the
+	// manager and nothing on the request path. GATEON_SOCKET_HANDOFF=false
+	// turns it off.
+	SocketHandoff bool
 }
 
 // NormalizeTier coerces an arbitrary string to a known tier, defaulting to
@@ -417,6 +423,7 @@ func DefaultsFor(tier Tier) TierDefaults {
 			UpdateWindow:               defaultUpdateWindow,
 			UpgradeReadyTimeout:        90 * time.Second,
 			MigrationBackup:            true,
+			SocketHandoff:              true,
 		}
 	case TierEnterprise:
 		return TierDefaults{
@@ -473,6 +480,7 @@ func DefaultsFor(tier Tier) TierDefaults {
 			UpdateWindow:               defaultUpdateWindow,
 			UpgradeReadyTimeout:        90 * time.Second,
 			MigrationBackup:            true,
+			SocketHandoff:              true,
 		}
 	default: // TierStandard
 		return TierDefaults{
@@ -529,6 +537,7 @@ func DefaultsFor(tier Tier) TierDefaults {
 			UpdateWindow:               defaultUpdateWindow,
 			UpgradeReadyTimeout:        90 * time.Second,
 			MigrationBackup:            true,
+			SocketHandoff:              true,
 		}
 	}
 }

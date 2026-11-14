@@ -12,6 +12,15 @@ ExecStart=/usr/bin/gateon
 Restart=on-failure
 RestartSec=5s
 
+# The gateway hands its listening sockets to systemd as it binds them, and
+# systemd keeps them open across a restart and passes them to the next
+# process (ADR 0092). A connection made while the gateway restarts then
+# waits in the socket and is served, where it used to be refused. Stopping
+# the service closes them. 64 is how many the gateway will hand over;
+# GATEON_SOCKET_HANDOFF=false turns it off.
+NotifyAccess=main
+FileDescriptorStoreMax=64
+
 # Config: place global.json, routes.json, etc. in /etc/gateon. State -- the
 # SQLite database, the trace store -- lives in /var/lib/gateon, which a
 # relative database path is resolved against.

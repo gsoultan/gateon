@@ -7,6 +7,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -306,14 +307,24 @@ func (s *Store) AddRule(ctx context.Context, r *Rule) error {
 	return nil
 }
 
+// ErrRuleNotFound is an update or delete of a rule the store does not hold.
+var ErrRuleNotFound = errors.New("waf: no such rule")
+
 // UpdateRule updates an existing rule in the database and reloads the cache.
+//
+// A rule that is not there is ErrRuleNotFound. The UPDATE matched no row and
+// the API answered success, so a rule deleted in another tab and then "saved"
+// in this one read as saved while nothing enforced it.
 func (s *Store) UpdateRule(ctx context.Context, r *Rule) error {
 	now := time.Now()
 	query := s.dialect.Rebind("UPDATE waf_rules SET name = ?, directive = ?, definition = ?, format = ?, conversion_note = ?, enabled = ?, paranoia_level = ?, category = ?, updated_at = ? WHERE id = ?")
-	_, err := s.db.ExecContext(ctx, query,
+	res, err := s.db.ExecContext(ctx, query,
 		r.Name, r.Directive, r.Definition, r.Format, r.ConversionNote,
 		r.Enabled, r.ParanoiaLevel, r.Category, now, r.ID)
 	if err != nil {
+		return err
+	}
+	if err := requireOneRow(res, r.ID); err != nil {
 		return err
 	}
 	r.UpdatedAt = now
@@ -324,17 +335,33 @@ func (s *Store) UpdateRule(ctx context.Context, r *Rule) error {
 	return nil
 }
 
-// DeleteRule removes a rule from the database and reloads the cache.
+// DeleteRule removes a rule from the database and reloads the cache. A rule
+// that is not there is ErrRuleNotFound, as for UpdateRule.
 func (s *Store) DeleteRule(ctx context.Context, id string) error {
 	query := s.dialect.Rebind("DELETE FROM waf_rules WHERE id = ?")
-	_, err := s.db.ExecContext(ctx, query, id)
+	res, err := s.db.ExecContext(ctx, query, id)
 	if err != nil {
+		return err
+	}
+	if err := requireOneRow(res, id); err != nil {
 		return err
 	}
 	if err := s.Reload(ctx); err != nil {
 		return err
 	}
 	s.notifyInvalidation()
+	return nil
+}
+
+// requireOneRow is ErrRuleNotFound when a write by id touched no row.
+func requireOneRow(res sql.Result, id string) error {
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return fmt.Errorf("rule %q: %w", id, ErrRuleNotFound)
+	}
 	return nil
 }
 
