@@ -58,18 +58,17 @@ func TestInboundDLPRulesNeverBlock(t *testing.T) {
 func TestNoInboundCardOrSSNRule(t *testing.T) {
 	t.Parallel()
 
-	card := NewCardNumber()
 	for _, s := range inboundSpecs() {
-		if _, isCard := s.op.(*CardNumber); isCard {
-			t.Errorf("rule %d puts a card detector on the request path", s.id)
-		}
+		// Both detectors live in gwaf now and are identified by behaviour: a
+		// rule that matches a valid card number is a card rule whatever its
+		// operator is called.
 		// The SSN detector is a bare regex, so it is identified by behaviour:
 		// anything matching a plain SSN inbound would block checkout-adjacent
 		// forms for the same reason.
 		if _, ok := s.op.Eval(nil, []byte("123-45-6789")); ok {
 			t.Errorf("rule %d matches a bare SSN on the request path", s.id)
 		}
-		if _, ok := s.op.Eval(nil, []byte("4111111111111111")); ok && s.op != card {
+		if _, ok := s.op.Eval(nil, []byte("4111111111111111")); ok {
 			t.Errorf("rule %d matches a bare card number on the request path", s.id)
 		}
 	}

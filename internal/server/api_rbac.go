@@ -220,10 +220,11 @@ var apiPermissions = map[string]apiPermission{
 	gateonv1connect.ApiServiceGetClamavScanStatusProcedure: readOn(auth.ResourceGlobal),
 
 	// WAF rules. GET/POST/PUT/DELETE /v1/waf/rules.
-	gateonv1connect.ApiServiceListWafRulesProcedure:  readOn(auth.ResourceWafRules),
-	gateonv1connect.ApiServiceCreateWafRuleProcedure: writeOn(auth.ResourceWafRules),
-	gateonv1connect.ApiServiceUpdateWafRuleProcedure: writeOn(auth.ResourceWafRules),
-	gateonv1connect.ApiServiceDeleteWafRuleProcedure: writeOn(auth.ResourceWafRules),
+	gateonv1connect.ApiServiceListWafRulesProcedure:        readOn(auth.ResourceWafRules),
+	gateonv1connect.ApiServiceListBuiltinWafRulesProcedure: readOn(auth.ResourceWafRules),
+	gateonv1connect.ApiServiceCreateWafRuleProcedure:       writeOn(auth.ResourceWafRules),
+	gateonv1connect.ApiServiceUpdateWafRuleProcedure:       writeOn(auth.ResourceWafRules),
+	gateonv1connect.ApiServiceDeleteWafRuleProcedure:       writeOn(auth.ResourceWafRules),
 }
 
 // NewConnectRBACInterceptor guards the ConnectRPC handler mounted on the mux.

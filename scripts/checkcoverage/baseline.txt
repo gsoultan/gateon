@@ -196,7 +196,7 @@ github.com/gsoultan/gateon/internal/security/scanner 100.0%
 github.com/gsoultan/gateon/internal/security/secretmask 100.0%
 github.com/gsoultan/gateon/internal/security/siem 63.3%
 github.com/gsoultan/gateon/internal/security/tpm 31.0%
-github.com/gsoultan/gateon/internal/security/waf 57.8%
+github.com/gsoultan/gateon/internal/security/waf 70.0%
 github.com/gsoultan/gateon/internal/security/waf/appprofile 94.2%
 github.com/gsoultan/gateon/internal/security/yara 93.8%
 github.com/gsoultan/gateon/internal/server 67.5%
