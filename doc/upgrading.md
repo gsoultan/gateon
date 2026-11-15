@@ -11,6 +11,22 @@ here after the fact.
 
 ## Unreleased
 
+### One built-in WAF rule is retired; the rest are unchanged and now listed
+
+The built-in WAF rules take their detection from the gwaf library (ADR 0093). Every
+rule keeps its ID, category, paranoia level and action, so stored exceptions and threat
+history resolve as before.
+
+Rule **1141001** (HTML tag injection, paranoia level 2) is gone. It matched the opening
+of `<svg`, `<iframe`, `<object`, `<embed`, `<base`, `<applet` and `<meta`. gwaf's core
+ruleset refuses each of those once it carries an attribute, terminated or not, and
+answers to the same XSS switch. The one request that is no longer refused is the bare
+word with nothing after it, such as `?q=<svg`.
+
+**What to check:** an exception written for rule 1141001 no longer matches anything and
+can be deleted. Security → Rules now has a **Built-in** view listing what is loaded,
+read-only; `GET /v1/waf/rules/builtin` returns the same list.
+
 ### An upload is clean only when ClamAV says so
 
 `file_security` read clamd's reply looking for `FOUND` and treated everything else as a

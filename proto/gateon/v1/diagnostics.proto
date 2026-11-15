@@ -430,3 +430,39 @@ message DeleteWafRuleRequest {
 message DeleteWafRuleResponse {
   bool success = 1;
 }
+
+// BuiltinWafRule is one rule compiled into the gateway. Every field is
+// gateon's own text: no part of it is taken from traffic.
+message BuiltinWafRule {
+  uint32 id = 1;
+  string name = 2;
+  string category = 3;
+  int32 paranoia_level = 4;
+  string severity = 5;
+  string confidence = 6;
+  string phase = 7;
+  repeated string tags = 8;
+  // action is "block" or "log".
+  string action = 9;
+  // source is "gwaf" when the detection is a gwaf rule loaded under this ID,
+  // and "gateon" for the few rules that state site policy or read a decision
+  // the gateway made.
+  string source = 10;
+  // source_rule_id is the gwaf rule's own ID. Zero when source is "gateon".
+  uint32 source_rule_id = 11;
+}
+
+message ListBuiltinWafRulesRequest {
+  int32 limit = 1;
+  int32 offset = 2;
+  string search = 3;
+  string category = 4;
+}
+
+message ListBuiltinWafRulesResponse {
+  repeated BuiltinWafRule rules = 1;
+  int32 total = 2;
+  // categories is every category a built-in rule carries, so a filter can
+  // offer exactly the ones that exist.
+  repeated string categories = 3;
+}
