@@ -433,39 +433,42 @@ export default function TrafficTab() {
 
   const trafficMetrics = [
     {
-      label: "Requests / 24h",
+      // requestsToday and bytesToday restart at 00:00 UTC (dailyResetLoop),
+      // so they are today's figures, not a rolling 24 hours: at 01:00 UTC they
+      // hold one hour of traffic.
+      label: "Requests today",
       value: formatCompact(requestsToday),
       icon: IconActivity,
       color: "teal" as const,
-      description: "Total requests in the last 24h",
+      description: "Since 00:00 UTC",
     },
     {
-      label: "Bandwidth / 24h",
+      label: "Bandwidth today",
       value: formatBytes(bytesToday),
       icon: IconTransferIn,
       color: "cyan" as const,
-      description: "Total bandwidth in the last 24h",
+      description: "Since 00:00 UTC",
     },
     {
       label: "Mitigated Threats",
       value: formatCompact(metricsSnap?.security?.mitigatedToday || 0),
       icon: IconShieldExclamation,
       color: "red" as const,
-      description: "Threats blocked in last 24h",
+      description: "Blocked since 00:00 UTC",
     },
     {
       label: "Active Threats",
       value: formatCompact(metricsSnap?.security?.activeThreats || 0),
       icon: IconAlertCircle,
       color: "orange" as const,
-      description: "Active risks detected in last 24h",
+      description: "Detected since 00:00 UTC",
     },
     {
       label: "eBPF Drops",
       value: formatCompact(metricsSnap?.middleware?.ebpfDroppedPackets?.reduce((acc, val) => acc + val.value, 0) || 0),
       icon: IconShieldOff,
       color: "violet" as const,
-      description: "Kernel-level drops in last 24h",
+      description: "Kernel-level drops since the gateway started",
     },
   ];
 

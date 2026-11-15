@@ -46,6 +46,26 @@ export const CERT_WARN_DAYS = 30;
 /** A resource this full is a red row, the same bar the Resources card turns red at. */
 export const RESOURCE_RED_PERCENT = 90;
 
+/**
+ * The Certificates card's answer, from the metrics snapshot.
+ *
+ * Unknown only while no snapshot has arrived. The gateway omits an empty
+ * `tlsCertificates` (the field is `omitzero`), so a gateway serving no
+ * certificate sends none at all; reading the missing field as "not yet known"
+ * kept the card on "Waiting for metrics" forever on every plain-HTTP install.
+ */
+export function certificateHealth(
+  snapshot: { tlsCertificates?: TLSCertMetric[] | null } | undefined,
+): { state: StatusState; label: string; detail: string } {
+  if (snapshot === undefined) return { state: "unknown", label: "Unknown", detail: "Waiting for metrics" };
+  const certs = snapshot.tlsCertificates ?? [];
+  if (certs.length === 0) return { state: "off", label: "None", detail: "No certificate is served" };
+  const soonest = Math.min(...certs.map((c) => c.daysRemaining));
+  if (soonest <= 0) return { state: "down", label: "Expired", detail: "A certificate has expired" };
+  if (soonest < CERT_WARN_DAYS) return { state: "degraded", label: `${soonest}d`, detail: `Soonest expiry in ${soonest} days` };
+  return { state: "up", label: "Up", detail: `${certs.length} valid, soonest expiry in ${soonest} days` };
+}
+
 const STATE_RANK: Record<StatusState, number> = { down: 0, degraded: 1, unknown: 2, off: 3, up: 4 };
 
 function targetRows(stats: Record<string, TargetStats[]>): AttentionItem[] {
