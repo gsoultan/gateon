@@ -140,3 +140,28 @@ func TestPostureGivesNoBlockingCreditToAWAFThatRunsNoCategory(t *testing.T) {
 		t.Fatalf("coverage = %+v, want the route counted under categoriesOff, not as blocking", cov)
 	}
 }
+
+// TestPostureReportCarriesBlindSpots reads the report the dashboard fetches,
+// as JSON, and requires the blind-spot list under the name the dashboard reads
+// it by. The gateway-wide WebSocket entry is there whatever the routes are, so
+// an empty list means the provider stopped filling the field.
+func TestPostureReportCarriesBlindSpots(t *testing.T) {
+	store := &mockGlobalReg{config: &gateonv1.GlobalConfig{}}
+	raw, err := json.Marshal(newPostureProvider(postureDeps{globalStore: store})(context.Background()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wire struct {
+		BlindSpots struct {
+			Spots []struct {
+				Kind string `json:"kind"`
+			} `json:"spots"`
+		} `json:"blindSpots"`
+	}
+	if err := json.Unmarshal(raw, &wire); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(wire.BlindSpots.Spots); n != 1 || wire.BlindSpots.Spots[0].Kind != string(posture.BlindWebSocketMessages) {
+		t.Fatalf("blindSpots.spots = %+v, want the one gateway-wide entry", wire.BlindSpots.Spots)
+	}
+}

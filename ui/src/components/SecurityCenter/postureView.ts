@@ -5,7 +5,13 @@
 // report. Pure functions, so every sentence an operator acts on is testable
 // without rendering (ADR 0048).
 
-import type { PostureScore, SignaturePosture, WafPosture } from "../../hooks/useSecurityPosture";
+import type {
+  BlindSpotKind,
+  BlindSpotReport,
+  PostureScore,
+  SignaturePosture,
+  WafPosture,
+} from "../../hooks/useSecurityPosture";
 import type { Reputation } from "../../types/gateon";
 
 export interface StatusView {
@@ -122,4 +128,88 @@ export function reputationSummary(reps: Reputation[], limit: number): Reputation
     value: `${count} lowered`,
     detail: `Lowest score ${Math.round(lowest)}/100. Penalised by WAF and anomaly findings; recovers over time.`,
   };
+}
+
+/** One kind of blind spot, with the routes it applies to. */
+export interface BlindSpotGroup {
+  kind: BlindSpotKind;
+  title: string;
+  /** What this means for traffic, in a sentence. */
+  why: string;
+  /** What the operator can do about it. Empty when nothing can be configured. */
+  fix: string;
+  /** Where the fix is made. Absent for a limit no setting changes. */
+  fixPath?: "/routes" | "/security";
+  color: string;
+  routes: string[];
+}
+
+const BLIND_SPOT_WORDS: Record<BlindSpotKind, Omit<BlindSpotGroup, "kind" | "routes">> = {
+  l4_open_to_all: {
+    title: "TCP routes anyone can connect to",
+    why: "No IP filter is attached, so every address on the internet can open a connection to the service behind the route.",
+    fix: "Attach an IP filter to the route.",
+    fixPath: "/routes",
+    color: "red",
+  },
+  waf_off: {
+    title: "HTTP routes with no WAF",
+    why: "Requests reach the backend without being inspected.",
+    fix: "Turn on the gateway-wide WAF, or attach a WAF to the route.",
+    fixPath: "/routes",
+    color: "red",
+  },
+  waf_no_categories: {
+    title: "Routes whose WAF has every attack family off",
+    why: "The WAF runs but refuses none of SQL injection, XSS, file inclusion or command execution.",
+    fix: "Switch the attack families back on in the route's WAF.",
+    fixPath: "/routes",
+    color: "red",
+  },
+  waf_detect_only: {
+    title: "Routes where the WAF only records",
+    why: "Attacks are logged and still forwarded to the backend.",
+    fix: "Switch the WAF from audit to blocking once its log shows no false positives.",
+    fixPath: "/routes",
+    color: "orange",
+  },
+  l4_passthrough: {
+    title: "TCP and UDP routes are forwarded unread",
+    why: "The gateway passes their bytes through, so no WAF rule can inspect them. A flaw in the service behind them is not something the WAF can stop.",
+    fix: "Limit who may connect with an IP filter, and keep the service patched.",
+    fixPath: "/routes",
+    color: "yellow",
+  },
+  websocket_messages: {
+    title: "WebSocket messages are not inspected",
+    why: "The WAF checks the request that opens a WebSocket. Messages sent afterwards are forwarded unread, on every route.",
+    fix: "",
+    color: "gray",
+  },
+};
+
+/** Most urgent first: what is open or unprotected, then what is only watched. */
+const BLIND_SPOT_ORDER: BlindSpotKind[] = [
+  "l4_open_to_all",
+  "waf_off",
+  "waf_no_categories",
+  "waf_detect_only",
+  "l4_passthrough",
+  "websocket_messages",
+];
+
+/**
+ * The blind-spot report as the hub shows it: one group per kind, most urgent
+ * first, each with the routes it names. A kind the report does not mention is
+ * left out, and a kind this build does not know is dropped rather than shown
+ * without words.
+ */
+export function blindSpotGroups(report: BlindSpotReport | undefined): BlindSpotGroup[] {
+  if (!report?.spots) return [];
+  return BLIND_SPOT_ORDER.flatMap((kind) => {
+    const spots = report.spots.filter((s) => s.kind === kind);
+    if (spots.length === 0) return [];
+    const routes = spots.map((s) => s.name || s.route || "").filter((n) => n !== "");
+    return [{ kind, ...BLIND_SPOT_WORDS[kind], routes }];
+  });
 }

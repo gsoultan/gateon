@@ -99,6 +99,29 @@ export interface EbpfPosture {
   shunnedIps: number;
 }
 
+export type BlindSpotKind =
+  | "l4_passthrough"
+  | "l4_open_to_all"
+  | "waf_off"
+  | "waf_detect_only"
+  | "waf_no_categories"
+  | "websocket_messages";
+
+/** One place the WAF does not judge traffic, or judges and does not refuse. */
+export interface BlindSpot {
+  kind: BlindSpotKind;
+  /** Empty for a gateway-wide entry. */
+  route?: string;
+  name?: string;
+}
+
+/** Computed from configuration only; the server caps the list. */
+export interface BlindSpotReport {
+  spots: BlindSpot[];
+  /** How many more there are past the server's cap. */
+  omitted?: number;
+}
+
 export interface SecurityPosture {
   version: string;
   generatedAt: string;
@@ -109,6 +132,8 @@ export interface SecurityPosture {
   fim?: FimStatus;
   ebpf: EbpfPosture;
   score: PostureScore;
+  /** Absent from a gateway older than this report field. */
+  blindSpots?: BlindSpotReport;
 }
 
 export function useSecurityPosture(refetchIntervalMs = 15000) {

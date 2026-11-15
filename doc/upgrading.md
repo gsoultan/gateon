@@ -11,6 +11,17 @@ here after the fact.
 
 ## Unreleased
 
+### The Security Hub lists what the WAF cannot see
+
+Security → Overview has a new card, "What the WAF cannot see". It names every
+enabled route whose traffic reaches a backend without the WAF refusing it: a
+TCP route with no IP filter, a TCP or UDP route (forwarded unread), an HTTP
+route with no WAF, with a WAF in audit mode, or with every attack family off.
+It also states one limit that holds on every route: WebSocket messages after
+the upgrade are not inspected. The list is computed from configuration, in
+`blindSpots` on `GET /v1/security/posture`, and is capped at 200 entries with a
+count of the rest. Nothing is enforced differently.
+
 ### Framework-internal headers from a client are no longer forwarded
 
 Every entrypoint now removes `X-Middleware-Subrequest`, `X-Original-URL`,
