@@ -103,6 +103,7 @@ ADRs follow a lightweight [MADR](https://adr.github.io/madr/)-style format:
 | [0091](./0091-uploads-are-scanned-on-scanner-workers.md) | Uploads are scanned on scanner workers | Accepted (staged) |
 | [0092](./0092-listening-sockets-stay-open-across-a-restart.md) | Listening sockets stay open across a restart | Accepted |
 | [0093](./0093-built-in-waf-rules-take-their-detection-from-gwaf.md) | Built-in WAF rules take their detection from gwaf | Accepted |
+| [0094](./0094-a-header-only-infrastructure-sends-is-not-taken-from-a-client.md) | A header only infrastructure sends is not taken from a client | Accepted |
 
 ## Conventions
 

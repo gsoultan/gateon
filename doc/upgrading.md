@@ -11,6 +11,28 @@ here after the fact.
 
 ## Unreleased
 
+### Framework-internal headers from a client are no longer forwarded
+
+Every entrypoint now removes `X-Middleware-Subrequest`, `X-Original-URL`,
+`X-Rewrite-URL`, `X-Original-URI`, `X-Override-URL`, `X-HTTP-Method-Override`,
+`X-HTTP-Method` and `X-Method-Override` from a request before routing it, in
+every spelling (hyphen, underscore, dot). A backend that honours one serves a
+path or runs a method the gateway never matched or authorised; the first of
+them is the Next.js middleware bypass, CVE-2025-29927. ADR 0094.
+
+**What may change for you.** A client that tunnels `DELETE` or `PUT` through
+`POST` with a method-override header, to a backend that honours it, now has the
+header removed. So does a setup where another proxy in front of Gateon sets
+`X-Original-URL` for the backend. Name the headers you need in
+`GATEON_FORWARD_INTERNAL_HEADERS` (comma-separated) to let them through:
+
+```
+GATEON_FORWARD_INTERNAL_HEADERS=X-HTTP-Method-Override
+```
+
+`gateon_client_internal_headers_stripped_total{header}` counts what is removed,
+so you can see whether any client sends one.
+
 ### One built-in WAF rule is retired; the rest are unchanged and now listed
 
 The built-in WAF rules take their detection from the gwaf library (ADR 0093). Every
