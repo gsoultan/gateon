@@ -60,7 +60,7 @@ jobs:
       FUZZTIME: ${{ inputs.fuzztime || '1h' }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       # The input reaches a shell command; accept only a go duration or an
       # iteration count, never anything a shell would interpret.
@@ -75,7 +75,7 @@ jobs:
       # the build cache the per-PR jobs restore, and keeps their build cache
       # out of this job's corpus.
       - name: Setup Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           check-latest: true
@@ -129,7 +129,7 @@ jobs:
       # here. Ninety days outlives any gap in the schedule.
       - name: Save the corpus
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: corpus-${{ matrix.target }}
           path: ${{ steps.corpus.outputs.dir }}
@@ -141,7 +141,7 @@ jobs:
       # every `go test` runs, which is the regression test for the fix.
       - name: Keep the crasher
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: crasher-${{ matrix.target }}
           path: ${{ matrix.pkg }}/testdata/fuzz/${{ matrix.target }}/

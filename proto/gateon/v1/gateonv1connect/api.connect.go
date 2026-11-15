@@ -199,6 +199,9 @@ const (
 	// ApiServiceDeleteWafRuleProcedure is the fully-qualified name of the ApiService's DeleteWafRule
 	// RPC.
 	ApiServiceDeleteWafRuleProcedure = "/gateon.v1.ApiService/DeleteWafRule"
+	// ApiServiceListBuiltinWafRulesProcedure is the fully-qualified name of the ApiService's
+	// ListBuiltinWafRules RPC.
+	ApiServiceListBuiltinWafRulesProcedure = "/gateon.v1.ApiService/ListBuiltinWafRules"
 	// ApiServiceListApiTokensProcedure is the fully-qualified name of the ApiService's ListApiTokens
 	// RPC.
 	ApiServiceListApiTokensProcedure = "/gateon.v1.ApiService/ListApiTokens"
@@ -304,6 +307,10 @@ type ApiServiceClient interface {
 	CreateWafRule(context.Context, *connect.Request[v1.CreateWafRuleRequest]) (*connect.Response[v1.CreateWafRuleResponse], error)
 	UpdateWafRule(context.Context, *connect.Request[v1.UpdateWafRuleRequest]) (*connect.Response[v1.UpdateWafRuleResponse], error)
 	DeleteWafRule(context.Context, *connect.Request[v1.DeleteWafRuleRequest]) (*connect.Response[v1.DeleteWafRuleResponse], error)
+	// ListBuiltinWafRules describes the rules compiled into the gateway, which
+	// ListWafRules does not return because they are not rows (ADR 0093). Read-only:
+	// there is no RPC that changes one.
+	ListBuiltinWafRules(context.Context, *connect.Request[v1.ListBuiltinWafRulesRequest]) (*connect.Response[v1.ListBuiltinWafRulesResponse], error)
 	// Scrape credentials (ADR 0050). Administrators only.
 	ListApiTokens(context.Context, *connect.Request[v1.ListApiTokensRequest]) (*connect.Response[v1.ListApiTokensResponse], error)
 	CreateApiToken(context.Context, *connect.Request[v1.CreateApiTokenRequest]) (*connect.Response[v1.CreateApiTokenResponse], error)
@@ -696,6 +703,12 @@ func NewApiServiceClient(httpClient connect.HTTPClient, baseURL string, opts ...
 			connect.WithSchema(apiServiceMethods.ByName("DeleteWafRule")),
 			connect.WithClientOptions(opts...),
 		),
+		listBuiltinWafRules: connect.NewClient[v1.ListBuiltinWafRulesRequest, v1.ListBuiltinWafRulesResponse](
+			httpClient,
+			baseURL+ApiServiceListBuiltinWafRulesProcedure,
+			connect.WithSchema(apiServiceMethods.ByName("ListBuiltinWafRules")),
+			connect.WithClientOptions(opts...),
+		),
 		listApiTokens: connect.NewClient[v1.ListApiTokensRequest, v1.ListApiTokensResponse](
 			httpClient,
 			baseURL+ApiServiceListApiTokensProcedure,
@@ -804,6 +817,7 @@ type apiServiceClient struct {
 	createWafRule                     *connect.Client[v1.CreateWafRuleRequest, v1.CreateWafRuleResponse]
 	updateWafRule                     *connect.Client[v1.UpdateWafRuleRequest, v1.UpdateWafRuleResponse]
 	deleteWafRule                     *connect.Client[v1.DeleteWafRuleRequest, v1.DeleteWafRuleResponse]
+	listBuiltinWafRules               *connect.Client[v1.ListBuiltinWafRulesRequest, v1.ListBuiltinWafRulesResponse]
 	listApiTokens                     *connect.Client[v1.ListApiTokensRequest, v1.ListApiTokensResponse]
 	createApiToken                    *connect.Client[v1.CreateApiTokenRequest, v1.CreateApiTokenResponse]
 	revokeApiToken                    *connect.Client[v1.RevokeApiTokenRequest, v1.RevokeApiTokenResponse]
@@ -1118,6 +1132,11 @@ func (c *apiServiceClient) DeleteWafRule(ctx context.Context, req *connect.Reque
 	return c.deleteWafRule.CallUnary(ctx, req)
 }
 
+// ListBuiltinWafRules calls gateon.v1.ApiService.ListBuiltinWafRules.
+func (c *apiServiceClient) ListBuiltinWafRules(ctx context.Context, req *connect.Request[v1.ListBuiltinWafRulesRequest]) (*connect.Response[v1.ListBuiltinWafRulesResponse], error) {
+	return c.listBuiltinWafRules.CallUnary(ctx, req)
+}
+
 // ListApiTokens calls gateon.v1.ApiService.ListApiTokens.
 func (c *apiServiceClient) ListApiTokens(ctx context.Context, req *connect.Request[v1.ListApiTokensRequest]) (*connect.Response[v1.ListApiTokensResponse], error) {
 	return c.listApiTokens.CallUnary(ctx, req)
@@ -1236,6 +1255,10 @@ type ApiServiceHandler interface {
 	CreateWafRule(context.Context, *connect.Request[v1.CreateWafRuleRequest]) (*connect.Response[v1.CreateWafRuleResponse], error)
 	UpdateWafRule(context.Context, *connect.Request[v1.UpdateWafRuleRequest]) (*connect.Response[v1.UpdateWafRuleResponse], error)
 	DeleteWafRule(context.Context, *connect.Request[v1.DeleteWafRuleRequest]) (*connect.Response[v1.DeleteWafRuleResponse], error)
+	// ListBuiltinWafRules describes the rules compiled into the gateway, which
+	// ListWafRules does not return because they are not rows (ADR 0093). Read-only:
+	// there is no RPC that changes one.
+	ListBuiltinWafRules(context.Context, *connect.Request[v1.ListBuiltinWafRulesRequest]) (*connect.Response[v1.ListBuiltinWafRulesResponse], error)
 	// Scrape credentials (ADR 0050). Administrators only.
 	ListApiTokens(context.Context, *connect.Request[v1.ListApiTokensRequest]) (*connect.Response[v1.ListApiTokensResponse], error)
 	CreateApiToken(context.Context, *connect.Request[v1.CreateApiTokenRequest]) (*connect.Response[v1.CreateApiTokenResponse], error)
@@ -1624,6 +1647,12 @@ func NewApiServiceHandler(svc ApiServiceHandler, opts ...connect.HandlerOption) 
 		connect.WithSchema(apiServiceMethods.ByName("DeleteWafRule")),
 		connect.WithHandlerOptions(opts...),
 	)
+	apiServiceListBuiltinWafRulesHandler := connect.NewUnaryHandler(
+		ApiServiceListBuiltinWafRulesProcedure,
+		svc.ListBuiltinWafRules,
+		connect.WithSchema(apiServiceMethods.ByName("ListBuiltinWafRules")),
+		connect.WithHandlerOptions(opts...),
+	)
 	apiServiceListApiTokensHandler := connect.NewUnaryHandler(
 		ApiServiceListApiTokensProcedure,
 		svc.ListApiTokens,
@@ -1790,6 +1819,8 @@ func NewApiServiceHandler(svc ApiServiceHandler, opts ...connect.HandlerOption) 
 			apiServiceUpdateWafRuleHandler.ServeHTTP(w, r)
 		case ApiServiceDeleteWafRuleProcedure:
 			apiServiceDeleteWafRuleHandler.ServeHTTP(w, r)
+		case ApiServiceListBuiltinWafRulesProcedure:
+			apiServiceListBuiltinWafRulesHandler.ServeHTTP(w, r)
 		case ApiServiceListApiTokensProcedure:
 			apiServiceListApiTokensHandler.ServeHTTP(w, r)
 		case ApiServiceCreateApiTokenProcedure:
@@ -2055,6 +2086,10 @@ func (UnimplementedApiServiceHandler) UpdateWafRule(context.Context, *connect.Re
 
 func (UnimplementedApiServiceHandler) DeleteWafRule(context.Context, *connect.Request[v1.DeleteWafRuleRequest]) (*connect.Response[v1.DeleteWafRuleResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gateon.v1.ApiService.DeleteWafRule is not implemented"))
+}
+
+func (UnimplementedApiServiceHandler) ListBuiltinWafRules(context.Context, *connect.Request[v1.ListBuiltinWafRulesRequest]) (*connect.Response[v1.ListBuiltinWafRulesResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gateon.v1.ApiService.ListBuiltinWafRules is not implemented"))
 }
 
 func (UnimplementedApiServiceHandler) ListApiTokens(context.Context, *connect.Request[v1.ListApiTokensRequest]) (*connect.Response[v1.ListApiTokensResponse], error) {
