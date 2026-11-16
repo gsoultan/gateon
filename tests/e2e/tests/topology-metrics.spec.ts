@@ -107,7 +107,7 @@ test.describe('Metrics', () => {
       golden.locator('.mantine-Paper-root').filter({ has: page.getByText(label, { exact: true }) });
     await expect(tile('Total Requests')).toContainText('987');
     await expect(tile('Error Rate')).toContainText('1.22%');
-    await expect(tile('Error Rate')).toContainText('12 errors of 987 requests');
+    await expect(tile('Error Rate')).toContainText('12 of 987 since the gateway started');
     await expect(tile('Avg Latency')).toContainText('12.3ms');
     await expect(tile('P95 Latency')).toContainText('45.7ms');
     await expect(tile('P99 Latency')).toContainText('500µs');

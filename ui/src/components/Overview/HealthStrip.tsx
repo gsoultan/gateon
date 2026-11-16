@@ -9,7 +9,7 @@ import { useGateonStatus } from "../../hooks/useGateonStatus";
 import { useMetricsSnapshot } from "../../hooks/useMetricsSnapshot";
 import { useSecurityPosture } from "../../hooks/useSecurityPosture";
 import { StatusChip, ratioState, wafModeState, type StatusState } from "../status";
-import { CERT_WARN_DAYS } from "./attention";
+import { certificateHealth } from "./attention";
 
 interface HealthItem {
   key: string;
@@ -19,15 +19,6 @@ interface HealthItem {
   detail: string;
   to: string;
   search?: Record<string, string>;
-}
-
-function certificateItem(certs: Array<{ daysRemaining: number }> | null | undefined): Pick<HealthItem, "state" | "label" | "detail"> {
-  if (certs === undefined) return { state: "unknown", label: "Unknown", detail: "Waiting for metrics" };
-  if (!certs || certs.length === 0) return { state: "off", label: "None", detail: "No certificate is served" };
-  const soonest = Math.min(...certs.map((c) => c.daysRemaining));
-  if (soonest <= 0) return { state: "down", label: "Expired", detail: "A certificate has expired" };
-  if (soonest < CERT_WARN_DAYS) return { state: "degraded", label: `${soonest}d`, detail: `Soonest expiry in ${soonest} days` };
-  return { state: "up", label: "Up", detail: `${certs.length} valid, soonest expiry in ${soonest} days` };
 }
 
 function HealthCard({ item }: { item: HealthItem }) {
@@ -90,7 +81,7 @@ export function HealthStrip() {
       detail: agg ? `${agg.healthyTargets} of ${agg.totalTargets} healthy${agg.openCircuits ? `, ${agg.openCircuits} circuit open` : ""}` : "Waiting for stats",
       to: "/services",
     },
-    { key: "certificates", title: "Certificates", ...certificateItem(snapshot ? snapshot.tlsCertificates : undefined), to: "/tls" },
+    { key: "certificates", title: "Certificates", ...certificateHealth(snapshot), to: "/tls" },
     {
       key: "waf",
       title: "WAF",

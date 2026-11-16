@@ -52,7 +52,10 @@ export function TrafficNow({ range, onRangeChange }: TrafficNowProps) {
         <SimpleGrid cols={{ base: 1, xs: 3 }} spacing="sm">
           <StatTile label="Requests / s" value={rate(latest?.requestsPerSecond)} hint={latest ? "Since the last poll" : "Waiting for a second poll"} />
           <StatTile label="Errors / s" value={rate(latest?.errorsPerSecond)} hint="5xx answers" />
-          <StatTile label="p99 latency" value={ms(golden?.p99LatencyMs)} hint="Across every route" />
+          {/* Lifetime: the snapshot estimates percentiles from cumulative histogram
+              buckets, so this is every request since the gateway started, not
+              the last poll like the two rates beside it. */}
+          <StatTile label="p99 latency" value={ms(golden?.p99LatencyMs)} hint="Since the gateway started" />
         </SimpleGrid>
         {isLoading ? (
           <Skeleton height={180} radius="md" />

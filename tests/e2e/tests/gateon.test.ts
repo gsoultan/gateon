@@ -156,7 +156,7 @@ test.describe('Gateon Comprehensive E2E', () => {
   });
 
   test('Dashboard Realtime and Accuracy', async ({ page, request }) => {
-    // The "Requests / 24h" card, on the Metrics page's Traffic tab, shows the
+    // The "Requests today" card, on the Metrics page's Traffic tab, shows the
     // metrics snapshot: fetched once when
     // the page loads, then pushed over /v1/watch on every telemetry refresh.
     // This used to check that a chart surface existed, which it does with no
@@ -167,7 +167,7 @@ test.describe('Gateon Comprehensive E2E', () => {
       (r) => r.url().includes('/v1/diag/metrics') && r.request().method() === 'GET');
     await page.goto('/metrics-dashboard?tab=traffic', { waitUntil: 'load' });
     const loaded = Number((await (await firstSnapshot).json()).goldenSignals?.requestsToday ?? 0);
-    const card = page.getByText('Requests / 24h', { exact: true })
+    const card = page.getByText('Requests today', { exact: true })
       .locator('xpath=following-sibling::*[1]');
     const shown = async () => Number((await card.innerText()).replaceAll(',', ''));
     // The card reads 0 until that snapshot renders; a baseline taken earlier

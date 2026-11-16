@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 import { describe, expect, test } from "bun:test";
-import { ATTENTION_CAP, deriveAttention } from "./attention";
+import { ATTENTION_CAP, certificateHealth, deriveAttention } from "./attention";
 import type { TargetStats } from "../../types/gateon";
 
 const target = (url: string, alive: boolean, circuitState?: string): TargetStats =>
@@ -50,5 +50,25 @@ describe("deriveAttention", () => {
       Array.from({ length: 30 }, (_, i) => [`r${i}`, [target(`http://t${i}`, false)]]),
     );
     expect(deriveAttention({ routeStats })).toHaveLength(ATTENTION_CAP);
+  });
+});
+
+describe("certificateHealth", () => {
+  test("is unknown only until a snapshot arrives", () => {
+    expect(certificateHealth(undefined).state).toBe("unknown");
+  });
+
+  test("a snapshot without certificates means none are served, not still waiting", () => {
+    // The gateway omits an empty tlsCertificates, so this is what a
+    // plain-HTTP gateway's snapshot looks like on the wire.
+    expect(certificateHealth({})).toEqual({ state: "off", label: "None", detail: "No certificate is served" });
+    expect(certificateHealth({ tlsCertificates: [] }).state).toBe("off");
+  });
+
+  test("reports the soonest expiry", () => {
+    const cert = (daysRemaining: number) => ({ domain: "x", certName: "x", expiryEpoch: 0, daysRemaining });
+    expect(certificateHealth({ tlsCertificates: [cert(90), cert(10)] }).state).toBe("degraded");
+    expect(certificateHealth({ tlsCertificates: [cert(0)] }).state).toBe("down");
+    expect(certificateHealth({ tlsCertificates: [cert(90)] }).state).toBe("up");
   });
 });
