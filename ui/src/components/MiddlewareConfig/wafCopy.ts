@@ -18,4 +18,25 @@ export const GLOBAL_AUDIT_ONLY_HELP =
 export const DLP_ACTION_HELP =
   "Roll out in stages: watch first, then redact, then block once the false-positive rate is known. " +
   "A leak is the backend's data: it is recorded on the route as a data exposure and never counts " +
-  "against the client that received the page.";
+  "against the client that received the page." +
+  " A response that shows an exploit worked (an account file, command output, a cloud role credential) " +
+  "is refused whole under Redact too: cutting two lines out of it would send the rest.";
+
+/** The OpenAPI document field on a route WAF. */
+export const OPENAPI_SPEC_HELP =
+  "An OpenAPI 3 document (YAML or JSON) for the API behind this route. Requests to a path and method " +
+  "it describes are checked against the parameter types, formats, enums, lengths and ranges it declares. " +
+  "A path it does not describe is not checked. Leave empty for no check.";
+
+/** The OpenAPI mode select: what each choice does to a request outside the document. */
+export const OPENAPI_MODE_HELP =
+  "Record first: published documents are usually narrower than the traffic an API really serves. " +
+  "Recorded requests are forwarded, counted, and listed in the Security Hub under api_schema. " +
+  "A refused request is not held against the client: no reputation penalty, no automatic block.";
+
+/** Shown when the route is audit-only and the document is set to enforce. */
+export const OPENAPI_AUDIT_ONLY_NOTE =
+  "Audit Only is on for this route, so requests outside the document are recorded and not refused.";
+
+/** The largest document the gateway accepts, in bytes (apischema.MaxDocumentBytes). */
+export const OPENAPI_MAX_BYTES = 1 << 20;

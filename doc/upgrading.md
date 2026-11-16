@@ -11,6 +11,29 @@ here after the fact.
 
 ## Unreleased
 
+### A route can be checked against its OpenAPI document
+
+A WAF middleware has two new settings, under "API Description" in its form:
+`openapi_spec` (an OpenAPI 3 document, YAML or JSON, at most 1 MiB) and
+`openapi_mode` (`record`, the default, or `enforce`). With no document nothing
+changes.
+
+With a document, a request to a path and method it describes is checked against
+the parameter types, formats, enums, lengths and ranges it declares. In
+`record` the request is forwarded, counted in
+`gateon_middleware_waf_schema_violations_total{route,violation,mode}` and
+listed in the Security Hub under `api_schema` (at most five entries a second
+per route; the metric counts all of them). In `enforce` it is answered 403.
+Start in `record`: published documents are usually narrower than real traffic.
+
+Three things to know before enforcing. A path the document does not describe is
+not checked. A refused request adds no reputation penalty and does not count
+towards an automatic block, because the cause may be the document. And a route
+with Audit Only on records whatever the mode says.
+
+A document that is too large, is not OpenAPI, has no paths, or a mode that is
+not one of the two, refuses the save with the reason. See ADR-0095.
+
 ### Response inspection refuses what a successful exploit returns
 
 Seven response rules are new (1130029 to 1130035, DLP category, paranoia level

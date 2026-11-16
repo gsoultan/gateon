@@ -20,6 +20,7 @@ import (
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/request"
 	secwaf "github.com/gsoultan/gateon/internal/security/waf"
+	"github.com/gsoultan/gateon/internal/security/waf/apischema"
 	"github.com/gsoultan/gateon/internal/security/waf/appprofile"
 	"github.com/gsoultan/gwaf"
 )
@@ -39,6 +40,55 @@ type wafEngine struct {
 	// allowedAdminNets is the parsed admin allowlist. It is computed once per
 	// engine rather than re-split from a comma-separated string per request.
 	allowedAdminNets []*net.IPNet
+
+	// schemaMode is "record" or "enforce" when the route has an OpenAPI
+	// document and empty when it has none; it is also the metric label.
+	// schemaEvents caps the Security Hub entries recorded violations write: a
+	// document narrower than the API it describes is violated by every
+	// request, and the counter, not the event list, is what counts them all.
+	schemaMode   string
+	schemaEvents logger.PerSecond
+}
+
+// schemaEventsPerSecond is how many recorded violations a second one route
+// writes to the Security Hub. The metric counts every one.
+const schemaEventsPerSecond = 5
+
+// loadAPISchema compiles the route's OpenAPI document into the policy and
+// reports the mode it runs in, or "" when the route has no document.
+//
+// A document that cannot be read fails the build, which the middleware
+// service turns into a refused save: the alternative is a route whose form
+// shows a document and whose engine checks nothing.
+func loadAPISchema(policy *secwaf.Policy, cfg WAFConfig) (string, error) {
+	if strings.TrimSpace(cfg.OpenAPISpec) == "" {
+		return "", nil
+	}
+	mode, err := apischema.ParseMode(cfg.OpenAPIMode)
+	if err != nil {
+		return "", err
+	}
+	s, rep, err := apischema.Compile(cfg.OpenAPISpec)
+	if err != nil {
+		return "", err
+	}
+	policy.Schema = s
+	// Audit-only refuses nothing, so the document is only ever recorded under
+	// it. Enforced there, gwaf would answer a violation before running the
+	// rules, and the would-block count an operator reads before enforcing
+	// would miss every attack that was also outside the document.
+	policy.SchemaObserve = mode == apischema.Record || cfg.AuditOnly
+	if policy.SchemaObserve {
+		mode = apischema.Record
+	}
+	logger.L.LogInfo("WAF checks requests against the route's OpenAPI document",
+		"route", cfg.RouteID, "mode", mode.String(), "operations", rep.Operations,
+		"constrained_fields", rep.Fields, "inert_fields", rep.Inert, "unusable", len(rep.Skipped))
+	if rep.Fields == 0 {
+		logger.L.LogWarn("The route's OpenAPI document constrains no parameter, so no request can violate it",
+			"route", cfg.RouteID, "operations", rep.Operations)
+	}
+	return mode.String(), nil
 }
 
 // categoryDisables maps gateon's per-family switches onto the rule categories
@@ -149,6 +199,10 @@ func newWAFEngine(cfg WAFConfig, onDecision func(gwaf.Decision)) (*wafEngine, er
 	policy.ExtraRules = append(policy.ExtraRules, cfg.ExtraRules...)
 	loadOperatorTuning(&policy, cfg)
 	warnInertSettings(cfg)
+	schemaMode, err := loadAPISchema(&policy, cfg)
+	if err != nil {
+		return nil, err
+	}
 
 	w, err := policy.NewEngine()
 	if err != nil {
@@ -161,13 +215,16 @@ func newWAFEngine(cfg WAFConfig, onDecision func(gwaf.Decision)) (*wafEngine, er
 	if err != nil {
 		logger.L.LogWarn("WAF audit log is disabled", "route", cfg.RouteID, "error", err)
 	}
-	return &wafEngine{
+	e := &wafEngine{
 		audit:            audit,
 		waf:              w,
 		cfg:              cfg,
 		policy:           policy,
 		allowedAdminNets: secwaf.ParseAllowedAdminIPs(cfg.AllowedAdminIps),
-	}, nil
+		schemaMode:       schemaMode,
+	}
+	e.schemaEvents.SetMax(schemaEventsPerSecond)
+	return e, nil
 }
 
 // warnInertSettings names, once per engine build, a setting that is stored and

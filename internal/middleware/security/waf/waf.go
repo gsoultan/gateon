@@ -163,6 +163,16 @@ type WAFConfig struct {
 	// which is the bug gwaf v0.4.1 fixed. Empty means the off-origin redirect
 	// and SSRF rules have nothing to compare against and stay quiet.
 	Origins []string
+
+	// OpenAPISpec is an OpenAPI 3 document describing the API behind this
+	// route, and OpenAPIMode what a request outside it costs: "record" (the
+	// default) counts it and lets the rules decide, "enforce" refuses it.
+	// Empty means no document, and no check. A route setting only: a document
+	// describes one API, and the global WAF fronts all of them.
+	//
+	// Configure with the "openapi_spec" and "openapi_mode" keys.
+	OpenAPISpec string
+	OpenAPIMode string
 }
 
 // Fingerprint returns a unique hash representing the WAF policy configuration.
@@ -206,6 +216,11 @@ func (c WAFConfig) Fingerprint() string {
 	// inherits it.
 	fmt.Fprintf(h, "p:%s|%t|%s\n", appprofile.Fingerprint(c.AppProfiles), c.EnableSSRFProtection,
 		appprofile.ScopeFingerprint(c.appProfileScope()))
+	// The document is the policy, so two routes with different ones must not
+	// share an engine. Hashed, because it can be a megabyte.
+	if c.OpenAPISpec != "" {
+		fmt.Fprintf(h, "o:%x|%s\n", sha256.Sum256([]byte(c.OpenAPISpec)), c.OpenAPIMode)
+	}
 	// Origins decide what counts as off-origin, so two configs with different
 	// ones reach different verdicts on the same request and must not share an
 	// engine. Sorted, because the routing table's iteration order is not
@@ -702,6 +717,8 @@ func (t *wafRuntime) inspectAndForward(next http.Handler, w http.ResponseWriter,
 		return
 	}
 
+	t.engine.recordSchemaViolation(tx, r)
+
 	if decision != nil {
 		observe(*decision)
 		if !t.cfg.AuditOnly {
@@ -1069,6 +1086,8 @@ func parseWAFConfig(cfg map[string]string) WAFConfig {
 		AppProfileScopeFields:       parseScopeList(cfg["app_profile_scope_fields"], scopeFieldsEnv),
 		EnableSSRFProtection:        strings.TrimSpace(strings.ToLower(cfg["ssrf_protection"])) == "true",
 		Origins:                     resolveOrigins(parseCSV(cfg["origins"])),
+		OpenAPISpec:                 cfg[keyOpenAPISpec],
+		OpenAPIMode:                 cfg[keyOpenAPIMode],
 	}
 }
 

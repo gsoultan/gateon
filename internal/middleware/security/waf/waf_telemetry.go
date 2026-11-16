@@ -20,8 +20,10 @@ import (
 	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/security/entropy"
 	secwaf "github.com/gsoultan/gateon/internal/security/waf"
+	"github.com/gsoultan/gateon/internal/security/waf/apischema"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	"github.com/gsoultan/gwaf"
+	"github.com/gsoultan/gwaf/schema"
 	"github.com/gsoultan/gwaf/types"
 )
 
@@ -123,6 +125,12 @@ func recordWAFDecision(o wafObservation) {
 	switch {
 	case blocked && secwaf.RepeatsEarlierDecision(uint32(o.decision.RuleID())):
 		o.refusedOnEarlierDecision(&th)
+	case blocked && o.decision.Reason() == gwaf.ReasonSchema:
+		// Refused for not being a request the API accepts, which says nothing
+		// about intent: a client one release behind the document sends the
+		// same thing. Recorded, and held against nobody -- no WAF-block count,
+		// no adaptive mitigation -- or enforcing a document would shun the
+		// API's own out-of-date clients.
 	case blocked && clientIP != "":
 		telemetry.GetAggregator().RecordWAFBlock(clientIP)
 		o.applyAdaptiveMitigation(clientIP)
@@ -334,6 +342,9 @@ func (o wafObservation) applyAdaptiveMitigation(clientIP string) {
 // numeric range. Now it is the rule's own first non-attack tag, falling back to
 // the attack tag, which is the same information without the range arithmetic.
 func wafSeverityAndCategory(matches []gwaf.Match, d gwaf.Decision) (severity, category string) {
+	if d.Reason() == gwaf.ReasonSchema {
+		return threatSeverity(types.SeverityNotice), schemaCategory
+	}
 	category = categoryGeneral
 
 	worst := types.SeverityNotice
@@ -408,9 +419,78 @@ func matchedEntropy(matches []gwaf.Match) float64 {
 }
 
 // explainWAFDecision produces the operator-facing text for a decision.
+// schemaCategory is the threat category of a request outside the route's
+// OpenAPI document, recorded or refused.
+const schemaCategory = "api_schema"
+
+// maxSchemaDetail bounds the client-chosen name in a schema event. An
+// undeclared parameter is named by whoever sent it.
+const maxSchemaDetail = 96
+
+// schemaRecommendation is the advice on every schema event.
+const schemaRecommendation = "If this is a request your API accepts, the OpenAPI document on this route is narrower than the API: update the document. If it is not, no action is needed."
+
+// schemaExplanation words a violation for the Security Hub.
+func schemaExplanation(detail string) string {
+	if len(detail) > maxSchemaDetail {
+		detail = detail[:maxSchemaDetail] + "..."
+	}
+	return "Request outside the route's OpenAPI document (" + detail + ")"
+}
+
+// recordSchemaViolation counts a request outside the route's OpenAPI document
+// and, in record mode, files it in the Security Hub.
+//
+// The counter sees every violation in both modes. The event is written only in
+// record mode, because an enforced violation is a refusal and reaches the hub
+// as one through recordWAFDecision; and at most schemaEventsPerSecond a second,
+// because a document narrower than its API is violated by every request.
+func (e *wafEngine) recordSchemaViolation(tx *gwaf.Transaction, r *http.Request) {
+	if e.schemaMode == "" || tx == nil {
+		return
+	}
+	v, at := tx.SchemaViolation()
+	if v == schema.ViolationNone {
+		return
+	}
+	telemetry.MiddlewareWAFSchemaViolationsTotal.
+		WithLabelValues(e.cfg.RouteID, v.String(), e.schemaMode).Inc()
+	if e.schemaMode != apischema.ModeRecord || !e.schemaEvents.Allow(time.Now()) {
+		return
+	}
+	detail := v.String()
+	if at != "" {
+		detail += ": " + at
+	}
+	id := "waf-" + kind.ActionDetected + "-" + uuid.NewString()
+	telemetry.RegisterRecommendation(id, schemaRecommendation)
+	telemetry.RecordSecurityThreat(telemetry.RecordSecurityThreatWithJA4(r, telemetry.SecurityThreat{
+		ID:             id,
+		Type:           "waf_" + kind.ActionDetected,
+		SourceIP:       request.ClientAddr(r),
+		Score:          0,
+		Details:        schemaExplanation(detail),
+		Recommendation: schemaRecommendation,
+		Time:           time.Now(),
+		RouteID:        e.cfg.RouteID,
+		RequestURI:     r.RequestURI,
+		Category:       schemaCategory,
+		Severity:       threatSeverity(types.SeverityNotice),
+		ActionTaken:    kind.ActionDetected,
+		Observed:       true,
+		UserAgent:      r.Header.Get("User-Agent"),
+		Method:         r.Method,
+		Confidence:     defaultThreatConfidence,
+	}))
+}
+
 func explainWAFDecision(d gwaf.Decision, matches []gwaf.Match) (explanation, recommendation, triggered string) {
 	ids := make([]uint32, 0, len(matches)+1)
 	var b strings.Builder
+
+	if d.Reason() == gwaf.ReasonSchema {
+		return schemaExplanation(d.Detail()), schemaRecommendation, ""
+	}
 
 	if d.Blocked() {
 		b.WriteString(d.Message())

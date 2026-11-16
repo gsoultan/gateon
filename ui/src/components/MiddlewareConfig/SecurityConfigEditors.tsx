@@ -26,6 +26,7 @@ import { WAF_APP_PROFILES } from "../../types/gateon";
 import { BROWSER_HEADER_CHECK_HELP, JS_CHALLENGE_HELP } from "./botManagementCopy";
 import { AUDIT_ONLY_HELP, DLP_ACTION_HELP } from "./wafCopy";
 import { ClientAddressNote } from "./RatelimitConfigEditor";
+import { OpenApiSpecFields } from "./OpenApiSpecFields";
 import { tlsBindingProblem, xfccProblem } from "./middlewareConfigProblems";
 import { ipListError } from "./ipList";
 import { routeSwitchOn, useEffectiveWaf, type EffectiveWaf } from "../../hooks/useEffectiveWaf";
@@ -308,6 +309,9 @@ export function WAFConfigFields({ config, updateConfig, global, globalUnreadable
           min={0}
         />
       </Group>
+
+      <Divider label="API Description" labelPosition="center" />
+      <OpenApiSpecFields config={config} updateConfig={updateConfig} auditOnly={auditOnly} />
 
       <Divider label="Audit Logging" labelPosition="center" />
       <Stack gap="xs">

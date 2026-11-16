@@ -465,6 +465,12 @@ func checkRouteCloudflareTrust(cfg map[string]string, d security.Deps) error {
 // keyTrustCloudflare is the route config key of the Cloudflare trust switch.
 const keyTrustCloudflare = "trust_cloudflare_headers"
 
+// The route config keys of the API description (WAFConfig.OpenAPISpec).
+const (
+	keyOpenAPISpec = "openapi_spec"
+	keyOpenAPIMode = "openapi_mode"
+)
+
 func NewWAF(cfg map[string]string, d security.Deps) (kind.Middleware, error) {
 	if err := checkRouteCloudflareTrust(cfg, d); err != nil {
 		return nil, err

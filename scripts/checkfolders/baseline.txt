@@ -56,7 +56,7 @@
 #
 # None of those is urgent and none should be folded into an unrelated change.
 # The ratchet holds the ground already taken; that is its job.
-15 internal/middleware/security
+14 internal/middleware/security
 
 # The dashboard/control-plane API surface. Grows a file per RPC group, so it is
 # the package most likely to cross a pin during ordinary feature work; that is

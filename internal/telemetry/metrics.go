@@ -165,6 +165,15 @@ var ClientInternalHeadersStrippedTotal = promauto.NewCounterVec(prometheus.Count
 	Help: "Framework-internal request headers sent by a client and removed at the entrypoint, by header.",
 }, []string{"header"})
 
+// MiddlewareWAFSchemaViolationsTotal counts requests that fell outside a
+// route's OpenAPI document, by what was wrong and by whether the route records
+// or enforces. The violation label is gwaf's fixed vocabulary and the mode has
+// two values; neither is anything a client wrote.
+var MiddlewareWAFSchemaViolationsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+	Name: "gateon_middleware_waf_schema_violations_total",
+	Help: "Requests outside a route's OpenAPI document, by violation and mode (record or enforce).",
+}, []string{"route", "violation", "mode"})
+
 // MiddlewareRateLimitRejectedTotal counts requests rejected by rate limiter.
 var MiddlewareRateLimitRejectedTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 	Name: "gateon_middleware_ratelimit_rejected_total",
