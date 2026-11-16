@@ -70,6 +70,14 @@ func EntryPoint(epID, epLabel string, isMgmt bool) Middleware {
 			// 2. Handle Request ID
 			rs.RequestID = assignRequestID(w, r)
 
+			// Before anything reads the request: a header that only
+			// infrastructure may send is removed here, at the one place every
+			// listener's requests pass, so no route, policy, auth service or
+			// backend downstream sees a client's copy (ADR 0094).
+			if stripped := request.StripInternalHeaders(r.Header); stripped != 0 {
+				countStrippedInternalHeaders(stripped)
+			}
+
 			// 3. Resolve Real IP, Country and Proto (Consolidated logic)
 			trustCloudflare := config.EffectiveTrustCloudflare()
 
@@ -1068,4 +1076,25 @@ func shouldRecordTrace(traceRate uint32, counter *uint64, status int) bool {
 // false-positive work depends on those being visible rather than sampled away.
 func traceWorthRecording(status int) bool {
 	return status >= 400
+}
+
+// strippedInternalHeaderCounters holds one counter per request.InternalHeaders
+// entry, resolved once: WithLabelValues hashes its labels on every call.
+var strippedInternalHeaderCounters = sync.OnceValue(func() []prometheus.Counter {
+	counters := make([]prometheus.Counter, len(request.InternalHeaders))
+	for i, name := range request.InternalHeaders {
+		counters[i] = telemetry.ClientInternalHeadersStrippedTotal.WithLabelValues(name)
+	}
+	return counters
+})
+
+// countStrippedInternalHeaders counts each header StripInternalHeaders
+// reported, one bit per request.InternalHeaders entry.
+func countStrippedInternalHeaders(found uint16) {
+	counters := strippedInternalHeaderCounters()
+	for i := range counters {
+		if found&(1<<i) != 0 {
+			counters[i].Inc()
+		}
+	}
 }

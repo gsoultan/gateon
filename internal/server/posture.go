@@ -126,6 +126,7 @@ func newPostureProvider(d postureDeps) handlers.SecurityPostureProvider {
 			SIEM:        siem.CurrentStatus(),
 			Ebpf:        ebpfPosture(ctx, d.globalStore, d.ebpf),
 			Score:       posture.Compute(pc),
+			BlindSpots:  posture.BlindSpots(pc),
 		}
 		if d.fimScanner != nil {
 			st := d.fimScanner.Status()

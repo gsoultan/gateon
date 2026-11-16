@@ -156,6 +156,15 @@ func RecordRequestOutcome(forwarded bool, status int) {
 	}
 }
 
+// ClientInternalHeadersStrippedTotal counts framework-internal headers a client
+// sent and the entrypoint removed (request.InternalHeaders), by the header's
+// canonical name. The label is bounded by that list, never by what a client
+// typed: an alias spelling is counted under the name it folds to.
+var ClientInternalHeadersStrippedTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+	Name: "gateon_client_internal_headers_stripped_total",
+	Help: "Framework-internal request headers sent by a client and removed at the entrypoint, by header.",
+}, []string{"header"})
+
 // MiddlewareRateLimitRejectedTotal counts requests rejected by rate limiter.
 var MiddlewareRateLimitRejectedTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 	Name: "gateon_middleware_ratelimit_rejected_total",

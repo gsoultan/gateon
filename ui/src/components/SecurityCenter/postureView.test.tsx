@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 import { describe, expect, test, mock } from "bun:test";
+import type React from "react";
 import { MantineProvider } from "@mantine/core";
 import { renderToString } from "react-dom/server";
 import type { SecurityPosture, WafPosture } from "../../hooks/useSecurityPosture";
@@ -9,9 +10,14 @@ import type { SecurityPosture, WafPosture } from "../../hooks/useSecurityPosture
 // OverviewTab reaches hooks/api, which builds the Connect client from
 // window.location at import; there is no window under bun:test.
 mock.module("../../services/client", () => ({ api: {} }));
+// A Link needs a router in context; the cards under test only need its href.
+mock.module("@tanstack/react-router", () => ({
+  Link: ({ to, children }: { to: string; children?: React.ReactNode }) => <a href={to}>{children}</a>,
+}));
 
 const view = await import("./postureView");
 const { SecurityPostureCard } = await import("./OverviewTab");
+const { BlindSpotsCard } = await import("./BlindSpotsCard");
 
 const waf = (mode: WafPosture["mode"], total: number, enforcing: number, detecting: number): WafPosture => ({
   enabled: mode !== "off",
@@ -114,5 +120,56 @@ describe("the posture card (T11)", () => {
       "Web application firewall: 20/40 — 0 of 1 routes blocking.",
     ]);
     expect(view.POSTURE_FORMULA).toContain("traffic and attackers do not move it");
+  });
+});
+
+describe("what the WAF cannot see", () => {
+  const posture = (blindSpots: SecurityPosture["blindSpots"]) => ({ blindSpots }) as SecurityPosture;
+  const render = (p: SecurityPosture | undefined, isLoading = false, error: unknown = null) =>
+    renderToString(
+      <MantineProvider>
+        <BlindSpotsCard posture={p} isLoading={isLoading} error={error} />
+      </MantineProvider>,
+    );
+
+  test("groups are ordered most urgent first and carry their routes", () => {
+    const groups = view.blindSpotGroups({
+      spots: [
+        { kind: "websocket_messages" },
+        { kind: "l4_passthrough", route: "r1", name: "ssh" },
+        { kind: "waf_detect_only", route: "r2", name: "shop" },
+        { kind: "l4_open_to_all", route: "r1", name: "ssh" },
+        { kind: "waf_off", route: "r3" },
+      ],
+    });
+    expect(groups.map((g) => g.kind)).toEqual([
+      "l4_open_to_all", "waf_off", "waf_detect_only", "l4_passthrough", "websocket_messages",
+    ]);
+    expect(groups[0].routes).toEqual(["ssh"]);
+    // A route with no name is shown by its id, never dropped.
+    expect(groups[1].routes).toEqual(["r3"]);
+    // The gateway-wide entry names no route and offers no setting to change.
+    expect(groups[4].routes).toEqual([]);
+    expect(groups[4].fix).toBe("");
+  });
+
+  test("a kind this build does not know is left out, not shown without words", () => {
+    const groups = view.blindSpotGroups({ spots: [{ kind: "future_kind" as never, route: "r" }] });
+    expect(groups).toEqual([]);
+  });
+
+  test("the card names the routes and escapes them", () => {
+    const html = render(posture({ spots: [{ kind: "waf_off", route: "r", name: "<img src=x>" }], omitted: 3 }));
+    expect(html).toContain("HTTP routes with no WAF");
+    expect(html).toContain("&lt;img src=x&gt;");
+    expect(html).not.toContain("<img src=x>");
+    expect(html).toContain("3 more are not listed here.");
+  });
+
+  test("loading, error and an older gateway each say what they are", () => {
+    expect(render(undefined, true)).toContain('aria-busy="true"');
+    expect(render(undefined, false, new Error("boom"))).toContain("could not be loaded");
+    expect(render(undefined, false, new Error("boom"))).not.toContain("boom");
+    expect(render({} as SecurityPosture)).toContain("does not report blind spots yet");
   });
 });
