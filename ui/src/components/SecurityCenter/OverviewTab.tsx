@@ -44,6 +44,7 @@ import { useDisclosure } from '@mantine/hooks';
 import { SecurityAnomalyModal } from '../SecurityAnomalyModal';
 import TraceVisualizer from '../Diagnostics/TraceVisualizer';
 import { useSecurityPosture } from '../../hooks/useSecurityPosture';
+import { BlindSpotsCard } from './BlindSpotsCard';
 import type { SecurityPosture } from '../../hooks/useSecurityPosture';
 import { useReputations } from '../../hooks/useReputations';
 import {
@@ -471,6 +472,8 @@ export function OverviewTab({
           </Card>
         </Grid.Col>
       </Grid>
+
+      <BlindSpotsCard posture={posture} isLoading={postureLoading} error={postureError} />
 
       <Card withBorder radius="md">
         {/* Every severity, newest first: it was titled "Critical" and its

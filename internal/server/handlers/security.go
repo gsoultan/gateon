@@ -37,6 +37,9 @@ type SecurityPostureReport struct {
 	// Score is the posture percentage and the controls behind it, computed
 	// from configuration only (ADR 0048).
 	Score posture.Score `json:"score"`
+	// BlindSpots is what the WAF does not judge or does not refuse, per
+	// route and gateway-wide, computed from configuration only.
+	BlindSpots posture.BlindSpotReport `json:"blindSpots"`
 }
 
 // SignaturePosture reports the YARA-lite upload signature engine as the routes
