@@ -11,6 +11,22 @@ here after the fact.
 
 ## Unreleased
 
+### Response inspection refuses what a successful exploit returns
+
+Seven response rules are new (1130029 to 1130035, DLP category, paranoia level
+1): a Unix account file, the output of `id`, `win.ini`, `boot.ini`, an EC2
+instance role-credential document, a `phpinfo()` page and a process
+environment. They run where response inspection already runs (`dlp` on) and
+need no setting. The request that fetched such a response may have matched
+nothing, which is the point: a traversal no rule names returns the same file.
+
+Under `dlp_action=redact` these findings are refused, not redacted: cutting the
+matched lines out of an account file forwards the rest of it. `dlp_action=audit`
+records them and forwards the response, as it does every DLP finding.
+
+A site that serves such content on purpose (documentation that prints a sample
+`/etc/passwd`) needs a WAF exception for the rule on that path.
+
 ### The Security Hub lists what the WAF cannot see
 
 Security → Overview has a new card, "What the WAF cannot see". It names every

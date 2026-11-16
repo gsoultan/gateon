@@ -90,18 +90,42 @@ var redactionMarker = []byte("[REDACTED]")
 // stateless and nothing here is retained between calls.
 type dlpRedactor struct {
 	ops []rules.Operator
+
+	// compromise are the operators of the rules that recognise the result of
+	// an exploit. A body one of them matches is refused, not redacted.
+	compromise []rules.Operator
 }
 
 // newDLPRedactor builds a redactor over the data-leak rules active at pl.
 func newDLPRedactor(paranoiaLevel int) *dlpRedactor {
 	set := waf.DLPResponseRules(paranoiaLevel)
 	ops := make([]rules.Operator, 0, len(set))
+	var compromise []rules.Operator
 	for i := range set {
-		if set[i].Op != nil {
-			ops = append(ops, set[i].Op)
+		if set[i].Op == nil {
+			continue
+		}
+		if waf.IsCompromiseRule(set[i].ID) {
+			compromise = append(compromise, set[i].Op)
+			continue
+		}
+		ops = append(ops, set[i].Op)
+	}
+	return &dlpRedactor{ops: ops, compromise: compromise}
+}
+
+// Compromised reports whether body holds what a successful exploit returns.
+//
+// Asked before redacting, because the engine reports one decision per phase:
+// a card number on the same page as an account file is reported as the card
+// number, and redacting it would forward the account file as a cleaned page.
+func (r *dlpRedactor) Compromised(body []byte) bool {
+	for _, op := range r.compromise {
+		if _, ok := op.Eval(nil, body); ok {
+			return true
 		}
 	}
-	return &dlpRedactor{ops: ops}
+	return false
 }
 
 // maxRedactionsPerBody bounds the work one response can cause. A body that

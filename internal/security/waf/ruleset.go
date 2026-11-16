@@ -108,6 +108,12 @@ const (
 	// selection unit: the two groups sit at different paranoia levels because a
 	// site may legitimately serve the former and never the latter.
 	TagLeakage = "leakage"
+
+	// TagCompromise marks a response rule that recognises what a successful
+	// exploit returns -- an account file, command output, a role credential.
+	// Unlike leakage, no site serves these on purpose outside documentation,
+	// so they are not held back to the higher paranoia level.
+	TagCompromise = "compromise"
 )
 
 // spec is the compact form of a gateon rule. It exists because a rules.Rule
@@ -595,6 +601,29 @@ var builtinSpecs = []spec{
 		tags: []string{TagDlp, TagLeakage}},
 	{id: 1130028, from: leaks.IDDatabaseError, status: 403, pl: 2, category: CategoryDLP,
 		tags: []string{TagDlp, TagLeakage}},
+
+	// What a working exploit returns, rather than what one looks like going in:
+	// an account file, the output of id, a cloud role credential. The request
+	// that fetched it may have matched nothing -- a traversal no rule names, a
+	// deserialisation gadget, a CVE published tomorrow -- and the response is
+	// the same either way. PL1 for the reason the credential rules are: the
+	// opt-in to response inspection is the gate. gwaf declares them High, not
+	// Certain, because documentation prints sample account files; a site that
+	// serves those legitimately excepts the rule on that path.
+	{id: 1130029, from: leaks.IDUnixAccountFile, status: 403, pl: 1, category: CategoryDLP,
+		tags: []string{TagDlp, TagCompromise}},
+	{id: 1130030, from: leaks.IDCommandIdentity, status: 403, pl: 1, category: CategoryDLP,
+		tags: []string{TagDlp, TagCompromise}},
+	{id: 1130031, from: leaks.IDWindowsWinIni, status: 403, pl: 1, category: CategoryDLP,
+		tags: []string{TagDlp, TagCompromise}},
+	{id: 1130032, from: leaks.IDWindowsBootIni, status: 403, pl: 1, category: CategoryDLP,
+		tags: []string{TagDlp, TagCompromise}},
+	{id: 1130033, from: leaks.IDCloudRoleCredential, status: 403, pl: 1, category: CategoryDLP,
+		tags: []string{TagDlp, TagCompromise}},
+	{id: 1130034, from: leaks.IDPHPInfoPage, status: 403, pl: 1, category: CategoryDLP,
+		tags: []string{TagDlp, TagCompromise, TagPhp}},
+	{id: 1130035, from: leaks.IDProcessEnvironment, status: 403, pl: 1, category: CategoryDLP,
+		tags: []string{TagDlp, TagCompromise}},
 
 	// The credential detectors pointed at the request. Two deliberate policy
 	// differences from the response rules above.

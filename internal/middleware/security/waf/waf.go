@@ -1344,6 +1344,12 @@ func (w *wafResponseWriter) applyDecision(d gwaf.Decision) {
 			}
 			return
 		}
+		// The result of an exploit is refused whole. Cutting the matched
+		// lines out of an account file forwards the rest of it.
+		if waf.IsCompromiseRule(d.RuleID()) {
+			w.block(d)
+			return
+		}
 		// Redaction is not settled here: whether it can actually remove the
 		// finding is only known once the whole body is held, so the decision is
 		// kept and resolved in resolveRedaction, which observes it exactly once
@@ -1715,6 +1721,12 @@ func (w *wafResponseWriter) resolveRedaction() {
 		body  []byte
 		count int
 	)
+	if w.redactor != nil && w.redactor.Compromised(source) {
+		logger.L.LogWarn("WAF found the result of an exploit beside a data leak; refusing the response",
+			"route", w.routeID, "rule", w.pendingDecision.RuleID())
+		w.block(w.pendingDecision)
+		return
+	}
 	if w.redactor != nil {
 		body, count = w.redactor.Redact(source)
 	}
