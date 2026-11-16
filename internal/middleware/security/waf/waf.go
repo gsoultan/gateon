@@ -173,6 +173,20 @@ type WAFConfig struct {
 	// Configure with the "openapi_spec" and "openapi_mode" keys.
 	OpenAPISpec string
 	OpenAPIMode string
+
+	// InspectWebSocket judges each message a client sends on a WebSocket this
+	// route upgrades, as the body of the request that opened it, and closes
+	// the connection on one the WAF refuses. Off, the upgrade request is
+	// judged and the messages after it are relayed unread.
+	//
+	// It is off by default because it changes what an existing route costs
+	// and negotiates: compression (permessage-deflate) is no longer offered to
+	// the backend, and a message past WebSocketMessageLimit closes the
+	// connection. Configure with the "websocket_inspection" and
+	// "websocket_message_limit" keys, or GATEON_WAF_WEBSOCKET_INSPECTION and
+	// GATEON_WAF_WEBSOCKET_MESSAGE_LIMIT for routes that set neither.
+	InspectWebSocket      bool
+	WebSocketMessageLimit int
 }
 
 // Fingerprint returns a unique hash representing the WAF policy configuration.
@@ -218,6 +232,9 @@ func (c WAFConfig) Fingerprint() string {
 		appprofile.ScopeFingerprint(c.appProfileScope()))
 	// The document is the policy, so two routes with different ones must not
 	// share an engine. Hashed, because it can be a megabyte.
+	if c.InspectWebSocket {
+		fmt.Fprintf(h, "ws:%d\n", c.WebSocketMessageLimit)
+	}
 	if c.OpenAPISpec != "" {
 		fmt.Fprintf(h, "o:%x|%s\n", sha256.Sum256([]byte(c.OpenAPISpec)), c.OpenAPIMode)
 	}
@@ -713,7 +730,7 @@ func (t *wafRuntime) inspectAndForward(next http.Handler, w http.ResponseWriter,
 				http.StatusForbidden)
 			return
 		}
-		next.ServeHTTP(w, r)
+		next.ServeHTTP(t.guardWebSocket(w, r, repScore), r)
 		return
 	}
 
@@ -732,6 +749,8 @@ func (t *wafRuntime) inspectAndForward(next http.Handler, w http.ResponseWriter,
 	} else {
 		observe(tx.Decision())
 	}
+
+	w = t.guardWebSocket(w, r, repScore)
 
 	if !t.cfg.EnableResponseInspection {
 		next.ServeHTTP(w, r)
@@ -1088,6 +1107,8 @@ func parseWAFConfig(cfg map[string]string) WAFConfig {
 		Origins:                     resolveOrigins(parseCSV(cfg["origins"])),
 		OpenAPISpec:                 cfg[keyOpenAPISpec],
 		OpenAPIMode:                 cfg[keyOpenAPIMode],
+		InspectWebSocket:            webSocketInspection(cfg[keyWebSocketInspection]),
+		WebSocketMessageLimit:       intVal(cfg[keyWebSocketMessageLimit]),
 	}
 }
 

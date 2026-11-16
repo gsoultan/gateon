@@ -157,6 +157,7 @@ func globalWAFConfig(w *gateonv1.WafConfig, tier config.Tier, d security.Deps) W
 		EnableConfidenceScoring:     w.GetEnableConfidenceScoring(),
 		AuditOnly:                   w.GetAuditOnly(),
 		AllowGitSmartHTTP:           gitSmartHTTP(""),
+		InspectWebSocket:            webSocketInspection(""),
 		TrustCloudflare:             config.TrustCloudflare(w),
 		AppProfiles:                 w.GetAppProfiles(),
 		EnableSSRFProtection:        w.GetSsrfProtection(),
@@ -469,6 +470,11 @@ const keyTrustCloudflare = "trust_cloudflare_headers"
 const (
 	keyOpenAPISpec = "openapi_spec"
 	keyOpenAPIMode = "openapi_mode"
+
+	// The route config keys of WebSocket message inspection
+	// (WAFConfig.InspectWebSocket).
+	keyWebSocketInspection   = "websocket_inspection"
+	keyWebSocketMessageLimit = "websocket_message_limit"
 )
 
 func NewWAF(cfg map[string]string, d security.Deps) (kind.Middleware, error) {

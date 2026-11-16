@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 import {
+  Alert,
   Stack,
   TextInput,
   Textarea,
@@ -24,7 +25,13 @@ import { apiFetch, getCloudflareIPs } from "../../hooks/useGateon";
 import { StoredSecretInput } from "../settings/StoredSecretInput";
 import { WAF_APP_PROFILES } from "../../types/gateon";
 import { BROWSER_HEADER_CHECK_HELP, JS_CHALLENGE_HELP } from "./botManagementCopy";
-import { AUDIT_ONLY_HELP, DLP_ACTION_HELP } from "./wafCopy";
+import {
+  AUDIT_ONLY_HELP,
+  DLP_ACTION_HELP,
+  WEBSOCKET_AUDIT_ONLY_NOTE,
+  WEBSOCKET_INSPECTION_HELP,
+  WEBSOCKET_LIMIT_HELP,
+} from "./wafCopy";
 import { ClientAddressNote } from "./RatelimitConfigEditor";
 import { OpenApiSpecFields } from "./OpenApiSpecFields";
 import { tlsBindingProblem, xfccProblem } from "./middlewareConfigProblems";
@@ -291,6 +298,30 @@ export function WAFConfigFields({ config, updateConfig, global, globalUnreadable
         checked={config.git_smart_http === "true"}
         onChange={(e) => updateConfig("git_smart_http", e.currentTarget.checked ? "true" : "false")}
       />
+
+      <Divider label="WebSocket" labelPosition="center" />
+      <Switch
+        label="Inspect WebSocket messages"
+        description={WEBSOCKET_INSPECTION_HELP}
+        checked={config.websocket_inspection === "true"}
+        onChange={(e) => updateConfig("websocket_inspection", e.currentTarget.checked ? "true" : "false")}
+      />
+      {config.websocket_inspection === "true" && (
+        <>
+          <NumberInput
+            label="WebSocket Message Limit"
+            description={WEBSOCKET_LIMIT_HELP}
+            value={parseInt(config.websocket_message_limit) || 0}
+            onChange={(val) => updateConfig("websocket_message_limit", (val ?? 0).toString())}
+            min={0}
+          />
+          {auditOnly && (
+            <Alert color="yellow" variant="light">
+              {WEBSOCKET_AUDIT_ONLY_NOTE}
+            </Alert>
+          )}
+        </>
+      )}
 
       <Divider label="Body Limits" labelPosition="center" />
       <Group grow>

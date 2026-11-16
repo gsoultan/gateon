@@ -181,9 +181,10 @@ const BLIND_SPOT_WORDS: Record<BlindSpotKind, Omit<BlindSpotGroup, "kind" | "rou
     color: "yellow",
   },
   websocket_messages: {
-    title: "WebSocket messages are not inspected",
-    why: "The WAF checks the request that opens a WebSocket. Messages sent afterwards are forwarded unread, on every route.",
-    fix: "",
+    title: "WebSocket messages are inspected only where a route asks",
+    why: "The WAF checks the request that opens a WebSocket. Messages a client sends afterwards are inspected only on a route whose WAF has WebSocket inspection on. Messages a backend sends are never inspected.",
+    fix: "Turn on WebSocket inspection in the WAF of each route that upgrades connections.",
+    fixPath: "/routes",
     color: "gray",
   },
 };

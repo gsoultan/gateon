@@ -11,6 +11,32 @@ here after the fact.
 
 ## Unreleased
 
+### WebSocket messages can be inspected
+
+A WAF middleware has a new switch, "Inspect WebSocket messages"
+(`websocket_inspection`, off by default). With it on, every message a client
+sends on a WebSocket the route upgrades is judged the way a request body is,
+and one the WAF refuses closes the connection (close code 1008) before the
+backend reads it. Fragmented messages are judged whole and binary frames like
+text ones.
+
+Turning it on changes three things about a working route, which is why it is
+off until you choose it:
+
+- Compression (`permessage-deflate`) is no longer offered to the backend,
+  because a compressed message cannot be read.
+- A message larger than `websocket_message_limit` closes the connection (1009).
+  The default is 16 KiB, 64 KiB or 256 KiB by resource profile; set it per
+  route, or with `GATEON_WAF_WEBSOCKET_MESSAGE_LIMIT`. It is never more than
+  the request body limit.
+- The route carries WebSocket only. Another protocol upgraded on it is closed.
+
+On an Audit Only route a refused message is recorded and forwarded.
+`GATEON_WAF_WEBSOCKET_INSPECTION=true` turns it on for the gateway-wide WAF,
+which has no switch of its own, and for every route WAF that does not set it. Messages a backend sends are not inspected. Closed connections
+are counted in `gateon_middleware_waf_websocket_closed_total{route,reason}`.
+See ADR-0096.
+
 ### A route can be checked against its OpenAPI document
 
 A WAF middleware has two new settings, under "API Description" in its form:

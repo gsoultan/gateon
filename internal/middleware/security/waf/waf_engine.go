@@ -22,6 +22,8 @@ import (
 	secwaf "github.com/gsoultan/gateon/internal/security/waf"
 	"github.com/gsoultan/gateon/internal/security/waf/apischema"
 	"github.com/gsoultan/gateon/internal/security/waf/appprofile"
+	"github.com/gsoultan/gateon/internal/security/wsinspect"
+	"github.com/gsoultan/gateon/internal/telemetry"
 	"github.com/gsoultan/gwaf"
 )
 
@@ -225,6 +227,130 @@ func newWAFEngine(cfg WAFConfig, onDecision func(gwaf.Decision)) (*wafEngine, er
 	}
 	e.schemaEvents.SetMax(schemaEventsPerSecond)
 	return e, nil
+}
+
+// The environment paths of WebSocket message inspection, for a deployment
+// that sets it for every route that does not say otherwise.
+const (
+	webSocketInspectionEnv   = "GATEON_WAF_WEBSOCKET_INSPECTION"
+	webSocketMessageLimitEnv = "GATEON_WAF_WEBSOCKET_MESSAGE_LIMIT"
+)
+
+// webSocketInspection reads the route's setting, falling back to the
+// environment and then to off. Only "true" turns it on: it changes what a
+// route negotiates with its backend, so nothing else is read as consent.
+func webSocketInspection(value string) bool {
+	v := strings.TrimSpace(strings.ToLower(value))
+	if v == "" {
+		v = strings.TrimSpace(strings.ToLower(os.Getenv(webSocketInspectionEnv)))
+	}
+	return v == "true"
+}
+
+// webSocketMessageLimit is the largest message held for inspection: the
+// route's value, else the environment's, else the resource profile's. It never
+// exceeds the request-body limit, because past that the engine reads nothing
+// and a message it did not read must not be reported clean.
+func (e *wafEngine) webSocketMessageLimit() int {
+	limit := e.cfg.WebSocketMessageLimit
+	if limit <= 0 {
+		limit, _ = strconv.Atoi(strings.TrimSpace(os.Getenv(webSocketMessageLimitEnv)))
+	}
+	if limit <= 0 {
+		limit = config.CurrentTierDefaults().WAFWebSocketMessageLimit
+	}
+	if limit <= 0 {
+		limit = wsinspect.DefaultMaxMessage
+	}
+	body := e.policy.Limits.MaxBodySize
+	if body <= 0 {
+		body = gwaf.DefaultLimits().MaxBodySize
+	}
+	return min(limit, body)
+}
+
+// guardWebSocket returns w so that a connection upgraded through it has every
+// client message judged before the backend receives it.
+//
+// Only a request that asks for an upgrade is guarded, which is the same
+// condition the proxy takes a connection on; a request that does not ask
+// cannot be given one. The offer of an extension is removed on the way: a
+// compressed message cannot be read, and what is negotiated on a connection is
+// for whoever owns it to decide.
+func (t *wafRuntime) guardWebSocket(w http.ResponseWriter, r *http.Request, reputation float64) http.ResponseWriter {
+	if !t.cfg.InspectWebSocket || r.Header.Get("Upgrade") == "" {
+		return w
+	}
+	r.Header.Del(wsinspect.ExtensionsHeader)
+	routeID := t.cfg.RouteID
+	return wsinspect.Guard(w, wsinspect.Options{
+		MaxMessage:      t.engine.webSocketMessageLimit(),
+		ForwardOversize: t.cfg.AuditOnly,
+		Inspect:         t.engine.messageInspector(r, reputation),
+		OnClose: func(why wsinspect.Reason) {
+			telemetry.MiddlewareWAFWebSocketClosedTotal.WithLabelValues(routeID, string(why)).Inc()
+		},
+	})
+}
+
+// messageInspector judges one WebSocket message as the body of the request
+// that opened the connection: same path, so the route's exceptions apply, and
+// no query, which was judged with the upgrade.
+//
+// The route's OpenAPI document, if it has one, describes that request and not
+// its messages. The operation still matches, by method and path, so a message
+// is held to nothing the upgrade was not: the document's query parameters are
+// absent, and a GET that opened a WebSocket had no body members to require.
+//
+// A refusal is recorded and held against the client exactly as a refused
+// request is. On an audit-only route it is recorded and the message forwarded.
+func (e *wafEngine) messageInspector(r *http.Request, reputation float64) wsinspect.Inspector {
+	return func(payload []byte, _ bool) wsinspect.Verdict {
+		tx := e.waf.NewTransaction()
+		// The transaction may keep views into payload, which is only valid
+		// until this returns.
+		defer tx.Close()
+
+		e.addResolvers(tx, r, reputation)
+		host, port := splitAddr(r.RemoteAddr)
+		tx.SetRemoteAddr(net.JoinHostPort(host, strconv.Itoa(port)))
+		tx.SetRequestLine(r.Method, r.URL.EscapedPath(), r.Proto)
+		tx.AddRequestHeader("Host", r.Host)
+		tx.AddRequestHeader("Content-Type", messageContentType(payload))
+
+		d := tx.ProcessRequestHeaders()
+		if !d.Blocked() {
+			tx.SetRequestBody(payload)
+			d = tx.ProcessRequestBody()
+		}
+		obs := wafObservation{
+			decision: d, matches: tx.Matches(), request: r,
+			routeID: e.cfg.RouteID, cfg: e.cfg, repScore: reputation,
+			phase: wafPhaseWebSocket,
+		}
+		recordWAFDecision(obs)
+		e.audit.record(d, obs.matches, obs)
+		if d.Blocked() && !e.cfg.AuditOnly {
+			return wsinspect.Refuse
+		}
+		return wsinspect.Allow
+	}
+}
+
+// messageContentType names a message's structure for the engine. WebSocket
+// carries no content type; nearly every application protocol on it is JSON,
+// and anything else is judged as text.
+func messageContentType(payload []byte) string {
+	for _, b := range payload {
+		switch b {
+		case ' ', '\t', '\r', '\n':
+			continue
+		case '{', '[':
+			return "application/json"
+		}
+		return "text/plain"
+	}
+	return "text/plain"
 }
 
 // warnInertSettings names, once per engine build, a setting that is stored and

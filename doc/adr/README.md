@@ -105,6 +105,7 @@ ADRs follow a lightweight [MADR](https://adr.github.io/madr/)-style format:
 | [0093](./0093-built-in-waf-rules-take-their-detection-from-gwaf.md) | Built-in WAF rules take their detection from gwaf | Accepted |
 | [0094](./0094-a-header-only-infrastructure-sends-is-not-taken-from-a-client.md) | A header only infrastructure sends is not taken from a client | Accepted |
 | [0095](./0095-a-route-is-checked-against-the-api-it-publishes.md) | A route is checked against the API it publishes | Accepted |
+| [0096](./0096-websocket-messages-are-judged-before-the-backend-reads-them.md) | WebSocket messages are judged before the backend reads them | Accepted |
 
 ## Conventions
 

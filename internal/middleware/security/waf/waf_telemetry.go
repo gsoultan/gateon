@@ -75,6 +75,9 @@ type wafObservation struct {
 const (
 	wafPhaseRequest  = "request"
 	wafPhaseResponse = "response"
+	// wafPhaseWebSocket is a message a client sent after an upgrade. It is
+	// held against the client like a request, because it is one.
+	wafPhaseWebSocket = "websocket"
 )
 
 // wouldHaveBlocked reports whether an audit-only decision would have refused the
@@ -235,6 +238,11 @@ func (o wafObservation) threat(clientIP string) telemetry.SecurityThreat {
 	blocked := o.decision.Blocked()
 	explanation, recommendation, triggered := explainWAFDecision(o.decision, o.matches)
 	severity, category := wafSeverityAndCategory(o.matches, o.decision)
+	if o.phase == wafPhaseWebSocket {
+		// The URI recorded below is the upgrade's, which was clean. Say where
+		// the finding was, or the entry reads as a refused GET.
+		explanation = "In a WebSocket message: " + explanation
+	}
 
 	action := kind.ActionDetected
 	if blocked {

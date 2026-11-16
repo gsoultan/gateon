@@ -97,3 +97,33 @@ describe("route WAF editor, OpenAPI document", async () => {
     expect(DLP_ACTION_HELP).toContain("refused whole under Redact too");
   });
 });
+
+// The gateway closes the connection on a refused message, closes it on one
+// past the limit, stops offering compression, and on an audit-only route
+// forwards both (waf_websocket_test.go). These pin the form saying so before
+// an operator turns it on, because each of them changes a working route.
+describe("route WAF editor, WebSocket inspection", () => {
+  const editor = (config: Record<string, string>) =>
+    WAFConfigFields({ config, updateConfig: () => {}, global: undefined, globalUnreadable: false });
+
+  test("the switch says what turning it on changes", () => {
+    const description = String(byLabel(editor({}), "Inspect WebSocket messages")?.props.description);
+    expect(description).toContain("closes the connection (code 1008)");
+    expect(description).toContain("compression (permessage-deflate) is not offered");
+    expect(description).toContain("any other upgraded protocol is closed");
+    expect(description).toContain("Messages the backend sends are not inspected");
+  });
+
+  test("the limit appears only with inspection on, and says a larger message closes the connection", () => {
+    expect(byLabel(editor({}), "WebSocket Message Limit")).toBeNull();
+    const limit = byLabel(editor({ websocket_inspection: "true" }), "WebSocket Message Limit");
+    expect(String(limit?.props.description)).toContain("closes the connection (code 1009)");
+  });
+
+  test("an audit-only route is told its messages are forwarded", () => {
+    const text = (config: Record<string, string>) => JSON.stringify(editor(config));
+    expect(text({ websocket_inspection: "true", audit_only: "true" })).toContain("recorded and forwarded");
+    expect(text({ websocket_inspection: "true" })).not.toContain("recorded and forwarded");
+    expect(text({ audit_only: "true" })).not.toContain("is forwarded unread");
+  });
+});

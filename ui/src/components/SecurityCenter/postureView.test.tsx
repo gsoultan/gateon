@@ -148,9 +148,9 @@ describe("what the WAF cannot see", () => {
     expect(groups[0].routes).toEqual(["ssh"]);
     // A route with no name is shown by its id, never dropped.
     expect(groups[1].routes).toEqual(["r3"]);
-    // The gateway-wide entry names no route and offers no setting to change.
+    // The gateway-wide entry names no route; its setting is per route.
     expect(groups[4].routes).toEqual([]);
-    expect(groups[4].fix).toBe("");
+    expect(groups[4].fix).toContain("WebSocket inspection");
   });
 
   test("a kind this build does not know is left out, not shown without words", () => {

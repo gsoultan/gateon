@@ -174,6 +174,14 @@ var MiddlewareWAFSchemaViolationsTotal = promauto.NewCounterVec(prometheus.Count
 	Help: "Requests outside a route's OpenAPI document, by violation and mode (record or enforce).",
 }, []string{"route", "violation", "mode"})
 
+// MiddlewareWAFWebSocketClosedTotal counts WebSocket connections the WAF
+// closed, and oversize messages a recording route forwarded unread, by why:
+// refused, oversize or protocol. The reason is this package's vocabulary.
+var MiddlewareWAFWebSocketClosedTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+	Name: "gateon_middleware_waf_websocket_closed_total",
+	Help: "WebSocket connections closed by message inspection (or oversize messages forwarded unread on a recording route), by reason.",
+}, []string{"route", "reason"})
+
 // MiddlewareRateLimitRejectedTotal counts requests rejected by rate limiter.
 var MiddlewareRateLimitRejectedTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 	Name: "gateon_middleware_ratelimit_rejected_total",
