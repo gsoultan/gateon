@@ -325,7 +325,7 @@ func (m *AuditManager) log(ctx context.Context, userID, action, resource, detail
 		return
 	}
 	m.noteStored(entry)
-	// To the sinks (ADR 0097) and the real-time subscribers (Command Center).
+	// To the sinks (ADR 0099) and the real-time subscribers (Command Center).
 	m.deliver(entry)
 }
 

@@ -84,7 +84,7 @@ func main() {
 			// What gateon-upgrade.service runs when the gateway asks.
 			os.Exit(upgradeCLI().Helper(context.Background(), os.Args[2:]))
 		case "admin":
-			// Recover a locked-out administrator from the host (ADR 0097).
+			// Recover a locked-out administrator from the host (ADR 0099).
 			os.Exit(adminCLI(os.Args[2:], os.Stdout, os.Stderr))
 		case "top":
 			apiURL, token := tui.TopArgs(os.Args[2:], "http://localhost:"+getPort())
@@ -192,7 +192,7 @@ func main() {
 			logger.L.LogError("failed to init audit manager", "error", err)
 		}
 		// Administrator activity alerts, and a copy of the log leaves the host
-		// as it is written (ADR 0097). A forwarding address that is set and
+		// as it is written (ADR 0099). A forwarding address that is set and
 		// cannot be used stops the start: running on without the copy the
 		// operator configured is the silence it exists to prevent.
 		audit.AddSink(alerting.AuditSink)

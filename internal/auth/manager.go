@@ -247,7 +247,7 @@ func (m *Manager) checkFirstFactor(username, password, addr string) (*loginRow, 
 
 // recordNewSource writes the audit entry for a password accepted from a
 // network the account has not signed in from before, which the alert on
-// administrator activity reads (ADR 0097).
+// administrator activity reads (ADR 0099).
 //
 // It is written here, at the one step every sign-in passes on every transport,
 // and at the password rather than after the second factor: a password that
@@ -761,7 +761,7 @@ type Recovery struct {
 var ErrRecoveryNoSuchUser = errors.New("no account has that username; pass --create to make it")
 
 // RecoverAdministrator gives username back to whoever holds the host, for
-// `gateon admin reset` (ADR 0097).
+// `gateon admin reset` (ADR 0099).
 //
 // An attacker with an administrator's session can change every password,
 // re-enrol every second factor and delete every other account, and the

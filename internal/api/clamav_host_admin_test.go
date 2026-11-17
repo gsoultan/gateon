@@ -106,7 +106,7 @@ func TestASavedClamAVImageIsAnImageReference(t *testing.T) {
 }
 
 // TestANewClamAVImageMustBeAClamAVRepository: a dashboard session could name
-// any image and have the host run it (ADR 0097). An image already stored is
+// any image and have the host run it (ADR 0099). An image already stored is
 // kept, so an install with a mirror can still save everything else.
 func TestANewClamAVImageMustBeAClamAVRepository(t *testing.T) {
 	t.Setenv("GATEON_CLAMAV_IMAGE_REPOSITORIES", "")

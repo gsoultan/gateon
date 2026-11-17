@@ -16,7 +16,7 @@ import (
 //
 // The Broadcaster already handed entries on, to the Command Center's live
 // view, and drops one for a subscriber whose channel is full. That is the
-// right trade for a screen. It is the wrong one for the two readers ADR 0097
+// right trade for a screen. It is the wrong one for the two readers ADR 0099
 // adds -- the alert on administrator activity and the copy sent off the host
 // -- because an attacker who floods the log with system entries chooses which
 // of the administrator's entries is dropped. A sink sees every entry and

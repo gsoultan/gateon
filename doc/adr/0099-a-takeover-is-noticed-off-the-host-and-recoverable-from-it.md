@@ -1,4 +1,4 @@
-# 97. A takeover is noticed, recorded off the host, and recoverable from it
+# 99. A takeover is noticed, recorded off the host, and recoverable from it
 
 Date: 2026-11-17
 

@@ -1,6 +1,6 @@
 # Gateon compromised
 
-What to do when someone else may control your gateway. ADR 0097 explains the
+What to do when someone else may control your gateway. ADR 0099 explains the
 pieces this page relies on. Set them up before you need them (the last
 section); most of this page assumes you did.
 

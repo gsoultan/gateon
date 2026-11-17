@@ -441,7 +441,7 @@ func ValidateClamAVImageSyntax(image string) error {
 // EnvClamAVImageRepositories adds image repositories, comma-separated, to the
 // ones ClamAV may be run from: a private mirror of the official image, for
 // example "registry.internal:5000/mirror/clamav". It is read from the host's
-// environment and nowhere else (ADR 0097).
+// environment and nowhere else (ADR 0099).
 const EnvClamAVImageRepositories = "GATEON_CLAMAV_IMAGE_REPOSITORIES"
 
 // officialClamAVRepositories are the repositories the ClamAV project publishes.

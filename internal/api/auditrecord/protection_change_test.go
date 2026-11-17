@@ -35,7 +35,7 @@ func entriesFor(t *testing.T, id, resource string) []string {
 
 // Switching the gateway-wide WAF off, or to audit-only, was recorded as
 // "Updated global configuration" and nothing more, which no alert could tell
-// from a change of log level (ADR 0097).
+// from a change of log level (ADR 0099).
 func TestSwitchingTheWAFDownNamesItInTheAuditLog(t *testing.T) {
 	svc, conf := serviceWithAuditOn(t)
 	conf.Waf = &gateonv1.WafConfig{Enabled: true, ParanoiaLevel: 2}

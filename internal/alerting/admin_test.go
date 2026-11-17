@@ -21,7 +21,7 @@ func withManager(t *testing.T, m *AlertingManager) {
 
 // A takeover sent no alert: alerting watched attack traffic only, and the
 // entries that mean control changed hands went to an audit log in the
-// database the attacker now holds (ADR 0097).
+// database the attacker now holds (ADR 0099).
 func TestAdministratorActivityAlerts(t *testing.T) {
 	cases := []struct {
 		entry    audit.AuditEntry
@@ -38,7 +38,7 @@ func TestAdministratorActivityAlerts(t *testing.T) {
 		{audit.AuditEntry{Action: "update", Resource: "waf_config", Details: "Changing WAF settings: enabled true -> false"}, "critical"},
 		{audit.AuditEntry{Action: "update", Resource: "waf_config", Details: "Changing WAF settings: audit only false -> true"}, "critical"},
 		{audit.AuditEntry{Action: "upload", Resource: "certificate"}, "high"},
-		{audit.AuditEntry{Action: "delete", Resource: "waf_rule"}, "warning"},
+		{audit.AuditEntry{Action: "delete", Resource: "waf_rule"}, "medium"},
 	}
 	for _, c := range cases {
 		m, rec := newTestManager(nil)

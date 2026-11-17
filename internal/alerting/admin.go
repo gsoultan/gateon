@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/gsoultan/gateon/internal/audit"
+	"github.com/gsoultan/gateon/internal/middleware/kind"
 	"github.com/gsoultan/gateon/internal/telemetry"
 )
 
@@ -23,7 +24,8 @@ type adminRule struct {
 	severity         string
 }
 
-// adminRules are the audit entries that alert, first match wins (ADR 0097).
+// adminRules are the audit entries that alert, first match wins (ADR 0099).
+// Severities are kind's vocabulary, the one the dashboard and SIEM rank by.
 //
 // Alerting covered attack traffic and nothing else, so a takeover was silent:
 // a new administrator, a reset second factor, the WAF switched off and the
@@ -32,18 +34,18 @@ type adminRule struct {
 // suspect something. These are the entries that mean control of the gateway
 // changed hands or its protection went down.
 var adminRules = []adminRule{
-	{action: "verify_failed", resource: "audit_chain", severity: "critical"},
-	{resource: "audit_config", severity: "critical"},
-	{action: "update", resource: "alerting_config", severity: "critical"},
-	{action: "update", resource: "waf_config", severity: "high"},
-	{action: "login_new_source", resource: "auth", severity: "high"},
-	{action: "setup", resource: "system", severity: "high"},
-	{resource: "user", severity: "high"},
-	{resource: "certificate", severity: "high"},
-	{resource: "clamav", severity: "high"},
-	{resource: "waf_rule", severity: "warning"},
-	{action: "create", resource: "api_token", severity: "warning"},
-	{action: "install_update", resource: "global", severity: "warning"},
+	{action: "verify_failed", resource: "audit_chain", severity: kind.SeverityCritical},
+	{resource: "audit_config", severity: kind.SeverityCritical},
+	{action: "update", resource: "alerting_config", severity: kind.SeverityCritical},
+	{action: "update", resource: "waf_config", severity: kind.SeverityHigh},
+	{action: "login_new_source", resource: "auth", severity: kind.SeverityHigh},
+	{action: "setup", resource: "system", severity: kind.SeverityHigh},
+	{resource: "user", severity: kind.SeverityHigh},
+	{resource: "certificate", severity: kind.SeverityHigh},
+	{resource: "clamav", severity: kind.SeverityHigh},
+	{resource: "waf_rule", severity: kind.SeverityMedium},
+	{action: "create", resource: "api_token", severity: kind.SeverityMedium},
+	{action: "install_update", resource: "global", severity: kind.SeverityMedium},
 }
 
 // adminSeverity is entry's alert severity, and whether it alerts at all. A
@@ -53,7 +55,7 @@ func adminSeverity(e audit.AuditEntry) (string, bool) {
 		if (r.action == "" || r.action == e.Action) && (r.resource == "" || r.resource == e.Resource) {
 			if e.Resource == "waf_config" && (strings.Contains(e.Details, "enabled true -> false") ||
 				strings.Contains(e.Details, "audit only false -> true")) {
-				return "critical", true
+				return kind.SeverityCritical, true
 			}
 			return r.severity, true
 		}

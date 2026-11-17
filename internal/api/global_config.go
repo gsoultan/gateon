@@ -386,7 +386,7 @@ func validateGlobalSave(stored, proposed *gateonv1.GlobalConfig) error {
 		return status.Error(codes.InvalidArgument, err.Error())
 	}
 	// The image is an argument to `docker run` on the gateway's own host, so a
-	// new one must come from a ClamAV repository (ADR 0097). One already stored
+	// new one must come from a ClamAV repository (ADR 0099). One already stored
 	// is checked only for being an image: an install whose mirror predates the
 	// allowlist can still save its other settings, and the install itself
 	// refuses the image until the host's environment allows it.
@@ -479,7 +479,7 @@ func (s *ApiService) auditRecordSettingsChange(ctx context.Context, stored, prop
 
 // auditProtectionChanges writes an audit entry for a change to the
 // gateway-wide WAF and one for a change to alerting, before either is stored
-// (ADR 0097).
+// (ADR 0099).
 //
 // Both were recorded only as "Updated global configuration", which says
 // nothing an alert can act on, and switching the WAF off is the first thing a

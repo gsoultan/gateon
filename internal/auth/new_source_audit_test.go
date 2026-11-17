@@ -49,7 +49,7 @@ func newSourceEntries(t *testing.T) func() []audit.AuditEntry {
 
 // A password that works from a network the account has never signed in from
 // is the earliest sign it was stolen, and nothing recorded it: the source was
-// remembered for the lockout and nobody was told (ADR 0097). It is recorded
+// remembered for the lockout and nobody was told (ADR 0099). It is recorded
 // once per network, so an owner's everyday sign-ins say nothing.
 func TestAPasswordFromANewNetworkIsAudited(t *testing.T) {
 	entries := newSourceEntries(t)

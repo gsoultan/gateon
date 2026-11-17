@@ -213,7 +213,7 @@ func registerCertHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI) {
 }
 
 // auditCertWrite records a certificate or private key written to the
-// certificates directory (ADR 0097).
+// certificates directory (ADR 0099).
 //
 // Both endpoints wrote files a TLS listener then serves -- an upload with the
 // name of one in use replaces it outright -- and neither left an entry, so a

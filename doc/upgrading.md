@@ -18,7 +18,7 @@ here after the fact.
 add the mirror's repository to `GATEON_CLAMAV_IMAGE_REPOSITORIES`
 (comma-separated) in the gateway's environment before the next install or
 update; until then the install refuses the image. Saving other settings still
-works with the mirror stored. See ADR-0097.
+works with the mirror stored. See ADR-0099.
 
 ### Administrator activity alerts, an off-host audit copy, and `gateon admin reset`
 
@@ -33,7 +33,7 @@ network is new to the record.
 every audit entry off the host as it is written. A value that is set and
 cannot be used stops the start. Certificate and key uploads are now audited.
 `sudo gateon admin reset <username>` recovers a locked-out administrator; see
-[incident-compromise.md](incident-compromise.md) and ADR-0097.
+[incident-compromise.md](incident-compromise.md) and ADR-0099.
 
 ### WebSocket messages can be inspected
 

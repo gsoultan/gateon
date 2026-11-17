@@ -33,7 +33,7 @@ func TestClamAVImageIsNeverReadAsADockerOption(t *testing.T) {
 
 // TestClamAVImageMustComeFromAClamAVRepository: any image reference was
 // accepted, so an administrator's session -- a stolen one included -- could
-// have the gateway's host run a container of its choosing (ADR 0097).
+// have the gateway's host run a container of its choosing (ADR 0099).
 func TestClamAVImageMustComeFromAClamAVRepository(t *testing.T) {
 	t.Setenv(EnvClamAVImageRepositories, "")
 	for _, bad := range []string{

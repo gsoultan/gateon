@@ -11,7 +11,7 @@ import (
 
 // A sink sees every stored entry, the management ones and the system ones the
 // writer batches, signed as stored -- which is what lets a copy kept off the
-// host be verified against the chain (ADR 0097).
+// host be verified against the chain (ADR 0099).
 func TestSinkSeesEveryStoredEntry(t *testing.T) {
 	m := newTestManager(t, signingConfig("sink-test-key"))
 	m.startWriter()

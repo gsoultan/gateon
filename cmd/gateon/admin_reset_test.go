@@ -6,6 +6,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -99,7 +100,7 @@ func TestAdminResetGivesTheAccountBack(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer m.Close()
-	if _, _, err := m.Authenticate("rightful", pw[1], "192.0.2.1:1"); err != auth.ErrTwoFactorSetupRequired &&
+	if _, _, err := m.Authenticate("rightful", pw[1], "192.0.2.1:1"); !errors.Is(err, auth.ErrTwoFactorSetupRequired) &&
 		!strings.Contains(errString(err), "setup required") {
 		t.Fatalf("signing in with the printed password: %v, want the second-factor enrolment it owes", err)
 	}

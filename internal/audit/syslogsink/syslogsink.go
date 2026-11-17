@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 // Package syslogsink sends a copy of every audit entry off the host, as
-// RFC 5424 syslog over TCP, TLS or UDP, as it is written (ADR 0097).
+// RFC 5424 syslog over TCP, TLS or UDP, as it is written (ADR 0099).
 //
 // The audit log is signed and chained, and it lives in the gateway's own
 // database with its signing key in the gateway's own environment. Someone who
@@ -69,6 +69,13 @@ const (
 	maxBackoff   = 30 * time.Second
 )
 
+// The receiver's transports, as EnvAddr's scheme names them.
+const (
+	networkTCP = "tcp"
+	networkTLS = "tls"
+	networkUDP = "udp"
+)
+
 // facilityLogAudit is syslog facility 13, "log audit".
 const facilityLogAudit = 13
 
@@ -112,7 +119,7 @@ func ConfigFromEnv() (cfg Config, ok bool, err error) {
 	if err != nil {
 		return Config{}, true, err
 	}
-	if cfg.Network == "tls" {
+	if cfg.Network == networkTLS {
 		if cfg.TLS, err = tlsConfig(cfg.Address, os.Getenv(EnvCAFile)); err != nil {
 			return Config{}, true, err
 		}
@@ -127,7 +134,7 @@ func parseAddr(raw string) (Config, error) {
 		return Config{}, fmt.Errorf("%s=%q is not scheme://host:port", EnvAddr, raw)
 	}
 	switch u.Scheme {
-	case "tcp", "tls", "udp":
+	case networkTCP, networkTLS, networkUDP:
 	default:
 		return Config{}, fmt.Errorf("%s=%q: the scheme must be tls, tcp or udp", EnvAddr, raw)
 	}
@@ -226,7 +233,7 @@ type queued struct {
 // Sink queues e without blocking. A full queue drops the entry and counts it.
 func (f *Forwarder) Sink(e audit.AuditEntry) {
 	q, name := f.account, "account"
-	if e.UserID == "system" {
+	if e.UserID == audit.SystemUser {
 		q, name = f.system, "system"
 	}
 	item := queued{e: e}
@@ -249,43 +256,63 @@ func (f *Forwarder) Sink(e audit.AuditEntry) {
 // so the receiver can see one twice and never sees a gap it is not told of.
 func (f *Forwarder) Run(ctx context.Context) {
 	defer close(f.done)
-	defer connectedGauge.Set(0)
-	var conn net.Conn
-	defer func() {
-		if conn != nil {
-			_ = conn.Close()
-		}
-	}()
-	backoff := minBackoff
+	l := &link{backoff: minBackoff}
+	defer l.drop()
 	for {
 		e, ok := f.next(ctx)
-		if !ok {
+		if !ok || !f.send(ctx, l, e) {
 			return
 		}
-		for {
-			if conn == nil {
-				c, err := f.dial(ctx)
-				if err != nil {
-					logger.L.LogWarn("audit forwarding cannot reach its receiver", "address", f.cfg.Address, "error", err)
-					if !sleep(ctx, backoff) {
-						return
-					}
-					backoff = min(backoff*2, maxBackoff)
-					continue
-				}
-				conn, backoff = c, minBackoff
-				connectedGauge.Set(1)
-			}
-			if err := f.write(conn, e); err != nil {
-				_ = conn.Close()
-				conn = nil
-				connectedGauge.Set(0)
-				continue
-			}
-			forwardedTotal.Inc()
-			break
-		}
 	}
+}
+
+// link is the connection to the receiver and the wait before the next dial.
+type link struct {
+	conn    net.Conn
+	backoff time.Duration
+}
+
+// drop closes the connection, if there is one, and reports it gone.
+func (l *link) drop() {
+	if l.conn != nil {
+		_ = l.conn.Close()
+		l.conn = nil
+	}
+	connectedGauge.Set(0)
+}
+
+// send writes e, reconnecting until it is written. It is false only when ctx
+// ended first.
+func (f *Forwarder) send(ctx context.Context, l *link, e queued) bool {
+	for {
+		if l.conn == nil {
+			if !f.connect(ctx, l) {
+				return false
+			}
+			continue
+		}
+		if err := f.write(l.conn, e); err != nil {
+			l.drop()
+			continue
+		}
+		forwardedTotal.Inc()
+		return true
+	}
+}
+
+// connect dials the receiver once. A failed dial waits out the backoff and
+// leaves l without a connection; connect is false only when ctx ended.
+func (f *Forwarder) connect(ctx context.Context, l *link) bool {
+	c, err := f.dial(ctx)
+	if err != nil {
+		logger.L.LogWarn("audit forwarding cannot reach its receiver", "address", f.cfg.Address, "error", err)
+		ok := sleep(ctx, l.backoff)
+		l.backoff = min(l.backoff*2, maxBackoff)
+		return ok
+	}
+	l.conn, l.backoff = c, minBackoff
+	connectedGauge.Set(1)
+	return true
 }
 
 // next is the next entry to send, an account's before the system's.
@@ -319,13 +346,13 @@ func sleep(ctx context.Context, d time.Duration) bool {
 func (f *Forwarder) dialReceiver(ctx context.Context) (net.Conn, error) {
 	d := net.Dialer{Timeout: dialTimeout}
 	switch f.cfg.Network {
-	case "tls":
+	case networkTLS:
 		td := tls.Dialer{NetDialer: &d, Config: f.cfg.TLS}
-		return td.DialContext(ctx, "tcp", f.cfg.Address)
-	case "udp":
-		return d.DialContext(ctx, "udp", f.cfg.Address)
+		return td.DialContext(ctx, networkTCP, f.cfg.Address)
+	case networkUDP:
+		return d.DialContext(ctx, networkUDP, f.cfg.Address)
 	default:
-		return d.DialContext(ctx, "tcp", f.cfg.Address)
+		return d.DialContext(ctx, networkTCP, f.cfg.Address)
 	}
 }
 
@@ -334,7 +361,7 @@ func (f *Forwarder) write(conn net.Conn, q queued) error {
 	if err != nil {
 		return err
 	}
-	if f.cfg.Network != "udp" {
+	if f.cfg.Network != networkUDP {
 		// Octet counting (RFC 5425 §4.3, RFC 6587 §3.4.1): a message may
 		// then carry a newline, which a details field can.
 		msg = append([]byte(strconv.Itoa(len(msg))+" "), msg...)
@@ -364,7 +391,7 @@ func format(host string, e audit.AuditEntry, truncated bool) ([]byte, error) {
 		return nil, errors.Join(errors.New("audit forwarding: encode entry"), err)
 	}
 	sev := severityNotice
-	if e.UserID == "system" {
+	if e.UserID == audit.SystemUser {
 		sev = severityInfo
 	}
 	ts := e.Timestamp
