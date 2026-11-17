@@ -383,8 +383,16 @@ func validateGlobalSave(stored, proposed *gateonv1.GlobalConfig) error {
 	if err := selfupdate.ValidateSource(proposed.GetUpdate().GetSourceUrl()); err != nil {
 		return status.Error(codes.InvalidArgument, err.Error())
 	}
-	// The image is an argument to `docker run` on the gateway's own host.
-	if err := hostsecurity.ValidateClamAVImage(proposed.GetWaf().GetClamav().GetDockerImage()); err != nil {
+	// The image is an argument to `docker run` on the gateway's own host, so a
+	// new one must come from a ClamAV repository (ADR 0097). One already stored
+	// is checked only for being an image: an install whose mirror predates the
+	// allowlist can still save its other settings, and the install itself
+	// refuses the image until the host's environment allows it.
+	checkImage := hostsecurity.ValidateClamAVImage
+	if img := proposed.GetWaf().GetClamav().GetDockerImage(); img == stored.GetWaf().GetClamav().GetDockerImage() {
+		checkImage = hostsecurity.ValidateClamAVImageSyntax
+	}
+	if err := checkImage(proposed.GetWaf().GetClamav().GetDockerImage()); err != nil {
 		return status.Error(codes.InvalidArgument, err.Error())
 	}
 	// A maintenance window that cannot be read would be skipped in favour of
