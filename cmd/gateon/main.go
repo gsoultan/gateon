@@ -83,6 +83,9 @@ func main() {
 		case "upgrade-helper":
 			// What gateon-upgrade.service runs when the gateway asks.
 			os.Exit(upgradeCLI().Helper(context.Background(), os.Args[2:]))
+		case "admin":
+			// Recover a locked-out administrator from the host (ADR 0097).
+			os.Exit(adminCLI(os.Args[2:], os.Stdout, os.Stderr))
 		case "top":
 			apiURL, token := tui.TopArgs(os.Args[2:], "http://localhost:"+getPort())
 			if err := tui.RunTop(context.Background(), apiURL, token); err != nil {
