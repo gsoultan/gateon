@@ -37,6 +37,7 @@ process (ADR 0092).
 | Connection | What happens |
 | :--- | :--- |
 | Made while the gateway restarts | Waits, then is served by the new gateway. |
+| Accepted by the old gateway, request not sent yet | Answered by the old gateway before it exits (ADR 0101). It waits up to one second for the request. |
 | A request in flight | Finished by the old gateway before it exits. |
 | Long-lived: WebSocket, SSE, a TCP session, HTTP/3 | Closed when the old gateway's drain ends. The client reconnects. |
 
@@ -51,6 +52,19 @@ systemctl show gateon -p NFileDescriptorStore
 
 It prints the number of sockets systemd is holding, one per listener.
 `systemctl stop gateon` closes them.
+
+## Compatibility with the previous release
+
+Every release is held to one rule: the release before it can be upgraded to
+it and rolled back again. The new version starts on the configuration and the
+database the previous one wrote, and the previous one starts again on what
+the new one left, with nothing restored (ADR 0100). A rollback, by the helper
+or by installing the older package, depends on the second half.
+
+The rule is checked on every pull request by running the previous release's
+own binary against the build, on SQLite and on PostgreSQL
+(`make check-compat`). It covers one release back. Upgrading across several
+releases at once is covered only because each step was.
 
 ## Before the first upgrade
 

@@ -11,6 +11,28 @@ here after the fact.
 
 ## Unreleased
 
+### A restart no longer drops a connection it had just accepted
+
+A gateway that was told to stop closed, without answering, a connection it
+had accepted a moment earlier whose request it had not read yet. Under a
+client opening a new connection per request, about one restart in eight lost
+a request this way. The gateway now stops accepting first and answers every
+connection it had already taken before it shuts its servers down (ADR 0101).
+
+**Who is affected:** everyone, for the better. A connection that was opened
+and has sent nothing is now closed one second into a shutdown instead of
+five, so a restart with such a connection open is about four seconds shorter.
+The fix is in the gateway being stopped: the restart that installs this
+release is still the old version's shutdown.
+
+### Releases are compatible with the one before
+
+From this release on, each release is tested against the previous release's
+own binary: it starts on the previous release's configuration and database,
+and the previous release starts again on what it left (ADR 0100). Nothing
+changes on an installed gateway. It is what makes a rollback after a
+migration sound.
+
 ### WebSocket messages can be inspected
 
 A WAF middleware has a new switch, "Inspect WebSocket messages"
