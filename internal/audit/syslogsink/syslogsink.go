@@ -143,7 +143,7 @@ func tlsConfig(address, caFile string) (*tls.Config, error) {
 	if caFile == "" {
 		return c, nil
 	}
-	pem, err := os.ReadFile(caFile) // #nosec G304 -- a path the host's environment names, not a request.
+	pem, err := os.ReadFile(caFile) // #nosec G304 G703 -- a path the host's environment names, not a request.
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", EnvCAFile, err)
 	}
