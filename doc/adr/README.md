@@ -107,6 +107,7 @@ ADRs follow a lightweight [MADR](https://adr.github.io/madr/)-style format:
 | [0095](./0095-a-route-is-checked-against-the-api-it-publishes.md) | A route is checked against the API it publishes | Accepted |
 | [0096](./0096-websocket-messages-are-judged-before-the-backend-reads-them.md) | WebSocket messages are judged before the backend reads them | Accepted |
 | [0097](./0097-the-gateway-keeps-a-sample-of-forwarded-requests-for-tuning.md) | The gateway keeps a sample of forwarded requests for tuning | Accepted |
+| [0098](./0098-a-route-drafts-its-own-api-document-from-the-shape-of-its-traffic.md) | A route drafts its own API document from the shape of its traffic | Accepted |
 
 ## Conventions
 
