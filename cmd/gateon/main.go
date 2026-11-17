@@ -18,6 +18,7 @@ import (
 	"github.com/gsoultan/gateon/internal/ai"
 	"github.com/gsoultan/gateon/internal/alerting"
 	"github.com/gsoultan/gateon/internal/audit"
+	"github.com/gsoultan/gateon/internal/audit/syslogsink"
 	"github.com/gsoultan/gateon/internal/auth"
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/config/storedsecret"
@@ -187,8 +188,14 @@ func main() {
 		if err := audit.Init(gc.Audit, databaseURL); err != nil {
 			logger.L.LogError("failed to init audit manager", "error", err)
 		}
-		// Administrator activity alerts (ADR 0097).
+		// Administrator activity alerts, and a copy of the log leaves the host
+		// as it is written (ADR 0097). A forwarding address that is set and
+		// cannot be used stops the start: running on without the copy the
+		// operator configured is the silence it exists to prevent.
 		audit.AddSink(alerting.AuditSink)
+		if _, err := syslogsink.Start(ctx); err != nil {
+			logger.Fatal("audit forwarding is configured and cannot be used", "error", err)
+		}
 
 		if gc.Ha != nil && gc.Ha.Enabled {
 			// Gossip reputation sync exposes no stop hook, so it stays boot-only.
