@@ -37,6 +37,7 @@ import (
 	"github.com/gsoultan/gateon/internal/security/mitigation"
 	"github.com/gsoultan/gateon/internal/security/reputation"
 	"github.com/gsoultan/gateon/internal/security/waf"
+	"github.com/gsoultan/gateon/internal/security/waf/corpus"
 	"github.com/gsoultan/gateon/internal/selfupdate/helper"
 	"github.com/gsoultan/gateon/internal/selfupdate/upgrade"
 	"github.com/gsoultan/gateon/internal/server"
@@ -82,6 +83,15 @@ func main() {
 		case "upgrade-helper":
 			// What gateon-upgrade.service runs when the gateway asks.
 			os.Exit(upgradeCLI().Helper(context.Background(), os.Args[2:]))
+		case "export-waf-corpus":
+			// The embedder's half of `gwaf tune` (ADR 0097): the requests
+			// the WAF let through, as the JSON Lines that command reads.
+			apiURL, token := tui.TopArgs(os.Args[2:], "http://localhost:"+getPort())
+			if err := corpus.Export(context.Background(), apiURL, token, os.Stdout); err != nil {
+				fmt.Fprintf(os.Stderr, "export-waf-corpus: %v\n", err)
+				os.Exit(1)
+			}
+			return
 		case "top":
 			apiURL, token := tui.TopArgs(os.Args[2:], "http://localhost:"+getPort())
 			if err := tui.RunTop(context.Background(), apiURL, token); err != nil {

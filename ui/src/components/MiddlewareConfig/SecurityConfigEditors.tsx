@@ -27,6 +27,7 @@ import { WAF_APP_PROFILES } from "../../types/gateon";
 import { BROWSER_HEADER_CHECK_HELP, JS_CHALLENGE_HELP } from "./botManagementCopy";
 import {
   AUDIT_ONLY_HELP,
+  CORPUS_SAMPLE_HELP,
   DLP_ACTION_HELP,
   WEBSOCKET_AUDIT_ONLY_NOTE,
   WEBSOCKET_INSPECTION_HELP,
@@ -322,6 +323,17 @@ export function WAFConfigFields({ config, updateConfig, global, globalUnreadable
           )}
         </>
       )}
+
+      <Divider label="Tuning" labelPosition="center" />
+      <NumberInput
+        label="Sample Requests for Tuning"
+        description={CORPUS_SAMPLE_HELP}
+        placeholder="Off"
+        value={parseInt(config.corpus_sample_rate) || ""}
+        onChange={(val) => updateConfig("corpus_sample_rate", (Number(val) || 0).toString())}
+        min={0}
+        allowDecimal={false}
+      />
 
       <Divider label="Body Limits" labelPosition="center" />
       <Group grow>
