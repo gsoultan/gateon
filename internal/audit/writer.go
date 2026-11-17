@@ -157,10 +157,8 @@ func (m *AuditManager) writeSystem(batch []systemEntry) {
 		return
 	}
 	m.noteStored(entries[len(entries)-1])
-	if m.Broadcaster != nil {
-		for _, e := range entries {
-			m.Broadcaster.Broadcast(e)
-		}
+	for _, e := range entries {
+		m.deliver(e)
 	}
 }
 

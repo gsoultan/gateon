@@ -318,10 +318,8 @@ func (m *AuditManager) log(ctx context.Context, userID, action, resource, detail
 		return
 	}
 	m.noteStored(entry)
-	// Broadcast to real-time subscribers (for Command Center etc)
-	if m.Broadcaster != nil {
-		m.Broadcaster.Broadcast(entry)
-	}
+	// To the sinks (ADR 0097) and the real-time subscribers (Command Center).
+	m.deliver(entry)
 }
 
 func (m *AuditManager) sign(entry AuditEntry, key string) string {
