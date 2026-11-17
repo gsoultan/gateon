@@ -56,13 +56,24 @@ GitOps is removed. No code path fetches settings from Git.
   in force, and nothing syncs. Because skipping quietly would leave an operator
   believing a repository still governs the gateway, `GlobalRegistry.load`
   checks the raw file for retired keys and logs a warning naming
-  `management.gitops` and this ADR. The next save writes the file without it.
+  `management.gitops` and this ADR.
+- **A rollback keeps working.** Every change is to be backward compatible
+  with the previous version, so that an update can be rolled back. That
+  version reads `management.gitops`, so a save from this one writes the block
+  back exactly as it was loaded (`keepRetired`), and the previous version
+  finds it after a rollback. This version never acts on it. Removing it from
+  the file is the operator's decision, made once they no longer need to roll
+  back. A file that never had the block does not gain one.
 - On the API, REST and Connect decode JSON with `DiscardUnknown`, as they do
   for every other removed setting, and binary gRPC keeps a removed tag as an
   unknown field that is never read or stored. A client still sending the block
   changes nothing.
 
 ## Consequences
+
+- A `global.json` that had the block keeps its repository URL and token on
+  disk until the operator deletes them. That is the price of the rollback, and
+  the startup warning names it every time.
 
 - Global settings change only through a save (dashboard, REST, gRPC), the
   Diagnostics fixes, ClamAV install mode, first-run setup, and the operator's

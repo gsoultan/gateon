@@ -300,7 +300,8 @@ message ManagementConfig {
   // replaced the whole global configuration from a repository on a timer,
   // without the validation a save goes through and without an audit entry.
   // The name stays reserved so the JSON decoders skip an old block instead of
-  // refusing it; GlobalRegistry.load warns when a global.json still has one.
+  // refusing it; GlobalRegistry.load warns when a global.json still has one,
+  // and a save writes it back so the previous version keeps it on rollback.
   reserved 11;
   reserved "gitops";
 }

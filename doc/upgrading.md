@@ -22,8 +22,9 @@ save goes through. ADR 0098.
 **What may change for you.** If your `global.json` (or `global.yaml`) has a
 `gitops` block under `management`, the gateway still starts and the rest of the
 file still applies, but nothing is synced any more, and a warning at startup
-names `management.gitops`. Delete the block; the next save from the dashboard
-also drops it. If you relied on it, make the change through the dashboard or
+names `management.gitops`. The block is kept in the file across saves, so if
+you roll back to the previous version it is still there and still works. Once
+you no longer need to roll back, delete it from the file. If you relied on it, make the change through the dashboard or
 `PUT /v1/global`, or manage `global.json` yourself as a mounted file
 (`GLOBAL_CONFIG_FILE`). A repository token that was stored for it is no longer
 used and can be revoked at the Git host.
