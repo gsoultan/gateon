@@ -66,6 +66,7 @@ type keyEffect struct {
 	logged    string                                                            // record how many log lines carry this
 	refusable bool                                                              // a refused build is an outcome to compare, not a failure
 	writeCap  int                                                               // the response writer fails past this many bytes, as a closed connection does
+	upgrade   []byte                                                            // the response writer can be hijacked, and the client then sends these bytes and hangs up
 }
 
 // effectBuild numbers the registry's builds. Each build is its own route, so
@@ -235,6 +236,9 @@ func serveProbes(t *testing.T, row keyEffect, mw Middleware, backend http.Handle
 		var w http.ResponseWriter = rec
 		if row.writeCap > 0 {
 			w = &cappedWriter{ResponseRecorder: rec, left: row.writeCap}
+		}
+		if row.upgrade != nil {
+			w = newUpgradeWriter(rec, row.upgrade)
 		}
 		start := time.Now()
 		h.ServeHTTP(w, probe)

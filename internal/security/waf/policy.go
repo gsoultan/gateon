@@ -10,6 +10,7 @@ import (
 	"github.com/gsoultan/gwaf"
 	"github.com/gsoultan/gwaf/rules"
 	"github.com/gsoultan/gwaf/ruleset/core"
+	"github.com/gsoultan/gwaf/schema"
 	"github.com/gsoultan/gwaf/types"
 )
 
@@ -201,6 +202,12 @@ type Policy struct {
 	// and the audit log are produced. It runs on the request path, so it must
 	// not block.
 	OnDecision func(gwaf.Decision)
+
+	// Schema is the API description requests are checked against, or nil.
+	// SchemaObserve records a request outside it and lets the rules decide;
+	// without it such a request is refused before any rule runs.
+	Schema        *schema.Schema
+	SchemaObserve bool
 }
 
 // Logger is the subset of *slog.Logger gwaf requires, restated so this package
@@ -464,6 +471,13 @@ func (p Policy) Options() []gwaf.Option {
 	opts = append(opts, gwaf.WithExceptions(exceptions...))
 	if p.OnDecision != nil {
 		opts = append(opts, gwaf.OnDecision(p.OnDecision))
+	}
+	if p.Schema != nil {
+		mode := gwaf.SchemaEnforce
+		if p.SchemaObserve {
+			mode = gwaf.SchemaObserve
+		}
+		opts = append(opts, gwaf.WithSchema(p.Schema), gwaf.WithSchemaMode(mode))
 	}
 	return opts
 }

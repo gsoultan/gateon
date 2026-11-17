@@ -157,6 +157,7 @@ func globalWAFConfig(w *gateonv1.WafConfig, tier config.Tier, d security.Deps) W
 		EnableConfidenceScoring:     w.GetEnableConfidenceScoring(),
 		AuditOnly:                   w.GetAuditOnly(),
 		AllowGitSmartHTTP:           gitSmartHTTP(""),
+		InspectWebSocket:            webSocketInspection(""),
 		TrustCloudflare:             config.TrustCloudflare(w),
 		AppProfiles:                 w.GetAppProfiles(),
 		EnableSSRFProtection:        w.GetSsrfProtection(),
@@ -464,6 +465,17 @@ func checkRouteCloudflareTrust(cfg map[string]string, d security.Deps) error {
 
 // keyTrustCloudflare is the route config key of the Cloudflare trust switch.
 const keyTrustCloudflare = "trust_cloudflare_headers"
+
+// The route config keys of the API description (WAFConfig.OpenAPISpec).
+const (
+	keyOpenAPISpec = "openapi_spec"
+	keyOpenAPIMode = "openapi_mode"
+
+	// The route config keys of WebSocket message inspection
+	// (WAFConfig.InspectWebSocket).
+	keyWebSocketInspection   = "websocket_inspection"
+	keyWebSocketMessageLimit = "websocket_message_limit"
+)
 
 func NewWAF(cfg map[string]string, d security.Deps) (kind.Middleware, error) {
 	if err := checkRouteCloudflareTrust(cfg, d); err != nil {

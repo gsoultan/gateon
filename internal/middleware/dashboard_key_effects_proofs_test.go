@@ -4,6 +4,7 @@
 package middleware
 
 import (
+	"bufio"
 	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -19,6 +20,7 @@ import (
 	"fmt"
 	"io"
 	"math/big"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -241,6 +243,98 @@ func init() {
 	dashboardKeyEffects = append(dashboardKeyEffects, challengeKeyEffects...)
 	dashboardKeyEffects = append(dashboardKeyEffects, stateKeyEffects...)
 	dashboardKeyEffects = append(dashboardKeyEffects, wafPolicyEffects...)
+	dashboardKeyEffects = append(dashboardKeyEffects, wafBoundaryEffects...)
+}
+
+// ordersAPI describes one operation with one typed parameter.
+const ordersAPI = `
+openapi: 3.0.3
+info: {title: Orders, version: "1"}
+paths:
+  /api/v1/orders:
+    get:
+      parameters:
+        - {name: id, in: query, schema: {type: integer}}
+`
+
+// wafBoundaryEffects are the WAF settings that judge something other than
+// what an attack looks like: a request against the API's own description, and
+// the messages on a connection after the request that opened it.
+var wafBoundaryEffects = []keyEffect{
+	// With a document that is enforced, a parameter of the wrong type is
+	// refused; with none it is forwarded. Recorded, it is forwarded too.
+	{mwType: "waf", key: "openapi_spec", base: map[string]string{"openapi_mode": "enforce"},
+		a: "", b: ordersAPI, probe: get("/api/v1/orders?id=abc")},
+	{mwType: "waf", key: "openapi_mode", base: map[string]string{"openapi_spec": ordersAPI},
+		a: "record", b: "enforce", probe: get("/api/v1/orders?id=abc")},
+	// An injection in a WebSocket message reaches the backend unless messages
+	// are inspected, and a clean message past the limit reaches it unless the
+	// limit says otherwise. The backend reports how many bytes it was given.
+	{mwType: "waf", key: "websocket_inspection", a: "false", b: "true", backend: tunnelBackend,
+		probe: upgradeRequest, upgrade: maskedMessage(`{"q":"1' UNION SELECT password FROM users--"}`)},
+	{mwType: "waf", key: "websocket_message_limit", base: map[string]string{"websocket_inspection": "true"},
+		a: "0", b: "64", backend: tunnelBackend,
+		probe: upgradeRequest, upgrade: maskedMessage(`{"note":"` + strings.Repeat("a", 100) + `"}`)},
+}
+
+func upgradeRequest(t *testing.T) *http.Request {
+	r := get("/ws")(t)
+	r.Header.Set("Upgrade", "websocket")
+	r.Header.Set("Connection", "Upgrade")
+	return r
+}
+
+// maskedMessage is one WebSocket text message as a client sends it.
+func maskedMessage(payload string) []byte {
+	key := [4]byte{3, 5, 7, 9}
+	out := []byte{0x81, 0x80 | byte(len(payload))}
+	if len(payload) > 125 {
+		out = []byte{0x81, 0x80 | 126, byte(len(payload) >> 8), byte(len(payload))}
+	}
+	out = append(out, key[:]...)
+	for i := range len(payload) {
+		out = append(out, payload[i]^key[i&3])
+	}
+	return out
+}
+
+// upgradeWriter is a recorder whose connection can be taken, as a real
+// server's can. The client on the other end sends its bytes and hangs up.
+type upgradeWriter struct {
+	*httptest.ResponseRecorder
+	conn net.Conn
+}
+
+func newUpgradeWriter(rec *httptest.ResponseRecorder, sent []byte) *upgradeWriter {
+	client, gateway := net.Pipe()
+	go func() { _, _ = io.Copy(io.Discard, client) }()
+	go func() {
+		_, _ = client.Write(sent)
+		_ = client.Close()
+	}()
+	return &upgradeWriter{ResponseRecorder: rec, conn: gateway}
+}
+
+func (u *upgradeWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	return u.conn, bufio.NewReadWriter(bufio.NewReader(u.conn), bufio.NewWriter(u.conn)), nil
+}
+
+// tunnelBackend takes the connection, as the proxy does for an upgrade, and
+// answers with how much of what the client sent it was given.
+func tunnelBackend(w http.ResponseWriter, _ *http.Request) {
+	hj, ok := w.(http.Hijacker)
+	if !ok {
+		_, _ = io.WriteString(w, "the connection could not be taken")
+		return
+	}
+	conn, _, err := hj.Hijack()
+	if err != nil {
+		_, _ = io.WriteString(w, "the connection could not be taken: "+err.Error())
+		return
+	}
+	got, _ := io.ReadAll(conn)
+	_ = conn.Close()
+	_, _ = fmt.Fprintf(w, "the backend was given %d bytes", len(got))
 }
 
 // deepPath has more segments than the protocol rule on path depth allows.

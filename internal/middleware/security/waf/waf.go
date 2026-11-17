@@ -163,6 +163,30 @@ type WAFConfig struct {
 	// which is the bug gwaf v0.4.1 fixed. Empty means the off-origin redirect
 	// and SSRF rules have nothing to compare against and stay quiet.
 	Origins []string
+
+	// OpenAPISpec is an OpenAPI 3 document describing the API behind this
+	// route, and OpenAPIMode what a request outside it costs: "record" (the
+	// default) counts it and lets the rules decide, "enforce" refuses it.
+	// Empty means no document, and no check. A route setting only: a document
+	// describes one API, and the global WAF fronts all of them.
+	//
+	// Configure with the "openapi_spec" and "openapi_mode" keys.
+	OpenAPISpec string
+	OpenAPIMode string
+
+	// InspectWebSocket judges each message a client sends on a WebSocket this
+	// route upgrades, as the body of the request that opened it, and closes
+	// the connection on one the WAF refuses. Off, the upgrade request is
+	// judged and the messages after it are relayed unread.
+	//
+	// It is off by default because it changes what an existing route costs
+	// and negotiates: compression (permessage-deflate) is no longer offered to
+	// the backend, and a message past WebSocketMessageLimit closes the
+	// connection. Configure with the "websocket_inspection" and
+	// "websocket_message_limit" keys, or GATEON_WAF_WEBSOCKET_INSPECTION and
+	// GATEON_WAF_WEBSOCKET_MESSAGE_LIMIT for routes that set neither.
+	InspectWebSocket      bool
+	WebSocketMessageLimit int
 }
 
 // Fingerprint returns a unique hash representing the WAF policy configuration.
@@ -206,6 +230,14 @@ func (c WAFConfig) Fingerprint() string {
 	// inherits it.
 	fmt.Fprintf(h, "p:%s|%t|%s\n", appprofile.Fingerprint(c.AppProfiles), c.EnableSSRFProtection,
 		appprofile.ScopeFingerprint(c.appProfileScope()))
+	// The document is the policy, so two routes with different ones must not
+	// share an engine. Hashed, because it can be a megabyte.
+	if c.InspectWebSocket {
+		fmt.Fprintf(h, "ws:%d\n", c.WebSocketMessageLimit)
+	}
+	if c.OpenAPISpec != "" {
+		fmt.Fprintf(h, "o:%x|%s\n", sha256.Sum256([]byte(c.OpenAPISpec)), c.OpenAPIMode)
+	}
 	// Origins decide what counts as off-origin, so two configs with different
 	// ones reach different verdicts on the same request and must not share an
 	// engine. Sorted, because the routing table's iteration order is not
@@ -698,9 +730,11 @@ func (t *wafRuntime) inspectAndForward(next http.Handler, w http.ResponseWriter,
 				http.StatusForbidden)
 			return
 		}
-		next.ServeHTTP(w, r)
+		next.ServeHTTP(t.guardWebSocket(w, r, repScore), r)
 		return
 	}
+
+	t.engine.recordSchemaViolation(tx, r)
 
 	if decision != nil {
 		observe(*decision)
@@ -715,6 +749,8 @@ func (t *wafRuntime) inspectAndForward(next http.Handler, w http.ResponseWriter,
 	} else {
 		observe(tx.Decision())
 	}
+
+	w = t.guardWebSocket(w, r, repScore)
 
 	if !t.cfg.EnableResponseInspection {
 		next.ServeHTTP(w, r)
@@ -1069,6 +1105,10 @@ func parseWAFConfig(cfg map[string]string) WAFConfig {
 		AppProfileScopeFields:       parseScopeList(cfg["app_profile_scope_fields"], scopeFieldsEnv),
 		EnableSSRFProtection:        strings.TrimSpace(strings.ToLower(cfg["ssrf_protection"])) == "true",
 		Origins:                     resolveOrigins(parseCSV(cfg["origins"])),
+		OpenAPISpec:                 cfg[keyOpenAPISpec],
+		OpenAPIMode:                 cfg[keyOpenAPIMode],
+		InspectWebSocket:            webSocketInspection(cfg[keyWebSocketInspection]),
+		WebSocketMessageLimit:       intVal(cfg[keyWebSocketMessageLimit]),
 	}
 }
 
@@ -1342,6 +1382,12 @@ func (w *wafResponseWriter) applyDecision(d gwaf.Decision) {
 			if w.onDecision != nil {
 				w.onDecision(d, kind.ActionDetected)
 			}
+			return
+		}
+		// The result of an exploit is refused whole. Cutting the matched
+		// lines out of an account file forwards the rest of it.
+		if waf.IsCompromiseRule(d.RuleID()) {
+			w.block(d)
 			return
 		}
 		// Redaction is not settled here: whether it can actually remove the
@@ -1715,6 +1761,12 @@ func (w *wafResponseWriter) resolveRedaction() {
 		body  []byte
 		count int
 	)
+	if w.redactor != nil && w.redactor.Compromised(source) {
+		logger.L.LogWarn("WAF found the result of an exploit beside a data leak; refusing the response",
+			"route", w.routeID, "rule", w.pendingDecision.RuleID())
+		w.block(w.pendingDecision)
+		return
+	}
 	if w.redactor != nil {
 		body, count = w.redactor.Redact(source)
 	}
