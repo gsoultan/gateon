@@ -48,3 +48,4 @@ its own goroutine as it already wrote on it.
   can be removed as those handlers are touched.
 - A GitOps sync still stores without `validateGlobalSave`; that is a
   separate decision about what a synced repository is trusted to say.
+  (Resolved by ADR 0098: GitOps is removed, so there is no sync.)

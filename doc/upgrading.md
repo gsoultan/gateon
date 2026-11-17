@@ -11,6 +11,26 @@ here after the fact.
 
 ## Unreleased
 
+### GitOps is removed — **check `global.json` for a `management.gitops` block**
+
+The GitOps sync (`management.gitops`), which cloned a repository on a timer and
+replaced the global settings with a JSON file from it, is gone. It was off by
+default, never shown in the dashboard, synced only global settings, and stored
+what it pulled without the validation, administrator check or audit entry a
+save goes through. ADR 0098.
+
+**What may change for you.** If your `global.json` (or `global.yaml`) has a
+`gitops` block under `management`, the gateway still starts and the rest of the
+file still applies, but nothing is synced any more, and a warning at startup
+names `management.gitops`. Delete the block; the next save from the dashboard
+also drops it. If you relied on it, make the change through the dashboard or
+`PUT /v1/global`, or manage `global.json` yourself as a mounted file
+(`GLOBAL_CONFIG_FILE`). A repository token that was stored for it is no longer
+used and can be revoked at the Git host.
+
+A `gitops` field sent to `PUT /v1/global` or `UpdateGlobalConfig` is ignored, as
+every removed setting is.
+
 ### The Security Hub lists what the WAF cannot see
 
 Security → Overview has a new card, "What the WAF cannot see". It names every

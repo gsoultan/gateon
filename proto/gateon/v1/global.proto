@@ -284,9 +284,6 @@ message ManagementConfig {
   // AllowedHosts is a whitelist of hostnames (e.g., ["admin.example.com"]) 
   // allowed to access the management API on public entrypoints.
   repeated string allowed_hosts = 7;
-  // GitOps config for configuration synchronization
-  GitOpsConfig gitops = 11;
-
   reserved 5;
   reserved "host";
   // 8, 9 and 10 were xdp_management_whitelisting, enable_port_knocking and
@@ -299,6 +296,13 @@ message ManagementConfig {
   // warning. Configure these under `ebpf`.
   reserved 8, 9, 10;
   reserved "xdp_management_whitelisting", "enable_port_knocking", "port_knocking_sequence";
+  // 11 was gitops, removed 2026-11-17 with the feature (doc/adr/0098). A sync
+  // replaced the whole global configuration from a repository on a timer,
+  // without the validation a save goes through and without an audit entry.
+  // The name stays reserved so the JSON decoders skip an old block instead of
+  // refusing it; GlobalRegistry.load warns when a global.json still has one.
+  reserved 11;
+  reserved "gitops";
 }
 
 message CorsConfig {
@@ -308,23 +312,6 @@ message CorsConfig {
   repeated string exposed_headers = 4;
   bool allow_credentials = 5;
   int32 max_age = 6;
-}
-
-message GitOpsConfig {
-  bool enabled = 1;
-  string repository_url = 2;
-  string branch = 3;
-  string path = 4;
-  int32 sync_interval_seconds = 5;
-  // 6 was ssh_private_key, removed 2026-08-30. Nothing read it: gitops.go
-  // imports only go-git's HTTP transport and authenticates with auth_token, so
-  // a pasted deploy key did nothing and a private repo failed to clone with no
-  // hint as to why. Adding SSH means a host-key verification story -- accepting
-  // any host key would let anyone on the path serve this gateway its own
-  // configuration -- so it comes back as a feature, not a field.
-  reserved 6;
-  reserved "ssh_private_key";
-  string auth_token = 7;
 }
 
 message RBACConfig {

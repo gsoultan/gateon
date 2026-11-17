@@ -24,8 +24,8 @@ import (
 // (MGMT-N2, ADR 0052): a service targeting 127.0.0.1:<management port> behind
 // a Host() route on a public entrypoint served the dashboard, sign-in and API
 // to the internet, the management listener seeing the gateway's own loopback
-// connection. The service is stored directly -- as a configuration file,
-// GitOps or a name that resolves here only after it was saved would put it --
+// connection. The service is stored directly -- as a configuration file
+// or a name that resolves here only after it was saved would put it --
 // so this is the dial-time half: the management listener registers itself as
 // it binds, and the proxy will not connect to it.
 func TestAHostRouteToTheManagementPortServesNoDashboard(t *testing.T) {

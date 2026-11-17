@@ -104,6 +104,7 @@ ADRs follow a lightweight [MADR](https://adr.github.io/madr/)-style format:
 | [0092](./0092-listening-sockets-stay-open-across-a-restart.md) | Listening sockets stay open across a restart | Accepted |
 | [0093](./0093-built-in-waf-rules-take-their-detection-from-gwaf.md) | Built-in WAF rules take their detection from gwaf | Accepted |
 | [0094](./0094-a-header-only-infrastructure-sends-is-not-taken-from-a-client.md) | A header only infrastructure sends is not taken from a client | Accepted |
+| [0098](./0098-settings-are-not-synced-from-git.md) | Settings are not synced from Git | Accepted |
 
 ## Conventions
 

@@ -102,17 +102,12 @@ func TestRestoreRefusesAKeptSecretWhoseDestinationMoved(t *testing.T) {
 		"auth.database_url": func(c *gateonv1.GlobalConfig) {
 			c.Auth.DatabaseUrl = strings.Replace(c.Auth.DatabaseUrl, "db.internal", "evil.example", 1)
 		},
-		"management.gitops.auth_token": func(c *gateonv1.GlobalConfig) {
-			c.Management.Gitops.RepositoryUrl = "https://evil.example/org/repo.git"
-		},
 		"security_advanced.ip_reputation.integrations": func(c *gateonv1.GlobalConfig) {
 			c.SecurityAdvanced.IpReputation.Integrations[0].Type = "virustotal"
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			stored, update := storedAndEcho(t)
-			stored.Management.Gitops.RepositoryUrl = "https://git.example/org/repo.git"
-			update.Management.Gitops.RepositoryUrl = stored.Management.Gitops.RepositoryUrl
 			move(update)
 			err := Restore(update, stored)
 			if !errors.Is(err, ErrMoved) || !strings.Contains(err.Error(), name) {

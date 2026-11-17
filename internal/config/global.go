@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -176,6 +177,7 @@ func (r *GlobalRegistry) load() {
 			return
 		}
 	}
+	warnRetiredKeys(r.path, data)
 	storedsecret.AssignIDs(cfg)
 	refs := secretReferences(cfg)
 	if err := decryptSensitiveFields(cfg); err != nil {
@@ -574,6 +576,58 @@ func identityOverrides(refs map[string]string, c *gateonv1.GlobalConfig) []strin
 // warnIdentityOverridden says when global.json keeps a gateway from using the
 // identity its environment supplies: replicas, and restarts on a fresh volume,
 // that start from the environment would not share it.
+// retiredGlobalSections maps a top-level section of the global config to the
+// keys under it that belonged to a feature since removed, with the ADR that
+// removed it. The proto reserves each name, so the decoders skip it; this is
+// what keeps that from happening without a word.
+var retiredGlobalSections = map[string]map[string]string{
+	"management": {"gitops": "0098"},
+}
+
+// retiredKeysIn names the retired keys a global config file still carries, as
+// "section.key", sorted. A file it cannot parse names none: load reports that
+// failure on its own.
+func retiredKeysIn(data []byte, isYAML bool) []string {
+	var doc map[string]any
+	var err error
+	if isYAML {
+		err = yaml.Unmarshal(data, &doc)
+	} else {
+		err = json.Unmarshal(data, &doc)
+	}
+	if err != nil {
+		return nil
+	}
+	var found []string
+	for section, keys := range retiredGlobalSections {
+		body, ok := doc[section].(map[string]any)
+		if !ok {
+			continue
+		}
+		for key := range keys {
+			if _, ok := body[key]; ok {
+				found = append(found, section+"."+key)
+			}
+		}
+	}
+	slices.Sort(found)
+	return found
+}
+
+// warnRetiredKeys logs each retired key the file at path still carries. GitOps
+// was removed (doc/adr/0098); a global.json written before then can still hold
+// an enabled management.gitops block, and an operator reading it would expect
+// it to sync. It does not, and the gateway says so instead of starting quietly.
+func warnRetiredKeys(path string, data []byte) {
+	isYAML := strings.HasSuffix(path, ".yaml") || strings.HasSuffix(path, ".yml")
+	for _, k := range retiredKeysIn(data, isYAML) {
+		section, key, _ := strings.Cut(k, ".")
+		logger.L.LogWarn("the global config carries a setting for a feature that was removed; it is ignored "+
+			"and nothing acts on it. Delete it from the file; the next save drops it",
+			"setting", k, "adr", "doc/adr/"+retiredGlobalSections[section][key], "path", path)
+	}
+}
+
 func warnIdentityOverridden(refs map[string]string, c *gateonv1.GlobalConfig) {
 	if over := identityOverrides(refs, c); len(over) > 0 {
 		logger.L.LogWarn("global.json names its own value for an identity secret the environment also sets, and "+

@@ -71,7 +71,7 @@
 22 internal/server/handlers
 
 # Config loading, tier defaults and validation.
-20 internal/config
+19 internal/config
 
 # The proxy data path.
 17 pkg/proxy
