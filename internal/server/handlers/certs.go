@@ -16,9 +16,11 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/gsoultan/gateon/internal/audit"
 	"github.com/gsoultan/gateon/internal/auth"
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/logger"
+	"github.com/gsoultan/gateon/internal/request"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
@@ -123,6 +125,8 @@ func registerCertHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI) {
 			_, _ = w.Write([]byte("invalid filename"))
 			return
 		}
+		_, statErr := os.Stat(destPath)
+		replaced := statErr == nil
 		// #nosec G304 -- filename is filepath.Base of the client value with an
 		// extension allow-list, and the containment check above proves destPath
 		// resolves inside certsDir.
@@ -136,12 +140,14 @@ func registerCertHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI) {
 			return
 		}
 		defer dst.Close()
-		if _, err := io.Copy(dst, file); err != nil {
+		sum := sha256.New()
+		if _, err := io.Copy(io.MultiWriter(dst, sum), file); err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
 		// Return relative path for use in config, e.g. "certs/filename"
 		relPath := filepath.Join("certs", filename)
+		auditCertWrite(r, "upload", relPath, replaced, sum.Sum(nil))
 		_ = json.NewEncoder(w).Encode(map[string]string{"path": relPath})
 		logger.L.LogInfo("certificate uploaded", "path", destPath)
 
@@ -182,6 +188,8 @@ func registerCertHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI) {
 		}
 
 		destPath := filepath.Join(certsDir, filename)
+		_, statErr := os.Stat(destPath)
+		replaced := statErr == nil
 		// 0600, not 0644. req.Type is one of "cert", "key" or "ca", so this
 		// endpoint writes private keys, and 0644 made every one of them
 		// readable by every user on the host. That is the finding rather than
@@ -193,6 +201,8 @@ func registerCertHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI) {
 		}
 
 		relPath := filepath.Join("certs", filename)
+		pasted := sha256.Sum256([]byte(req.Content))
+		auditCertWrite(r, "paste", relPath, replaced, pasted[:])
 		_ = json.NewEncoder(w).Encode(map[string]string{"path": relPath})
 		logger.L.LogInfo("certificate pasted and saved", "path", destPath)
 
@@ -200,6 +210,24 @@ func registerCertHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI) {
 			inv.InvalidateTLS()
 		}
 	})
+}
+
+// auditCertWrite records a certificate or private key written to the
+// certificates directory (ADR 0097).
+//
+// Both endpoints wrote files a TLS listener then serves -- an upload with the
+// name of one in use replaces it outright -- and neither left an entry, so a
+// stolen administrator session could swap the key a site presents and the
+// audit log had nothing to say about it. The entry names the file, whether it
+// replaced one, and the SHA-256 of what was written, which identifies the file
+// without the entry carrying a private key (ADR 0060).
+func auditCertWrite(r *http.Request, how, relPath string, replaced bool, sum []byte) {
+	verb := "Wrote"
+	if replaced {
+		verb = "Replaced"
+	}
+	audit.Log(r.Context(), auditUser(r), how, "certificate",
+		fmt.Sprintf("%s %s (%s, sha256 %x)", verb, relPath, how, sum), request.ClientAddr(r))
 }
 
 var filenameSanitizeRegexp = regexp.MustCompile(`[^a-zA-Z0-9.-]+`)
