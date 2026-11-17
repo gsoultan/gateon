@@ -38,7 +38,8 @@ func TestRecoverAdministratorUndoesATakeover(t *testing.T) {
 		t.Fatalf("owner: %v", err)
 	}
 	if row.user.Role != RoleAdmin || row.user.Disabled || row.user.TwoFactorEnabled || !row.user.TwoFactorPending {
-		t.Fatalf("owner after recovery = %+v, want an enabled administrator owing a new second factor", row.user)
+		t.Fatalf("owner after recovery: role %q, disabled %t, 2FA enabled %t, pending %t; want an enabled administrator owing a new second factor",
+			row.user.Role, row.user.Disabled, row.user.TwoFactorEnabled, row.user.TwoFactorPending)
 	}
 	if _, _, err := m.Authenticate("rightful", rec.Password, "192.0.2.1:1"); !errors.Is(err, ErrTwoFactorSetupRequired) {
 		t.Fatalf("signing in with the new password: %v, want the second-factor enrolment it owes", err)
