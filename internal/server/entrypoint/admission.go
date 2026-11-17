@@ -5,10 +5,12 @@ package entrypoint
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"io"
 	"math"
 	"net"
+	"net/http"
 	"net/netip"
 	"os"
 	"strconv"
@@ -21,6 +23,7 @@ import (
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware/kind"
 	"github.com/gsoultan/gateon/internal/middleware/security/identity"
+	"github.com/gsoultan/gateon/internal/server/entrypoint/connguard"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 	"github.com/quic-go/quic-go"
@@ -55,6 +58,72 @@ func perAddrConnLimit() int {
 		}
 	}
 	return config.CurrentTierDefaults().EntryPointMaxConnPerAddr
+}
+
+// envInt is the integer in env when it parses, else def.
+func envInt(env string, def int) int {
+	if v, ok := os.LookupEnv(env); ok {
+		if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil {
+			return n
+		}
+		logger.L.LogWarn("ignoring an invalid value; using the profile default", "env", env, "value", v)
+	}
+	return def
+}
+
+// envDuration is the duration in env when it parses and is positive, else def.
+func envDuration(env string, def time.Duration) time.Duration {
+	if v, ok := os.LookupEnv(env); ok {
+		if d, err := time.ParseDuration(strings.TrimSpace(v)); err == nil && d > 0 {
+			return d
+		}
+		logger.L.LogWarn("ignoring an invalid duration; using the profile default", "env", env, "value", v)
+	}
+	return def
+}
+
+// newUnprovenGuard builds an HTTP entrypoint's tracker of connections that
+// have not yet delivered a request, from the resource profile and its
+// overrides (config.TierDefaults). It is nil, the guard off, when
+// GATEON_ENTRYPOINT_MAX_UNPROVEN_PER_ADDR is 0.
+func newUnprovenGuard() *connguard.Unproven {
+	td := config.CurrentTierDefaults()
+	return connguard.NewUnproven(
+		envInt("GATEON_ENTRYPOINT_MAX_UNPROVEN_PER_ADDR", td.EntryPointMaxUnprovenPerAddr),
+		envDuration("GATEON_ENTRYPOINT_HANDSHAKE_TIMEOUT", td.EntryPointHandshakeTimeout),
+		envDuration("GATEON_ENTRYPOINT_HANDSHAKE_TIMEOUT_UNDER_PRESSURE", td.EntryPointHandshakeTimeoutUnderPressure))
+}
+
+// h2MaxResetsPerSecond is how many streams a second an HTTP/2 connection's
+// client may cancel; 0 disables the guard.
+func h2MaxResetsPerSecond() int {
+	return envInt("GATEON_H2_MAX_RESETS_PER_SECOND", config.CurrentTierDefaults().H2MaxResetsPerSecond)
+}
+
+// h2ResetCoolOffMaxAddrs bounds how many addresses an entrypoint keeps in its
+// rapid-reset cool-off at once; past it, an address is not cooled off but its
+// connections are still closed at the reset limit.
+const h2ResetCoolOffMaxAddrs = 4096
+
+// newResetCoolOff builds an HTTP entrypoint's rapid-reset cool-off from the
+// resource profile, unless GATEON_H2_RESET_COOLOFF overrides it; nil, off,
+// when it is 0 or the reset guard itself is off.
+func newResetCoolOff() *connguard.CoolOff {
+	if h2MaxResetsPerSecond() <= 0 {
+		return nil
+	}
+	d := envDuration("GATEON_H2_RESET_COOLOFF", config.CurrentTierDefaults().H2ResetCoolOff)
+	return connguard.NewCoolOff(d, h2ResetCoolOffMaxAddrs)
+}
+
+// h2MaxConcurrentStreams is SETTINGS_MAX_CONCURRENT_STREAMS on the
+// entrypoints' HTTP/2 connections: the profile's, unless
+// GATEON_H2_MAX_CONCURRENT_STREAMS names a positive number.
+func h2MaxConcurrentStreams() int {
+	if n := envInt("GATEON_H2_MAX_CONCURRENT_STREAMS", 0); n > 0 {
+		return n
+	}
+	return int(config.CurrentTierDefaults().H2MaxConcurrentStreams)
 }
 
 // maxHeaderBytesEnv overrides the tier's request-header cap, in bytes.
@@ -247,6 +316,11 @@ func (s *connSlots) take() bool {
 
 func (s *connSlots) release() { s.held.Add(-1) }
 
+// pressured reports whether three quarters or more of the slots are held:
+// the point from which a connection that has proved nothing gets the short
+// deadline.
+func (s *connSlots) pressured() bool { return s.held.Load()*4 >= s.limit*3 }
+
 // refused counts a connection that was closed as soon as it was accepted,
 // because every slot was held, and says so at most once a minute.
 func (s *connSlots) refused() {
@@ -265,6 +339,15 @@ type cappedListener struct {
 	net.Listener
 	slots   *connSlots
 	perAddr *perAddrLimiter
+	// unproven tracks connections that have not yet delivered a complete
+	// request (review D1); nil when the guard is off.
+	unproven *connguard.Unproven
+	// h2Resets is how many streams a second an HTTP/2 connection's client
+	// may cancel before the connection is closed (review D2); 0 is off.
+	h2Resets int
+	// coolOff refuses, for a while, addresses whose connection was closed
+	// for rapid reset; nil when off.
+	coolOff *connguard.CoolOff
 }
 
 func (l *cappedListener) Accept() (net.Conn, error) {
@@ -273,7 +356,10 @@ func (l *cappedListener) Accept() (net.Conn, error) {
 		if err != nil {
 			return nil, err
 		}
-		if !l.slots.take() {
+		if l.coolingOff(c) {
+			continue
+		}
+		if !l.takeSlot() {
 			// Counted before the close, so a client that sees the close
 			// can already read the count: the other order let a reader
 			// look between the two and find the refusal uncounted.
@@ -283,21 +369,93 @@ func (l *cappedListener) Accept() (net.Conn, error) {
 		}
 		// The per-address cap is the tighter of the two, so it is checked
 		// after the entrypoint-wide slot is held and gives it back on refusal.
-		// peerIP is read only when the cap is on, so an entrypoint without one
+		// peerIP is read only when a cap is on, so an entrypoint without one
 		// pays nothing for it.
 		ip := ""
-		if l.perAddr != nil {
+		if l.perAddr != nil || l.unproven != nil {
 			ip = peerIP(c)
-			if !l.perAddr.acquire(ip) {
-				l.slots.release()
-				l.refusedPerAddr()
-				_ = c.Close()
-				continue
-			}
 		}
-		return &slotConn{Conn: c, slots: l.slots, perAddr: l.perAddr, addr: ip}, nil
+		if !l.perAddr.acquire(ip) {
+			l.slots.release()
+			l.refusedPerAddr()
+			_ = c.Close()
+			continue
+		}
+		sc := &slotConn{Conn: c, slots: l.slots, perAddr: l.perAddr, addr: ip, coolOff: l.coolOff}
+		sc.resets.Init(l.h2Resets)
+		if !l.admitUnproven(sc, ip) {
+			_ = sc.Close() // gives back both slots
+			continue
+		}
+		return sc, nil
 	}
 }
+
+// coolOffKey is the key ip cools off under, the same one the per-address caps
+// count it by; false for an address that is never capped.
+func coolOffKey(ip string) (netip.Addr, bool) {
+	if perAddrExempt(ip) {
+		return netip.Addr{}, false
+	}
+	return connKey(ip)
+}
+
+// coolingOff closes c, and reports true, when its address is in its
+// rapid-reset cool-off: refused before a slot is taken or a TLS byte read, so
+// a client reconnecting after its connection was closed costs a close.
+func (l *cappedListener) coolingOff(c net.Conn) bool {
+	if l.coolOff == nil {
+		return false
+	}
+	key, ok := connKey(peerIP(c))
+	if !ok || !l.coolOff.Refuses(key, time.Now()) {
+		return false
+	}
+	telemetry.IncInflightRejected(h2ResetCoolOffReason)
+	_ = c.Close()
+	return true
+}
+
+// takeSlot claims an entrypoint slot. When every slot is held it closes the
+// connection that has waited longest without delivering a request, and takes
+// the slot that frees: a full entrypoint used to refuse the newcomer, so
+// connections that proved nothing kept out everyone who would have (D1).
+func (l *cappedListener) takeSlot() bool {
+	if l.slots.take() {
+		return true
+	}
+	return l.unproven.EvictOldest() && l.slots.take()
+}
+
+// admitUnproven records sc as not yet having delivered a request, with a
+// deadline that is shorter when the entrypoint is under pressure. It reports
+// false when the source address already holds its limit of such connections.
+func (l *cappedListener) admitUnproven(sc *slotConn, ip string) bool {
+	if l.unproven == nil {
+		return true
+	}
+	key, ok := connKey(ip)
+	capped := ok && !perAddrExempt(ip)
+	e, admitted := l.unproven.Admit(sc, key, capped, l.slots.pressured())
+	if !admitted {
+		telemetry.IncInflightRejected(unprovenPerAddrReason)
+		if l.slots.warn.due(time.Now()) {
+			logger.L.LogWarn("HTTP entrypoint refusing a connection: source address holds its limit of connections that have not sent a request",
+				"ep", l.slots.epID)
+		}
+		return false
+	}
+	sc.unproven = e
+	return true
+}
+
+// unprovenPerAddrReason and h2RapidResetReason are the fixed labels those
+// refusals are counted under, with the other connection-limit rejections.
+const (
+	unprovenPerAddrReason = "http_unproven_per_addr"
+	h2RapidResetReason    = "h2_rapid_reset"
+	h2ResetCoolOffReason  = "h2_reset_cooloff"
+)
 
 // refusedPerAddr counts a connection closed at accept because its source
 // address already holds its per-address limit, and says so at most once a
@@ -315,19 +473,87 @@ func (l *cappedListener) refusedPerAddr() {
 // a TLS connection closes the one beneath it too.
 type slotConn struct {
 	net.Conn
-	slots   *connSlots
-	perAddr *perAddrLimiter
-	addr    string
-	closed  atomic.Bool
+	slots    *connSlots
+	perAddr  *perAddrLimiter
+	addr     string
+	closed   atomic.Bool
+	unproven *connguard.Entry // nil once proven, or when the guard is off
+	resets   connguard.Resets
+	coolOff  *connguard.CoolOff
 }
 
 func (c *slotConn) Close() error {
 	err := c.Conn.Close()
 	if c.closed.CompareAndSwap(false, true) {
+		c.unproven.Forget()
 		c.slots.release()
 		c.perAddr.release(c.addr)
 	}
 	return err
+}
+
+// guardRequests runs first for every request on an HTTP entrypoint, before
+// the per-request deadlines are armed. A request that reaches it has been
+// delivered whole -- handshake done, headers read -- which proves its
+// connection (D1). On HTTP/2 it counts the streams the client cancelled, and
+// closes the connection that cancels them faster than H2MaxResetsPerSecond
+// (D2); a stream already cancelled when it arrives is not served, because
+// its client is gone and there is nobody to answer -- nothing reaches a
+// backend that way, so this cheapens no check, it skips dead work.
+//
+// It allocates nothing: a context lookup, an assertion and two atomic loads
+// on a connection already proven.
+func guardRequests(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sc := slotConnOf(r)
+		if sc == nil {
+			next.ServeHTTP(w, r)
+			return
+		}
+		sc.unproven.Prove()
+		if r.ProtoMajor == 2 && r.Context().Err() != nil {
+			sc.noteReset()
+			return
+		}
+		next.ServeHTTP(w, r)
+		if r.ProtoMajor == 2 && r.Context().Err() != nil {
+			sc.noteReset()
+		}
+	})
+}
+
+// noteReset records a cancelled stream and closes the connection the first
+// time it goes over its limit.
+func (c *slotConn) noteReset() {
+	if !c.resets.Note(time.Now()) {
+		return
+	}
+	telemetry.IncInflightRejected(h2RapidResetReason)
+	if c.slots.warn.due(time.Now()) {
+		logger.L.LogWarn("HTTP/2 connection closed: its client cancels streams faster than the limit (rapid reset)",
+			"ep", c.slots.epID, "client", c.addr)
+	}
+	if key, ok := coolOffKey(c.addr); ok {
+		c.coolOff.Start(key, time.Now())
+	}
+	_ = c.Close()
+}
+
+// slotConnOf is the admitted connection r arrived on, beneath its TLS layer,
+// or nil when r did not come through a cappedListener.
+func slotConnOf(r *http.Request) *slotConn {
+	c, ok := r.Context().Value(identity.ConnContextKey).(net.Conn)
+	if !ok {
+		return nil
+	}
+	if tc, ok := c.(*tls.Conn); ok {
+		c = tc.NetConn()
+	}
+	sc, ok := c.(*slotConn)
+	if !ok {
+		return nil
+	}
+	return sc
 }
 
 // CloseWrite half-closes the connection, as the *net.TCPConn beneath it does:
