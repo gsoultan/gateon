@@ -187,6 +187,8 @@ func main() {
 		if err := audit.Init(gc.Audit, databaseURL); err != nil {
 			logger.L.LogError("failed to init audit manager", "error", err)
 		}
+		// Administrator activity alerts (ADR 0097).
+		audit.AddSink(alerting.AuditSink)
 
 		if gc.Ha != nil && gc.Ha.Enabled {
 			// Gossip reputation sync exposes no stop hook, so it stays boot-only.

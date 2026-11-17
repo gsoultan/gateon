@@ -5,6 +5,7 @@ package auth
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"encoding/base64"
 	"errors"
@@ -17,6 +18,7 @@ import (
 
 	"aidanwoods.dev/go-paseto"
 	"github.com/google/uuid"
+	"github.com/gsoultan/gateon/internal/audit"
 	"github.com/gsoultan/gateon/internal/auth/admission"
 	"github.com/gsoultan/gateon/internal/auth/apitoken"
 	"github.com/gsoultan/gateon/internal/auth/lockout"
@@ -236,9 +238,27 @@ func (m *Manager) checkFirstFactor(username, password, addr string) (*loginRow, 
 		return nil, ErrAccountDisabled
 	}
 	tracker.Succeed(key, source)
-	m.rememberSource(row.user.Id, source)
+	if m.rememberSource(row.user.Id, source) {
+		recordNewSource(row.user.Username, source, addr)
+	}
 	return row, nil
 }
+
+// recordNewSource writes the audit entry for a password accepted from a
+// network the account has not signed in from before, which the alert on
+// administrator activity reads (ADR 0097).
+//
+// It is written here, at the one step every sign-in passes on every transport,
+// and at the password rather than after the second factor: a password that
+// works from somewhere new is the earliest sign of a stolen one, whether or
+// not its holder also has the second factor.
+func recordNewSource(username, source, addr string) {
+	audit.Log(context.Background(), username, ActionLoginNewSource, "auth",
+		"Password accepted from "+source+", a network this account has not signed in from before", addr)
+}
+
+// ActionLoginNewSource is the audit action recordNewSource writes.
+const ActionLoginNewSource = "login_new_source"
 
 // trackerFor is the tracker and key an attempt is counted under. Accounts
 // that exist are keyed by id in a tracker only they reach, so a flood of
@@ -345,13 +365,15 @@ func (m *Manager) loginSources(id string) []string {
 // rememberSource records that account id signed in from source, keeping the
 // maxLoginSources most recent. A source already known is not rewritten, so an
 // ordinary sign-in costs a read and no write.
-func (m *Manager) rememberSource(id, source string) {
+//
+// It reports whether source was new to the account.
+func (m *Manager) rememberSource(id, source string) bool {
 	if source == "" {
-		return
+		return false
 	}
 	known := m.loginSources(id)
 	if slices.Contains(known, source) {
-		return
+		return false
 	}
 	known = append([]string{source}, known...)
 	if len(known) > maxLoginSources {
@@ -361,6 +383,7 @@ func (m *Manager) rememberSource(id, source string) {
 		m.logger.LogError("could not record a sign-in source; under attack this account "+
 			"will not be admitted from it", "error", err)
 	}
+	return true
 }
 
 // APITokens is the scrape-credential store (ADR 0050).
