@@ -71,10 +71,9 @@ version ever shipped.
   pair was held to the rule, and additive changes compose, but v1.3.8 to
   v1.4.2 directly was never run. The helper still restores the SQLite copy on
   a rollback, which does not depend on the rule.
-- The helper still refuses to roll back after a PostgreSQL migration. With
-  this rule a rollback there would be sound between adjacent releases;
-  allowing it is a separate decision, because the helper would have to know
-  the upgrade was from the adjacent release.
+- The helper rolls back after a migration it cannot undo, PostgreSQL or
+  SQLite with the copy switched off, when the upgrade was one release
+  forward. See below.
 - A restart out of the latest release is the latest release's own shutdown.
   A request it drops on its way out (ADR 0101, fixed in the build after
   v1.3.8) is reported by the spec and not held against this build. Everything
@@ -84,6 +83,34 @@ version ever shipped.
   right answer to both.
 - The first release with a real breaking need has to do it in two steps, or
   change this ADR in the open.
+
+## Rolling back on a database that cannot be restored
+
+ADR 0087 left a failed upgrade in place once it had migrated PostgreSQL: the
+old binary would have started on a schema it did not know. With this rule it
+does know it, for one step.
+
+**A release build carries the tag of the release before it.**
+`.goreleaser.yaml` sets `main.CompatibleWith` to the previous tag, and the
+gateway writes it into its migration record beside the databases it
+migrated. `release.yml` works that tag out, runs `make check-compat` against
+exactly that release before anything is built, and hands the same tag to
+GoReleaser, so the binary cannot claim a release it was not tested against.
+
+**The helper puts the old binary back when the two match.** If the failed
+version says it is compatible with the version it replaced, the helper rolls
+back and leaves the database as migrated. The outcome is "Rolled back", and
+the dashboard says the database was kept (`UpgradeRecord.database_kept`)
+instead of "nothing else was changed". A SQLite database with a copy is
+still restored, as before.
+
+**Anything else is refused as before:** an upgrade that skipped a release, a
+build that is not a release, a record with no claim. The comparison is exact
+on the version, with or without the tag's `v`.
+
+The claim is the new gateway's own word, like the rest of its migration
+record (ADR 0087): a gateway that lies in it can at most get the previous
+release put back, which is what a failed upgrade gets anyway.
 
 ## Alternatives
 

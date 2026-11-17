@@ -33,6 +33,20 @@ and the previous release starts again on what it left (ADR 0100). Nothing
 changes on an installed gateway. It is what makes a rollback after a
 migration sound.
 
+### A failed upgrade is rolled back on PostgreSQL too
+
+A failed upgrade that had already migrated PostgreSQL used to stay on the new
+version as "Failed, not rolled back". When the upgrade was one release
+forward, the helper now puts the previous version back and leaves the
+database as migrated; the previous version runs on it, and Settings, Updates
+says the database was kept. An upgrade across several releases is still not
+rolled back. The same applies to SQLite with `GATEON_MIGRATION_BACKUP=false`.
+
+**Who is affected:** PostgreSQL installs that upgrade themselves, from the
+upgrade after this one. The helper that installs a release is the installed
+version's, so the upgrade that brings this release in still behaves as
+before.
+
 ### WebSocket messages can be inspected
 
 A WAF middleware has a new switch, "Inspect WebSocket messages"

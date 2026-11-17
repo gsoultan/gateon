@@ -58,6 +58,22 @@ jobs:
     if: github.event_name == 'push' || inputs.publish_tag == ''
     permissions:
       contents: write
+    # For the compatibility check below, which starts the previous release on
+    # a PostgreSQL database this build has migrated.
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: gateon
+          POSTGRES_PASSWORD: gateon
+          POSTGRES_DB: gateon_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
 
     # This job used to run on the self-hosted Apple-silicon Mac, building inside
     # the Linux container from .github/ci/Dockerfile.ci. That runner is a single
@@ -193,6 +209,26 @@ jobs:
       # gateway could verify it. Such a release is published unsigned, loudly,
       # and gateways report its version as unverified. That branch disappears
       # with the first line in release_keys.txt.
+      # The binary built below carries the previous release's tag as the one
+      # it is compatible with, and the upgrade helper acts on that: it puts
+      # that release back after a migration it cannot undo. So the claim is
+      # checked here, against that exact tag, before anything is built. The
+      # same tag is handed to GoReleaser so the two cannot disagree.
+      - name: The previous release upgrades to this one and rolls back
+        env:
+          GATEON_TEST_POSTGRES_DSN: postgres://gateon:gateon@localhost:5432/gateon_test?sslmode=disable
+          EVENT_NAME: ${{ github.event_name }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          if [ "$EVENT_NAME" = "push" ]; then
+            previous="$(git describe --tags --abbrev=0 --match 'v*' "${TAG}^")"
+          else
+            previous="$(git describe --tags --abbrev=0 --match 'v*' HEAD)"
+          fi
+          echo "previous release: $previous"
+          echo "GORELEASER_PREVIOUS_TAG=$previous" >> "$GITHUB_ENV"
+          GATEON_COMPAT_VERSION="$previous" make check-compat
+
       - name: Run GoReleaser
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

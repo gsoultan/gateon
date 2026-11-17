@@ -101,9 +101,10 @@ type Recorder struct {
 	rec Migrated
 }
 
-// NewRecorder records the migrations of the gateway of version.
-func NewRecorder(version, dataDir string) *Recorder {
-	return &Recorder{dataDir: dataDir, now: time.Now, rec: Migrated{Version: version}}
+// NewRecorder records the migrations of the gateway of version, which was
+// built compatible with the release compatibleWith.
+func NewRecorder(version, compatibleWith, dataDir string) *Recorder {
+	return &Recorder{dataDir: dataDir, now: time.Now, rec: Migrated{Version: version, CompatibleWith: compatibleWith}}
 }
 
 // Begin records a migration that has started.
