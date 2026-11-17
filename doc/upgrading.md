@@ -11,6 +11,24 @@ here after the fact.
 
 ## Unreleased
 
+### A route can keep a sample of its traffic for tuning the WAF
+
+A WAF middleware has a new setting, "Sample Requests for Tuning"
+(`corpus_sample_rate`, off by default). At 100 the gateway keeps one in a
+hundred of the requests that route forwards and the origin answers 2xx or 3xx.
+`gateon export-waf-corpus [API URL] [--token TOKEN] > corpus.jsonl` writes the
+sample in the shape `gwaf tune` reads, to suggest exceptions for false
+positives or, with `-schema`, to draft an OpenAPI document for the route.
+
+Kept: method, path, query parameters and headers. Never kept: bodies, client
+addresses, and credentials. `Authorization`, cookies and API keys are left
+out, and a token in a query parameter is masked. The sample is held in memory
+only (512, 2048 or 8192 requests by resource profile, at most 4 KiB each;
+`GATEON_WAF_CORPUS_ENTRIES` overrides it), the newest request replaces the
+oldest, and a restart empties it. Exporting needs an account that may change
+the WAF rules. `GATEON_WAF_CORPUS_SAMPLE_RATE` sets a rate for the
+gateway-wide WAF and for every route WAF that sets none. See ADR-0097.
+
 ### WebSocket messages can be inspected
 
 A WAF middleware has a new switch, "Inspect WebSocket messages"

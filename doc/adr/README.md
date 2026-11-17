@@ -106,6 +106,7 @@ ADRs follow a lightweight [MADR](https://adr.github.io/madr/)-style format:
 | [0094](./0094-a-header-only-infrastructure-sends-is-not-taken-from-a-client.md) | A header only infrastructure sends is not taken from a client | Accepted |
 | [0095](./0095-a-route-is-checked-against-the-api-it-publishes.md) | A route is checked against the API it publishes | Accepted |
 | [0096](./0096-websocket-messages-are-judged-before-the-backend-reads-them.md) | WebSocket messages are judged before the backend reads them | Accepted |
+| [0097](./0097-the-gateway-keeps-a-sample-of-forwarded-requests-for-tuning.md) | The gateway keeps a sample of forwarded requests for tuning | Accepted |
 | [0098](./0098-settings-are-not-synced-from-git.md) | Settings are not synced from Git | Accepted |
 
 ## Conventions

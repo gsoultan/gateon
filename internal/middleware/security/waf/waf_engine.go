@@ -22,6 +22,7 @@ import (
 	secwaf "github.com/gsoultan/gateon/internal/security/waf"
 	"github.com/gsoultan/gateon/internal/security/waf/apischema"
 	"github.com/gsoultan/gateon/internal/security/waf/appprofile"
+	"github.com/gsoultan/gateon/internal/security/waf/corpus"
 	"github.com/gsoultan/gateon/internal/security/wsinspect"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	"github.com/gsoultan/gwaf"
@@ -267,6 +268,53 @@ func (e *wafEngine) webSocketMessageLimit() int {
 		body = gwaf.DefaultLimits().MaxBodySize
 	}
 	return min(limit, body)
+}
+
+// corpusSampleRateEnv sets the sample rate for every route that sets none.
+const corpusSampleRateEnv = "GATEON_WAF_CORPUS_SAMPLE_RATE"
+
+// corpusSampleRate reads the route's rate, falling back to the environment
+// and then to 0, which samples nothing.
+func corpusSampleRate(value string) int {
+	if v := strings.TrimSpace(value); v != "" {
+		return corpus.ParseRate(v)
+	}
+	return corpus.ParseRate(strings.TrimSpace(os.Getenv(corpusSampleRateEnv)))
+}
+
+// noSample is what sample returns for a request that is not being kept.
+func noSample() {}
+
+// sample decides whether this request is one to keep for tuning, and returns
+// the writer to answer it through and a function to call once it is answered.
+//
+// It is reached only for a request the WAF is forwarding. The entry is built
+// before the origin sees the request, because the proxy rewrites headers on
+// the way, and kept only if the origin then accepts it: a request the
+// application itself refused is not evidence of what benign traffic looks
+// like. A request that asks for an upgrade is never kept -- it has no status
+// to judge it by, and wrapping its writer would sit between the proxy and the
+// connection for nothing.
+//
+// All but one request in CorpusSampleRate pay one atomic add.
+func (t *wafRuntime) sample(w http.ResponseWriter, r *http.Request) (http.ResponseWriter, func()) {
+	if t.cfg.CorpusSampleRate < 1 || r.Header.Get("Upgrade") != "" {
+		return w, noSample
+	}
+	ring := corpus.Shared()
+	if !ring.Due(t.cfg.CorpusSampleRate) {
+		return w, noSample
+	}
+	entry, ok := corpus.Capture(r, t.cfg.RouteID)
+	if !ok {
+		return w, noSample
+	}
+	sw := corpus.Watch(w)
+	return sw, func() {
+		if corpus.Accepted(sw.Status()) {
+			ring.Add(entry)
+		}
+	}
 }
 
 // guardWebSocket returns w so that a connection upgraded through it has every
