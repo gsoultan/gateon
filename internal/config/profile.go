@@ -205,6 +205,15 @@ type TierDefaults struct {
 	// overrides it; it cannot be switched off.
 	WAFMaxLargeBodyInspections int
 
+	// WAFWebSocketMessageLimit is the largest WebSocket message, in bytes, a
+	// route with WebSocket inspection holds to judge it, when the route sets
+	// no limit of its own. A connection holds at most 2.25 times this while a
+	// message is arriving and nothing between messages, so the worst case is
+	// this times the connections a client can keep mid-message, which the
+	// entrypoint's connection caps bound. A larger message closes the
+	// connection (1009). GATEON_WAF_WEBSOCKET_MESSAGE_LIMIT overrides it.
+	WAFWebSocketMessageLimit int
+
 	// CompressMaxBrotliEncoders is how many responses the compress middleware
 	// brotli-encodes at once in the whole process (ADR 0073). One encoder holds
 	// about 2.6 MiB once it has seen more than its 256 KiB window -- gzip about
@@ -405,6 +414,7 @@ func DefaultsFor(tier Tier) TierDefaults {
 			EntryPointMaxConnections:   1000,
 			EntryPointMaxConnPerAddr:   128,
 			WAFMaxLargeBodyInspections: 4,
+			WAFWebSocketMessageLimit:   16 << 10, // 16 KiB
 			CompressMaxBrotliEncoders:  8,
 			SchemaMaxBodyBytes:         1 << 20, // 1 MiB
 			SchemaMaxLargeBodies:       2,
@@ -462,6 +472,7 @@ func DefaultsFor(tier Tier) TierDefaults {
 			EntryPointMaxConnections:   50000,
 			EntryPointMaxConnPerAddr:   1024,
 			WAFMaxLargeBodyInspections: 64,
+			WAFWebSocketMessageLimit:   256 << 10, // 256 KiB
 			CompressMaxBrotliEncoders:  128,
 			SchemaMaxBodyBytes:         4 << 20, // 4 MiB
 			SchemaMaxLargeBodies:       16,
@@ -519,6 +530,7 @@ func DefaultsFor(tier Tier) TierDefaults {
 			EntryPointMaxConnections:   10000,
 			EntryPointMaxConnPerAddr:   256,
 			WAFMaxLargeBodyInspections: 16,
+			WAFWebSocketMessageLimit:   64 << 10, // 64 KiB
 			CompressMaxBrotliEncoders:  32,
 			SchemaMaxBodyBytes:         1 << 20, // 1 MiB
 			SchemaMaxLargeBodies:       8,

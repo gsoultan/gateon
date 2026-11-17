@@ -31,8 +31,9 @@ const (
 	// BlindWAFNoCategories: a WAF with every attack family switched off.
 	BlindWAFNoCategories BlindSpotKind = "waf_no_categories"
 	// BlindWebSocketMessages: gateway-wide. The WAF judges the upgrade
-	// request; the messages that follow on the upgraded connection are
-	// forwarded unread.
+	// request. What the client sends afterwards is judged only on a route
+	// whose WAF has websocket_inspection on, and what the backend sends is
+	// never judged, so this is true of every install whatever it sets.
 	BlindWebSocketMessages BlindSpotKind = "websocket_messages"
 )
 

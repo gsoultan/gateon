@@ -11,6 +11,71 @@ here after the fact.
 
 ## Unreleased
 
+### WebSocket messages can be inspected
+
+A WAF middleware has a new switch, "Inspect WebSocket messages"
+(`websocket_inspection`, off by default). With it on, every message a client
+sends on a WebSocket the route upgrades is judged the way a request body is,
+and one the WAF refuses closes the connection (close code 1008) before the
+backend reads it. Fragmented messages are judged whole and binary frames like
+text ones.
+
+Turning it on changes three things about a working route, which is why it is
+off until you choose it:
+
+- Compression (`permessage-deflate`) is no longer offered to the backend,
+  because a compressed message cannot be read.
+- A message larger than `websocket_message_limit` closes the connection (1009).
+  The default is 16 KiB, 64 KiB or 256 KiB by resource profile; set it per
+  route, or with `GATEON_WAF_WEBSOCKET_MESSAGE_LIMIT`. It is never more than
+  the request body limit.
+- The route carries WebSocket only. Another protocol upgraded on it is closed.
+
+On an Audit Only route a refused message is recorded and forwarded.
+`GATEON_WAF_WEBSOCKET_INSPECTION=true` turns it on for the gateway-wide WAF,
+which has no switch of its own, and for every route WAF that does not set it. Messages a backend sends are not inspected. Closed connections
+are counted in `gateon_middleware_waf_websocket_closed_total{route,reason}`.
+See ADR-0096.
+
+### A route can be checked against its OpenAPI document
+
+A WAF middleware has two new settings, under "API Description" in its form:
+`openapi_spec` (an OpenAPI 3 document, YAML or JSON, at most 1 MiB) and
+`openapi_mode` (`record`, the default, or `enforce`). With no document nothing
+changes.
+
+With a document, a request to a path and method it describes is checked against
+the parameter types, formats, enums, lengths and ranges it declares. In
+`record` the request is forwarded, counted in
+`gateon_middleware_waf_schema_violations_total{route,violation,mode}` and
+listed in the Security Hub under `api_schema` (at most five entries a second
+per route; the metric counts all of them). In `enforce` it is answered 403.
+Start in `record`: published documents are usually narrower than real traffic.
+
+Three things to know before enforcing. A path the document does not describe is
+not checked. A refused request adds no reputation penalty and does not count
+towards an automatic block, because the cause may be the document. And a route
+with Audit Only on records whatever the mode says.
+
+A document that is too large, is not OpenAPI, has no paths, or a mode that is
+not one of the two, refuses the save with the reason. See ADR-0095.
+
+### Response inspection refuses what a successful exploit returns
+
+Seven response rules are new (1130029 to 1130035, DLP category, paranoia level
+1): a Unix account file, the output of `id`, `win.ini`, `boot.ini`, an EC2
+instance role-credential document, a `phpinfo()` page and a process
+environment. They run where response inspection already runs (`dlp` on) and
+need no setting. The request that fetched such a response may have matched
+nothing, which is the point: a traversal no rule names returns the same file.
+
+Under `dlp_action=redact` these findings are refused, not redacted: cutting the
+matched lines out of an account file forwards the rest of it. `dlp_action=audit`
+records them and forwards the response, as it does every DLP finding.
+
+A site that serves such content on purpose (documentation that prints a sample
+`/etc/passwd`) needs a WAF exception for the rule on that path.
+
 ### The Security Hub lists what the WAF cannot see
 
 Security → Overview has a new card, "What the WAF cannot see". It names every

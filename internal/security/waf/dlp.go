@@ -4,6 +4,8 @@
 package waf
 
 import (
+	"slices"
+
 	"github.com/gsoultan/gwaf/rules"
 	"github.com/gsoultan/gwaf/types"
 )
@@ -36,6 +38,30 @@ func DLPResponseRules(paranoiaLevel int) rules.Set {
 	}
 	return set
 }
+
+// IsCompromiseRule reports whether id is a response rule that recognises the
+// result of a successful exploit rather than a value that should not have been
+// on the page.
+//
+// The difference decides what redaction means. A card number cut out of a
+// receipt leaves a receipt. Two lines cut out of an account file leave the
+// rest of the account file, and the response still proves the request read a
+// file it should not have.
+func IsCompromiseRule(id types.RuleID) bool {
+	_, ok := compromiseRuleIDs[id]
+	return ok
+}
+
+// compromiseRuleIDs is the id set behind IsCompromiseRule.
+var compromiseRuleIDs = func() map[types.RuleID]struct{} {
+	ids := make(map[types.RuleID]struct{}, 8)
+	for _, s := range defaultSpecs {
+		if slices.Contains(s.tags, TagCompromise) {
+			ids[types.RuleID(s.id)] = struct{}{}
+		}
+	}
+	return ids
+}()
 
 // dlpRuleIDs is the id set behind IsDLPRule, built once from the corpus.
 var dlpRuleIDs = func() map[types.RuleID]struct{} {
