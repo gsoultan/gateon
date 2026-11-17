@@ -8,6 +8,7 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -21,6 +22,7 @@ import (
 	"github.com/gsoultan/gateon/internal/middleware/security"
 	"github.com/gsoultan/gateon/internal/middleware/security/identity"
 	"github.com/gsoultan/gateon/internal/middleware/traffic"
+	"github.com/gsoultan/gateon/internal/server/drain"
 	"github.com/gsoultan/gateon/internal/server/sockets"
 	"github.com/gsoultan/gateon/internal/syncutil"
 	"github.com/gsoultan/gateon/internal/telemetry"
@@ -155,9 +157,10 @@ func (*httpRunner) Run(ctx context.Context, ep *gateonv1.EntryPoint, deps *Deps,
 		e.tlsConfig = deps.TLSConfig.Clone()
 	}
 	server := e.newServer(dynamicTimeouts(ep, deps, e.startHTTP3(e.frontHandler(ctx))))
+	e.arrivals = drain.Track(server)
 	if deps.ShutdownRegistry != nil {
 		deps.ShutdownRegistry.Register(func(ctx context.Context) error {
-			return shutdownHTTPServer(ctx, server)
+			return e.arrivals.Shutdown(ctx, e.tcp.closer())
 		})
 	}
 	if hasTCP, _ := protocols(ep); hasTCP {
@@ -179,6 +182,27 @@ type httpEntrypoint struct {
 	// the two, drawn on by the same TCP and QUIC listeners. Nil when the cap is
 	// disabled (ADR 0036).
 	perAddr *perAddrLimiter
+	// arrivals is what lets a shutdown answer the connections the server had
+	// already accepted, and tcp the listener it closes first to do so.
+	arrivals *drain.Arrivals
+	tcp      boundListener
+}
+
+// boundListener is the listener a server is accepting on, once it has bound.
+// An entrypoint whose address was taken binds later, in the background, so a
+// shutdown may find none yet.
+type boundListener struct{ l atomic.Pointer[net.Listener] }
+
+func (b *boundListener) set(l net.Listener) { b.l.Store(&l) }
+
+// closer is the bound listener, or nil when there is none: drain.Shutdown
+// takes a nil io.Closer to mean that, which a nil net.Listener inside the
+// interface would not be.
+func (b *boundListener) closer() io.Closer {
+	if l := b.l.Load(); l != nil {
+		return *l
+	}
+	return nil
 }
 
 // frontHandler is the entrypoint chain around the base handler and the global
@@ -356,10 +380,11 @@ func (e *httpEntrypoint) serveTCPOn(server *http.Server, l net.Listener) {
 		l = e.deps.Phantom.OptimizeListener(l)
 	}
 	l = &cappedListener{Listener: l, slots: e.slots, perAddr: e.perAddr}
+	e.tcp.set(l)
 	if e.tlsConfig != nil {
 		logger.L.LogInfo("starting HTTPS entrypoint", "addr", addr, "type", e.ep.Type.String())
 		e.wg.Go(func() {
-			if err := server.ServeTLS(l, "", ""); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			if err := e.arrivals.Serve(func() error { return server.ServeTLS(l, "", "") }); err != nil {
 				logger.L.LogError("HTTPS server failed", "error", err, "addr", addr)
 			}
 		})
@@ -367,7 +392,7 @@ func (e *httpEntrypoint) serveTCPOn(server *http.Server, l net.Listener) {
 	}
 	logger.L.LogInfo("starting HTTP entrypoint", "addr", addr, "type", e.ep.Type.String())
 	e.wg.Go(func() {
-		if err := server.Serve(l); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		if err := e.arrivals.Serve(func() error { return server.Serve(l) }); err != nil {
 			logger.L.LogError("HTTP server failed", "error", err, "addr", addr)
 		}
 	})
