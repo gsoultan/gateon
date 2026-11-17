@@ -192,9 +192,39 @@ jobs:
       # the two together. pipefail keeps what the old Test step had: go test's
       # own exit status fails the job, rather than resting on the ratchet
       # recognising every shape of FAIL line in its input.
+      # PgBouncer in transaction pooling mode in front of the same database,
+      # from Ubuntu's own package rather than a third-party image. The gateway
+      # set up on one and then failed queries at random ("unnamed prepared
+      # statement does not exist") and dropped audit entries; the tests that
+      # prove otherwise skip without it, so without this step they never ran.
+      - name: PgBouncer (transaction pooling)
+        run: |
+          sudo apt-get install -y -q pgbouncer
+          # The package starts its own instance on 6432; this one replaces it.
+          sudo systemctl stop pgbouncer || true
+          dir="$RUNNER_TEMP/pgbouncer"
+          mkdir -p "$dir"
+          printf '"gateon" "gateon"\n' > "$dir/users.txt"
+          cat > "$dir/pgbouncer.ini" <<EOF
+          [databases]
+          gateon_test = host=127.0.0.1 port=5432 dbname=gateon_test
+          [pgbouncer]
+          listen_addr = 127.0.0.1
+          listen_port = 6432
+          unix_socket_dir =
+          auth_type = scram-sha-256
+          auth_file = $dir/users.txt
+          pool_mode = transaction
+          logfile = $dir/pgbouncer.log
+          pidfile = $dir/pgbouncer.pid
+          EOF
+          pgbouncer -d "$dir/pgbouncer.ini"
+          PGPASSWORD=gateon psql -h 127.0.0.1 -p 6432 -U gateon gateon_test -c 'SELECT 1' > /dev/null
+
       - name: Test (race, shuffled) and coverage ratchet
         env:
           GATEON_TEST_POSTGRES_DSN: postgres://gateon:gateon@localhost:5432/gateon_test?sslmode=disable
+          GATEON_TEST_PGBOUNCER_DSN: postgres://gateon:gateon@127.0.0.1:6432/gateon_test?sslmode=disable
         run: make check-coverage SHELL=/bin/bash .SHELLFLAGS='-o pipefail -c'
 
       # check-coverage leaves cmd/gateon out (see the Makefile for the
