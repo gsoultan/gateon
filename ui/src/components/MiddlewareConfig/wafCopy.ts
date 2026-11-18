@@ -59,3 +59,12 @@ export const WEBSOCKET_LIMIT_HELP =
 export const WEBSOCKET_AUDIT_ONLY_NOTE =
   "Audit Only is on for this route, so a message the WAF would refuse is recorded and forwarded, " +
   "and a message past the limit is forwarded unread.";
+
+/** Under the request sample rate. */
+export const CORPUS_SAMPLE_HELP =
+  "Keep one in this many of the requests this route forwards and the origin answers 2xx or 3xx, " +
+  "so the WAF can be tuned against real traffic with gwaf tune. 100 keeps one in a hundred; 0 or empty keeps none. " +
+  "Kept: method, path, query parameters and headers. Never kept: bodies, client addresses, " +
+  "and credentials (Authorization, cookies, API keys and token-shaped values are removed). " +
+  "The sample stays in memory, holds a fixed number of requests with the newest replacing the oldest, " +
+  "and is lost on restart. Export it with: gateon export-waf-corpus";

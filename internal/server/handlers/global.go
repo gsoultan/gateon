@@ -25,6 +25,7 @@ import (
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware"
 	"github.com/gsoultan/gateon/internal/request"
+	"github.com/gsoultan/gateon/internal/security/waf/corpus"
 	"github.com/gsoultan/gateon/internal/server/readiness"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
@@ -229,6 +230,7 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 		data, _ := ProtojsonOptions().Marshal(gc)
 		_, _ = w.Write(data)
 	})
+	mux.HandleFunc("GET /v1/waf/corpus", serveWAFCorpus)
 	mux.HandleFunc("GET /v1/audit/logs", func(w http.ResponseWriter, r *http.Request) {
 		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceDiagnostics) {
 			return
@@ -1146,4 +1148,22 @@ func writeInstallRefusal(w http.ResponseWriter, err error) {
 	default:
 		WriteHTTPError(w, http.StatusInternalServerError, "the upgrade could not be started")
 	}
+}
+
+// serveWAFCorpus answers the sample of forwarded requests the WAF kept for
+// tuning, as JSON Lines (ADR 0097).
+//
+// It asks for write on the WAF rules although it changes nothing. The sample
+// is real request traffic -- credentials removed, but paths, parameters and
+// headers as clients sent them -- and it exists to change the rules, so it is
+// held to the permission of the person who may change them rather than to
+// anyone who may look at a dashboard.
+func serveWAFCorpus(w http.ResponseWriter, r *http.Request) {
+	if !RequirePermission(w, r, auth.ActionWrite, auth.ResourceWafRules) {
+		return
+	}
+	w.Header().Set("Content-Type", "application/x-ndjson")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	_, _ = corpus.Shared().WriteJSONL(w)
 }

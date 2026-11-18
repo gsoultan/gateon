@@ -16,8 +16,8 @@ import (
 )
 
 // TestUpdateRefusesToStoreThePlaceholder is the store's own guard. The API
-// restores a kept secret before saving, but setup, GitOps sync, the diagnostic
-// fixes and ClamAV installation write the registry directly; whichever path
+// restores a kept secret before saving, but setup, the diagnostic fixes and
+// ClamAV installation write the registry directly; whichever path
 // carries the placeholder in, it must not become the session key.
 func TestUpdateRefusesToStoreThePlaceholder(t *testing.T) {
 	reg, path := registryWithReference(t)

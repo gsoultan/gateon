@@ -266,6 +266,13 @@ type TierDefaults struct {
 	// connection (1009). GATEON_WAF_WEBSOCKET_MESSAGE_LIMIT overrides it.
 	WAFWebSocketMessageLimit int
 
+	// WAFCorpusEntries is how many sampled requests the gateway keeps for
+	// tuning the WAF (ADR 0097), across every route that samples. One entry
+	// holds at most 4 KiB, so this times 4 KiB is the sample's whole memory
+	// bound; nothing is held when no route samples. A new entry displaces the
+	// oldest. GATEON_WAF_CORPUS_ENTRIES overrides it.
+	WAFCorpusEntries int
+
 	// CompressMaxBrotliEncoders is how many responses the compress middleware
 	// brotli-encodes at once in the whole process (ADR 0073). One encoder holds
 	// about 2.6 MiB once it has seen more than its 256 KiB window -- gzip about
@@ -475,6 +482,7 @@ func DefaultsFor(tier Tier) TierDefaults {
 			BackendQueueTimeout:                     2 * time.Second,
 			WAFMaxLargeBodyInspections:              4,
 			WAFWebSocketMessageLimit:                16 << 10, // 16 KiB
+			WAFCorpusEntries:                        512,      // at most 2 MiB
 			CompressMaxBrotliEncoders:               8,
 			SchemaMaxBodyBytes:                      1 << 20, // 1 MiB
 			SchemaMaxLargeBodies:                    2,
@@ -541,6 +549,7 @@ func DefaultsFor(tier Tier) TierDefaults {
 			BackendQueueTimeout:                     2 * time.Second,
 			WAFMaxLargeBodyInspections:              64,
 			WAFWebSocketMessageLimit:                256 << 10, // 256 KiB
+			WAFCorpusEntries:                        8192,      // at most 32 MiB
 			CompressMaxBrotliEncoders:               128,
 			SchemaMaxBodyBytes:                      4 << 20, // 4 MiB
 			SchemaMaxLargeBodies:                    16,
@@ -607,6 +616,7 @@ func DefaultsFor(tier Tier) TierDefaults {
 			BackendQueueTimeout:                     2 * time.Second,
 			WAFMaxLargeBodyInspections:              16,
 			WAFWebSocketMessageLimit:                64 << 10, // 64 KiB
+			WAFCorpusEntries:                        2048,     // at most 8 MiB
 			CompressMaxBrotliEncoders:               32,
 			SchemaMaxBodyBytes:                      1 << 20, // 1 MiB
 			SchemaMaxLargeBodies:                    8,
