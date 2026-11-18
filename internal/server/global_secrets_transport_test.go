@@ -54,12 +54,11 @@ func secretLadenConfig(t *testing.T) (*gateonv1.GlobalConfig, []string) {
 		Audit: &gateonv1.AuditConfig{Enabled: true, SignEntries: true, SignatureKey: r(),
 			DatabaseUrl:    "postgres://audit:" + r() + "@audit.internal:5432/audit",
 			DatabaseConfig: &gateonv1.DatabaseConfig{Driver: "postgres", Host: "audit.internal", Port: 5432, Password: r()}},
-		Redis: &gateonv1.RedisConfig{Addr: "redis.internal:6379", Password: r()},
-		Ha:    &gateonv1.HaConfig{AuthPass: r()},
-		Geoip: &gateonv1.GeoIPConfig{MaxmindLicenseKey: r()},
-		Management: &gateonv1.ManagementConfig{Bind: "127.0.0.1", Port: "8080", Gitops: &gateonv1.GitOpsConfig{
-			RepositoryUrl: "https://deploy:" + r() + "@git.internal/org/config.git", AuthToken: r()}},
-		Waf: &gateonv1.WafConfig{BotManagement: &gateonv1.BotManagementConfig{SecretKey: r()}},
+		Redis:      &gateonv1.RedisConfig{Addr: "redis.internal:6379", Password: r()},
+		Ha:         &gateonv1.HaConfig{AuthPass: r()},
+		Geoip:      &gateonv1.GeoIPConfig{MaxmindLicenseKey: r()},
+		Management: &gateonv1.ManagementConfig{Bind: "127.0.0.1", Port: "8080"},
+		Waf:        &gateonv1.WafConfig{BotManagement: &gateonv1.BotManagementConfig{SecretKey: r()}},
 		SecurityAdvanced: &gateonv1.SecurityAdvancedConfig{
 			Deception: &gateonv1.DeceptionConfig{CanaryToken: r()},
 			Pow:       &gateonv1.PowConfig{Secret: r()},
