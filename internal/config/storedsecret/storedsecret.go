@@ -156,22 +156,6 @@ var fields = []Field{
 		}
 		return nil
 	}},
-	// The repository URL is read like a database URL: a password in it is a
-	// credential go-git sends, and the rest says which repository it is.
-	{Name: "management.gitops.repository_url", URL: true, Ptr: func(c *gateonv1.GlobalConfig) *string {
-		if g := c.GetManagement().GetGitops(); g != nil {
-			return &g.RepositoryUrl
-		}
-		return nil
-	}},
-	{Name: "management.gitops.auth_token", Destination: func(c *gateonv1.GlobalConfig) string {
-		return urlOrigin(c.GetManagement().GetGitops().GetRepositoryUrl())
-	}, Ptr: func(c *gateonv1.GlobalConfig) *string {
-		if g := c.GetManagement().GetGitops(); g != nil {
-			return &g.AuthToken
-		}
-		return nil
-	}},
 	{Name: "waf.bot_management.secret_key", Ptr: func(c *gateonv1.GlobalConfig) *string {
 		if b := c.GetWaf().GetBotManagement(); b != nil {
 			return &b.SecretKey

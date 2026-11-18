@@ -214,7 +214,7 @@ func main() {
 	}
 
 	// Manage hot-reloadable background security subsystems (anomaly detection,
-	// GitOps, HA, WAF rule auto-update). Toggling these in the config now takes
+	// HA, WAF rule auto-update). Toggling these in the config now takes
 	// effect without a restart. Pass a properly-nil interface when the updater
 	// was not created, so the supervisor's nil check works as intended.
 	var wafAuto wafAutoUpdater
