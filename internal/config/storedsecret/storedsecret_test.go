@@ -27,12 +27,11 @@ func fullConfig() *gateonv1.GlobalConfig {
 			Driver: "postgres", Host: "db.internal", Port: 5432, User: "gateon", Database: "gateon"}},
 		Audit: &gateonv1.AuditConfig{SignEntries: true, DatabaseConfig: &gateonv1.DatabaseConfig{
 			Driver: "postgres", Host: "audit.internal", Port: 5432, User: "audit", Database: "audit"}},
-		Redis:      &gateonv1.RedisConfig{Enabled: true, Addr: "redis.internal:6379"},
-		Ha:         &gateonv1.HaConfig{Enabled: true},
-		Geoip:      &gateonv1.GeoIPConfig{Enabled: true},
-		Ai:         &gateonv1.AIConfig{Enabled: true, Provider: "anthropic"},
-		Management: &gateonv1.ManagementConfig{Gitops: &gateonv1.GitOpsConfig{Enabled: true}},
-		Waf:        &gateonv1.WafConfig{BotManagement: &gateonv1.BotManagementConfig{Enabled: true}},
+		Redis: &gateonv1.RedisConfig{Enabled: true, Addr: "redis.internal:6379"},
+		Ha:    &gateonv1.HaConfig{Enabled: true},
+		Geoip: &gateonv1.GeoIPConfig{Enabled: true},
+		Ai:    &gateonv1.AIConfig{Enabled: true, Provider: "anthropic"},
+		Waf:   &gateonv1.WafConfig{BotManagement: &gateonv1.BotManagementConfig{Enabled: true}},
 		SecurityAdvanced: &gateonv1.SecurityAdvancedConfig{
 			Deception: &gateonv1.DeceptionConfig{Enabled: true},
 			Pow:       &gateonv1.PowConfig{Enabled: true},

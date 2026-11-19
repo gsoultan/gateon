@@ -28,7 +28,7 @@ Drafts are held in memory (at most 64 routes) and lost on restart.
 /v1/waf/schema-drafts/{route}` starts a route again.
 `GATEON_WAF_SCHEMA_LEARNING=true` turns learning on for route WAFs that do not
 set it. Rolling back needs nothing undone: an older build ignores the setting.
-See ADR-0098.
+See ADR-0099.
 
 ### A route can keep a sample of its traffic for tuning the WAF
 
@@ -112,6 +112,26 @@ records them and forwards the response, as it does every DLP finding.
 
 A site that serves such content on purpose (documentation that prints a sample
 `/etc/passwd`) needs a WAF exception for the rule on that path.
+### GitOps is removed — **check `global.json` for a `management.gitops` block**
+
+The GitOps sync (`management.gitops`), which cloned a repository on a timer and
+replaced the global settings with a JSON file from it, is gone. It was off by
+default, never shown in the dashboard, synced only global settings, and stored
+what it pulled without the validation, administrator check or audit entry a
+save goes through. ADR 0098.
+
+**What may change for you.** If your `global.json` (or `global.yaml`) has a
+`gitops` block under `management`, the gateway still starts and the rest of the
+file still applies, but nothing is synced any more, and a warning at startup
+names `management.gitops`. The block is kept in the file across saves, so if
+you roll back to the previous version it is still there and still works. Once
+you no longer need to roll back, delete it from the file. If you relied on it, make the change through the dashboard or
+`PUT /v1/global`, or manage `global.json` yourself as a mounted file
+(`GLOBAL_CONFIG_FILE`). A repository token that was stored for it is no longer
+used and can be revoked at the Git host.
+
+A `gitops` field sent to `PUT /v1/global` or `UpdateGlobalConfig` is ignored, as
+every removed setting is.
 
 ### The Security Hub lists what the WAF cannot see
 

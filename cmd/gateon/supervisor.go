@@ -63,9 +63,6 @@ type securitySupervisor struct {
 	anomalyCancel context.CancelFunc
 	anomalyCfg    *gateonv1.AnomalyDetectionConfig
 
-	gitops    *config.GitOpsManager
-	gitopsCfg *gateonv1.GitOpsConfig
-
 	haCancel context.CancelFunc
 	haCfg    *gateonv1.HaConfig
 
@@ -118,7 +115,6 @@ func (s *securitySupervisor) reconcile(gc *gateonv1.GlobalConfig) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.reconcileAnomaly(gc.GetAnomalyDetection())
-	s.reconcileGitOps(gc.GetManagement().GetGitops())
 	s.reconcileHA(gc.GetHa())
 	s.reconcileWAFAutoUpdate(gc.GetWaf())
 	s.reconcileClamAV(gc.GetWaf().GetClamav())
@@ -148,25 +144,6 @@ func (s *securitySupervisor) reconcileAnomaly(cfg *gateonv1.AnomalyDetectionConf
 	s.anomalyCfg = proto.Clone(cfg).(*gateonv1.AnomalyDetectionConfig)
 	go ad.Start(ctx)
 	logger.L.LogInfo("anomaly detection (re)configured", "enabled", true)
-}
-
-// reconcileGitOps starts/stops/restarts the GitOps sync loop.
-func (s *securitySupervisor) reconcileGitOps(cfg *gateonv1.GitOpsConfig) {
-	enabled := cfg.GetEnabled()
-	running := s.gitops != nil
-	if running && (!enabled || !proto.Equal(cfg, s.gitopsCfg)) {
-		s.gitops.Stop()
-		s.gitops = nil
-		s.gitopsCfg = nil
-		running = false
-	}
-	if !enabled || running {
-		return
-	}
-	s.gitops = config.NewGitOpsManager(cfg, s.reg)
-	s.gitopsCfg = proto.Clone(cfg).(*gateonv1.GitOpsConfig)
-	s.gitops.Start(s.rootCtx)
-	logger.L.LogInfo("gitops sync (re)configured", "enabled", true)
 }
 
 // reconcileHA starts/stops/restarts the HA (VIP failover) manager.

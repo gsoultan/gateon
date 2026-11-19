@@ -1,4 +1,4 @@
-# 98. A route drafts its own API document from the shape of its traffic
+# 99. A route drafts its own API document from the shape of its traffic
 
 Date: 2026-11-17
 
