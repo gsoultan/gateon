@@ -278,11 +278,11 @@ type globalChangeSource interface {
 // applyEveryGlobalChange reconfigures the running subsystems on every change
 // the store reports, not only on the ones UpdateGlobalConfig makes.
 //
-// Only UpdateGlobalConfig applied a change. A GitOps sync, a fix applied from
-// Diagnostics, the ClamAV install mode and first-run setup all store through
-// the registry, and each left the WAF cache, the route chains, alerting, the
-// audit settings, IP reputation and GeoIP as they were: a WAF switched off in
-// the synced repository kept running until something else saved.
+// Only UpdateGlobalConfig applied a change. A fix applied from Diagnostics,
+// the ClamAV install mode and first-run setup all store through the registry,
+// and each left the WAF cache, the route chains, alerting, the audit settings,
+// IP reputation and GeoIP as they were: a WAF switched off by one of them kept
+// running until something else saved.
 func (s *ApiService) applyEveryGlobalChange(store config.GlobalConfigStore) {
 	src, ok := store.(globalChangeSource)
 	if !ok {

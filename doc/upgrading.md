@@ -47,6 +47,24 @@ upgrade after this one. The helper that installs a release is the installed
 version's, so the upgrade that brings this release in still behaves as
 before.
 
+### A route can keep a sample of its traffic for tuning the WAF
+
+A WAF middleware has a new setting, "Sample Requests for Tuning"
+(`corpus_sample_rate`, off by default). At 100 the gateway keeps one in a
+hundred of the requests that route forwards and the origin answers 2xx or 3xx.
+`gateon export-waf-corpus [API URL] [--token TOKEN] > corpus.jsonl` writes the
+sample in the shape `gwaf tune` reads, to suggest exceptions for false
+positives or, with `-schema`, to draft an OpenAPI document for the route.
+
+Kept: method, path, query parameters and headers. Never kept: bodies, client
+addresses, and credentials. `Authorization`, cookies and API keys are left
+out, and a token in a query parameter is masked. The sample is held in memory
+only (512, 2048 or 8192 requests by resource profile, at most 4 KiB each;
+`GATEON_WAF_CORPUS_ENTRIES` overrides it), the newest request replaces the
+oldest, and a restart empties it. Exporting needs an account that may change
+the WAF rules. `GATEON_WAF_CORPUS_SAMPLE_RATE` sets a rate for the
+gateway-wide WAF and for every route WAF that sets none. See ADR-0097.
+
 ### WebSocket messages can be inspected
 
 A WAF middleware has a new switch, "Inspect WebSocket messages"
@@ -111,6 +129,26 @@ records them and forwards the response, as it does every DLP finding.
 
 A site that serves such content on purpose (documentation that prints a sample
 `/etc/passwd`) needs a WAF exception for the rule on that path.
+### GitOps is removed — **check `global.json` for a `management.gitops` block**
+
+The GitOps sync (`management.gitops`), which cloned a repository on a timer and
+replaced the global settings with a JSON file from it, is gone. It was off by
+default, never shown in the dashboard, synced only global settings, and stored
+what it pulled without the validation, administrator check or audit entry a
+save goes through. ADR 0098.
+
+**What may change for you.** If your `global.json` (or `global.yaml`) has a
+`gitops` block under `management`, the gateway still starts and the rest of the
+file still applies, but nothing is synced any more, and a warning at startup
+names `management.gitops`. The block is kept in the file across saves, so if
+you roll back to the previous version it is still there and still works. Once
+you no longer need to roll back, delete it from the file. If you relied on it, make the change through the dashboard or
+`PUT /v1/global`, or manage `global.json` yourself as a mounted file
+(`GLOBAL_CONFIG_FILE`). A repository token that was stored for it is no longer
+used and can be revoked at the Git host.
+
+A `gitops` field sent to `PUT /v1/global` or `UpdateGlobalConfig` is ignored, as
+every removed setting is.
 
 ### The Security Hub lists what the WAF cannot see
 

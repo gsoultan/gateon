@@ -158,6 +158,7 @@ func globalWAFConfig(w *gateonv1.WafConfig, tier config.Tier, d security.Deps) W
 		AuditOnly:                   w.GetAuditOnly(),
 		AllowGitSmartHTTP:           gitSmartHTTP(""),
 		InspectWebSocket:            webSocketInspection(""),
+		CorpusSampleRate:            corpusSampleRate(""),
 		TrustCloudflare:             config.TrustCloudflare(w),
 		AppProfiles:                 w.GetAppProfiles(),
 		EnableSSRFProtection:        w.GetSsrfProtection(),
@@ -475,6 +476,7 @@ const (
 	// (WAFConfig.InspectWebSocket).
 	keyWebSocketInspection   = "websocket_inspection"
 	keyWebSocketMessageLimit = "websocket_message_limit"
+	keyCorpusSampleRate      = "corpus_sample_rate"
 )
 
 func NewWAF(cfg map[string]string, d security.Deps) (kind.Middleware, error) {

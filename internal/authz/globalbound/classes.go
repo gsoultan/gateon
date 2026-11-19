@@ -55,7 +55,7 @@ var classes = map[protoreflect.FullName]Class{
 	"gateon.v1.GlobalConfig.ha":                Section,
 	"gateon.v1.GlobalConfig.anomaly_detection": Section,
 	"gateon.v1.GlobalConfig.ebpf":              Section,
-	"gateon.v1.GlobalConfig.management":        Boundary, // bind, allowlist, CORS, public exposure, GitOps source
+	"gateon.v1.GlobalConfig.management":        Boundary, // bind, allowlist, CORS, public exposure
 	"gateon.v1.GlobalConfig.geoip":             Section,
 	"gateon.v1.GlobalConfig.debugger":          Section,
 	"gateon.v1.GlobalConfig.security_advanced": Section,

@@ -34,11 +34,11 @@ func (c *countingInvalidator) count() int {
 	return c.routes
 }
 
-// TestAGlobalChangeStoredOutsideTheAPIIsApplied: a GitOps sync stores the
-// configuration it pulled straight into the registry, as do the fixes applied
-// from Diagnostics and first-run setup. Only UpdateGlobalConfig reconfigured
-// the running gateway, so a WAF switched off in the synced repository kept
-// running -- the route chains it is built into were never rebuilt.
+// TestAGlobalChangeStoredOutsideTheAPIIsApplied: the fixes applied from
+// Diagnostics, the ClamAV install mode and first-run setup store straight into
+// the registry. Only UpdateGlobalConfig reconfigured the running gateway, so a
+// WAF switched off by one of them kept running -- the route chains it is built
+// into were never rebuilt.
 func TestAGlobalChangeStoredOutsideTheAPIIsApplied(t *testing.T) {
 	reg := config.NewGlobalRegistry(filepath.Join(t.TempDir(), "global.json"))
 	inv := &countingInvalidator{}
@@ -46,7 +46,7 @@ func TestAGlobalChangeStoredOutsideTheAPIIsApplied(t *testing.T) {
 
 	gc := reg.Get(t.Context())
 	gc.Waf.Enabled = !gc.Waf.GetEnabled()
-	if err := reg.Update(t.Context(), gc); err != nil { // as GitOpsManager.sync does
+	if err := reg.Update(t.Context(), gc); err != nil { // as a Diagnostics fix does
 		t.Fatal(err)
 	}
 	if inv.count() == 0 {
