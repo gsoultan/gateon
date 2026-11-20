@@ -73,9 +73,6 @@ var boundaryCases = []struct {
 		c.Management.Cors.AllowedOrigins = []string{"https://evil.example"}
 	}},
 	{"management.allow_public_management", func(c *gateonv1.GlobalConfig) { c.Management.AllowPublicManagement = true }},
-	{"management.gitops.repository_url", func(c *gateonv1.GlobalConfig) {
-		c.Management.Gitops = &gateonv1.GitOpsConfig{RepositoryUrl: "https://evil.example/config.git"}
-	}},
 	{"waf.trust_cloudflare_headers", func(c *gateonv1.GlobalConfig) { c.Waf.TrustCloudflareHeaders = true }},
 	{"waf.audit_log_path", func(c *gateonv1.GlobalConfig) { c.Waf.AuditLogPath = "/root/.ssh/authorized_keys" }},
 	{"tls.client_auth_type", func(c *gateonv1.GlobalConfig) { c.Tls.ClientAuthType = "RequestClientCert" }},

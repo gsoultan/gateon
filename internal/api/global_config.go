@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/gsoultan/gateon/internal/ai/llm"
 
@@ -171,6 +172,7 @@ func (s *ApiService) UpdateGlobalConfig(ctx context.Context, req *gateonv1.Updat
 	}
 
 	recordChange := s.auditRecordSettingsChange(ctx, stored, req.Config)
+	s.auditProtectionChanges(ctx, stored, req.Config)
 	if err := s.Globals.Update(ctx, req.Config); err != nil {
 		if rotated {
 			s.restoreSessionKey(stored)
@@ -278,11 +280,11 @@ type globalChangeSource interface {
 // applyEveryGlobalChange reconfigures the running subsystems on every change
 // the store reports, not only on the ones UpdateGlobalConfig makes.
 //
-// Only UpdateGlobalConfig applied a change. A GitOps sync, a fix applied from
-// Diagnostics, the ClamAV install mode and first-run setup all store through
-// the registry, and each left the WAF cache, the route chains, alerting, the
-// audit settings, IP reputation and GeoIP as they were: a WAF switched off in
-// the synced repository kept running until something else saved.
+// Only UpdateGlobalConfig applied a change. A fix applied from Diagnostics,
+// the ClamAV install mode and first-run setup all store through the registry,
+// and each left the WAF cache, the route chains, alerting, the audit settings,
+// IP reputation and GeoIP as they were: a WAF switched off by one of them kept
+// running until something else saved.
 func (s *ApiService) applyEveryGlobalChange(store config.GlobalConfigStore) {
 	src, ok := store.(globalChangeSource)
 	if !ok {
@@ -383,8 +385,16 @@ func validateGlobalSave(stored, proposed *gateonv1.GlobalConfig) error {
 	if err := selfupdate.ValidateSource(proposed.GetUpdate().GetSourceUrl()); err != nil {
 		return status.Error(codes.InvalidArgument, err.Error())
 	}
-	// The image is an argument to `docker run` on the gateway's own host.
-	if err := hostsecurity.ValidateClamAVImage(proposed.GetWaf().GetClamav().GetDockerImage()); err != nil {
+	// The image is an argument to `docker run` on the gateway's own host, so a
+	// new one must come from a ClamAV repository (ADR 0099). One already stored
+	// is checked only for being an image: an install whose mirror predates the
+	// allowlist can still save its other settings, and the install itself
+	// refuses the image until the host's environment allows it.
+	checkImage := hostsecurity.ValidateClamAVImage
+	if img := proposed.GetWaf().GetClamav().GetDockerImage(); img == stored.GetWaf().GetClamav().GetDockerImage() {
+		checkImage = hostsecurity.ValidateClamAVImageSyntax
+	}
+	if err := checkImage(proposed.GetWaf().GetClamav().GetDockerImage()); err != nil {
 		return status.Error(codes.InvalidArgument, err.Error())
 	}
 	// A maintenance window that cannot be read would be skipped in favour of
@@ -465,6 +475,71 @@ func (s *ApiService) auditRecordSettingsChange(ctx context.Context, stored, prop
 	}
 	s.logAudit(ctx, "update", "audit_config", "Changing audit settings: "+globalbound.DescribeRecordChanges(changes))
 	return true
+}
+
+// auditProtectionChanges writes an audit entry for a change to the
+// gateway-wide WAF and one for a change to alerting, before either is stored
+// (ADR 0099).
+//
+// Both were recorded only as "Updated global configuration", which says
+// nothing an alert can act on, and switching the WAF off is the first thing a
+// takeover does to the traffic. Written before the change, under the alerting
+// still in force, so an alert about alerting being switched off or re-pointed
+// goes to the destinations it is being taken from.
+func (s *ApiService) auditProtectionChanges(ctx context.Context, stored, proposed *gateonv1.GlobalConfig) {
+	if d := describeWAFChange(stored.GetWaf(), proposed.GetWaf()); d != "" {
+		s.logAudit(ctx, "update", "waf_config", "Changing WAF settings: "+d)
+	}
+	if !proto.Equal(alertingOf(stored), alertingOf(proposed)) {
+		a := proposed.GetAlerting()
+		s.logAudit(ctx, "update", "alerting_config", fmt.Sprintf(
+			"Changing alerting: enabled %t, %d destinations, %d playbooks",
+			a.GetEnabled(), len(a.GetDispatchers()), len(a.GetPlaybooks())))
+	}
+}
+
+// alertingOf is c's alerting section, with none read as the empty one it
+// means.
+func alertingOf(c *gateonv1.GlobalConfig) *gateonv1.AlertingConfig {
+	if a := c.GetAlerting(); a != nil {
+		return a
+	}
+	return &gateonv1.AlertingConfig{}
+}
+
+// describeWAFChange names a change to what the gateway-wide WAF blocks --
+// whether it runs, whether it only records, how hard it looks and for what --
+// or "" when none of that changed. The section's other settings are saved
+// with the configuration's own entry: they shape the WAF without switching
+// its protection down, and an entry for every one of them would be an alert
+// on every save.
+func describeWAFChange(stored, proposed *gateonv1.WafConfig) string {
+	var parts []string
+	if stored.GetEnabled() != proposed.GetEnabled() {
+		parts = append(parts, fmt.Sprintf("enabled %t -> %t", stored.GetEnabled(), proposed.GetEnabled()))
+	}
+	if stored.GetAuditOnly() != proposed.GetAuditOnly() {
+		parts = append(parts, fmt.Sprintf("audit only %t -> %t", stored.GetAuditOnly(), proposed.GetAuditOnly()))
+	}
+	if stored.GetParanoiaLevel() != proposed.GetParanoiaLevel() {
+		parts = append(parts, fmt.Sprintf("paranoia %d -> %d", stored.GetParanoiaLevel(), proposed.GetParanoiaLevel()))
+	}
+	if !proto.Equal(wafCategories(stored), wafCategories(proposed)) {
+		parts = append(parts, "attack categories changed")
+	}
+	if stored.GetCustomDirectives() != proposed.GetCustomDirectives() {
+		parts = append(parts, "custom directives changed")
+	}
+	return strings.Join(parts, ", ")
+}
+
+// wafCategories is w's categories, with none set read as an empty set: the
+// two mean the same thing, and proto.Equal tells them apart.
+func wafCategories(w *gateonv1.WafConfig) *gateonv1.WafCategories {
+	if c := w.GetCategories(); c != nil {
+		return c
+	}
+	return &gateonv1.WafCategories{}
 }
 
 // errorMessage is err's text without the gRPC status prefix, for the writers

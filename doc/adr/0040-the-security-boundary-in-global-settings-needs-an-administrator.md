@@ -73,7 +73,7 @@ The other writers of the global configuration, and why they are not held to it:
 - **GitOps** replaces the whole configuration from a repository on a timer.
   Its source -- `management.gitops` -- is itself Boundary, so only an
   administrator chooses the repository; what it says is that administrator's
-  choice.
+  choice. (Removed by ADR 0098: there is no GitOps writer any more.)
 - **Bootstrap** runs at start-up from the operator's own files.
 
 ### Who counts as an administrator

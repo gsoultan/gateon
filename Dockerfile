@@ -122,7 +122,8 @@ ENV GATEON_PROFILE=standard
 # entrypoint, middleware and TLS-option files seed a fresh database. Naming
 # every path keeps a missing mount from silently resolving against "/".
 #
-# To keep managing global.json as a mounted file instead (read-only, GitOps),
+# To keep managing global.json as a mounted file instead (read-only, from your
+# own deployment tooling),
 # set GLOBAL_CONFIG_FILE=/etc/gateon/global.json; the dashboard then cannot
 # save global settings, and setup must have been done elsewhere.
 ENV GATEON_DATA_DIR=/var/lib/gateon \

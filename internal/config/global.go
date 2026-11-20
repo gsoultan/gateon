@@ -4,11 +4,14 @@
 package config
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -50,6 +53,10 @@ type GlobalRegistry struct {
 	// $vault:, $aws-sm:) to that reference. The live config holds the resolved
 	// value; the file and a writer's view hold the reference. Guarded by mu.
 	refs map[string]string
+
+	// retired holds the keys of removed features the file was loaded with, by
+	// "section.key", so a save writes them back. See keepRetired.
+	retired map[string]any
 }
 
 var (
@@ -176,6 +183,8 @@ func (r *GlobalRegistry) load() {
 			return
 		}
 	}
+	warnRetiredKeys(r.path, data)
+	r.retired = retiredValuesIn(data, isYAMLPath(r.path))
 	storedsecret.AssignIDs(cfg)
 	refs := secretReferences(cfg)
 	if err := decryptSensitiveFields(cfg); err != nil {
@@ -257,6 +266,9 @@ func (r *GlobalRegistry) saveLocked() error {
 	}
 	if err != nil {
 		return fmt.Errorf("marshal global config: %w", err)
+	}
+	if data, err = keepRetired(data, isYAMLPath(r.path), r.retired); err != nil {
+		return fmt.Errorf("keep retired settings in global config: %w", err)
 	}
 	if err := os.WriteFile(r.path, data, 0o600); err != nil {
 		return fmt.Errorf("write global config file: %w", err)
@@ -574,6 +586,103 @@ func identityOverrides(refs map[string]string, c *gateonv1.GlobalConfig) []strin
 // warnIdentityOverridden says when global.json keeps a gateway from using the
 // identity its environment supplies: replicas, and restarts on a fresh volume,
 // that start from the environment would not share it.
+// retiredGlobalSections maps a top-level section of the global config to the
+// keys under it that belonged to a feature since removed, with the ADR that
+// removed it. The proto reserves each name, so the decoders skip it; this is
+// what keeps that from happening without a word, and what keeps the key in
+// the file across a save so the previous version still finds it after a
+// rollback.
+var retiredGlobalSections = map[string]map[string]string{
+	"management": {"gitops": "0098"},
+}
+
+// isYAMLPath reports whether the global config at path is YAML.
+func isYAMLPath(path string) bool {
+	return strings.HasSuffix(path, ".yaml") || strings.HasSuffix(path, ".yml")
+}
+
+// decodeLoose decodes data into a generic document, keeping JSON numbers as
+// written so that re-encoding one does not round it through a float.
+func decodeLoose(data []byte, isYAML bool) (map[string]any, error) {
+	var doc map[string]any
+	if isYAML {
+		return doc, yaml.Unmarshal(data, &doc)
+	}
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.UseNumber()
+	return doc, dec.Decode(&doc)
+}
+
+// retiredValuesIn returns the retired keys a global config file still
+// carries, as "section.key", with the value each holds. A file it cannot
+// parse holds none: load reports that failure on its own.
+func retiredValuesIn(data []byte, isYAML bool) map[string]any {
+	doc, err := decodeLoose(data, isYAML)
+	if err != nil {
+		return nil
+	}
+	found := map[string]any{}
+	for section, keys := range retiredGlobalSections {
+		body, ok := doc[section].(map[string]any)
+		if !ok {
+			continue
+		}
+		for key := range keys {
+			if v, ok := body[key]; ok {
+				found[section+"."+key] = v
+			}
+		}
+	}
+	return found
+}
+
+// retiredKeysIn names the retired keys a global config file still carries,
+// sorted.
+func retiredKeysIn(data []byte, isYAML bool) []string {
+	return slices.Sorted(maps.Keys(retiredValuesIn(data, isYAML)))
+}
+
+// keepRetired writes the retired values the file was loaded with back into
+// data, the file about to be written. The previous version still reads them:
+// dropping one on a save would mean that rolling back after any change made
+// from the dashboard came up without a setting the operator had, with nothing
+// saying so. Nothing in this version acts on them.
+func keepRetired(data []byte, isYAML bool, kept map[string]any) ([]byte, error) {
+	if len(kept) == 0 {
+		return data, nil
+	}
+	doc, err := decodeLoose(data, isYAML)
+	if err != nil {
+		return nil, err
+	}
+	for k, v := range kept {
+		section, key, _ := strings.Cut(k, ".")
+		body, ok := doc[section].(map[string]any)
+		if !ok {
+			body = map[string]any{}
+			doc[section] = body
+		}
+		body[key] = v
+	}
+	if isYAML {
+		return yaml.Marshal(doc)
+	}
+	return json.MarshalIndent(doc, "", "  ")
+}
+
+// warnRetiredKeys logs each retired key the file at path still carries. GitOps
+// was removed (doc/adr/0098); a global.json written before then can still hold
+// an enabled management.gitops block, and an operator reading it would expect
+// it to sync. It does not, and the gateway says so instead of starting quietly.
+func warnRetiredKeys(path string, data []byte) {
+	for _, k := range retiredKeysIn(data, isYAMLPath(path)) {
+		section, key, _ := strings.Cut(k, ".")
+		logger.L.LogWarn("the global config carries a setting for a feature that was removed; nothing acts on it. "+
+			"It is kept in the file so an earlier version still has it after a rollback; delete it once "+
+			"you no longer need that", "setting", k, "adr", "doc/adr/"+retiredGlobalSections[section][key], "path", path)
+	}
+}
+
 func warnIdentityOverridden(refs map[string]string, c *gateonv1.GlobalConfig) {
 	if over := identityOverrides(refs, c); len(over) > 0 {
 		logger.L.LogWarn("global.json names its own value for an identity secret the environment also sets, and "+

@@ -18,6 +18,7 @@ import (
 	"github.com/gsoultan/gateon/internal/ai"
 	"github.com/gsoultan/gateon/internal/alerting"
 	"github.com/gsoultan/gateon/internal/audit"
+	"github.com/gsoultan/gateon/internal/audit/syslogsink"
 	"github.com/gsoultan/gateon/internal/auth"
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/config/storedsecret"
@@ -83,6 +84,9 @@ func main() {
 		case "upgrade-helper":
 			// What gateon-upgrade.service runs when the gateway asks.
 			os.Exit(upgradeCLI().Helper(context.Background(), os.Args[2:]))
+		case "admin":
+			// Recover a locked-out administrator from the host (ADR 0099).
+			os.Exit(adminCLI(os.Args[2:], os.Stdout, os.Stderr))
 		case "export-waf-corpus":
 			// The embedder's half of `gwaf tune` (ADR 0097): the requests
 			// the WAF let through, as the JSON Lines that command reads.
@@ -197,6 +201,14 @@ func main() {
 		if err := audit.Init(gc.Audit, databaseURL); err != nil {
 			logger.L.LogError("failed to init audit manager", "error", err)
 		}
+		// Administrator activity alerts, and a copy of the log leaves the host
+		// as it is written (ADR 0099). A forwarding address that is set and
+		// cannot be used stops the start: running on without the copy the
+		// operator configured is the silence it exists to prevent.
+		audit.AddSink(alerting.AuditSink)
+		if _, err := syslogsink.Start(ctx); err != nil {
+			logger.Fatal("audit forwarding is configured and cannot be used", "error", err)
+		}
 
 		if gc.Ha != nil && gc.Ha.Enabled {
 			// Gossip reputation sync exposes no stop hook, so it stays boot-only.
@@ -214,7 +226,7 @@ func main() {
 	}
 
 	// Manage hot-reloadable background security subsystems (anomaly detection,
-	// GitOps, HA, WAF rule auto-update). Toggling these in the config now takes
+	// HA, WAF rule auto-update). Toggling these in the config now takes
 	// effect without a restart. Pass a properly-nil interface when the updater
 	// was not created, so the supervisor's nil check works as intended.
 	var wafAuto wafAutoUpdater
