@@ -187,6 +187,13 @@ type WAFConfig struct {
 	// GATEON_WAF_WEBSOCKET_MESSAGE_LIMIT for routes that set neither.
 	InspectWebSocket      bool
 	WebSocketMessageLimit int
+
+	// CorpusSampleRate keeps one in this many of the requests this WAF let
+	// through and the origin accepted, for tuning with gwaf's toolchain
+	// (ADR 0097). 0, the default, keeps nothing. What is kept, and what is
+	// not, is in internal/security/waf/corpus. GATEON_WAF_CORPUS_SAMPLE_RATE
+	// sets it for routes that set none.
+	CorpusSampleRate int
 }
 
 // Fingerprint returns a unique hash representing the WAF policy configuration.
@@ -232,6 +239,9 @@ func (c WAFConfig) Fingerprint() string {
 		appprofile.ScopeFingerprint(c.appProfileScope()))
 	// The document is the policy, so two routes with different ones must not
 	// share an engine. Hashed, because it can be a megabyte.
+	if c.CorpusSampleRate > 0 {
+		fmt.Fprintf(h, "corpus:%d\n", c.CorpusSampleRate)
+	}
 	if c.InspectWebSocket {
 		fmt.Fprintf(h, "ws:%d\n", c.WebSocketMessageLimit)
 	}
@@ -750,6 +760,11 @@ func (t *wafRuntime) inspectAndForward(next http.Handler, w http.ResponseWriter,
 		observe(tx.Decision())
 	}
 
+	// From here the request goes to the origin, so it is one the WAF let
+	// through. Whether it is kept for tuning waits on what the origin says.
+	w, keep := t.sample(w, r)
+	defer keep()
+
 	w = t.guardWebSocket(w, r, repScore)
 
 	if !t.cfg.EnableResponseInspection {
@@ -1109,6 +1124,7 @@ func parseWAFConfig(cfg map[string]string) WAFConfig {
 		OpenAPIMode:                 cfg[keyOpenAPIMode],
 		InspectWebSocket:            webSocketInspection(cfg[keyWebSocketInspection]),
 		WebSocketMessageLimit:       intVal(cfg[keyWebSocketMessageLimit]),
+		CorpusSampleRate:            corpusSampleRate(cfg[keyCorpusSampleRate]),
 	}
 }
 

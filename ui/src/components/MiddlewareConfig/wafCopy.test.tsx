@@ -127,3 +127,42 @@ describe("route WAF editor, WebSocket inspection", () => {
     expect(text({ audit_only: "true" })).not.toContain("is forwarded unread");
   });
 });
+
+// The sample is real request traffic leaving the request path, so the form
+// has to say what is in it before an operator turns it on, and writes the key
+// the gateway reads (corpus_sample_rate, waf_corpus_sample_test.go).
+describe("route WAF editor, request sample for tuning", () => {
+  test("the field says what is kept, what never is, and where the sample lives", () => {
+    const field = byLabel(
+      WAFConfigFields({ config: {}, updateConfig: () => {}, global: undefined, globalUnreadable: false }),
+      "Sample Requests for Tuning",
+    );
+    const description = String(field?.props.description);
+    expect(description).toContain("the origin answers 2xx or 3xx");
+    expect(description).toContain("Never kept: bodies, client addresses");
+    expect(description).toContain("lost on restart");
+    expect(description).toContain("gateon export-waf-corpus");
+    expect(field?.props.value).toBe("");
+  });
+
+  test("a rate is written under the key the gateway reads, and clearing it writes off", () => {
+    const written: Record<string, string> = {};
+    const field = byLabel(
+      WAFConfigFields({
+        config: { corpus_sample_rate: "100" },
+        updateConfig: (key, value) => {
+          written[key] = value;
+        },
+        global: undefined,
+        globalUnreadable: false,
+      }),
+      "Sample Requests for Tuning",
+    );
+    expect(field?.props.value).toBe(100);
+    const onChange = field?.props.onChange as (v: number | string) => void;
+    onChange(50);
+    expect(written.corpus_sample_rate).toBe("50");
+    onChange("");
+    expect(written.corpus_sample_rate).toBe("0");
+  });
+});

@@ -44,7 +44,10 @@ var droppedSystemEntries atomic.Uint64
 // writer was behind.
 func DroppedSystemEntries() uint64 { return droppedSystemEntries.Load() }
 
-// LogSystem records an entry the gateway makes for itself, user "system",
+// SystemUser is the UserID of every entry the gateway makes for itself.
+const SystemUser = "system"
+
+// LogSystem records an entry the gateway makes for itself, user SystemUser,
 // without waiting for it to be stored. It never blocks: when the writer is
 // that far behind the entry is dropped and counted. A manager with no writer,
 // which only a test builds, writes it at once.
@@ -58,7 +61,7 @@ func LogSystem(action, resource, details, ip string) {
 
 func (m *AuditManager) logSystem(e systemEntry) {
 	if m.queue == nil {
-		m.log(context.Background(), "system", e.action, e.resource, e.details, e.ip)
+		m.log(context.Background(), SystemUser, e.action, e.resource, e.details, e.ip)
 		return
 	}
 	select {
@@ -157,10 +160,8 @@ func (m *AuditManager) writeSystem(batch []systemEntry) {
 		return
 	}
 	m.noteStored(entries[len(entries)-1])
-	if m.Broadcaster != nil {
-		for _, e := range entries {
-			m.Broadcaster.Broadcast(e)
-		}
+	for _, e := range entries {
+		m.deliver(e)
 	}
 }
 
@@ -178,7 +179,7 @@ func (m *AuditManager) signSystem(batch []systemEntry) (entries []AuditEntry, pr
 	for i, e := range batch {
 		entry := AuditEntry{
 			ID:           uuid.NewString(),
-			UserID:       "system",
+			UserID:       SystemUser,
 			Action:       db.SafeText(e.action),
 			Resource:     db.SafeText(e.resource),
 			Details:      db.SafeText(e.details),

@@ -5,6 +5,8 @@ package auth
 
 import (
 	"bytes"
+	"context"
+	"crypto/rand"
 	"database/sql"
 	"encoding/base64"
 	"errors"
@@ -17,6 +19,7 @@ import (
 
 	"aidanwoods.dev/go-paseto"
 	"github.com/google/uuid"
+	"github.com/gsoultan/gateon/internal/audit"
 	"github.com/gsoultan/gateon/internal/auth/admission"
 	"github.com/gsoultan/gateon/internal/auth/apitoken"
 	"github.com/gsoultan/gateon/internal/auth/lockout"
@@ -236,9 +239,27 @@ func (m *Manager) checkFirstFactor(username, password, addr string) (*loginRow, 
 		return nil, ErrAccountDisabled
 	}
 	tracker.Succeed(key, source)
-	m.rememberSource(row.user.Id, source)
+	if m.rememberSource(row.user.Id, source) {
+		recordNewSource(row.user.Username, source, addr)
+	}
 	return row, nil
 }
+
+// recordNewSource writes the audit entry for a password accepted from a
+// network the account has not signed in from before, which the alert on
+// administrator activity reads (ADR 0099).
+//
+// It is written here, at the one step every sign-in passes on every transport,
+// and at the password rather than after the second factor: a password that
+// works from somewhere new is the earliest sign of a stolen one, whether or
+// not its holder also has the second factor.
+func recordNewSource(username, source, addr string) {
+	audit.Log(context.Background(), username, ActionLoginNewSource, "auth",
+		"Password accepted from "+source+", a network this account has not signed in from before", addr)
+}
+
+// ActionLoginNewSource is the audit action recordNewSource writes.
+const ActionLoginNewSource = "login_new_source"
 
 // trackerFor is the tracker and key an attempt is counted under. Accounts
 // that exist are keyed by id in a tracker only they reach, so a flood of
@@ -345,13 +366,15 @@ func (m *Manager) loginSources(id string) []string {
 // rememberSource records that account id signed in from source, keeping the
 // maxLoginSources most recent. A source already known is not rewritten, so an
 // ordinary sign-in costs a read and no write.
-func (m *Manager) rememberSource(id, source string) {
+//
+// It reports whether source was new to the account.
+func (m *Manager) rememberSource(id, source string) bool {
 	if source == "" {
-		return
+		return false
 	}
 	known := m.loginSources(id)
 	if slices.Contains(known, source) {
-		return
+		return false
 	}
 	known = append([]string{source}, known...)
 	if len(known) > maxLoginSources {
@@ -361,6 +384,7 @@ func (m *Manager) rememberSource(id, source string) {
 		m.logger.LogError("could not record a sign-in source; under attack this account "+
 			"will not be admitted from it", "error", err)
 	}
+	return true
 }
 
 // APITokens is the scrape-credential store (ADR 0050).
@@ -721,6 +745,109 @@ func (m *Manager) DeleteUser(id string) error {
 	// Dropping the cached entry is what forces that lookup to happen.
 	m.revokeSessions(id)
 	return nil
+}
+
+// Recovery is what RecoverAdministrator did.
+type Recovery struct {
+	UserID   string
+	Password string
+	Created  bool
+	// SessionsEnded is how many accounts' sessions were ended: every one.
+	SessionsEnded int
+}
+
+// ErrRecoveryNoSuchUser refuses a recovery for an account that does not exist
+// when creating one was not asked for.
+var ErrRecoveryNoSuchUser = errors.New("no account has that username; pass --create to make it")
+
+// RecoverAdministrator gives username back to whoever holds the host, for
+// `gateon admin reset` (ADR 0099).
+//
+// An attacker with an administrator's session can change every password,
+// re-enrol every second factor and delete every other account, and the
+// dashboard is then no way back in. The gateway also refuses to start on a
+// database without an administrator, so emptying the users table is not one
+// either. This is: the account becomes an enabled administrator with a new
+// random password, its second factor is cleared and owed again at the next
+// sign-in, its failed attempts are forgotten, and every session of every
+// account ends -- whoever else was signed in, the attacker included.
+func (m *Manager) RecoverAdministrator(username string, create bool) (Recovery, error) {
+	password, err := recoveryPassword(username)
+	if err != nil {
+		return Recovery{}, err
+	}
+	row, err := m.loadLoginRow(username)
+	if err != nil {
+		return Recovery{}, fmt.Errorf("read account: %w", err)
+	}
+	rec := Recovery{Password: password}
+	u := &gateonv1.User{Username: username, Password: password, Role: RoleAdmin}
+	switch {
+	case row != nil:
+		u.Id = row.user.Id
+	case !create:
+		return Recovery{}, ErrRecoveryNoSuchUser
+	default:
+		rec.Created = true
+	}
+	if err := m.UpsertUser(u); err != nil {
+		return Recovery{}, err
+	}
+	rec.UserID = u.Id
+	if err := m.restoreAdministrator(u.Id, username); err != nil {
+		return Recovery{}, err
+	}
+	rec.SessionsEnded, err = m.endEverySession()
+	return rec, err
+}
+
+// restoreAdministrator enables account id, owes it a new second factor and
+// forgets its failed attempts.
+func (m *Manager) restoreAdministrator(id, username string) error {
+	if err := m.SetUserDisabled(id, false); err != nil {
+		return err
+	}
+	if err := m.ResetTwoFactor(id); err != nil {
+		return err
+	}
+	m.resetFailedAttempts(username)
+	return nil
+}
+
+// endEverySession ends the sessions of every account and reports how many.
+func (m *Manager) endEverySession() (int, error) {
+	const pageSize = 100
+	ended := 0
+	for page := int32(0); ; page++ {
+		users, total, err := m.ListUsers(page, pageSize, "")
+		if err != nil {
+			return ended, fmt.Errorf("list accounts: %w", err)
+		}
+		for _, u := range users {
+			if err := m.EndSessions(u.Id); err != nil {
+				return ended, err
+			}
+			ended++
+		}
+		if len(users) < pageSize || int32(ended) >= total {
+			return ended, nil
+		}
+	}
+}
+
+// recoveryPassword is a random password that passes the policy for username.
+func recoveryPassword(username string) (string, error) {
+	for range 8 {
+		b := make([]byte, 18)
+		if _, err := rand.Read(b); err != nil {
+			return "", fmt.Errorf("generate password: %w", err)
+		}
+		p := base64.RawURLEncoding.EncodeToString(b)
+		if passpolicy.Check(p, username) == nil {
+			return p, nil
+		}
+	}
+	return "", errors.New("could not generate a password the policy accepts")
 }
 
 // UpdateSymmetricKey makes key the session key, now. Every session signed with
