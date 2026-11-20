@@ -98,9 +98,26 @@ func TestASavedClamAVImageIsAnImageReference(t *testing.T) {
 			t.Errorf("image %q saved: %v", bad, err)
 		}
 	}
-	for _, ok := range []string{"", "clamav/clamav:1.4", "registry.example:5000/sec/clamav@sha256:0123abcd"} {
+	for _, ok := range []string{"", "clamav/clamav:1.4", "clamav/clamav@sha256:0123abcd"} {
 		if err := validateGlobalSave(stored, withImage(ok)); err != nil {
 			t.Errorf("image %q refused at save: %v", ok, err)
 		}
+	}
+}
+
+// TestANewClamAVImageMustBeAClamAVRepository: a dashboard session could name
+// any image and have the host run it (ADR 0099). An image already stored is
+// kept, so an install with a mirror can still save everything else.
+func TestANewClamAVImageMustBeAClamAVRepository(t *testing.T) {
+	t.Setenv("GATEON_CLAMAV_IMAGE_REPOSITORIES", "")
+	withImage := func(image string) *gateonv1.GlobalConfig {
+		return &gateonv1.GlobalConfig{Waf: &gateonv1.WafConfig{Clamav: &gateonv1.ClamavConfig{DockerImage: image}}}
+	}
+	if err := validateGlobalSave(&gateonv1.GlobalConfig{}, withImage("attacker/tools:1")); status.Code(err) != codes.InvalidArgument {
+		t.Errorf("a new image outside the ClamAV repositories saved: %v", err)
+	}
+	mirror := "registry.example:5000/sec/clamav:1.4"
+	if err := validateGlobalSave(withImage(mirror), withImage(mirror)); err != nil {
+		t.Errorf("a stored mirror image blocked an unrelated save: %v", err)
 	}
 }
