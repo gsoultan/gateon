@@ -108,6 +108,7 @@ ADRs follow a lightweight [MADR](https://adr.github.io/madr/)-style format:
 | [0096](./0096-websocket-messages-are-judged-before-the-backend-reads-them.md) | WebSocket messages are judged before the backend reads them | Accepted |
 | [0097](./0097-the-gateway-keeps-a-sample-of-forwarded-requests-for-tuning.md) | The gateway keeps a sample of forwarded requests for tuning | Accepted |
 | [0098](./0098-settings-are-not-synced-from-git.md) | Settings are not synced from Git | Accepted |
+| [0099](./0099-a-takeover-is-noticed-off-the-host-and-recoverable-from-it.md) | A takeover is noticed, recorded off the host, and recoverable from it | Accepted |
 
 ## Conventions
 

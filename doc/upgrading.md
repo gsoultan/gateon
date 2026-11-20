@@ -11,6 +11,30 @@ here after the fact.
 
 ## Unreleased
 
+### ClamAV runs only from a ClamAV repository
+
+`waf.clamav.docker_image` must now name `clamav/clamav` or
+`clamav/clamav-debian`, at any tag or digest. If you run ClamAV from a mirror,
+add the mirror's repository to `GATEON_CLAMAV_IMAGE_REPOSITORIES`
+(comma-separated) in the gateway's environment before the next install or
+update; until then the install refuses the image. Saving other settings still
+works with the mirror stored. See ADR-0099.
+
+### Administrator activity alerts, an off-host audit copy, and `gateon admin reset`
+
+With alerting on, every destination now receives an alert for sign-ins from
+a new network, account changes, second-factor resets, audit and alerting
+changes, the WAF switched off or to audit-only, WAF rule changes, certificate
+writes and failed audit verification. These need no playbook. Expect one alert
+the first time each administrator signs in after the upgrade, because their
+network is new to the record.
+
+`GATEON_AUDIT_SYSLOG_ADDR` (`tls://`, `tcp://` or `udp://host:port`) sends
+every audit entry off the host as it is written. A value that is set and
+cannot be used stops the start. Certificate and key uploads are now audited.
+`sudo gateon admin reset <username>` recovers a locked-out administrator; see
+[incident-compromise.md](incident-compromise.md) and ADR-0099.
+
 ### A route can keep a sample of its traffic for tuning the WAF
 
 A WAF middleware has a new setting, "Sample Requests for Tuning"
