@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 // Package schemalearn drafts a route's OpenAPI document from the requests the
-// route forwards (ADR 0099).
+// route forwards (ADR 0100).
 //
 // A route can be checked against an OpenAPI document (ADR 0095), and most
 // routes have none. This watches a route's traffic and drafts one: which
