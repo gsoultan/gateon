@@ -39,6 +39,11 @@ func recordAudit(t *testing.T) func() []audit.AuditEntry {
 			t.Fatal(err)
 		}
 	})
+	// Re-enabled for every test, not once: the log's configuration is as
+	// process-global as the log, and a test in this package that saves a
+	// global config without an audit section turns it off for whatever runs
+	// next -- under -shuffle, sometimes this.
+	audit.UpdateConfig(&gateonv1.AuditConfig{Enabled: true})
 	var mu sync.Mutex
 	var got []audit.AuditEntry
 	remove := audit.AddSink(func(e audit.AuditEntry) {
