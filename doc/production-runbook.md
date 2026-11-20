@@ -388,8 +388,9 @@ while you investigate. Decide in section 0 whether that path exists.
 - **Locked out of the management plane:** use the tunnel from the host itself;
   `GATEON_MANAGEMENT_ALLOWED_IPS` from the environment overrides the stored
   config.
-- **Suspected compromise of an administrator account:** sign that account out
-  (sign-out ends every session of the account), change its password, re-enrol
-  2FA, rotate the session key, and read the audit log from your off-host copy.
+- **Suspected compromise of an administrator account, or of the gateway:**
+  follow [incident-compromise.md](incident-compromise.md). Locked out of every
+  administrator account: `sudo gateon admin reset <username>` with the
+  gateway stopped.
 - **Report a vulnerability** as [SECURITY.md](../SECURITY.md) describes, not in a
   public issue.

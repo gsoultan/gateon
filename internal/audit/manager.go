@@ -68,6 +68,7 @@ type AuditManager struct {
 	writerDone chan struct{}
 	// lastStamp is the newest timestamp handed to an entry; guarded by mu.
 	lastStamp time.Time
+	stopOnce  sync.Once
 }
 
 // insertAuditQuery stores one entry.
@@ -175,19 +176,25 @@ func warnIfNotRecording(cfg *gateonv1.AuditConfig) {
 	}
 }
 
+// Stop stores what is queued and closes the log's statements. A second call
+// does nothing.
 func Stop() {
 	if manager != nil {
-		close(manager.stop)
-		if manager.writerDone != nil {
-			<-manager.writerDone // what is queued is stored before the database goes
-		}
-		manager.stmtMu.Lock()
-		if manager.stmtInsert != nil {
-			_ = manager.stmtInsert.Close()
-			manager.stmtInsert = nil
-		}
-		manager.stmtMu.Unlock()
+		manager.stopOnce.Do(manager.shutdown)
 	}
+}
+
+func (m *AuditManager) shutdown() {
+	close(m.stop)
+	if m.writerDone != nil {
+		<-m.writerDone // what is queued is stored before the database goes
+	}
+	m.stmtMu.Lock()
+	if m.stmtInsert != nil {
+		_ = m.stmtInsert.Close()
+		m.stmtInsert = nil
+	}
+	m.stmtMu.Unlock()
 }
 
 func (m *AuditManager) prepareStatements() {
@@ -318,10 +325,8 @@ func (m *AuditManager) log(ctx context.Context, userID, action, resource, detail
 		return
 	}
 	m.noteStored(entry)
-	// Broadcast to real-time subscribers (for Command Center etc)
-	if m.Broadcaster != nil {
-		m.Broadcaster.Broadcast(entry)
-	}
+	// To the sinks (ADR 0099) and the real-time subscribers (Command Center).
+	m.deliver(entry)
 }
 
 func (m *AuditManager) sign(entry AuditEntry, key string) string {

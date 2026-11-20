@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -411,14 +412,14 @@ func lookPath(bin string) bool {
 // a repository path and a digest fit in it with room to spare.
 const maxClamAVImageLen = 255
 
-// ValidateClamAVImage refuses a docker_image that is not an image reference.
-// "" is valid: it means the default image.
+// ValidateClamAVImageSyntax refuses a docker_image that is not an image
+// reference. "" is valid: it means the default image.
 //
 // The value is an argument to `docker pull` and `docker run`. No shell is
 // involved, but docker reads an argument that starts with "-" as one of its
 // own flags, so "--privileged" in this field was a flag and not an image.
 // Anything outside the characters a reference is made of is refused with it.
-func ValidateClamAVImage(image string) error {
+func ValidateClamAVImageSyntax(image string) error {
 	if image == "" {
 		return nil
 	}
@@ -435,6 +436,67 @@ func ValidateClamAVImage(image string) error {
 		}
 	}
 	return nil
+}
+
+// EnvClamAVImageRepositories adds image repositories, comma-separated, to the
+// ones ClamAV may be run from: a private mirror of the official image, for
+// example "registry.internal:5000/mirror/clamav". It is read from the host's
+// environment and nowhere else (ADR 0099).
+const EnvClamAVImageRepositories = "GATEON_CLAMAV_IMAGE_REPOSITORIES"
+
+// officialClamAVRepositories are the repositories the ClamAV project publishes.
+var officialClamAVRepositories = []string{"clamav/clamav", "clamav/clamav-debian"}
+
+// ValidateClamAVImage refuses a docker_image that is not an image reference,
+// or that names a repository ClamAV is not published from. "" is valid: it
+// means the default image.
+//
+// ADR 0090 made the image an administrator's setting and checked that it was
+// an image, and any image was still one: whoever held an administrator's
+// session could have the gateway's host `docker run` a container of their
+// choosing, which on a host where the gateway may use docker is root. The
+// repositories an install may run ClamAV from are now the official ones and
+// those the host's own environment adds, so a dashboard session cannot name
+// a new one. A tag or a digest on an allowed repository stays the
+// administrator's choice.
+func ValidateClamAVImage(image string) error {
+	if err := ValidateClamAVImageSyntax(image); err != nil || image == "" {
+		return err
+	}
+	repo := clamAVImageRepository(image)
+	if slices.Contains(allowedClamAVRepositories(), repo) {
+		return nil
+	}
+	return fmt.Errorf("waf.clamav.docker_image names %q, which is not a ClamAV repository this gateway runs; "+
+		"use %s, or add the repository to %s in the gateway's environment",
+		repo, strings.Join(officialClamAVRepositories, " or "), EnvClamAVImageRepositories)
+}
+
+// allowedClamAVRepositories is the official repositories and the ones
+// EnvClamAVImageRepositories adds.
+func allowedClamAVRepositories() []string {
+	out := slices.Clone(officialClamAVRepositories)
+	for r := range strings.SplitSeq(os.Getenv(EnvClamAVImageRepositories), ",") {
+		if r = strings.TrimSpace(r); r != "" {
+			out = append(out, clamAVImageRepository(r))
+		}
+	}
+	return out
+}
+
+// clamAVImageRepository is image without its digest or tag, and without the
+// docker.io registry docker assumes when none is named, so "clamav/clamav",
+// "docker.io/clamav/clamav:1.4" and "clamav/clamav@sha256:..." are one
+// repository.
+func clamAVImageRepository(image string) string {
+	if i := strings.IndexByte(image, '@'); i >= 0 {
+		image = image[:i]
+	}
+	if i := strings.LastIndexByte(image, ':'); i > strings.LastIndexByte(image, '/') {
+		image = image[:i]
+	}
+	image = strings.TrimPrefix(image, "docker.io/")
+	return strings.TrimPrefix(image, "index.docker.io/")
 }
 
 func isImageRefStart(c byte) bool {
