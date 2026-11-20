@@ -3,7 +3,10 @@
 
 package e2e
 
-import "testing"
+import (
+	"net"
+	"testing"
+)
 
 // Every port in one environment must differ. Allocated one at a time, Linux
 // handed out a duplicate in about 1 set of 6 in 500, enough to fail a few
@@ -50,4 +53,47 @@ func TestPatchPortsNeverRewritesAnAllocatedPort(t *testing.T) {
 	if got := patchPorts(in, ports); got != want {
 		t.Fatalf("patchPorts rewrote an allocated port:\n got %s\nwant %s", got, want)
 	}
+}
+
+// waitForPortRelease is what load_test relies on between two gateway runs on
+// the same ports; it must come back as soon as the port stops answering, and
+// not before. The listener here closes only after the helper has connected to
+// it at least once, so a helper that returned without waiting would be caught
+// by the accept never happening.
+func TestWaitForPortReleaseReturnsOnceTheListenerCloses(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	port := ln.Addr().(*net.TCPAddr).Port
+
+	accepted := make(chan struct{})
+	go func() {
+		conn, acceptErr := ln.Accept()
+		if acceptErr == nil {
+			_ = conn.Close()
+		}
+		close(accepted)
+		_ = ln.Close()
+	}()
+
+	waitForPortRelease(t, port)
+
+	select {
+	case <-accepted:
+	default:
+		t.Fatal("waitForPortRelease returned while the port was still accepting connections")
+	}
+}
+
+func TestWaitForPortReleaseReturnsAtOnceForAClosedPort(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	port := ln.Addr().(*net.TCPAddr).Port
+	if err := ln.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	waitForPortRelease(t, port)
 }
