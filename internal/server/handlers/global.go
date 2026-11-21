@@ -1172,7 +1172,7 @@ func serveWAFCorpus(w http.ResponseWriter, r *http.Request) {
 }
 
 // serveWAFSchemaDrafts answers the OpenAPI document each learning route has
-// drafted from its traffic (ADR 0100).
+// drafted from its traffic (ADR 0101).
 //
 // Read on the middlewares is enough, unlike the request sample: a draft holds
 // path templates, parameter names and types, and no value any client sent. It

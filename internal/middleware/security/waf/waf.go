@@ -197,7 +197,7 @@ type WAFConfig struct {
 	CorpusSampleRate int
 
 	// LearnSchema drafts an OpenAPI document for this route from the shape
-	// of the requests it forwards and the origin accepts (ADR 0100). Shapes
+	// of the requests it forwards and the origin accepts (ADR 0101). Shapes
 	// only: no value is kept. The draft is read from the management API and
 	// enforces nothing. GATEON_WAF_SCHEMA_LEARNING sets it for routes that
 	// do not.
@@ -422,7 +422,7 @@ type wafRuntime struct {
 	redactor *dlpRedactor
 	fp       string
 	// learner is where this route's request shapes go, nil unless the route
-	// learns its schema (ADR 0100).
+	// learns its schema (ADR 0101).
 	learner *schemalearn.Handle
 }
 
