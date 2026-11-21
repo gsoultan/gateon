@@ -36,8 +36,8 @@ func TestATLSEntrypointServesHTTP2UnderItsStreamCap(t *testing.T) {
 		t.Fatalf("a TLS entrypoint served %q, want HTTP/2.0", body)
 	}
 
-	if got := advertisedMaxConcurrentStreams(t, addr, clientTLS); got != h2MaxConcurrentStreams {
-		t.Fatalf("SETTINGS_MAX_CONCURRENT_STREAMS = %d, want %d", got, h2MaxConcurrentStreams)
+	if got := advertisedMaxConcurrentStreams(t, addr, clientTLS); got != uint32(h2MaxConcurrentStreams()) {
+		t.Fatalf("SETTINGS_MAX_CONCURRENT_STREAMS = %d, want %d", got, h2MaxConcurrentStreams())
 	}
 }
 
@@ -47,9 +47,9 @@ func TestATLSEntrypointServesHTTP2UnderItsStreamCap(t *testing.T) {
 func TestTheEntrypointServerSetsItsHTTP2CapsExplicitly(t *testing.T) {
 	e := &httpEntrypoint{ep: &gateonv1.EntryPoint{Id: "h2-caps", Address: "127.0.0.1:0"}}
 	cfg := e.newServer(http.NotFoundHandler()).HTTP2
-	if cfg == nil || cfg.MaxConcurrentStreams != h2MaxConcurrentStreams || cfg.MaxReadFrameSize != h2MaxReadFrameSize {
+	if cfg == nil || cfg.MaxConcurrentStreams != h2MaxConcurrentStreams() || cfg.MaxReadFrameSize != h2MaxReadFrameSize {
 		t.Fatalf("HTTP/2 config = %+v, want MaxConcurrentStreams %d and MaxReadFrameSize %d",
-			cfg, h2MaxConcurrentStreams, h2MaxReadFrameSize)
+			cfg, h2MaxConcurrentStreams(), h2MaxReadFrameSize)
 	}
 }
 
