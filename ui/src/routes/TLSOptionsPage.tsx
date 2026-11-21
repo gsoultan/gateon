@@ -459,7 +459,7 @@ export default function TLSOptionsPage({ embedded = false }: { embedded?: boolea
           <Group grow>
             <Select
               label="Client Auth Type"
-              description="Choose how the server validates peer certificates. For Cloudflare Authenticated Origin Pulls, select 'RequireAndVerifyClientCert'."
+              description="Choose how the server validates peer certificates. For Cloudflare Authenticated Origin Pulls, select 'RequireAndVerifyClientCert' with a per-zone origin-pull CA: the built-in one is shared by every Cloudflare account."
               placeholder="Select client auth policy"
               data={[
                 { label: "None (no client cert)", value: "" },
@@ -480,7 +480,7 @@ export default function TLSOptionsPage({ embedded = false }: { embedded?: boolea
             />
             <MultiSelect
               label="Client Authorities (CA bundles)"
-              description="Select one or more CA bundles to trust for client certificates (e.g., Cloudflare Origin Pull CA)."
+              description="Select one or more CA bundles to trust for client certificates. Cloudflare's built-in origin-pull CA admits every Cloudflare account, not only yours."
               placeholder={caList && caList.length > 0 ? "Select client authorities" : "No client authorities found. Add them in Global TLS → Client Authorities"}
               data={(caList || []).map((c) => ({ value: c.id, label: `${c.name} (${c.id})` }))}
               value={editingOption?.clientAuthorityIds || []}

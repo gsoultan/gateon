@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 import { describe, expect, test } from "bun:test";
-import { expiryLine, orderForUse } from "./builtinCAs";
+import { caveatFor, expiryLine, isBuiltinRef, orderForUse } from "./builtinCAs";
 import { BuiltinCertificateAuthorityUse } from "../../services/gen/gateon/v1/tls_pb";
 
 const base = { notAfter: "2029-08-15T17:00:00Z", keyAlgorithm: "ECDSA", expired: false, expiringSoon: false };
@@ -32,5 +32,24 @@ describe("orderForUse", () => {
   });
   test("a chain field keeps the origin CAs first", () => {
     expect(orderForUse(cas, "server-chain").map((c) => c.ref)).toEqual(["rsa", "ecc", "aop"]);
+  });
+});
+
+describe("caveatFor", () => {
+  const cas = [
+    { ref: "builtin:cloudflare-origin-pull-ca", caveat: "Shared by every Cloudflare account" },
+    { ref: "builtin:cloudflare-origin-ca-ecc", caveat: "" },
+  ];
+
+  test("names the chosen built-in CA's caveat", () => {
+    expect(caveatFor(cas, "builtin:cloudflare-origin-pull-ca")).toContain("every Cloudflare account");
+  });
+
+  test("says nothing for a CA without one, an unknown ref, or a path", () => {
+    expect(caveatFor(cas, "builtin:cloudflare-origin-ca-ecc")).toBe("");
+    expect(caveatFor(cas, "builtin:nope")).toBe("");
+    expect(caveatFor(cas, "certs/ca.pem")).toBe("");
+    expect(isBuiltinRef("certs/ca.pem")).toBe(false);
+    expect(isBuiltinRef("builtin:cloudflare-origin-pull-ca")).toBe(true);
   });
 });
