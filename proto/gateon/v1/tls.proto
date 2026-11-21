@@ -84,6 +84,9 @@ message BuiltinCertificateAuthority {
   bool expired = 8;
   // True when the certificate expires within 90 days, or has expired.
   bool expiring_soon = 9;
+  // Output only: what trusting this CA does not prove, for the dashboard to
+  // show wherever it is chosen. Empty when there is nothing to say.
+  string caveat = 10;
 }
 
 message ListBuiltinCertificateAuthoritiesRequest {

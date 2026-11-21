@@ -34,6 +34,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/gsoultan/gateon/internal/request"
 	secwaf "github.com/gsoultan/gateon/internal/security/waf"
+	"github.com/gsoultan/gateon/internal/security/waf/corpus"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
@@ -272,6 +273,11 @@ var wafBoundaryEffects = []keyEffect{
 	// limit says otherwise. The backend reports how many bytes it was given.
 	{mwType: "waf", key: "websocket_inspection", a: "false", b: "true", backend: tunnelBackend,
 		probe: upgradeRequest, upgrade: maskedMessage(`{"q":"1' UNION SELECT password FROM users--"}`)},
+	// A forwarded request the origin accepted is kept for tuning at a rate of
+	// one in one and not at all at zero. Nothing about the response differs,
+	// so what is measured is how many entries the sample was given.
+	{mwType: "waf", key: "corpus_sample_rate", a: "0", b: "1", probe: get("/api/v1/orders?id=7"),
+		measure: func(*testing.T) float64 { return float64(corpus.Shared().Total()) }},
 	{mwType: "waf", key: "websocket_message_limit", base: map[string]string{"websocket_inspection": "true"},
 		a: "0", b: "64", backend: tunnelBackend,
 		probe: upgradeRequest, upgrade: maskedMessage(`{"note":"` + strings.Repeat("a", 100) + `"}`)},

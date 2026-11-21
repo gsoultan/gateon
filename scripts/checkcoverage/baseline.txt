@@ -144,7 +144,7 @@ github.com/gsoultan/gateon/internal/auth/lockout 96.8%
 github.com/gsoultan/gateon/internal/auth/passpolicy 100.0%
 github.com/gsoultan/gateon/internal/authz/globalbound 85.1%
 github.com/gsoultan/gateon/internal/authz/routebind 94.5%
-github.com/gsoultan/gateon/internal/config 47.4%
+github.com/gsoultan/gateon/internal/config 50.7%
 github.com/gsoultan/gateon/internal/config/mwsecret 91.2%
 github.com/gsoultan/gateon/internal/config/storedsecret 86.8%
 github.com/gsoultan/gateon/internal/db 80.4%

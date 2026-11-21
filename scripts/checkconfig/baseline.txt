@@ -27,11 +27,6 @@
 # --- DebuggerConfig ---
 
 
-# --- GitOpsConfig ---
-# ssh_private_key: auth_token is read, so token auth works and
-# SSH-authenticated repositories cannot actually be used.
-
-
 # --- LogConfig ---
 
 

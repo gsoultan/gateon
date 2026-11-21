@@ -102,8 +102,10 @@ func TestRestoreRefusesAKeptSecretWhoseDestinationMoved(t *testing.T) {
 		"auth.database_url": func(c *gateonv1.GlobalConfig) {
 			c.Auth.DatabaseUrl = strings.Replace(c.Auth.DatabaseUrl, "db.internal", "evil.example", 1)
 		},
-		"management.gitops.auth_token": func(c *gateonv1.GlobalConfig) {
-			c.Management.Gitops.RepositoryUrl = "https://evil.example/org/repo.git"
+		// The key goes to the provider's base URL, so moving the URL's host
+		// moves the key, even with credentials written into the URL.
+		"ai.api_key": func(c *gateonv1.GlobalConfig) {
+			c.Ai.BaseUrl = "https://user:pw@evil.example:8443/v1?x=1"
 		},
 		"security_advanced.ip_reputation.integrations": func(c *gateonv1.GlobalConfig) {
 			c.SecurityAdvanced.IpReputation.Integrations[0].Type = "virustotal"
@@ -111,8 +113,8 @@ func TestRestoreRefusesAKeptSecretWhoseDestinationMoved(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			stored, update := storedAndEcho(t)
-			stored.Management.Gitops.RepositoryUrl = "https://git.example/org/repo.git"
-			update.Management.Gitops.RepositoryUrl = stored.Management.Gitops.RepositoryUrl
+			stored.Ai.BaseUrl = "https://api.example/v1"
+			update.Ai.BaseUrl = stored.Ai.BaseUrl
 			move(update)
 			err := Restore(update, stored)
 			if !errors.Is(err, ErrMoved) || !strings.Contains(err.Error(), name) {
