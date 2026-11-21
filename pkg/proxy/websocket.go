@@ -14,6 +14,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"runtime/debug"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -378,13 +379,32 @@ func tunnelUpgrade(clientConn net.Conn, fromClient io.Reader, backendConn net.Co
 
 	done := make(chan struct{})
 	go func() {
+		defer close(done)
+		// This goroutine is the proxy's own, so net/http's recovery is not
+		// above it, and a reader wrapped around the client -- the WAF's
+		// WebSocket inspection is one -- runs here on what the client sent.
+		// A panic in it ended the process; it closes this tunnel instead.
+		defer recoverTunnel(clientConn, backendConn)
 		copyWithPooledBuffer(clock.Writer(backendConn), clientSide)
 		closeWrite(backendConn)
-		close(done)
 	}()
 	copyWithPooledBuffer(clock.Writer(clientConn), backendReader)
 	closeWrite(clientConn)
 	<-done
+}
+
+// recoverTunnel ends a tunnel whose client-to-backend copy panicked: both
+// connections are closed, so the other direction returns too, and the panic is
+// logged with its stack. The panic is still a bug; this keeps it to one tunnel.
+func recoverTunnel(clientConn, backendConn net.Conn) {
+	p := recover()
+	if p == nil {
+		return
+	}
+	_ = clientConn.Close()
+	_ = backendConn.Close()
+	logger.L.LogError("panic relaying an upgraded connection; the tunnel is closed",
+		"remote", clientConn.RemoteAddr().String(), "panic", p, "stack", string(debug.Stack()))
 }
 
 // copyWithPooledBuffer streams src→dst reusing a buffer from the shared proxy

@@ -19,6 +19,7 @@ import (
 	"github.com/gsoultan/gateon/internal/db"
 	"github.com/gsoultan/gateon/internal/middleware/security"
 	"github.com/gsoultan/gateon/internal/security/waf"
+	"github.com/gsoultan/gateon/internal/security/wsinspect"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 	dto "github.com/prometheus/client_model/go"
@@ -283,5 +284,28 @@ func TestWebSocketSettingChangesTheEngineKey(t *testing.T) {
 	}
 	if parseWAFConfig(map[string]string{keyWebSocketInspection: "false"}).InspectWebSocket {
 		t.Error("a route that says false was overridden by the environment")
+	}
+}
+
+// TestWebSocketInspectionPanicFailsClosed refuses a message whose judgement
+// panicked instead of letting the panic leave the inspector. The inspector runs
+// on the proxy's client-to-backend goroutine, where net/http's recovery is not
+// above it, so before the fix the panic ended the process. An engine with no
+// compiled WAF stands in for a WAF bug: NewTransaction on it panics.
+func TestWebSocketInspectionPanicFailsClosed(t *testing.T) {
+	e := &wafEngine{cfg: WAFConfig{RouteID: "ws-panic"}}
+	r := httptest.NewRequest(http.MethodGet, "/ws", nil)
+
+	var got wsinspect.Verdict
+	func() {
+		defer func() {
+			if p := recover(); p != nil {
+				t.Fatalf("the inspector let a panic out: %v", p)
+			}
+		}()
+		got = e.messageInspector(r, 0)([]byte(wsClean), true)
+	}()
+	if got != wsinspect.Refuse {
+		t.Fatalf("verdict = %v; want the message refused when judging it panicked", got)
 	}
 }
