@@ -28,3 +28,15 @@ export function orderForUse<T extends Pick<BuiltinCertificateAuthority, "use">>(
   const want = wantedUse[use];
   return [...cas].sort((a, b) => Number(b.use === want) - Number(a.use === want));
 }
+
+/** The prefix a ca_file value carries when it names a built-in CA. */
+export const BUILTIN_PREFIX = "builtin:";
+
+export function isBuiltinRef(caFile: string): boolean {
+  return caFile.startsWith(BUILTIN_PREFIX);
+}
+
+/** The caveat of the built-in CA caFile names, or "" when it has none or names none. */
+export function caveatFor(cas: readonly Pick<BuiltinCertificateAuthority, "ref" | "caveat">[], caFile: string): string {
+  return cas.find((ca) => ca.ref === caFile)?.caveat ?? "";
+}

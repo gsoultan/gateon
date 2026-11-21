@@ -55,8 +55,22 @@ type Authority struct {
 	// SHA256 is the pinned fingerprint of the DER certificate, lowercase hex,
 	// as Cloudflare's published file produces it.
 	SHA256 string
+	// Caveat is what trusting this CA does not prove, shown wherever it is
+	// chosen. Empty when there is nothing to say.
+	Caveat string
 	file   string
 }
+
+// sharedOriginPullCaveat is the origin-pull CA's caveat (review S2). It is
+// Cloudflare's shared Authenticated Origin Pulls certificate: Cloudflare
+// presents the same client certificate for every zone, so requiring it proves
+// a connection came through Cloudflare, not through your account. Anyone can
+// add this origin to a zone of their own, turn on origin pulls, and pass,
+// skipping your Cloudflare WAF and rate limits. Cloudflare's documentation
+// says the same and recommends a per-zone certificate.
+const sharedOriginPullCaveat = "Shared by every Cloudflare account: it proves a connection came through " +
+	"Cloudflare, not through your zone. Anyone can point a zone of their own at this origin and pass. " +
+	"Use a per-zone origin-pull certificate, or restrict the routes with Host()."
 
 //go:embed certs/*.pem
 var files embed.FS
@@ -83,8 +97,9 @@ var catalog = [...]Authority{
 	},
 	{
 		Ref:    Prefix + "cloudflare-origin-pull-ca",
-		Name:   "Cloudflare Authenticated Origin Pulls CA",
+		Name:   "Cloudflare Authenticated Origin Pulls CA (shared by every Cloudflare account)",
 		Use:    UseClientCA,
+		Caveat: sharedOriginPullCaveat,
 		SHA256: "9a1ac2b4be15f9f27eee20a734cba4e9898f61001b3bd7c84b69b56a3e25a2b9",
 		file:   "certs/cloudflare-origin-pull-ca.pem",
 	},

@@ -28,6 +28,12 @@ var initAuditOnce sync.Once
 
 // recordAudit puts a real audit log under this test binary -- once, since the
 // audit log is process-global -- and collects what it stores for this test.
+//
+// The log's configuration is process-global too, and any test that saves the
+// global settings through the API applies theirs: the global-secrets tests
+// save an audit section with Enabled unset, which switches the log off. Under
+// -shuffle those ran first often enough to fail CI, so every caller turns the
+// log back on rather than trusting whoever ran before it.
 func recordAudit(t *testing.T) func() []audit.AuditEntry {
 	t.Helper()
 	initAuditOnce.Do(func() {
@@ -39,10 +45,6 @@ func recordAudit(t *testing.T) func() []audit.AuditEntry {
 			t.Fatal(err)
 		}
 	})
-	// Re-enabled for every test, not once: the log's configuration is as
-	// process-global as the log, and a test in this package that saves a
-	// global config without an audit section turns it off for whatever runs
-	// next -- under -shuffle, sometimes this.
 	audit.UpdateConfig(&gateonv1.AuditConfig{Enabled: true})
 	var mu sync.Mutex
 	var got []audit.AuditEntry
