@@ -10,12 +10,47 @@ import (
 	"errors"
 	"fmt"
 	"html"
+	"net"
 	"net/http"
 	neturl "net/url"
 	"strings"
 	"time"
 
+	"github.com/gsoultan/gateon/internal/mgmtaddr"
 	"github.com/gsoultan/gateon/internal/telemetry"
+)
+
+// webhookClient sends every alert. It dials through mgmtaddr.Control, the
+// guard every backend connection already passes, so a webhook -- or a
+// redirect from one -- that resolves to this gateway's management listener or
+// a cloud metadata service is refused before it connects (review L2). It was
+// http.DefaultClient, which dials anything.
+//
+// A proxy from the environment is still honoured, as DefaultClient honoured
+// it, so an install that sends alerts through one keeps working; the guard
+// then sees the proxy's address, and the proxy decides the rest.
+var webhookClient = &http.Client{
+	Transport: &http.Transport{
+		Proxy:                 http.ProxyFromEnvironment,
+		DialContext:           (&net.Dialer{Timeout: webhookDialTimeout, KeepAlive: 30 * time.Second, Control: mgmtaddr.Control}).DialContext,
+		ForceAttemptHTTP2:     true,
+		TLSHandshakeTimeout:   webhookDialTimeout,
+		ResponseHeaderTimeout: alertSendTimeout,
+		MaxIdleConns:          8,
+		MaxIdleConnsPerHost:   2,
+		IdleConnTimeout:       90 * time.Second,
+	},
+	CheckRedirect: func(_ *http.Request, via []*http.Request) error {
+		if len(via) >= maxWebhookRedirects {
+			return errors.New("webhook redirected too many times")
+		}
+		return nil
+	},
+}
+
+const (
+	webhookDialTimeout  = 5 * time.Second
+	maxWebhookRedirects = 3
 )
 
 type SlackDispatcher struct {
@@ -152,7 +187,7 @@ func sendWebhook(ctx context.Context, url string, payload any) error {
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := webhookClient.Do(req)
 	if err != nil {
 		return withoutURL(err)
 	}

@@ -12,7 +12,7 @@ import { usePermissions } from '../hooks/usePermissions'
 import { useGlobalConfigDraft } from '../hooks/useGlobalConfigDraft'
 import { ConfirmDeleteModal } from '../components/ConfirmDelete'
 import { PageHeader } from "../components/layout";
-import { BuiltinCAPicker } from "../components/BuiltinCAPicker";
+import { BuiltinCACaveat, BuiltinCAPicker } from "../components/BuiltinCAPicker";
 
 // embedded: rendered as a tab of a page that already has a title, so only
 // the description and the actions are shown.
@@ -439,6 +439,7 @@ export default function CertificatesPage({ embedded = false }: { embedded?: bool
               </Group>
             }
           />
+          <BuiltinCACaveat caFile={editingCert?.caFile || ""} />
 
           {editingCert?.validation && (
             <Stack gap="sm">
