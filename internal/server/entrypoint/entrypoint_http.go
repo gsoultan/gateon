@@ -31,10 +31,12 @@ import (
 )
 
 const (
-	quicMaxIdleTimeout        = 30 * time.Second
-	quicKeepAlivePeriod       = 10 * time.Second
-	quicMaxIncomingStreams    = 1000
-	quicMaxIncomingUniStreams = 500
+	quicMaxIdleTimeout  = 30 * time.Second
+	quicKeepAlivePeriod = 10 * time.Second
+	// A client needs three unidirectional streams of its own -- control and
+	// the two QPACK streams -- and gateon serves nothing that opens more. It
+	// was 500 on every connection; each is a stream the server must track.
+	quicMaxIncomingUniStreams = 16
 
 	// HTTP/2's frame size on the public entrypoints. Its stream cap is the
 	// resource profile's (h2MaxConcurrentStreams), and how fast a client may
@@ -393,7 +395,7 @@ func newHTTP3Server(addr string, handler http.Handler, tlsConfig *tls.Config) *h
 		QUICConfig: &quic.Config{
 			MaxIdleTimeout:        quicMaxIdleTimeout,
 			KeepAlivePeriod:       quicKeepAlivePeriod,
-			MaxIncomingStreams:    quicMaxIncomingStreams,
+			MaxIncomingStreams:    h3MaxConcurrentStreams(),
 			MaxIncomingUniStreams: quicMaxIncomingUniStreams,
 		},
 	}

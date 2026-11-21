@@ -51,6 +51,9 @@ on the wire changes. Four new limits apply by default (ADR-0100):
   `GATEON_H2_MAX_RESETS_PER_SECOND`, `GATEON_H2_RESET_COOLOFF`.
 - HTTP/2 advertises 100 concurrent streams on `minimal` and `standard`, down
   from 250. `GATEON_H2_MAX_CONCURRENT_STREAMS`.
+- HTTP/3 allows the same number of request streams per connection as HTTP/2
+  (100, or 250 on `enterprise`), down from 1,000, and 16 client
+  unidirectional streams, down from 500. `GATEON_H3_MAX_CONCURRENT_STREAMS`.
 - Each backend target takes at most 256 / 1,024 / 8,192 requests at once by
   profile; a request past that waits up to 2 s and is answered 503 with
   `Retry-After: 1`. WebSocket upgrades are not counted.

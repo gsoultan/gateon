@@ -223,6 +223,14 @@ type TierDefaults struct {
 	// overrides it.
 	H2MaxConcurrentStreams uint32
 
+	// H3MaxConcurrentStreams is how many request streams one HTTP/3 (QUIC)
+	// connection may have open at once -- quic-go's MaxIncomingStreams. It was
+	// a fixed 1000 on every profile, so with 256 QUIC connections an address
+	// could hold 256,000 streams: the HTTP/2 stream flood, over UDP (audit
+	// 2026-11-20 A2). Sized as H2MaxConcurrentStreams is.
+	// GATEON_H3_MAX_CONCURRENT_STREAMS overrides it.
+	H3MaxConcurrentStreams int64
+
 	// H2MaxResetsPerSecond is how many streams one HTTP/2 connection may have
 	// cancelled by its client in a second before the connection is closed.
 	// net/http bounds how many handlers a connection runs at once, not how
@@ -476,6 +484,7 @@ func DefaultsFor(tier Tier) TierDefaults {
 			EntryPointHandshakeTimeoutUnderPressure: time.Second,
 			EntryPointMaxUnprovenPerAddr:            16,
 			H2MaxConcurrentStreams:                  100,
+			H3MaxConcurrentStreams:                  100,
 			H2MaxResetsPerSecond:                    100,
 			H2ResetCoolOff:                          10 * time.Second,
 			BackendMaxInflight:                      256,
@@ -543,6 +552,7 @@ func DefaultsFor(tier Tier) TierDefaults {
 			EntryPointHandshakeTimeoutUnderPressure: time.Second,
 			EntryPointMaxUnprovenPerAddr:            64,
 			H2MaxConcurrentStreams:                  250,
+			H3MaxConcurrentStreams:                  250,
 			H2MaxResetsPerSecond:                    200,
 			H2ResetCoolOff:                          10 * time.Second,
 			BackendMaxInflight:                      8192,
@@ -610,6 +620,7 @@ func DefaultsFor(tier Tier) TierDefaults {
 			EntryPointHandshakeTimeoutUnderPressure: time.Second,
 			EntryPointMaxUnprovenPerAddr:            16,
 			H2MaxConcurrentStreams:                  100,
+			H3MaxConcurrentStreams:                  100,
 			H2MaxResetsPerSecond:                    100,
 			H2ResetCoolOff:                          10 * time.Second,
 			BackendMaxInflight:                      1024,

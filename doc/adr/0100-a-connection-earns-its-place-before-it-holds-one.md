@@ -71,6 +71,14 @@ silently. The cool-off keeps at most 4,096 addresses; past that an address is
 not cooled off but its connections are still closed. Addresses behind one
 NAT share a cool-off, which is why it is short.
 
+**HTTP/3 holds a connection to the same stream cap as HTTP/2**
+(`H3MaxConcurrentStreams`, 100 / 250 / 100 by profile). It was a fixed
+1,000 request streams per QUIC connection on every profile, so with 256
+connections one address could hold 256,000 streams, the shape of D2 over UDP
+(audit 2026-11-20, A2). A client's unidirectional streams drop from 500 to 16:
+it needs three, for control and QPACK. A test opens streams on a real QUIC
+connection until the server's limit refuses one; it opened 1,000 before this.
+
 **Each backend target has an in-flight cap** (`BackendMaxInflight`, 256 /
 1,024 / 8,192). A request that finds it full waits up to
 `BackendQueueTimeout` (2 s) for a slot and is then answered 503 with
@@ -86,7 +94,8 @@ guard, the cool-off and the backend cap:
 `GATEON_ENTRYPOINT_HANDSHAKE_TIMEOUT`,
 `GATEON_ENTRYPOINT_HANDSHAKE_TIMEOUT_UNDER_PRESSURE`,
 `GATEON_H2_MAX_RESETS_PER_SECOND`, `GATEON_H2_RESET_COOLOFF`,
-`GATEON_H2_MAX_CONCURRENT_STREAMS` (a positive value overrides the profile),
+`GATEON_H2_MAX_CONCURRENT_STREAMS` and `GATEON_H3_MAX_CONCURRENT_STREAMS`
+(a positive value overrides the profile),
 `GATEON_BACKEND_MAX_INFLIGHT`, `GATEON_BACKEND_QUEUE_TIMEOUT`. Refusals are
 counted with the other limit rejections under fixed labels:
 `http_unproven_per_addr`, `h2_rapid_reset`, `h2_reset_cooloff`,

@@ -126,6 +126,16 @@ func h2MaxConcurrentStreams() int {
 	return int(config.CurrentTierDefaults().H2MaxConcurrentStreams)
 }
 
+// h3MaxConcurrentStreams is how many request streams one of the entrypoints'
+// HTTP/3 connections may have open at once: the profile's, unless
+// GATEON_H3_MAX_CONCURRENT_STREAMS names a positive number.
+func h3MaxConcurrentStreams() int64 {
+	if n := envInt("GATEON_H3_MAX_CONCURRENT_STREAMS", 0); n > 0 {
+		return int64(n)
+	}
+	return config.CurrentTierDefaults().H3MaxConcurrentStreams
+}
+
 // maxHeaderBytesEnv overrides the tier's request-header cap, in bytes.
 const maxHeaderBytesEnv = "GATEON_MAX_HEADER_BYTES"
 
