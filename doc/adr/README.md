@@ -109,6 +109,7 @@ ADRs follow a lightweight [MADR](https://adr.github.io/madr/)-style format:
 | [0097](./0097-the-gateway-keeps-a-sample-of-forwarded-requests-for-tuning.md) | The gateway keeps a sample of forwarded requests for tuning | Accepted |
 | [0098](./0098-settings-are-not-synced-from-git.md) | Settings are not synced from Git | Accepted |
 | [0099](./0099-a-takeover-is-noticed-off-the-host-and-recoverable-from-it.md) | A takeover is noticed, recorded off the host, and recoverable from it | Accepted |
+| [0100](./0100-a-connection-earns-its-place-before-it-holds-one.md) | A connection earns its place before it holds one | Accepted |
 
 ## Conventions
 

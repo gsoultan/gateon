@@ -4,11 +4,17 @@
 package proxy
 
 import (
+	"context"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"os"
+	"strconv"
+	"strings"
 	"sync/atomic"
+	"time"
 
+	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 	"github.com/prometheus/client_golang/prometheus"
@@ -38,6 +44,68 @@ type targetState struct {
 	activeConnGuage prometheus.Gauge
 	proxy           atomic.Pointer[httputil.ReverseProxy]
 	transport       atomic.Value // stores *transportContainer
+	// inflight holds a token for each request in flight to this target; nil
+	// when the cap is off (BackendMaxInflight, review D3).
+	inflight chan struct{}
+}
+
+// backendMaxInflight is how many requests may be in flight to one target:
+// GATEON_BACKEND_MAX_INFLIGHT when it is an integer (0 or less is no cap),
+// else the resource profile's (config.TierDefaults).
+func backendMaxInflight() int {
+	if v, ok := os.LookupEnv("GATEON_BACKEND_MAX_INFLIGHT"); ok {
+		if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil {
+			return n
+		}
+	}
+	return config.CurrentTierDefaults().BackendMaxInflight
+}
+
+// backendQueueTimeout is how long a request waits for a target at its cap:
+// GATEON_BACKEND_QUEUE_TIMEOUT when it is a positive duration, else the
+// resource profile's.
+func backendQueueTimeout() time.Duration {
+	if d, err := time.ParseDuration(strings.TrimSpace(os.Getenv("GATEON_BACKEND_QUEUE_TIMEOUT"))); err == nil && d > 0 {
+		return d
+	}
+	return config.CurrentTierDefaults().BackendQueueTimeout
+}
+
+// acquire takes one of the target's in-flight slots, waiting up to
+// backendQueueTimeout for one when all are taken. It is false when none
+// freed in time or ctx ended first; the caller answers 503.
+//
+// Nothing capped this, so the connections to a backend were as many as an
+// attacker could make the gateway hold requests for -- 18,822 descriptors in
+// the 2026-11-13 rapid-reset experiment -- and the flood went on to the
+// backend (review D3). The fast path is a non-blocking channel send and
+// allocates nothing; only a request that has to wait pays for a timer.
+func (s *targetState) acquire(ctx context.Context) bool {
+	if s.inflight == nil {
+		return true
+	}
+	select {
+	case s.inflight <- struct{}{}:
+		return true
+	default:
+	}
+	t := time.NewTimer(backendQueueTimeout())
+	defer t.Stop()
+	select {
+	case s.inflight <- struct{}{}:
+		return true
+	case <-t.C:
+		return false
+	case <-ctx.Done():
+		return false
+	}
+}
+
+// release gives back a slot acquire took.
+func (s *targetState) release() {
+	if s.inflight != nil {
+		<-s.inflight
+	}
 }
 
 func newTargetState(rawURL string, weight int32) *targetState {
@@ -53,6 +121,9 @@ func newTargetStateWithProxy(rawURL string, weight int32, proxyEnabled bool, pro
 		activeConnGuage:      telemetry.ActiveConnections.WithLabelValues(rawURL),
 	}
 	ts.alive.Store(true)
+	if n := backendMaxInflight(); n > 0 {
+		ts.inflight = make(chan struct{}, n)
+	}
 	if parsed, err := url.Parse(rawURL); err == nil {
 		ts.transportScheme = parsed.Scheme
 		// Normalize scheme for proxy cache key
