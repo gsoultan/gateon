@@ -296,3 +296,97 @@ func TestHTTPServersShutdownHonourTheirDeadline(t *testing.T) {
 		waitWithin(t, wg)
 	})
 }
+
+// answeringDeps returns entrypoint dependencies whose base handler answers at
+// once, and the capture that reports the address a listener bound.
+func answeringDeps(t *testing.T) (*Deps, *addrCapture) {
+	t.Helper()
+	deps := mockDepsForInspection(t)
+	deps.GlobalStore = config.NewGlobalRegistry(filepath.Join(t.TempDir(), "global.json"))
+	capture := &addrCapture{addrs: make(chan net.Addr, 1)}
+	deps.Phantom = capture
+	deps.BaseHandler = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})
+	return deps, capture
+}
+
+// requestAfterShutdownBegins opens a connection, starts the shutdown, waits
+// for the listener to stop accepting, and only then sends the request. It
+// fails the test unless the request is answered.
+func requestAfterShutdownBegins(t *testing.T, addr net.Addr, reg *ShutdownRegistry) {
+	t.Helper()
+	c, err := net.Dial("tcp", addr.String())
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer func() { _ = c.Close() }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), shutdownBound)
+	defer cancel()
+	done := make(chan struct{})
+	go func() {
+		reg.ShutdownAll(ctx)
+		close(done)
+	}()
+	for deadline := time.Now().Add(shutdownBound); ; {
+		probe, err := net.DialTimeout("tcp", addr.String(), time.Second)
+		if err != nil {
+			break
+		}
+		_ = probe.Close()
+		if time.Now().After(deadline) {
+			t.Fatal("the listener was still accepting long after the shutdown began")
+		}
+	}
+
+	if _, err := io.WriteString(c, "GET /healthz HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n"); err != nil {
+		t.Fatalf("send the request: %v", err)
+	}
+	_ = c.SetReadDeadline(time.Now().Add(shutdownBound))
+	resp, err := http.ReadResponse(bufio.NewReader(c), nil)
+	if err != nil {
+		t.Fatalf("a connection accepted before the shutdown got no answer: %v", err)
+	}
+	_ = resp.Body.Close()
+	select {
+	case <-done:
+	case <-time.After(shutdownBound):
+		t.Fatal("ShutdownAll had not returned after the request was answered")
+	}
+}
+
+// TestShutdownAnswersAConnectionItHadAccepted covers the same two servers for
+// the request a restart used to lose. http.Server.Shutdown marks the server
+// as shutting down before anything else, and net/http then closes, without
+// answering, any connection whose request it reads after that. A client that
+// had connected a moment before the restart saw an empty reply, and no socket
+// kept open across the restart could help: the old process already held the
+// connection.
+func TestShutdownAnswersAConnectionItHadAccepted(t *testing.T) {
+	t.Run("http_entrypoint", func(t *testing.T) {
+		deps, capture := answeringDeps(t)
+		ep := &gateonv1.EntryPoint{Id: "web", Address: "127.0.0.1:0", Type: gateonv1.EntryPoint_HTTP}
+		wg := &syncutil.WaitGroup{}
+		(&httpRunner{}).Run(context.Background(), ep, deps, wg)
+
+		requestAfterShutdownBegins(t, <-capture.addrs, deps.ShutdownRegistry)
+		waitWithin(t, wg)
+	})
+
+	t.Run("management", func(t *testing.T) {
+		for _, env := range []string{"GATEON_MANAGEMENT_BIND", "GATEON_MANAGEMENT_PORT",
+			"GATEON_MANAGEMENT_ALLOWED_IPS", "GATEON_MANAGEMENT_HOST"} {
+			t.Setenv(env, "")
+		}
+		deps, capture := answeringDeps(t)
+		deps.ManagementConfig = &gateonv1.ManagementConfig{Bind: "127.0.0.1", Port: "0"}
+		wg := &syncutil.WaitGroup{}
+		if err := startSecureManagementServer("0", deps, wg); err != nil {
+			t.Fatalf("start the management server: %v", err)
+		}
+
+		requestAfterShutdownBegins(t, <-capture.addrs, deps.ShutdownRegistry)
+		waitWithin(t, wg)
+	})
+}

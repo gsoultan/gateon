@@ -97,11 +97,11 @@ func TestAGatewayThatNeverBecomesReadyNeverAnswers(t *testing.T) {
 
 func TestTheRecorderWritesEachMigrationAsItStartsAndEnds(t *testing.T) {
 	dirs := Dirs{Data: t.TempDir()}
-	r := NewRecorder("1.8.3", dirs.Data)
+	r := NewRecorder("1.8.3", "1.8.2", dirs.Data)
 	run := db.MigrationRun{Driver: db.DriverSQLite, Database: "/d/gateon.db", Backup: "/d/gateon.db.bak"}
 	r.Begin(run)
 	var rec Migrated
-	if err := readSpool(t, dirs, MigratedFile, &rec); err != nil || rec.Version != "1.8.3" || len(rec.Runs) != 1 || rec.Runs[0].Done {
+	if err := readSpool(t, dirs, MigratedFile, &rec); err != nil || rec.Version != "1.8.3" || rec.CompatibleWith != "1.8.2" || len(rec.Runs) != 1 || rec.Runs[0].Done {
 		t.Fatalf("after Begin: %+v (%v)", rec, err)
 	}
 	r.End(run)
@@ -116,7 +116,7 @@ func TestTheRecorderWritesEachMigrationAsItStartsAndEnds(t *testing.T) {
 
 func TestTheRecorderIsBounded(t *testing.T) {
 	dirs := Dirs{Data: t.TempDir()}
-	r := NewRecorder("1.8.3", dirs.Data)
+	r := NewRecorder("1.8.3", "1.8.2", dirs.Data)
 	for i := range maxMigrationRuns + 4 {
 		r.Begin(db.MigrationRun{Driver: db.DriverSQLite, Database: filepath.Join("/d", string(rune('a'+i)))})
 	}
@@ -143,7 +143,7 @@ func migratedSite(t *testing.T, st Status) (dirs Dirs, database string) {
 			t.Fatal(err)
 		}
 	}
-	r := NewRecorder("1.8.3", dirs.Data)
+	r := NewRecorder("1.8.3", "1.8.2", dirs.Data)
 	r.End(db.MigrationRun{Driver: db.DriverSQLite, Database: database, Backup: database + ".pre-upgrade.bak"})
 	return dirs, database
 }
