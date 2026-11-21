@@ -28,6 +28,9 @@ builds:
     ldflags:
       - -s -w
       - -X main.Version={{.Version}}
+      # The release this one is held compatible with (ADR 0100). release.yml
+      # runs make check-compat against the same tag before anything is built.
+      - -X main.CompatibleWith={{ .PreviousTag }}
     mod_timestamp: "{{ .CommitTimestamp }}"
     goos:
       - linux

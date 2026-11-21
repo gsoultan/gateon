@@ -12,6 +12,7 @@ import (
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware"
 	"github.com/gsoultan/gateon/internal/middleware/traffic"
+	"github.com/gsoultan/gateon/internal/server/drain"
 	"github.com/gsoultan/gateon/pkg/l4"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
@@ -157,9 +158,12 @@ func serveConnAsHTTP(conn net.Conn, peeked []byte, ep *gateonv1.EntryPoint, deps
 				handler := dynamicTimeouts(ep, deps,
 					deps.TLSManager.HTTPChallengeHandler(buildPlainHTTPHandler(ep, deps)))
 				server := (&httpEntrypoint{ep: ep, deps: deps}).newServer(handler)
+				// No listener to close: the TCP entrypoint that feeds d
+				// stops accepting in its own shutdown.
+				arrivals := drain.Track(server)
 				if deps.ShutdownRegistry != nil {
 					deps.ShutdownRegistry.Register(func(ctx context.Context) error {
-						return shutdownHTTPServer(ctx, server)
+						return arrivals.Shutdown(ctx, nil)
 					})
 				}
 				if err := server.Serve(d); err != nil && err != http.ErrServerClosed {

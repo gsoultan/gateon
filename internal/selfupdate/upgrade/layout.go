@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -138,11 +139,14 @@ type Status struct {
 	Reason Reason `json:"reason,omitempty"`
 	// RestoreDatabase orders the gateway of version Previous to put back the
 	// SQLite backup taken before Target migrated it.
-	RestoreDatabase bool      `json:"restore_database,omitempty"`
-	RequestedBy     string    `json:"requested_by,omitempty"`
-	Automatic       bool      `json:"automatic,omitempty"`
-	StartedAt       time.Time `json:"started_at"`
-	FinishedAt      time.Time `json:"finished_at,omitzero"`
+	RestoreDatabase bool `json:"restore_database,omitempty"`
+	// DatabaseKept: Target migrated a database that was not put back, and
+	// Previous was started on it because Target was built compatible with it.
+	DatabaseKept bool      `json:"database_kept,omitempty"`
+	RequestedBy  string    `json:"requested_by,omitempty"`
+	Automatic    bool      `json:"automatic,omitempty"`
+	StartedAt    time.Time `json:"started_at"`
+	FinishedAt   time.Time `json:"finished_at,omitzero"`
 }
 
 // Ready is the gateway's answer to Status.Nonce.
@@ -175,8 +179,19 @@ const maxMigrationRuns = 8
 
 // Migrated records that the gateway of Version changed a database schema.
 type Migrated struct {
-	Version string         `json:"version"`
-	Runs    []MigrationRun `json:"runs"`
+	Version string `json:"version"`
+	// CompatibleWith is the release this build was held to before it shipped
+	// (ADR 0100): that release starts on a database this one has migrated.
+	// Empty for a build that was not released.
+	CompatibleWith string         `json:"compatible_with,omitempty"`
+	Runs           []MigrationRun `json:"runs"`
+}
+
+// SameRelease reports whether a and b name one release, with or without the
+// tag's leading v. An empty name is no release.
+func SameRelease(a, b string) bool {
+	a, b = strings.TrimPrefix(a, "v"), strings.TrimPrefix(b, "v")
+	return a != "" && a == b
 }
 
 // SanitizeRequestedBy bounds a name for display and drops control characters.

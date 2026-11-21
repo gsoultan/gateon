@@ -11,6 +11,42 @@ here after the fact.
 
 ## Unreleased
 
+### A restart no longer drops a connection it had just accepted
+
+A gateway that was told to stop closed, without answering, a connection it
+had accepted a moment earlier whose request it had not read yet. Under a
+client opening a new connection per request, about one restart in eight lost
+a request this way. The gateway now stops accepting first and answers every
+connection it had already taken before it shuts its servers down (ADR 0101).
+
+**Who is affected:** everyone, for the better. A connection that was opened
+and has sent nothing is now closed one second into a shutdown instead of
+five, so a restart with such a connection open is about four seconds shorter.
+The fix is in the gateway being stopped: the restart that installs this
+release is still the old version's shutdown.
+
+### Releases are compatible with the one before
+
+From this release on, each release is tested against the previous release's
+own binary: it starts on the previous release's configuration and database,
+and the previous release starts again on what it left (ADR 0100). Nothing
+changes on an installed gateway. It is what makes a rollback after a
+migration sound.
+
+### A failed upgrade is rolled back on PostgreSQL too
+
+A failed upgrade that had already migrated PostgreSQL used to stay on the new
+version as "Failed, not rolled back". When the upgrade was one release
+forward, the helper now puts the previous version back and leaves the
+database as migrated; the previous version runs on it, and Settings, Updates
+says the database was kept. An upgrade across several releases is still not
+rolled back. The same applies to SQLite with `GATEON_MIGRATION_BACKUP=false`.
+
+**Who is affected:** PostgreSQL installs that upgrade themselves, from the
+upgrade after this one. The helper that installs a release is the installed
+version's, so the upgrade that brings this release in still behaves as
+before.
+
 ### ClamAV runs only from a ClamAV repository
 
 `waf.clamav.docker_image` must now name `clamav/clamav` or

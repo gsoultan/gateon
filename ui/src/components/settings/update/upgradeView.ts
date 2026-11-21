@@ -12,7 +12,7 @@ import {
 /** The fields the views read, so a test builds one without a protobuf message. */
 export type UpgradeFacts = Pick<
   UpgradeRecord,
-  "phase" | "reason" | "targetVersion" | "previousVersion" | "automatic" | "requestedBy" | "databaseRestored"
+  "phase" | "reason" | "targetVersion" | "previousVersion" | "automatic" | "requestedBy" | "databaseRestored" | "databaseKept"
 >;
 
 /** How an outcome reads: its colour and what it says. */
@@ -84,6 +84,18 @@ const REFUSALS: Partial<Record<UpgradeReason, string>> = {
   [UpgradeReason.HELPER]: "The upgrade helper did not pick the request up. Enable it with: sudo systemctl enable --now gateon-upgrade.path",
 };
 
+/** A rollback says what became of the database, because that is the part an administrator cannot see. */
+function rolledBackDetail(r: UpgradeFacts, target: string, previous: string): string {
+  const again = `${target} did not become ready, so ${previous} is running again`;
+  if (r.databaseKept) {
+    return `${again}. ${target} had already updated the database, and that was left as it is: ${target} only adds to what ${previous} reads, so ${previous} runs on it. It will not be installed automatically again.`;
+  }
+  if (r.databaseRestored) {
+    return `${again} and the database was put back to the copy taken before the upgrade. What ${target} wrote is kept beside it.`;
+  }
+  return `${again}. Nothing else was changed. It will not be installed automatically again.`;
+}
+
 /** What the card says about a finished install. Null while one is running, or when there has been none. */
 export function outcomeView(r: UpgradeFacts): OutcomeView | null {
   const target = `v${r.targetVersion}`;
@@ -99,9 +111,7 @@ export function outcomeView(r: UpgradeFacts): OutcomeView | null {
       return {
         tone: "yellow",
         title: `${target} was rolled back`,
-        detail: r.databaseRestored
-          ? `${target} did not become ready, so ${previous} is running again and the database was put back to the copy taken before the upgrade. What ${target} wrote is kept beside it.`
-          : `${target} did not become ready, so ${previous} is running again. Nothing else was changed. It will not be installed automatically again.`,
+        detail: rolledBackDetail(r, target, previous),
       };
     case UpgradePhase.REFUSED:
       return {
