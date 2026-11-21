@@ -195,6 +195,66 @@ type TierDefaults struct {
 	// space. GATEON_ENTRYPOINT_MAX_CONN_PER_ADDR overrides it; 0 disables it.
 	EntryPointMaxConnPerAddr int
 
+	// EntryPointHandshakeTimeout is how long an HTTP entrypoint lets a
+	// connection go without delivering a complete request -- the TLS handshake
+	// and the request's headers -- before it is closed. Under pressure, when
+	// three quarters of the entrypoint's connections are held, a new
+	// connection gets EntryPointHandshakeTimeoutUnderPressure instead. A
+	// connection that has proved nothing held a slot for the full ten-second
+	// header timeout, so sixty addresses reconnecting bare TCP connections
+	// kept every slot full and refused everyone else (review D1).
+	// GATEON_ENTRYPOINT_HANDSHAKE_TIMEOUT and
+	// GATEON_ENTRYPOINT_HANDSHAKE_TIMEOUT_UNDER_PRESSURE override them.
+	EntryPointHandshakeTimeout              time.Duration
+	EntryPointHandshakeTimeoutUnderPressure time.Duration
+
+	// EntryPointMaxUnprovenPerAddr is how many connections one source address
+	// may hold on an HTTP entrypoint before any of them has delivered a
+	// complete request: far fewer than EntryPointMaxConnPerAddr, which bounds
+	// connections that are serving requests. When the entrypoint is full, the
+	// oldest such connection is closed to admit a new one instead of the new
+	// one being refused (review D1). Loopback and GATEON_MITIGATION_ALLOWLIST
+	// are exempt. GATEON_ENTRYPOINT_MAX_UNPROVEN_PER_ADDR overrides it; 0
+	// disables the cap and the eviction.
+	EntryPointMaxUnprovenPerAddr int
+
+	// H2MaxConcurrentStreams is SETTINGS_MAX_CONCURRENT_STREAMS on every HTTP
+	// entrypoint's HTTP/2 connections. GATEON_H2_MAX_CONCURRENT_STREAMS
+	// overrides it.
+	H2MaxConcurrentStreams uint32
+
+	// H3MaxConcurrentStreams is how many request streams one HTTP/3 (QUIC)
+	// connection may have open at once -- quic-go's MaxIncomingStreams. It was
+	// a fixed 1000 on every profile, so with 256 QUIC connections an address
+	// could hold 256,000 streams: the HTTP/2 stream flood, over UDP (audit
+	// 2026-11-20 A2). Sized as H2MaxConcurrentStreams is.
+	// GATEON_H3_MAX_CONCURRENT_STREAMS overrides it.
+	H3MaxConcurrentStreams int64
+
+	// H2MaxResetsPerSecond is how many streams one HTTP/2 connection may have
+	// cancelled by its client in a second before the connection is closed.
+	// net/http bounds how many handlers a connection runs at once, not how
+	// fast its client opens and resets streams, so 128 connections doing it
+	// took the 2 GB host to its memory limit (review D2, CVE-2023-44487).
+	// GATEON_H2_MAX_RESETS_PER_SECOND overrides it; 0 disables the guard.
+	H2MaxResetsPerSecond int
+	// H2ResetCoolOff is how long new connections from an address are refused
+	// after one of its HTTP/2 connections was closed for rapid reset: closed
+	// connections reconnected at once, and parsing their frames kept the
+	// CPU saturated. GATEON_H2_RESET_COOLOFF overrides it; 0 disables it.
+	H2ResetCoolOff time.Duration
+
+	// BackendMaxInflight is how many requests the gateway has in flight to one
+	// backend target at once; BackendQueueTimeout is how long a request past
+	// it waits for one to finish before it is answered 503 with Retry-After.
+	// Nothing bounded it, so connections to a backend numbered whatever
+	// concurrency an attacker could create -- 18,822 descriptors in the
+	// rapid-reset experiment -- and the flood was handed on (review D3).
+	// GATEON_BACKEND_MAX_INFLIGHT (0 disables) and GATEON_BACKEND_QUEUE_TIMEOUT
+	// override them.
+	BackendMaxInflight  int
+	BackendQueueTimeout time.Duration
+
 	// WAFMaxLargeBodyInspections is how many request bodies over 64 KiB the
 	// WAF inspects at once in the whole process. Inspection holds several
 	// times a body's length until the request has been proxied -- about 7.75
@@ -386,180 +446,207 @@ func DefaultsFor(tier Tier) TierDefaults {
 	switch tier {
 	case TierMinimal:
 		return TierDefaults{
-			Tier:                       TierMinimal,
-			CorrelationEnabled:         false,
-			CorrelationMaxSources:      500,
-			CorrelationMaxPerSource:    32,
-			TraceStoreEnabled:          false,
-			TraceSampleRate:            0,
-			CMSWidth:                   512,
-			CMSDepth:                   3,
-			EbpfPollSeconds:            10,
-			RetentionDays:              1,
-			PebbleCacheBytes:           4 << 20, // 4 MiB
-			PebbleMemTableBytes:        1 << 20, // 1 MiB
-			PebbleMaxOpenFiles:         50,
-			TraceStoreMaxBytes:         256 << 20, // 256 MiB
-			AccessLogMaxPerSecond:      50,
-			TraceArchiveRetentionDays:  7,
-			TraceArchiveMaxBytes:       256 << 20, // 256 MiB
-			ThreatArchiveMaxBytes:      256 << 20, // 256 MiB
-			ArchiveOnRetention:         false,     // off on every tier
-			MitigationCacheEntries:     4_000,     // ~2 MiB
-			PathStatsMaxPathsPerHost:   500,
-			PathStatsMaxRowsPerDay:     5_000,
-			DBMaxOpenConns:             5,
-			DBMaxIdleConns:             5,
-			SQLiteMaxOpenConns:         2,
-			TelemetryIntervalSeconds:   30,
-			DashboardAggregateInterval: 2 * time.Minute,
-			FlushIntervalSeconds:       10,
-			WAFTier:                    TierMinimal,
-			RLLimiterStates:            2000,
-			AuthAttemptsPerMinute:      10,
-			AuthHashConcurrency:        1,
-			EntryPointMaxConnections:   1000,
-			EntryPointMaxConnPerAddr:   128,
-			WAFMaxLargeBodyInspections: 4,
-			WAFWebSocketMessageLimit:   16 << 10, // 16 KiB
-			WAFCorpusEntries:           512,      // at most 2 MiB
-			CompressMaxBrotliEncoders:  8,
-			SchemaMaxBodyBytes:         1 << 20, // 1 MiB
-			SchemaMaxLargeBodies:       2,
-			FileScanMaxConcurrent:      2,
-			FileScanMaxBytes:           16 << 20, // 16 MiB; ~64 MiB resident at worst
-			MaxHeaderBytes:             32 << 10, // 32 KiB
-			StreamIdleTimeout:          2 * time.Minute,
-			StreamMaxLifetime:          time.Hour,
-			BlockLookupTimeout:         200 * time.Millisecond,
-			IPFeedMaxEntries:           250_000,
-			IPFeedMaxBytes:             8 << 20, // 8 MiB
-			IPFeedCoverageV4Prefix:     4,
-			IPFeedCoverageV6Prefix:     32,
-			UpdateCheckInterval:        24 * time.Hour,
-			UpdateAutoInstall:          false,
-			UpdateWindow:               defaultUpdateWindow,
-			UpgradeReadyTimeout:        90 * time.Second,
-			MigrationBackup:            true,
-			SocketHandoff:              true,
+			Tier:                                    TierMinimal,
+			CorrelationEnabled:                      false,
+			CorrelationMaxSources:                   500,
+			CorrelationMaxPerSource:                 32,
+			TraceStoreEnabled:                       false,
+			TraceSampleRate:                         0,
+			CMSWidth:                                512,
+			CMSDepth:                                3,
+			EbpfPollSeconds:                         10,
+			RetentionDays:                           1,
+			PebbleCacheBytes:                        4 << 20, // 4 MiB
+			PebbleMemTableBytes:                     1 << 20, // 1 MiB
+			PebbleMaxOpenFiles:                      50,
+			TraceStoreMaxBytes:                      256 << 20, // 256 MiB
+			AccessLogMaxPerSecond:                   50,
+			TraceArchiveRetentionDays:               7,
+			TraceArchiveMaxBytes:                    256 << 20, // 256 MiB
+			ThreatArchiveMaxBytes:                   256 << 20, // 256 MiB
+			ArchiveOnRetention:                      false,     // off on every tier
+			MitigationCacheEntries:                  4_000,     // ~2 MiB
+			PathStatsMaxPathsPerHost:                500,
+			PathStatsMaxRowsPerDay:                  5_000,
+			DBMaxOpenConns:                          5,
+			DBMaxIdleConns:                          5,
+			SQLiteMaxOpenConns:                      2,
+			TelemetryIntervalSeconds:                30,
+			DashboardAggregateInterval:              2 * time.Minute,
+			FlushIntervalSeconds:                    10,
+			WAFTier:                                 TierMinimal,
+			RLLimiterStates:                         2000,
+			AuthAttemptsPerMinute:                   10,
+			AuthHashConcurrency:                     1,
+			EntryPointMaxConnections:                1000,
+			EntryPointMaxConnPerAddr:                128,
+			EntryPointHandshakeTimeout:              5 * time.Second,
+			EntryPointHandshakeTimeoutUnderPressure: time.Second,
+			EntryPointMaxUnprovenPerAddr:            16,
+			H2MaxConcurrentStreams:                  100,
+			H3MaxConcurrentStreams:                  100,
+			H2MaxResetsPerSecond:                    100,
+			H2ResetCoolOff:                          10 * time.Second,
+			BackendMaxInflight:                      256,
+			BackendQueueTimeout:                     2 * time.Second,
+			WAFMaxLargeBodyInspections:              4,
+			WAFWebSocketMessageLimit:                16 << 10, // 16 KiB
+			WAFCorpusEntries:                        512,      // at most 2 MiB
+			CompressMaxBrotliEncoders:               8,
+			SchemaMaxBodyBytes:                      1 << 20, // 1 MiB
+			SchemaMaxLargeBodies:                    2,
+			FileScanMaxConcurrent:                   2,
+			FileScanMaxBytes:                        16 << 20, // 16 MiB; ~64 MiB resident at worst
+			MaxHeaderBytes:                          32 << 10, // 32 KiB
+			StreamIdleTimeout:                       2 * time.Minute,
+			StreamMaxLifetime:                       time.Hour,
+			BlockLookupTimeout:                      200 * time.Millisecond,
+			IPFeedMaxEntries:                        250_000,
+			IPFeedMaxBytes:                          8 << 20, // 8 MiB
+			IPFeedCoverageV4Prefix:                  4,
+			IPFeedCoverageV6Prefix:                  32,
+			UpdateCheckInterval:                     24 * time.Hour,
+			UpdateAutoInstall:                       false,
+			UpdateWindow:                            defaultUpdateWindow,
+			UpgradeReadyTimeout:                     90 * time.Second,
+			MigrationBackup:                         true,
+			SocketHandoff:                           true,
 		}
 	case TierEnterprise:
 		return TierDefaults{
-			Tier:                       TierEnterprise,
-			CorrelationEnabled:         true,
-			CorrelationMaxSources:      10000,
-			CorrelationMaxPerSource:    256,
-			TraceStoreEnabled:          true,
-			TraceSampleRate:            1,
-			CMSWidth:                   4096,
-			CMSDepth:                   4,
-			EbpfPollSeconds:            2,
-			RetentionDays:              30,
-			PebbleCacheBytes:           32 << 20, // 32 MiB
-			PebbleMemTableBytes:        8 << 20,  // 8 MiB
-			PebbleMaxOpenFiles:         500,
-			TraceStoreMaxBytes:         20 << 30, // 20 GiB
-			AccessLogMaxPerSecond:      200,
-			TraceArchiveRetentionDays:  365,
-			TraceArchiveMaxBytes:       20 << 30, // 20 GiB
-			ThreatArchiveMaxBytes:      10 << 30, // 10 GiB
-			ArchiveOnRetention:         false,    // off on every tier
-			MitigationCacheEntries:     100_000,  // ~50 MiB
-			PathStatsMaxPathsPerHost:   10_000,
-			PathStatsMaxRowsPerDay:     200_000,
-			DBMaxOpenConns:             100,
-			DBMaxIdleConns:             50,
-			SQLiteMaxOpenConns:         8,
-			TelemetryIntervalSeconds:   2,
-			DashboardAggregateInterval: 30 * time.Second,
-			FlushIntervalSeconds:       1,
-			WAFTier:                    TierEnterprise,
-			RLLimiterStates:            100000,
-			AuthAttemptsPerMinute:      10,
-			AuthHashConcurrency:        4,
-			EntryPointMaxConnections:   50000,
-			EntryPointMaxConnPerAddr:   1024,
-			WAFMaxLargeBodyInspections: 64,
-			WAFWebSocketMessageLimit:   256 << 10, // 256 KiB
-			WAFCorpusEntries:           8192,      // at most 32 MiB
-			CompressMaxBrotliEncoders:  128,
-			SchemaMaxBodyBytes:         4 << 20, // 4 MiB
-			SchemaMaxLargeBodies:       16,
-			FileScanMaxConcurrent:      8,
-			FileScanMaxBytes:           64 << 20, // 64 MiB; ~1 GiB resident at worst
-			MaxHeaderBytes:             64 << 10, // 64 KiB
-			StreamIdleTimeout:          10 * time.Minute,
-			StreamMaxLifetime:          12 * time.Hour,
-			BlockLookupTimeout:         50 * time.Millisecond,
-			IPFeedMaxEntries:           4_000_000,
-			IPFeedMaxBytes:             128 << 20, // 128 MiB
-			IPFeedCoverageV4Prefix:     4,
-			IPFeedCoverageV6Prefix:     32,
-			UpdateCheckInterval:        24 * time.Hour,
-			UpdateAutoInstall:          false,
-			UpdateWindow:               defaultUpdateWindow,
-			UpgradeReadyTimeout:        90 * time.Second,
-			MigrationBackup:            true,
-			SocketHandoff:              true,
+			Tier:                                    TierEnterprise,
+			CorrelationEnabled:                      true,
+			CorrelationMaxSources:                   10000,
+			CorrelationMaxPerSource:                 256,
+			TraceStoreEnabled:                       true,
+			TraceSampleRate:                         1,
+			CMSWidth:                                4096,
+			CMSDepth:                                4,
+			EbpfPollSeconds:                         2,
+			RetentionDays:                           30,
+			PebbleCacheBytes:                        32 << 20, // 32 MiB
+			PebbleMemTableBytes:                     8 << 20,  // 8 MiB
+			PebbleMaxOpenFiles:                      500,
+			TraceStoreMaxBytes:                      20 << 30, // 20 GiB
+			AccessLogMaxPerSecond:                   200,
+			TraceArchiveRetentionDays:               365,
+			TraceArchiveMaxBytes:                    20 << 30, // 20 GiB
+			ThreatArchiveMaxBytes:                   10 << 30, // 10 GiB
+			ArchiveOnRetention:                      false,    // off on every tier
+			MitigationCacheEntries:                  100_000,  // ~50 MiB
+			PathStatsMaxPathsPerHost:                10_000,
+			PathStatsMaxRowsPerDay:                  200_000,
+			DBMaxOpenConns:                          100,
+			DBMaxIdleConns:                          50,
+			SQLiteMaxOpenConns:                      8,
+			TelemetryIntervalSeconds:                2,
+			DashboardAggregateInterval:              30 * time.Second,
+			FlushIntervalSeconds:                    1,
+			WAFTier:                                 TierEnterprise,
+			RLLimiterStates:                         100000,
+			AuthAttemptsPerMinute:                   10,
+			AuthHashConcurrency:                     4,
+			EntryPointMaxConnections:                50000,
+			EntryPointMaxConnPerAddr:                1024,
+			EntryPointHandshakeTimeout:              5 * time.Second,
+			EntryPointHandshakeTimeoutUnderPressure: time.Second,
+			EntryPointMaxUnprovenPerAddr:            64,
+			H2MaxConcurrentStreams:                  250,
+			H3MaxConcurrentStreams:                  250,
+			H2MaxResetsPerSecond:                    200,
+			H2ResetCoolOff:                          10 * time.Second,
+			BackendMaxInflight:                      8192,
+			BackendQueueTimeout:                     2 * time.Second,
+			WAFMaxLargeBodyInspections:              64,
+			WAFWebSocketMessageLimit:                256 << 10, // 256 KiB
+			WAFCorpusEntries:                        8192,      // at most 32 MiB
+			CompressMaxBrotliEncoders:               128,
+			SchemaMaxBodyBytes:                      4 << 20, // 4 MiB
+			SchemaMaxLargeBodies:                    16,
+			FileScanMaxConcurrent:                   8,
+			FileScanMaxBytes:                        64 << 20, // 64 MiB; ~1 GiB resident at worst
+			MaxHeaderBytes:                          64 << 10, // 64 KiB
+			StreamIdleTimeout:                       10 * time.Minute,
+			StreamMaxLifetime:                       12 * time.Hour,
+			BlockLookupTimeout:                      50 * time.Millisecond,
+			IPFeedMaxEntries:                        4_000_000,
+			IPFeedMaxBytes:                          128 << 20, // 128 MiB
+			IPFeedCoverageV4Prefix:                  4,
+			IPFeedCoverageV6Prefix:                  32,
+			UpdateCheckInterval:                     24 * time.Hour,
+			UpdateAutoInstall:                       false,
+			UpdateWindow:                            defaultUpdateWindow,
+			UpgradeReadyTimeout:                     90 * time.Second,
+			MigrationBackup:                         true,
+			SocketHandoff:                           true,
 		}
 	default: // TierStandard
 		return TierDefaults{
-			Tier:                       TierStandard,
-			CorrelationEnabled:         true,
-			CorrelationMaxSources:      2000,
-			CorrelationMaxPerSource:    64,
-			TraceStoreEnabled:          true,
-			TraceSampleRate:            1,
-			CMSWidth:                   2048,
-			CMSDepth:                   4,
-			EbpfPollSeconds:            2,
-			RetentionDays:              7,
-			PebbleCacheBytes:           8 << 20, // 8 MiB
-			PebbleMemTableBytes:        4 << 20, // 4 MiB
-			PebbleMaxOpenFiles:         200,
-			TraceStoreMaxBytes:         2 << 30, // 2 GiB
-			AccessLogMaxPerSecond:      100,
-			TraceArchiveRetentionDays:  90,
-			TraceArchiveMaxBytes:       2 << 30, // 2 GiB
-			ThreatArchiveMaxBytes:      1 << 30, // 1 GiB
-			ArchiveOnRetention:         false,   // off on every tier
-			MitigationCacheEntries:     20_000,  // ~10 MiB
-			PathStatsMaxPathsPerHost:   2_000,
-			PathStatsMaxRowsPerDay:     20_000,
-			DBMaxOpenConns:             25,
-			DBMaxIdleConns:             25,
-			SQLiteMaxOpenConns:         4,
-			TelemetryIntervalSeconds:   5,
-			DashboardAggregateInterval: time.Minute,
-			FlushIntervalSeconds:       2,
-			WAFTier:                    TierStandard,
-			RLLimiterStates:            20000,
-			AuthAttemptsPerMinute:      10,
-			AuthHashConcurrency:        2,
-			EntryPointMaxConnections:   10000,
-			EntryPointMaxConnPerAddr:   256,
-			WAFMaxLargeBodyInspections: 16,
-			WAFWebSocketMessageLimit:   64 << 10, // 64 KiB
-			WAFCorpusEntries:           2048,     // at most 8 MiB
-			CompressMaxBrotliEncoders:  32,
-			SchemaMaxBodyBytes:         1 << 20, // 1 MiB
-			SchemaMaxLargeBodies:       8,
-			FileScanMaxConcurrent:      4,
-			FileScanMaxBytes:           64 << 20, // 64 MiB; unchanged from the old fixed default
-			MaxHeaderBytes:             32 << 10, // 32 KiB
-			StreamIdleTimeout:          5 * time.Minute,
-			StreamMaxLifetime:          4 * time.Hour,
-			BlockLookupTimeout:         100 * time.Millisecond,
-			IPFeedMaxEntries:           1_000_000,
-			IPFeedMaxBytes:             32 << 20, // 32 MiB
-			IPFeedCoverageV4Prefix:     4,
-			IPFeedCoverageV6Prefix:     32,
-			UpdateCheckInterval:        24 * time.Hour,
-			UpdateAutoInstall:          false,
-			UpdateWindow:               defaultUpdateWindow,
-			UpgradeReadyTimeout:        90 * time.Second,
-			MigrationBackup:            true,
-			SocketHandoff:              true,
+			Tier:                                    TierStandard,
+			CorrelationEnabled:                      true,
+			CorrelationMaxSources:                   2000,
+			CorrelationMaxPerSource:                 64,
+			TraceStoreEnabled:                       true,
+			TraceSampleRate:                         1,
+			CMSWidth:                                2048,
+			CMSDepth:                                4,
+			EbpfPollSeconds:                         2,
+			RetentionDays:                           7,
+			PebbleCacheBytes:                        8 << 20, // 8 MiB
+			PebbleMemTableBytes:                     4 << 20, // 4 MiB
+			PebbleMaxOpenFiles:                      200,
+			TraceStoreMaxBytes:                      2 << 30, // 2 GiB
+			AccessLogMaxPerSecond:                   100,
+			TraceArchiveRetentionDays:               90,
+			TraceArchiveMaxBytes:                    2 << 30, // 2 GiB
+			ThreatArchiveMaxBytes:                   1 << 30, // 1 GiB
+			ArchiveOnRetention:                      false,   // off on every tier
+			MitigationCacheEntries:                  20_000,  // ~10 MiB
+			PathStatsMaxPathsPerHost:                2_000,
+			PathStatsMaxRowsPerDay:                  20_000,
+			DBMaxOpenConns:                          25,
+			DBMaxIdleConns:                          25,
+			SQLiteMaxOpenConns:                      4,
+			TelemetryIntervalSeconds:                5,
+			DashboardAggregateInterval:              time.Minute,
+			FlushIntervalSeconds:                    2,
+			WAFTier:                                 TierStandard,
+			RLLimiterStates:                         20000,
+			AuthAttemptsPerMinute:                   10,
+			AuthHashConcurrency:                     2,
+			EntryPointMaxConnections:                10000,
+			EntryPointMaxConnPerAddr:                256,
+			EntryPointHandshakeTimeout:              5 * time.Second,
+			EntryPointHandshakeTimeoutUnderPressure: time.Second,
+			EntryPointMaxUnprovenPerAddr:            16,
+			H2MaxConcurrentStreams:                  100,
+			H3MaxConcurrentStreams:                  100,
+			H2MaxResetsPerSecond:                    100,
+			H2ResetCoolOff:                          10 * time.Second,
+			BackendMaxInflight:                      1024,
+			BackendQueueTimeout:                     2 * time.Second,
+			WAFMaxLargeBodyInspections:              16,
+			WAFWebSocketMessageLimit:                64 << 10, // 64 KiB
+			WAFCorpusEntries:                        2048,     // at most 8 MiB
+			CompressMaxBrotliEncoders:               32,
+			SchemaMaxBodyBytes:                      1 << 20, // 1 MiB
+			SchemaMaxLargeBodies:                    8,
+			FileScanMaxConcurrent:                   4,
+			FileScanMaxBytes:                        64 << 20, // 64 MiB; unchanged from the old fixed default
+			MaxHeaderBytes:                          32 << 10, // 32 KiB
+			StreamIdleTimeout:                       5 * time.Minute,
+			StreamMaxLifetime:                       4 * time.Hour,
+			BlockLookupTimeout:                      100 * time.Millisecond,
+			IPFeedMaxEntries:                        1_000_000,
+			IPFeedMaxBytes:                          32 << 20, // 32 MiB
+			IPFeedCoverageV4Prefix:                  4,
+			IPFeedCoverageV6Prefix:                  32,
+			UpdateCheckInterval:                     24 * time.Hour,
+			UpdateAutoInstall:                       false,
+			UpdateWindow:                            defaultUpdateWindow,
+			UpgradeReadyTimeout:                     90 * time.Second,
+			MigrationBackup:                         true,
+			SocketHandoff:                           true,
 		}
 	}
 }

@@ -92,6 +92,7 @@ func BuiltinCertificateAuthorities(now time.Time) ([]*gateonv1.BuiltinCertificat
 			Sha256Fingerprint: a.SHA256,
 			Expired:           now.After(cert.NotAfter),
 			ExpiringSoon:      cert.NotAfter.Sub(now) < builtinCAExpiryWindow,
+			Caveat:            a.Caveat,
 		})
 	}
 	return out, nil

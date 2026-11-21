@@ -12,7 +12,7 @@ import { useGlobalConfigDraft } from '../hooks/useGlobalConfigDraft'
 import { ConfirmDeleteModal } from '../components/ConfirmDelete'
 import { AdminOnlyNote } from '../components/settings/adminOnly/AdminOnlyNote'
 import { PageHeader } from "../components/layout";
-import { BuiltinCAPicker } from "../components/BuiltinCAPicker";
+import { BuiltinCACaveat, BuiltinCAPicker } from "../components/BuiltinCAPicker";
 
 // embedded: rendered as a tab of a page that already has a title, so only
 // the description and the actions are shown.
@@ -318,6 +318,7 @@ export default function ClientAuthoritiesPage({ embedded = false }: { embedded?:
               </Group>
             }
           />
+          <BuiltinCACaveat caFile={editingCA?.caFile || ""} />
           <Select
             label="Client Auth Type"
             placeholder="Select client auth requirement"

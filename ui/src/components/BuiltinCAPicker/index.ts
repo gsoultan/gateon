@@ -2,3 +2,4 @@
 // SPDX-License-Identifier: MIT
 
 export { BuiltinCAPicker, type BuiltinCAPickerProps } from "./BuiltinCAPicker";
+export { BuiltinCACaveat, type BuiltinCACaveatProps } from "./BuiltinCACaveat";
