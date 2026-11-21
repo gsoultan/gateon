@@ -26,6 +26,7 @@ import (
 	"github.com/gsoultan/gateon/internal/middleware"
 	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/security/waf/corpus"
+	"github.com/gsoultan/gateon/internal/security/waf/schemalearn"
 	"github.com/gsoultan/gateon/internal/server/readiness"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
@@ -231,6 +232,8 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 		_, _ = w.Write(data)
 	})
 	mux.HandleFunc("GET /v1/waf/corpus", serveWAFCorpus)
+	mux.HandleFunc("GET /v1/waf/schema-drafts", serveWAFSchemaDrafts)
+	mux.HandleFunc("DELETE /v1/waf/schema-drafts/{route}", forgetWAFSchemaDraft)
 	mux.HandleFunc("GET /v1/audit/logs", func(w http.ResponseWriter, r *http.Request) {
 		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceDiagnostics) {
 			return
@@ -1166,4 +1169,40 @@ func serveWAFCorpus(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	_, _ = corpus.Shared().WriteJSONL(w)
+}
+
+// serveWAFSchemaDrafts answers the OpenAPI document each learning route has
+// drafted from its traffic (ADR 0100).
+//
+// Read on the middlewares is enough, unlike the request sample: a draft holds
+// path templates, parameter names and types, and no value any client sent. It
+// is what someone editing a route's WAF is shown, so it is held to seeing
+// that form.
+func serveWAFSchemaDrafts(w http.ResponseWriter, r *http.Request) {
+	if !RequirePermission(w, r, auth.ActionRead, auth.ResourceMiddlewares) {
+		return
+	}
+	drafts, rejected := schemalearn.Shared().Drafts()
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"drafts":         drafts,
+		"routesRejected": rejected,
+		"maxRoutes":      schemalearn.MaxRoutes,
+	})
+}
+
+// forgetWAFSchemaDraft drops what one route has learned, so that a draft can
+// be started again after the API behind the route changes.
+func forgetWAFSchemaDraft(w http.ResponseWriter, r *http.Request) {
+	if !RequirePermission(w, r, auth.ActionWrite, auth.ResourceMiddlewares) {
+		return
+	}
+	route := r.PathValue("route")
+	if !schemalearn.Shared().Forget(route) {
+		WriteHTTPError(w, http.StatusNotFound, "no route of that name is learning its schema")
+		return
+	}
+	logger.L.LogInfo("WAF schema draft discarded", "route", route, "user", auditUser(r))
+	w.WriteHeader(http.StatusNoContent)
 }

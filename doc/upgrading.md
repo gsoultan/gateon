@@ -11,6 +11,25 @@ here after the fact.
 
 ## Unreleased
 
+### A route can draft its own OpenAPI document
+
+A WAF middleware has a new switch, "Learn this route's API from traffic"
+(`schema_learning`, off by default). With it on, the route learns the shape of
+the requests it forwards and the origin answers 2xx or 3xx: paths, query
+parameter names, and the narrowest type every value fit. No value is kept.
+"Show what has been learned" in the same form lists each learning route's
+draft, and "Use as the document" puts one in the document field for you to
+read and save. A draft enforces nothing by itself, and is not offered over a
+document the form already has or while the route refuses requests outside its
+document.
+
+Drafts are held in memory (at most 64 routes) and lost on restart.
+`GET /v1/waf/schema-drafts` returns them and `DELETE
+/v1/waf/schema-drafts/{route}` starts a route again.
+`GATEON_WAF_SCHEMA_LEARNING=true` turns learning on for route WAFs that do not
+set it. Rolling back needs nothing undone: an older build ignores the setting.
+See ADR-0100.
+
 ### ClamAV runs only from a ClamAV repository
 
 `waf.clamav.docker_image` must now name `clamav/clamav` or
