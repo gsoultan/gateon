@@ -5,6 +5,7 @@ package api
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -79,5 +80,26 @@ func TestBuiltinCertificateAuthoritiesFlagExpiry(t *testing.T) {
 	}
 	if e := find(cert.NotAfter.Add(time.Hour)); !e.Expired || !e.ExpiringSoon {
 		t.Errorf("after expiry: %v", e)
+	}
+}
+
+// The origin-pull CA is Cloudflare's shared one: requiring it proves a
+// connection came through Cloudflare, not through the operator's zone, and the
+// dashboard offered it as Authenticated Origin Pulls with no caveat (review
+// S2). The caveat travels with the entry so every screen that offers it can
+// say so; the server-chain CAs have nothing to add.
+func TestTheSharedOriginPullCASaysItIsShared(t *testing.T) {
+	all, err := BuiltinCertificateAuthorities(time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, a := range all {
+		shared := a.Ref == builtinca.Prefix+"cloudflare-origin-pull-ca"
+		if shared && (!strings.Contains(a.Caveat, "every Cloudflare account") || !strings.Contains(a.Name, "shared")) {
+			t.Errorf("%s: name %q, caveat %q; want both to say it is shared by every Cloudflare account", a.Ref, a.Name, a.Caveat)
+		}
+		if !shared && a.Caveat != "" {
+			t.Errorf("%s has a caveat %q", a.Ref, a.Caveat)
+		}
 	}
 }

@@ -53,6 +53,7 @@ export function BuiltinCAPicker({ use, onSelect }: BuiltinCAPickerProps) {
             <Menu.Item key={ca.ref} onClick={() => onSelect(ca.ref)}>
               <Text size="sm">{ca.name}</Text>
               <Text size="xs" c={expiry.color}>{expiry.text}</Text>
+              {ca.caveat && <Text size="xs" c="orange">{ca.caveat}</Text>}
             </Menu.Item>
           );
         })}
