@@ -114,6 +114,11 @@ type migrated struct {
 	inProgress bool
 	// restorable: every database it changed is SQLite with a backup.
 	restorable bool
+	// backedUp: at least one database it changed has a backup to put back.
+	backedUp bool
+	// compatible: it was built compatible with the release it replaced, so
+	// that release starts on what it migrated (ADR 0102).
+	compatible bool
 }
 
 // migration reads the new gateway's migration record. It is the gateway's
@@ -123,12 +128,18 @@ func (r *run) migration() migrated {
 	if err := upgrade.ReadJSON(r.data, spool(upgrade.MigratedFile), &m); err != nil || m.Version != r.status.Target {
 		return migrated{}
 	}
-	out := migrated{ran: len(m.Runs) > 0, restorable: true}
+	out := migrated{
+		ran:        len(m.Runs) > 0,
+		restorable: true,
+		compatible: upgrade.SameRelease(m.CompatibleWith, r.status.Previous),
+	}
 	for _, run := range m.Runs {
 		if !run.Done {
 			out.inProgress = true
 		}
-		if run.Dialect != upgrade.DialectSQLite || run.Backup == "" {
+		if run.Dialect == upgrade.DialectSQLite && run.Backup != "" {
+			out.backedUp = true
+		} else {
 			out.restorable = false
 		}
 	}
@@ -137,14 +148,22 @@ func (r *run) migration() migrated {
 
 // recover answers a new binary that did not become ready. Putting the old
 // binary back is right unless the new one changed a database the old one
-// cannot be given back: then the old binary would start on a schema it does
-// not know, and the helper leaves the new one in place and says so.
+// cannot be given back and cannot run on: then the old binary would start on
+// a schema it does not know, and the helper leaves the new one in place and
+// says so.
+//
+// The old binary can run on it when the new one was built compatible with
+// exactly that release (ADR 0102): every release is tested against the one
+// before it by starting that release on what the new one migrated. That says
+// nothing of an upgrade across several releases, which is still refused.
 func (r *run) recover(ctx context.Context) upgrade.Status {
 	mig := r.migration()
-	if mig.ran && !mig.restorable {
+	kept := mig.ran && !mig.restorable
+	if kept && !mig.compatible {
 		return r.finish(upgrade.PhaseFailed, upgrade.ReasonMigrated, nil)
 	}
-	r.status.RestoreDatabase = mig.ran
+	r.status.RestoreDatabase = mig.backedUp
+	r.status.DatabaseKept = kept
 	r.expect(upgrade.PhaseRollingBack, r.status.Previous)
 	previous := filepath.Join(r.cfg.StateDir, previousFile)
 	if err := copyFile(previous, r.cfg.BinaryPath, binaryMode); err != nil {

@@ -307,7 +307,7 @@ func unwatched() {}
 // Two things can be kept, and both wait on the origin accepting the request,
 // because a request the application itself refused is not evidence of what
 // its traffic looks like: the request, for tuning (ADR 0097), and its shape,
-// for the route's draft document (ADR 0101). What they need is read before
+// for the route's draft document (ADR 0103). What they need is read before
 // the origin sees the request, because the proxy rewrites it on the way.
 //
 // A request that asks for an upgrade is never watched -- it has no status to

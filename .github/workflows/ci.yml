@@ -197,6 +197,16 @@ jobs:
           GATEON_TEST_POSTGRES_DSN: postgres://gateon:gateon@localhost:5432/gateon_test?sslmode=disable
         run: make check-coverage SHELL=/bin/bash .SHELLFLAGS='-o pipefail -c'
 
+      # The suite above runs this tree against itself. This runs it against
+      # the last release: that release's own binary writes the configuration
+      # and the database, this build must start on them, and the release must
+      # start again on what this build left, which is what a rollback is. On
+      # SQLite and on PostgreSQL, and nothing in it may skip (ADR 0102).
+      - name: The last release upgrades to this build and rolls back
+        env:
+          GATEON_TEST_POSTGRES_DSN: postgres://gateon:gateon@localhost:5432/gateon_test?sslmode=disable
+        run: make check-compat
+
       # check-coverage leaves cmd/gateon out (see the Makefile for the
       # toolchain reason), so it still needs its own race run.
       - name: Test cmd/gateon (race, shuffled)
