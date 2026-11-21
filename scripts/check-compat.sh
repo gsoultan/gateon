@@ -2,7 +2,7 @@
 # Copyright (c) 2026 Gembit Soultan Shirazi <gembit.soultan@gmail.com>. All rights reserved.
 # SPDX-License-Identifier: MIT
 #
-# check-compat: hold this tree to the compatibility rule (ADR 0100).
+# check-compat: hold this tree to the compatibility rule (ADR 0102).
 #
 # The rule is that the last release can be upgraded to this build and rolled
 # back again: this build starts on the configuration and the database the last

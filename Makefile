@@ -301,7 +301,7 @@ check-folders:
 ##               self-upgrade rolls back by putting the old binary back, so a
 ##               migration the old binary cannot read breaks every rollback
 ##               after it ships. Needs GATEON_TEST_POSTGRES_DSN; nothing in it
-##               may skip. See ADR 0100.
+##               may skip. See ADR 0102.
 check-compat:
 	./scripts/check-compat.sh
 

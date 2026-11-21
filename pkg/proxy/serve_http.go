@@ -12,6 +12,7 @@ import (
 	"github.com/gsoultan/gateon/internal/logger"
 	mwauth "github.com/gsoultan/gateon/internal/middleware/auth"
 	"github.com/gsoultan/gateon/internal/request"
+	"github.com/gsoultan/gateon/internal/telemetry"
 	"github.com/gsoultan/gateon/pkg/httputil"
 )
 
@@ -47,6 +48,12 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if !state.acquire(r.Context()) {
+		backendBusy(w)
+		return
+	}
+	defer state.release()
+
 	sw, ok := w.(*httputil.StatusResponseWriter)
 	var pooled bool
 	if !ok {
@@ -62,6 +69,20 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	answeredAt, _ := sw.FirstByteAt()
 	h.recordMetrics(state, start, responseOutcome{status: sw.Status, answeredAt: answeredAt})
+}
+
+// backendBusyReason is the fixed label a request refused at a target's
+// in-flight cap is counted under, with the other limit rejections.
+const backendBusyReason = "backend_max_inflight"
+
+// backendBusy answers a request that found its target at its in-flight cap
+// for the whole queue timeout. 503 with Retry-After, as the gateway's other
+// load refusals answer, and not counted against the target: it did nothing
+// wrong, and an error here would steer the balancer and the health state.
+func backendBusy(w http.ResponseWriter) {
+	telemetry.IncInflightRejected(backendBusyReason)
+	w.Header().Set("Retry-After", "1")
+	http.Error(w, "service busy, retry shortly", http.StatusServiceUnavailable)
 }
 
 // withholdManagementCredentials removes from r what would let the backend act

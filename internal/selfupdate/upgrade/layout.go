@@ -181,7 +181,7 @@ const maxMigrationRuns = 8
 type Migrated struct {
 	Version string `json:"version"`
 	// CompatibleWith is the release this build was held to before it shipped
-	// (ADR 0100): that release starts on a database this one has migrated.
+	// (ADR 0102): that release starts on a database this one has migrated.
 	// Empty for a build that was not released.
 	CompatibleWith string         `json:"compatible_with,omitempty"`
 	Runs           []MigrationRun `json:"runs"`

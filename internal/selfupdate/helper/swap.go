@@ -117,7 +117,7 @@ type migrated struct {
 	// backedUp: at least one database it changed has a backup to put back.
 	backedUp bool
 	// compatible: it was built compatible with the release it replaced, so
-	// that release starts on what it migrated (ADR 0100).
+	// that release starts on what it migrated (ADR 0102).
 	compatible bool
 }
 
@@ -153,7 +153,7 @@ func (r *run) migration() migrated {
 // says so.
 //
 // The old binary can run on it when the new one was built compatible with
-// exactly that release (ADR 0100): every release is tested against the one
+// exactly that release (ADR 0102): every release is tested against the one
 // before it by starting that release on what the new one migrated. That says
 // nothing of an upgrade across several releases, which is still refused.
 func (r *run) recover(ctx context.Context) upgrade.Status {

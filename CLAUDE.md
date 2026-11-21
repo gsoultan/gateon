@@ -206,7 +206,7 @@ and one database, SQLite and PostgreSQL. The release creates the state, this bui
 must start on it, and the release must start again on what this build left —
 because a self-upgrade rolls back by putting the old binary back. So a migration
 may add; it may not drop, rename or narrow what the latest release reads, and
-removing something takes two releases. Nothing in it may skip. See ADR 0100.
+removing something takes two releases. Nothing in it may skip. See ADR 0102.
 
 **`make check-invariants`** (folded into `make sec`, and a CI step) enforces the vetoes
 above that no compiler or linter can see. Four of the five below were violated in

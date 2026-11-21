@@ -23,7 +23,7 @@ import (
 )
 
 // The compatibility specs run two real binaries against one set of state:
-// the last release, and the build of this checkout (ADR 0100). They are what
+// the last release, and the build of this checkout (ADR 0102). They are what
 // holds a change to the rule that a gateway can be upgraded from the previous
 // release and put back.
 const (

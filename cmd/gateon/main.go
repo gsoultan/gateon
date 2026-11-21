@@ -561,7 +561,7 @@ var Version string
 // CompatibleWith is the release before this one, set at release time via
 // -ldflags "-X main.CompatibleWith=<previous tag>". The release workflow
 // starts that release on a database this build has migrated before it
-// publishes (ADR 0100), which is what lets the upgrade helper put that
+// publishes (ADR 0102), which is what lets the upgrade helper put that
 // release back after a migration it cannot undo. Empty in any other build,
 // and the helper then does not.
 var CompatibleWith string

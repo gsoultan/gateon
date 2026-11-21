@@ -58,7 +58,7 @@ It prints the number of sockets systemd is holding, one per listener.
 Every release is held to one rule: the release before it can be upgraded to
 it and rolled back again. The new version starts on the configuration and the
 database the previous one wrote, and the previous one starts again on what
-the new one left, with nothing restored (ADR 0100). A rollback, by the helper
+the new one left, with nothing restored (ADR 0102). A rollback, by the helper
 or by installing the older package, depends on the second half.
 
 The rule is checked on every pull request by running the previous release's

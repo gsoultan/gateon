@@ -633,7 +633,7 @@ func (h *host) compatibleMigration(compatibleWith string, runs ...upgrade.Migrat
 
 // TestAFailedUpgradeFromThePreviousReleaseIsRolledBackOnPostgres: a release
 // is tested by starting the one before it on a database the new one has
-// migrated (ADR 0100), so when the upgrade was exactly that step the old
+// migrated (ADR 0102), so when the upgrade was exactly that step the old
 // binary can be put back on a PostgreSQL database nobody can restore. The
 // helper used to leave the gateway on a version that did not start.
 func TestAFailedUpgradeFromThePreviousReleaseIsRolledBackOnPostgres(t *testing.T) {

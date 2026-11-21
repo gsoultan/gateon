@@ -29,7 +29,7 @@ release is still the old version's shutdown.
 
 From this release on, each release is tested against the previous release's
 own binary: it starts on the previous release's configuration and database,
-and the previous release starts again on what it left (ADR 0100). Nothing
+and the previous release starts again on what it left (ADR 0102). Nothing
 changes on an installed gateway. It is what makes a rollback after a
 migration sound.
 
@@ -70,6 +70,41 @@ every audit entry off the host as it is written. A value that is set and
 cannot be used stops the start. Certificate and key uploads are now audited.
 `sudo gateon admin reset <username>` recovers a locked-out administrator; see
 [incident-compromise.md](incident-compromise.md) and ADR-0099.
+
+### Connection floods, HTTP/2 rapid reset and slow backends are bounded
+
+Upgrading from v1.3.8 needs no change and rollback is safe: nothing stored or
+on the wire changes. Four new limits apply by default (ADR-0100):
+
+- A connection that has not yet sent a complete request is closed after 5 s
+  (1 s when its entrypoint is three-quarters full), one address may hold 16 of
+  them (64 on `enterprise`), and a full entrypoint closes the oldest of them to
+  admit a new connection. `GATEON_ENTRYPOINT_HANDSHAKE_TIMEOUT`,
+  `GATEON_ENTRYPOINT_HANDSHAKE_TIMEOUT_UNDER_PRESSURE`,
+  `GATEON_ENTRYPOINT_MAX_UNPROVEN_PER_ADDR`.
+- An HTTP/2 connection whose client cancels more than 100 streams a second
+  (200 on `enterprise`) is closed, and its address is refused for 10 s.
+  `GATEON_H2_MAX_RESETS_PER_SECOND`, `GATEON_H2_RESET_COOLOFF`.
+- HTTP/2 advertises 100 concurrent streams on `minimal` and `standard`, down
+  from 250. `GATEON_H2_MAX_CONCURRENT_STREAMS`.
+- HTTP/3 allows the same number of request streams per connection as HTTP/2
+  (100, or 250 on `enterprise`), down from 1,000, and 16 client
+  unidirectional streams, down from 500. `GATEON_H3_MAX_CONCURRENT_STREAMS`.
+- Each backend target takes at most 256 / 1,024 / 8,192 requests at once by
+  profile; a request past that waits up to 2 s and is answered 503 with
+  `Retry-After: 1`. WebSocket upgrades are not counted.
+  `GATEON_BACKEND_MAX_INFLIGHT`, `GATEON_BACKEND_QUEUE_TIMEOUT`.
+
+Setting `GATEON_ENTRYPOINT_MAX_UNPROVEN_PER_ADDR`, `GATEON_H2_MAX_RESETS_PER_SECOND`,
+`GATEON_H2_RESET_COOLOFF` or `GATEON_BACKEND_MAX_INFLIGHT` to 0 turns that guard
+off.
+
+**Who is affected:** a backend that legitimately serves more requests at once
+than its profile's cap (raise `GATEON_BACKEND_MAX_INFLIGHT`); clients behind
+one NAT with a client that resets HTTP/2 streams in a loop (set
+`GATEON_H2_RESET_COOLOFF=0`). Refusals are counted under
+`backend_max_inflight`, `h2_rapid_reset`, `h2_reset_cooloff` and
+`http_unproven_per_addr`.
 
 ### A route can keep a sample of its traffic for tuning the WAF
 
