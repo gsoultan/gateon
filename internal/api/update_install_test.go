@@ -124,7 +124,7 @@ func TestTheStatusCarriesTheInstallAndItsHistory(t *testing.T) {
 	s, up := installService()
 	rolledBack := upgrade.Status{
 		Phase: upgrade.PhaseRolledBack, Reason: upgrade.ReasonNotReady, Target: "1.8.3", Previous: "1.8.2",
-		RequestedBy: "ada", RestoreDatabase: true, Nonce: "must-not-leave",
+		RequestedBy: "ada", RestoreDatabase: true, DatabaseKept: true, Nonce: "must-not-leave",
 	}
 	up.view = upgrade.View{
 		Blocker: upgrade.BlockerNoHelper,
@@ -148,7 +148,7 @@ func TestTheStatusCarriesTheInstallAndItsHistory(t *testing.T) {
 			cur.GetPhase() != gateonv1.UpgradePhase_UPGRADE_PHASE_ROLLED_BACK ||
 			cur.GetReason() != gateonv1.UpgradeReason_UPGRADE_REASON_NOT_READY ||
 			cur.GetTargetVersion() != "1.8.3" || cur.GetPreviousVersion() != "1.8.2" ||
-			cur.GetRequestedBy() != "ada" || !cur.GetDatabaseRestored() {
+			cur.GetRequestedBy() != "ada" || !cur.GetDatabaseRestored() || !cur.GetDatabaseKept() {
 			t.Errorf("%s: current = %v, blocker %v", name, cur, u.GetBlocker())
 		}
 		if len(u.GetHistory()) != 2 || !u.GetHistory()[1].GetAutomatic() ||

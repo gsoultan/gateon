@@ -29,6 +29,7 @@ import (
 	"github.com/gsoultan/gateon/internal/middleware/security"
 	"github.com/gsoultan/gateon/internal/middleware/security/identity"
 	"github.com/gsoultan/gateon/internal/middleware/traffic"
+	"github.com/gsoultan/gateon/internal/server/drain"
 	"github.com/gsoultan/gateon/internal/server/sockets"
 	"github.com/gsoultan/gateon/internal/syncutil"
 	"github.com/gsoultan/gateon/internal/telemetry"
@@ -178,16 +179,16 @@ func startSecureManagementServer(port string, deps *Deps, wg *syncutil.WaitGroup
 	timeouts := managementTimeouts(deps)
 	server := newManagementHTTPServer(addr, timeouts.Handler(handler, deadline.CurrentStreamLimits()), timeouts)
 
-	if deps.ShutdownRegistry != nil {
-		deps.ShutdownRegistry.Register(func(ctx context.Context) error {
-			return shutdownHTTPServer(ctx, server)
-		})
-	}
-
 	l, err := deps.Sockets.Listen(addr)
 	if err != nil {
 		return fmt.Errorf("management listener could not bind %s: %w (set GATEON_MANAGEMENT_PORT or "+
 			"management.port to a free port)", addr, err)
+	}
+	arrivals := drain.Track(server)
+	if deps.ShutdownRegistry != nil {
+		deps.ShutdownRegistry.Register(func(ctx context.Context) error {
+			return arrivals.Shutdown(ctx, l)
+		})
 	}
 	logger.L.LogInfo("Secure Management Entrypoint started", "addr", addr)
 	// From here on, the data plane refuses to connect to this listener
@@ -195,7 +196,7 @@ func startSecureManagementServer(port string, deps *Deps, wg *syncutil.WaitGroup
 	unregister := mgmtaddr.RegisterListener(l.Addr())
 	wg.Go(func() {
 		defer unregister()
-		serveManagement(server, l, deps.Phantom)
+		serveManagement(server, arrivals, l, deps.Phantom)
 	})
 	return nil
 }
@@ -255,7 +256,7 @@ func managementHost(bind string) string {
 
 // serveManagement serves the management API on l until the server is shut
 // down.
-func serveManagement(server *http.Server, l net.Listener, phantom PhantomCore) {
+func serveManagement(server *http.Server, arrivals *drain.Arrivals, l net.Listener, phantom PhantomCore) {
 	defer l.Close()
 
 	if phantom != nil {
@@ -263,7 +264,7 @@ func serveManagement(server *http.Server, l net.Listener, phantom PhantomCore) {
 	}
 	l = managementListener(l)
 
-	if err := server.Serve(l); err != nil && !errors.Is(err, http.ErrServerClosed) {
+	if err := arrivals.Serve(func() error { return server.Serve(l) }); err != nil {
 		logger.L.LogError("Management server failed", "error", err)
 	}
 }

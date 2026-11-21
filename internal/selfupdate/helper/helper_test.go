@@ -618,3 +618,107 @@ func TestTheHistoryIsBounded(t *testing.T) {
 		t.Fatalf("history holds %d entries (%v), want %d", len(history), err, upgrade.MaxHistory)
 	}
 }
+
+// compatibleMigration records that the new gateway migrated runs and was
+// built compatible with the release compatibleWith.
+func (h *host) compatibleMigration(compatibleWith string, runs ...upgrade.MigrationRun) func(int) {
+	return func(starts int) {
+		if starts == 1 {
+			h.json(h.spool(upgrade.MigratedFile), upgrade.Migrated{Version: offered, CompatibleWith: compatibleWith, Runs: runs})
+			return
+		}
+		h.answer()
+	}
+}
+
+// TestAFailedUpgradeFromThePreviousReleaseIsRolledBackOnPostgres: a release
+// is tested by starting the one before it on a database the new one has
+// migrated (ADR 0102), so when the upgrade was exactly that step the old
+// binary can be put back on a PostgreSQL database nobody can restore. The
+// helper used to leave the gateway on a version that did not start.
+func TestAFailedUpgradeFromThePreviousReleaseIsRolledBackOnPostgres(t *testing.T) {
+	for _, compatibleWith := range []string{installed, "v" + installed} {
+		t.Run(compatibleWith, func(t *testing.T) {
+			h := newHost(t)
+			var ordered upgrade.Status
+			record := h.compatibleMigration(compatibleWith, upgrade.MigrationRun{Dialect: upgrade.DialectPostgres, Done: true})
+			h.svc.onStart = func(starts int) {
+				if starts == 2 {
+					data, _ := os.ReadFile(filepath.Join(h.cfg.StateDir, upgrade.StatusFile))
+					_ = json.Unmarshal(data, &ordered)
+				}
+				record(starts)
+			}
+			st := h.run()
+			if st.Phase != upgrade.PhaseRolledBack || h.installedBinary() != "old" {
+				t.Fatalf("got %s/%q with the %s binary", st.Phase, st.Reason, h.installedBinary())
+			}
+			if !st.DatabaseKept {
+				t.Fatal("the outcome does not say the migrated database was left in place")
+			}
+			if st.RestoreDatabase || ordered.RestoreDatabase {
+				t.Fatal("the old gateway was told to restore a PostgreSQL database, of which there is no copy")
+			}
+			if !st.Proto().GetDatabaseKept() || st.Proto().GetDatabaseRestored() {
+				t.Fatalf("the dashboard is told kept=%v restored=%v", st.Proto().GetDatabaseKept(), st.Proto().GetDatabaseRestored())
+			}
+		})
+	}
+}
+
+// TestAFailedUpgradeAcrossReleasesIsStillNotRolledBackOnPostgres: the test a
+// release passed says nothing about a release two back, and a build nobody
+// released made no claim at all.
+func TestAFailedUpgradeAcrossReleasesIsStillNotRolledBackOnPostgres(t *testing.T) {
+	for name, compatibleWith := range map[string]string{
+		"an older release":   "1.8.1",
+		"a newer release":    offered,
+		"no release at all":  "",
+		"a prefix of a tag":  "1.8",
+		"only the tag's v":   "v",
+		"the tag and a tail": installed + "-rc1",
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newHost(t)
+			h.svc.onStart = h.compatibleMigration(compatibleWith, upgrade.MigrationRun{Dialect: upgrade.DialectPostgres, Done: true})
+			st := h.run()
+			if st.Phase != upgrade.PhaseFailed || st.Reason != upgrade.ReasonMigrated {
+				t.Fatalf("got %s/%q", st.Phase, st.Reason)
+			}
+			if got := h.installedBinary(); got != "new" {
+				t.Fatalf("the %s binary was put on a schema nobody tested it on", got)
+			}
+			if st.DatabaseKept {
+				t.Fatal("nothing was rolled back, and the outcome says a database was kept under the old version")
+			}
+		})
+	}
+}
+
+// TestACompatibleRollbackStillRestoresTheSQLiteCopy: with both kinds of
+// database migrated, the one that has a copy is still put back.
+func TestACompatibleRollbackStillRestoresTheSQLiteCopy(t *testing.T) {
+	h := newHost(t)
+	h.svc.onStart = h.compatibleMigration(installed,
+		upgrade.MigrationRun{Dialect: upgrade.DialectSQLite, Database: "/d/gateon.db", Backup: "/d/gateon.db.bak", Done: true},
+		upgrade.MigrationRun{Dialect: upgrade.DialectPostgres, Done: true})
+	st := h.run()
+	if st.Phase != upgrade.PhaseRolledBack || h.installedBinary() != "old" {
+		t.Fatalf("got %s with the %s binary", st.Phase, h.installedBinary())
+	}
+	if !st.RestoreDatabase || !st.DatabaseKept {
+		t.Fatalf("restore=%v kept=%v, want both: one database has a copy and one does not", st.RestoreDatabase, st.DatabaseKept)
+	}
+}
+
+// TestASQLiteRollbackWithACopyKeepsNothing: the ordinary rollback is
+// unchanged by a compatible build.
+func TestASQLiteRollbackWithACopyKeepsNothing(t *testing.T) {
+	h := newHost(t)
+	h.svc.onStart = h.compatibleMigration(installed,
+		upgrade.MigrationRun{Dialect: upgrade.DialectSQLite, Database: "/d/gateon.db", Backup: "/d/gateon.db.bak", Done: true})
+	st := h.run()
+	if st.Phase != upgrade.PhaseRolledBack || !st.RestoreDatabase || st.DatabaseKept {
+		t.Fatalf("got %s restore=%v kept=%v", st.Phase, st.RestoreDatabase, st.DatabaseKept)
+	}
+}

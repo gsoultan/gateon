@@ -41,6 +41,7 @@ func (s Status) Proto() *gateonv1.UpgradeRecord {
 		RequestedBy:      s.RequestedBy,
 		Automatic:        s.Automatic,
 		DatabaseRestored: s.RestoreDatabase && s.Phase == PhaseRolledBack,
+		DatabaseKept:     s.DatabaseKept && s.Phase == PhaseRolledBack,
 	}
 }
 

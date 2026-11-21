@@ -552,11 +552,19 @@ func prepareForUpgrades() {
 		logger.Fatal("could not put the database back after a failed upgrade; refusing to start on a schema this version does not know",
 			"error", err)
 	}
-	db.SetMigrationObserver(upgrade.NewRecorder(version(), dirs.Data))
+	db.SetMigrationObserver(upgrade.NewRecorder(version(), CompatibleWith, dirs.Data))
 }
 
 // Version is set at build time via -ldflags "-X main.Version=<tag>".
 var Version string
+
+// CompatibleWith is the release before this one, set at release time via
+// -ldflags "-X main.CompatibleWith=<previous tag>". The release workflow
+// starts that release on a database this build has migrated before it
+// publishes (ADR 0102), which is what lets the upgrade helper put that
+// release back after a migration it cannot undo. Empty in any other build,
+// and the helper then does not.
+var CompatibleWith string
 
 // adaptiveLimitSweep is how often expired adaptive rate limits are lifted: a
 // limit outlives its lease by at most this much.
