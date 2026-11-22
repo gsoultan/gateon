@@ -47,6 +47,9 @@ const (
 	// ApiServiceInstallUpdateProcedure is the fully-qualified name of the ApiService's InstallUpdate
 	// RPC.
 	ApiServiceInstallUpdateProcedure = "/gateon.v1.ApiService/InstallUpdate"
+	// ApiServiceRollbackUpdateProcedure is the fully-qualified name of the ApiService's RollbackUpdate
+	// RPC.
+	ApiServiceRollbackUpdateProcedure = "/gateon.v1.ApiService/RollbackUpdate"
 	// ApiServiceListTracesProcedure is the fully-qualified name of the ApiService's ListTraces RPC.
 	ApiServiceListTracesProcedure = "/gateon.v1.ApiService/ListTraces"
 	// ApiServiceGetTraceProcedure is the fully-qualified name of the ApiService's GetTrace RPC.
@@ -235,6 +238,11 @@ type ApiServiceClient interface {
 	// install the named release (ADR 0087). Administrators only. It answers
 	// as soon as the download has started; GetUpdateStatus reports progress.
 	InstallUpdate(context.Context, *connect.Request[v1.InstallUpdateRequest]) (*connect.Response[v1.InstallUpdateResponse], error)
+	// RollbackUpdate asks the root-owned helper to put back the release the
+	// last upgrade replaced, which it kept (ADR 0104). Administrators only.
+	// Nothing is downloaded. It answers as soon as the request is left;
+	// GetUpdateStatus reports progress.
+	RollbackUpdate(context.Context, *connect.Request[v1.RollbackUpdateRequest]) (*connect.Response[v1.RollbackUpdateResponse], error)
 	ListTraces(context.Context, *connect.Request[v1.ListTracesRequest]) (*connect.Response[v1.ListTracesResponse], error)
 	GetTrace(context.Context, *connect.Request[v1.GetTraceRequest]) (*connect.Response[v1.GetTraceResponse], error)
 	QueryTraces(context.Context, *connect.Request[v1.QueryTracesRequest]) (*connect.Response[v1.QueryTracesResponse], error)
@@ -359,6 +367,12 @@ func NewApiServiceClient(httpClient connect.HTTPClient, baseURL string, opts ...
 			httpClient,
 			baseURL+ApiServiceInstallUpdateProcedure,
 			connect.WithSchema(apiServiceMethods.ByName("InstallUpdate")),
+			connect.WithClientOptions(opts...),
+		),
+		rollbackUpdate: connect.NewClient[v1.RollbackUpdateRequest, v1.RollbackUpdateResponse](
+			httpClient,
+			baseURL+ApiServiceRollbackUpdateProcedure,
+			connect.WithSchema(apiServiceMethods.ByName("RollbackUpdate")),
 			connect.WithClientOptions(opts...),
 		),
 		listTraces: connect.NewClient[v1.ListTracesRequest, v1.ListTracesResponse](
@@ -760,6 +774,7 @@ type apiServiceClient struct {
 	getUpdateStatus                   *connect.Client[v1.GetUpdateStatusRequest, v1.GetUpdateStatusResponse]
 	checkForUpdate                    *connect.Client[v1.CheckForUpdateRequest, v1.CheckForUpdateResponse]
 	installUpdate                     *connect.Client[v1.InstallUpdateRequest, v1.InstallUpdateResponse]
+	rollbackUpdate                    *connect.Client[v1.RollbackUpdateRequest, v1.RollbackUpdateResponse]
 	listTraces                        *connect.Client[v1.ListTracesRequest, v1.ListTracesResponse]
 	getTrace                          *connect.Client[v1.GetTraceRequest, v1.GetTraceResponse]
 	queryTraces                       *connect.Client[v1.QueryTracesRequest, v1.QueryTracesResponse]
@@ -845,6 +860,11 @@ func (c *apiServiceClient) CheckForUpdate(ctx context.Context, req *connect.Requ
 // InstallUpdate calls gateon.v1.ApiService.InstallUpdate.
 func (c *apiServiceClient) InstallUpdate(ctx context.Context, req *connect.Request[v1.InstallUpdateRequest]) (*connect.Response[v1.InstallUpdateResponse], error) {
 	return c.installUpdate.CallUnary(ctx, req)
+}
+
+// RollbackUpdate calls gateon.v1.ApiService.RollbackUpdate.
+func (c *apiServiceClient) RollbackUpdate(ctx context.Context, req *connect.Request[v1.RollbackUpdateRequest]) (*connect.Response[v1.RollbackUpdateResponse], error) {
+	return c.rollbackUpdate.CallUnary(ctx, req)
 }
 
 // ListTraces calls gateon.v1.ApiService.ListTraces.
@@ -1183,6 +1203,11 @@ type ApiServiceHandler interface {
 	// install the named release (ADR 0087). Administrators only. It answers
 	// as soon as the download has started; GetUpdateStatus reports progress.
 	InstallUpdate(context.Context, *connect.Request[v1.InstallUpdateRequest]) (*connect.Response[v1.InstallUpdateResponse], error)
+	// RollbackUpdate asks the root-owned helper to put back the release the
+	// last upgrade replaced, which it kept (ADR 0104). Administrators only.
+	// Nothing is downloaded. It answers as soon as the request is left;
+	// GetUpdateStatus reports progress.
+	RollbackUpdate(context.Context, *connect.Request[v1.RollbackUpdateRequest]) (*connect.Response[v1.RollbackUpdateResponse], error)
 	ListTraces(context.Context, *connect.Request[v1.ListTracesRequest]) (*connect.Response[v1.ListTracesResponse], error)
 	GetTrace(context.Context, *connect.Request[v1.GetTraceRequest]) (*connect.Response[v1.GetTraceResponse], error)
 	QueryTraces(context.Context, *connect.Request[v1.QueryTracesRequest]) (*connect.Response[v1.QueryTracesResponse], error)
@@ -1303,6 +1328,12 @@ func NewApiServiceHandler(svc ApiServiceHandler, opts ...connect.HandlerOption) 
 		ApiServiceInstallUpdateProcedure,
 		svc.InstallUpdate,
 		connect.WithSchema(apiServiceMethods.ByName("InstallUpdate")),
+		connect.WithHandlerOptions(opts...),
+	)
+	apiServiceRollbackUpdateHandler := connect.NewUnaryHandler(
+		ApiServiceRollbackUpdateProcedure,
+		svc.RollbackUpdate,
+		connect.WithSchema(apiServiceMethods.ByName("RollbackUpdate")),
 		connect.WithHandlerOptions(opts...),
 	)
 	apiServiceListTracesHandler := connect.NewUnaryHandler(
@@ -1705,6 +1736,8 @@ func NewApiServiceHandler(svc ApiServiceHandler, opts ...connect.HandlerOption) 
 			apiServiceCheckForUpdateHandler.ServeHTTP(w, r)
 		case ApiServiceInstallUpdateProcedure:
 			apiServiceInstallUpdateHandler.ServeHTTP(w, r)
+		case ApiServiceRollbackUpdateProcedure:
+			apiServiceRollbackUpdateHandler.ServeHTTP(w, r)
 		case ApiServiceListTracesProcedure:
 			apiServiceListTracesHandler.ServeHTTP(w, r)
 		case ApiServiceGetTraceProcedure:
@@ -1858,6 +1891,10 @@ func (UnimplementedApiServiceHandler) CheckForUpdate(context.Context, *connect.R
 
 func (UnimplementedApiServiceHandler) InstallUpdate(context.Context, *connect.Request[v1.InstallUpdateRequest]) (*connect.Response[v1.InstallUpdateResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gateon.v1.ApiService.InstallUpdate is not implemented"))
+}
+
+func (UnimplementedApiServiceHandler) RollbackUpdate(context.Context, *connect.Request[v1.RollbackUpdateRequest]) (*connect.Response[v1.RollbackUpdateResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gateon.v1.ApiService.RollbackUpdate is not implemented"))
 }
 
 func (UnimplementedApiServiceHandler) ListTraces(context.Context, *connect.Request[v1.ListTracesRequest]) (*connect.Response[v1.ListTracesResponse], error) {

@@ -69,6 +69,11 @@ type Request struct {
 	RequestedBy string    `json:"requested_by,omitempty"`
 	Automatic   bool      `json:"automatic,omitempty"`
 	RequestedAt time.Time `json:"requested_at"`
+	// Rollback asks for the release the last upgrade replaced to be put back
+	// (ADR 0104). Version then names the release the asker was shown, and the
+	// helper refuses when that is not the one it kept: which binary goes back
+	// is decided by the helper's own record, not by this file.
+	Rollback bool `json:"rollback,omitempty"`
 }
 
 // Phase is where an install stands.
@@ -125,6 +130,33 @@ const (
 	// back, so the old binary was not either.
 	ReasonMigrated Reason = "migrated"
 )
+
+// The reasons of a rollback an operator asked for (ADR 0104). The phases are
+// the ones an install has; the reason is what says nobody waited for a
+// gateway to fail first.
+const (
+	// ReasonRequested: an operator asked for the previous release back.
+	ReasonRequested Reason = "requested"
+	// ReasonNoPrevious: there is no release to go back to. The helper keeps
+	// the binary of the last upgrade only, and only until it is rolled back.
+	ReasonNoPrevious Reason = "no_previous"
+	// ReasonNeedsRestore: the installed release migrated a database the
+	// previous one was not tested on, and nobody with a root shell asked for
+	// the copy taken beforehand to be put back.
+	ReasonNeedsRestore Reason = "needs_restore"
+	// ReasonPreviousNotReady: the previous release was put back, did not
+	// report ready, and the release it replaced is installed again.
+	ReasonPreviousNotReady Reason = "previous_not_ready"
+)
+
+// Requested reports whether r belongs to a rollback an operator asked for.
+func (r Reason) Requested() bool {
+	switch r {
+	case ReasonRequested, ReasonNoPrevious, ReasonNeedsRestore, ReasonPreviousNotReady:
+		return true
+	}
+	return false
+}
 
 // Status is the helper's account of the install in hand, or of the last one.
 type Status struct {

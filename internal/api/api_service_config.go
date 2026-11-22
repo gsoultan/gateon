@@ -87,6 +87,9 @@ type UpgradeInstaller interface {
 	View() upgrade.View
 	// Install starts installing version on behalf of by.
 	Install(version, by string, automatic bool) error
+	// Rollback asks for the release the last upgrade replaced, which must
+	// be to, on behalf of by.
+	Rollback(to, by string) error
 }
 
 // UpdateChecker is the release check GetUpdateStatus and CheckForUpdate

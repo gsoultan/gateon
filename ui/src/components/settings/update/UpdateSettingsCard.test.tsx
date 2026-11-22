@@ -20,6 +20,7 @@ mock.module("../../../hooks/useUpdateStatus", () => ({
   // stand-in carries each hook another file's component imports.
   useCheckForUpdate: () => ({}),
   useInstallUpdate: () => ({}),
+  useRollbackUpdate: () => ({}),
 }));
 
 const { ADMIN_ONLY_REASON } = await import("../../../hooks/usePermissions");

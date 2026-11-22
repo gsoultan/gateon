@@ -1943,13 +1943,35 @@ func (s *ApiService) InstallUpdate(ctx context.Context, req *gateonv1.InstallUpd
 	return &gateonv1.InstallUpdateResponse{Status: s.withUpgrade(s.Updates.Status().Proto())}, nil
 }
 
+// RollbackUpdate asks for the release the last upgrade replaced to be put
+// back (ADR 0104). An administrator only, on every transport, for the reason
+// InstallUpdate gives: it ends with root replacing the gateway's binary.
+func (s *ApiService) RollbackUpdate(ctx context.Context, req *gateonv1.RollbackUpdateRequest) (*gateonv1.RollbackUpdateResponse, error) {
+	if err := s.requireAdmin(ctx); err != nil {
+		return nil, err
+	}
+	if s.Upgrades == nil || s.Updates == nil {
+		return nil, status.Error(codes.FailedPrecondition, upgrade.ErrBlocked.Error())
+	}
+	by := ""
+	if claims, _ := callerClaims(ctx); claims != nil {
+		by = claims.Username
+	}
+	if err := s.Upgrades.Rollback(req.GetVersion(), by); err != nil {
+		return nil, installRefusal(err)
+	}
+	s.logAudit(ctx, "rollback_update", "global", "rollback to "+req.GetVersion()+" requested")
+	return &gateonv1.RollbackUpdateResponse{Status: s.withUpgrade(s.Updates.Status().Proto())}, nil
+}
+
 // installRefusal renders a refusal to start an install. Each is a state of
 // the gateway the caller can read and act on, so none is Internal.
 func installRefusal(err error) error {
 	switch {
 	case errors.Is(err, upgrade.ErrBusy):
 		return status.Error(codes.Aborted, err.Error())
-	case errors.Is(err, upgrade.ErrBlocked), errors.Is(err, upgrade.ErrNotOffered):
+	case errors.Is(err, upgrade.ErrBlocked), errors.Is(err, upgrade.ErrNotOffered),
+		errors.Is(err, upgrade.ErrNoPrevious), errors.Is(err, upgrade.ErrNeedsRestore):
 		return status.Error(codes.FailedPrecondition, err.Error())
 	}
 	return status.Error(codes.Internal, "the upgrade could not be started")

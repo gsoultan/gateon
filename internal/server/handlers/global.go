@@ -1137,6 +1137,22 @@ func registerUpdateHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI) {
 		}
 		WriteProtoResponse(w, http.StatusAccepted, res.GetStatus())
 	})
+	// Rolling back (ADR 0104), under the same two checks.
+	mux.HandleFunc("POST /v1/update/rollback", func(w http.ResponseWriter, r *http.Request) {
+		if !RequirePermission(w, r, auth.ActionWrite, auth.ResourceGlobal) {
+			return
+		}
+		var req gateonv1.RollbackUpdateRequest
+		if !DecodeProtoRequest(w, r, &req) {
+			return
+		}
+		res, err := svc.RollbackUpdate(r.Context(), &req)
+		if err != nil {
+			writeInstallRefusal(w, err)
+			return
+		}
+		WriteProtoResponse(w, http.StatusAccepted, res.GetStatus())
+	})
 }
 
 // writeInstallRefusal answers a refused install with the status its reason

@@ -40,6 +40,15 @@ export function useInstallUpdate() {
   });
 }
 
+/** Asks for the version the last upgrade replaced to be put back (ADR 0104). */
+export function useRollbackUpdate() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (version: string) => (await api.rollbackUpdate({ version })).status,
+    onSuccess: (status) => queryClient.setQueryData(queryKey, status),
+  });
+}
+
 /** Asks the release source now; the status everyone reads becomes the answer. */
 export function useCheckForUpdate() {
   const queryClient = useQueryClient();

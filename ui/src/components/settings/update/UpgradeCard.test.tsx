@@ -19,6 +19,7 @@ mock.module("../../../hooks/useUpdateStatus", () => ({
   useUpdateStatus: () => query,
   useCheckForUpdate: () => ({}),
   useInstallUpdate: () => ({ mutate: () => undefined, reset: () => undefined, isPending: false, isError: false }),
+  useRollbackUpdate: () => ({ mutate: () => undefined, reset: () => undefined, isPending: false, isError: false }),
 }));
 
 const { UpgradeCard } = await import("./UpgradeCard");
@@ -118,7 +119,7 @@ describe("the Install card", () => {
   });
 
   test("has an empty state for the history, and rows when there are any", () => {
-    expect(card("admin", status({}))).toContain("No release has been installed from this gateway yet.");
+    expect(card("admin", status({}))).toContain("No release has been installed or rolled back from this gateway yet.");
     const html = card("admin", status({ history: [record({ phase: UpgradePhase.SUCCEEDED }), record({ phase: UpgradePhase.REFUSED, automatic: true, requestedBy: "" })] }));
     expect(html).toContain("Installed");
     expect(html).toContain("Not installed");
@@ -136,6 +137,65 @@ describe("the Install card", () => {
     const html = card("admin", undefined, { isError: true });
     expect(html).toContain("The upgrade status could not be loaded");
     expect(html).toContain("Retry");
+  });
+});
+
+// 1.8.3 runs here, and 1.8.2 is the version its upgrade replaced.
+describe("rolling back from the Install card", () => {
+  const upgraded = (upgrade: Record<string, unknown> = {}) =>
+    status({ rollbackVersion: "1.8.2", ...upgrade }, { currentVersion: "1.8.3", latestVersion: "1.8.3", updateAvailable: false });
+
+  test("offers an administrator the exact version the host kept", () => {
+    const html = card("admin", upgraded());
+    expect(html).toContain('data-testid="rollback-offer"');
+    expect(button(html, "Roll back to v<!-- -->1.8.2")).not.toContain("disabled");
+    expect(html).toContain("You will be asked to confirm.");
+  });
+
+  test("shows an operator the button they may not press, and says who may", () => {
+    const html = card("operator", upgraded());
+    expect(button(html, "Roll back to v<!-- -->1.8.2")).toContain("disabled");
+    expect(html).toContain("Only an administrator can roll this gateway back.");
+  });
+
+  test("offers nothing when the host kept no previous version", () => {
+    const html = card("admin", status({}));
+    expect(html).not.toContain('data-testid="rollback-offer"');
+    expect(html).not.toContain("Roll back to v");
+  });
+
+  test("gives the command for the host instead of a button when the database copy must go back too", () => {
+    const html = card("admin", upgraded({ rollbackNeedsRestore: true }));
+    expect(html).not.toContain("Roll back to v");
+    expect(html).toContain("sudo gateon upgrade --rollback --restore-database");
+    expect(html).toContain("sets aside what was written since");
+  });
+
+  test("shows the rollback's own steps and no button while one runs", () => {
+    const running = record({ phase: UpgradePhase.ROLLING_BACK, reason: UpgradeReason.REQUESTED, finishedAt: 0n });
+    const html = card("admin", upgraded({ current: running }));
+    expect(html).toContain('data-testid="upgrade-progress"');
+    expect(html).toContain("The gateway is restarting on v1.8.2.");
+    expect(html).toContain("Put back");
+    expect(html).not.toContain("Fetch the release");
+    expect(html).not.toContain("Roll back to v");
+  });
+
+  test("says how it ended, offers a reload from the version left running, and lists it", () => {
+    const done = record({ phase: UpgradePhase.ROLLED_BACK, reason: UpgradeReason.REQUESTED });
+    const html = card("admin", status({ current: done, history: [done] }));
+    expect(html).toContain("Rolled back to v1.8.2");
+    expect(html).toContain("Reload the dashboard");
+    expect(html).toContain("Rolled back on request");
+    expect(html).toContain("v1.8.3 back to v1.8.2");
+  });
+
+  test("does not offer a reload when the previous version never came up", () => {
+    const failed = record({ phase: UpgradePhase.FAILED, reason: UpgradeReason.PREVIOUS_NOT_READY });
+    const html = card("admin", upgraded({ current: failed }));
+    expect(html).toContain("v1.8.2 did not become ready");
+    expect(html).not.toContain("Reload the dashboard");
+    expect(html).toContain("Roll back to v");
   });
 });
 

@@ -331,6 +331,8 @@ func TestAuthorizeProcedure(t *testing.T) {
 		// viewer never reaches it; ApiService then requires an administrator.
 		{"viewer denied install", claims(auth.RoleViewer), procedureFor("InstallUpdate"), true},
 		{"admin allowed install", claims(auth.RoleAdmin), procedureFor("InstallUpdate"), false},
+		{"viewer denied rollback", claims(auth.RoleViewer), procedureFor("RollbackUpdate"), true},
+		{"admin allowed rollback", claims(auth.RoleAdmin), procedureFor("RollbackUpdate"), false},
 
 		{"operator allowed mitigate", claims(auth.RoleOperator), procedureFor("MitigateThreat"), false},
 		{"operator allowed route write", claims(auth.RoleOperator), procedureFor("UpdateRoute"), false},

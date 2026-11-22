@@ -30,6 +30,16 @@ const IN_PROGRESS = new Set<UpgradePhase>([
   UpgradePhase.ROLLING_BACK,
 ]);
 
+const ROLLBACK_REASONS = new Set<UpgradeReason>([
+  UpgradeReason.REQUESTED,
+  UpgradeReason.NO_PREVIOUS,
+  UpgradeReason.NEEDS_RESTORE,
+  UpgradeReason.PREVIOUS_NOT_READY,
+]);
+
+/** The record is of a rollback somebody asked for (ADR 0104), not of an install. */
+export const isRollback = (r: Pick<UpgradeFacts, "reason">): boolean => ROLLBACK_REASONS.has(r.reason);
+
 /** An install is running: the page asks again every couple of seconds. */
 export const upgradeInProgress = (phase: UpgradePhase | undefined): boolean => phase !== undefined && IN_PROGRESS.has(phase);
 
@@ -50,11 +60,45 @@ const ACTIVE_STEP: Partial<Record<UpgradePhase, number>> = {
   [UpgradePhase.SUCCEEDED]: UPGRADE_STEPS.length,
 };
 
+/** The steps of a rollback. Nothing is downloaded: the previous version is already on the host. */
+export const ROLLBACK_STEPS = [
+  { label: "Hand over", description: "The root-owned helper checks which version it kept" },
+  { label: "Put back", description: "Replace the binary with the previous version" },
+  { label: "Restart", description: "Start the previous version and wait until it is ready" },
+] as const;
+
+const ROLLBACK_STEP: Partial<Record<UpgradePhase, number>> = {
+  [UpgradePhase.REQUESTED]: 0,
+  [UpgradePhase.ROLLING_BACK]: 2,
+  [UpgradePhase.RESTARTING]: 2,
+  [UpgradePhase.ROLLED_BACK]: ROLLBACK_STEPS.length,
+};
+
+/** The steps the record is going through. */
+export const stepsOf = (r: Pick<UpgradeFacts, "reason">) => (isRollback(r) ? ROLLBACK_STEPS : UPGRADE_STEPS);
+
 /** Which step is under way; every step before it is done. */
-export const activeStep = (phase: UpgradePhase): number => ACTIVE_STEP[phase] ?? 0;
+export const activeStep = (r: Pick<UpgradeFacts, "phase" | "reason">): number =>
+  (isRollback(r) ? ROLLBACK_STEP[r.phase] : ACTIVE_STEP[r.phase]) ?? 0;
+
+/** What a rollback somebody asked for is doing right now. */
+function rollbackNote(r: UpgradeFacts): string {
+  const previous = `v${r.previousVersion}`;
+  switch (r.phase) {
+    case UpgradePhase.REQUESTED:
+      return `Waiting for the upgrade helper to put ${previous} back.`;
+    case UpgradePhase.ROLLING_BACK:
+      return `The gateway is restarting on ${previous}. This page reconnects by itself.`;
+    case UpgradePhase.RESTARTING:
+      return `${previous} did not become ready. Putting v${r.targetVersion} back.`;
+    default:
+      return "";
+  }
+}
 
 /** What the gateway is doing right now, in one sentence. */
 export function progressNote(r: UpgradeFacts): string {
+  if (isRollback(r)) return rollbackNote(r);
   const target = `v${r.targetVersion}`;
   switch (r.phase) {
     case UpgradePhase.DOWNLOADING:
@@ -96,10 +140,47 @@ function rolledBackDetail(r: UpgradeFacts, target: string, previous: string): st
   return `${again}. Nothing else was changed. It will not be installed automatically again.`;
 }
 
+/** How a rollback somebody asked for ended. Null while it is running. */
+function rollbackOutcome(r: UpgradeFacts, target: string, previous: string): OutcomeView | null {
+  if (upgradeInProgress(r.phase)) return null;
+  switch (r.reason) {
+    case UpgradeReason.REQUESTED:
+      return {
+        tone: "green",
+        title: `Rolled back to ${previous}`,
+        detail: `The gateway restarted on ${previous} and reported ready. ${
+          r.databaseRestored
+            ? `The database was put back to the copy taken before the upgrade, and what was written since is kept beside it.`
+            : `The database was left as it is.`
+        } ${target} will not be installed automatically again; you can still install it from here.`,
+      };
+    case UpgradeReason.NO_PREVIOUS:
+      return {
+        tone: "red",
+        title: "Not rolled back",
+        detail:
+          "There is no previous version on this host to go back to. The helper keeps the version the last upgrade replaced, until it is rolled back. Nothing on this host was changed.",
+      };
+    case UpgradeReason.NEEDS_RESTORE:
+      return {
+        tone: "red",
+        title: "Not rolled back",
+        detail: `${target} changed the database in a way ${previous} was never tested on, so going back means putting the database copy back as well. That discards what was written since the upgrade and is only done on the host: sudo gateon upgrade --rollback --restore-database. Nothing on this host was changed.`,
+      };
+    default:
+      return {
+        tone: "red",
+        title: `${previous} did not become ready`,
+        detail: `So ${target} was put back and is running, as it was before. The reason is in the system journal on the host: journalctl -u gateon.`,
+      };
+  }
+}
+
 /** What the card says about a finished install. Null while one is running, or when there has been none. */
 export function outcomeView(r: UpgradeFacts): OutcomeView | null {
   const target = `v${r.targetVersion}`;
   const previous = `v${r.previousVersion}`;
+  if (isRollback(r)) return rollbackOutcome(r, target, previous);
   switch (r.phase) {
     case UpgradePhase.SUCCEEDED:
       return {
@@ -140,8 +221,30 @@ const OUTCOMES: Partial<Record<UpgradePhase, string>> = {
   [UpgradePhase.FAILED]: "Failed, not rolled back",
 };
 
-/** One word or two for the history table. */
-export const outcomeLabel = (phase: UpgradePhase): string => OUTCOMES[phase] ?? "In progress";
+const ROLLBACK_OUTCOMES: Partial<Record<UpgradeReason, string>> = {
+  [UpgradeReason.REQUESTED]: "Rolled back on request",
+  [UpgradeReason.NO_PREVIOUS]: "Rollback refused",
+  [UpgradeReason.NEEDS_RESTORE]: "Rollback refused",
+  [UpgradeReason.PREVIOUS_NOT_READY]: "Rollback failed",
+};
+
+/** A few words for the history table. */
+export const outcomeLabel = (r: Pick<UpgradeFacts, "phase" | "reason">): string =>
+  (isRollback(r) ? ROLLBACK_OUTCOMES[r.reason] : OUTCOMES[r.phase]) ?? "In progress";
+
+/** Which way the versions went, for the history table: a rollback reads backwards. */
+export const versionChange = (r: UpgradeFacts): string =>
+  isRollback(r) ? `v${r.targetVersion} back to v${r.previousVersion}` : `v${r.previousVersion} to v${r.targetVersion}`;
+
+/** The version a finished record left running, or null when it left things as they were or is not finished. */
+export function landedOn(r: UpgradeFacts): string | null {
+  if (r.phase === UpgradePhase.SUCCEEDED) return r.targetVersion;
+  if (r.phase === UpgradePhase.ROLLED_BACK && r.reason === UpgradeReason.REQUESTED) return r.previousVersion;
+  return null;
+}
+
+/** The command that rolls back together with the database copy. It is only run on the host. */
+export const ROLLBACK_RESTORE_COMMAND = "sudo gateon upgrade --rollback --restore-database";
 
 /** Who started an install, for the history table. */
 export const startedBy = (r: UpgradeFacts): string => (r.automatic ? "Automatic" : r.requestedBy || "Unknown");
@@ -182,3 +285,7 @@ export function windowError(start: string, end: string): string | null {
   if (!HHMM.test(start) || !HHMM.test(end)) return "Write each time as HH:MM, such as 02:00.";
   return null;
 }
+
+/** Why this rollback has no button, said before the command for the host. */
+export const rollbackOnHostNote = (current: string, previous: string): string =>
+  `v${previous}, the version before the last upgrade, is kept on this host. v${current} changed the database in a way v${previous} was never tested on, so going back also puts back the database copy taken before the upgrade and sets aside what was written since. That is only done on the host:`;
