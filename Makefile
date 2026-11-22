@@ -25,7 +25,7 @@ GOTOOLCHAIN := $(shell go env GOVERSION)
 endif
 export GOTOOLCHAIN
 
-.PHONY: proto models build build-fips release deb test test-race bench clean vuln staticcheck gosec sec check-invariants check-config check-auth-nil check-coverage check-folders ebpf ebpf-docker pgo-profile docker fuzz dev dev-sqlite dev-pg-down dev-pg-destroy
+.PHONY: proto models build build-fips release deb test test-race bench clean vuln staticcheck gosec sec check-invariants check-config check-auth-nil check-coverage check-folders check-compat ebpf ebpf-docker pgo-profile docker fuzz dev dev-sqlite dev-pg-down dev-pg-destroy
 
 ## proto: regenerate Go bindings from proto/gateon/v1/*.proto using buf
 proto:
@@ -291,6 +291,19 @@ check-config:
 ##                unenforced is how they got this big.
 check-folders:
 	go run ./scripts/checkfolders
+
+## check-compat: assert the last release upgrades to this tree and rolls back.
+##               Downloads the latest release's tarball, checks it against that
+##               release's checksums, and runs the two binaries as real
+##               processes on one configuration and one database, SQLite and
+##               PostgreSQL: the release creates the state, this build starts
+##               on it, the release starts again on what this build left. A
+##               self-upgrade rolls back by putting the old binary back, so a
+##               migration the old binary cannot read breaks every rollback
+##               after it ships. Needs GATEON_TEST_POSTGRES_DSN; nothing in it
+##               may skip. See ADR 0102.
+check-compat:
+	./scripts/check-compat.sh
 
 ## check-auth-nil: assert no auth.Service is compared against nil, with types
 ##                 resolved rather than names matched. check-invariants greps for

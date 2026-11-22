@@ -18,6 +18,7 @@ import (
 	"github.com/gsoultan/gateon/internal/ai"
 	"github.com/gsoultan/gateon/internal/alerting"
 	"github.com/gsoultan/gateon/internal/audit"
+	"github.com/gsoultan/gateon/internal/audit/syslogsink"
 	"github.com/gsoultan/gateon/internal/auth"
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/config/storedsecret"
@@ -83,6 +84,9 @@ func main() {
 		case "upgrade-helper":
 			// What gateon-upgrade.service runs when the gateway asks.
 			os.Exit(upgradeCLI().Helper(context.Background(), os.Args[2:]))
+		case "admin":
+			// Recover a locked-out administrator from the host (ADR 0099).
+			os.Exit(adminCLI(os.Args[2:], os.Stdout, os.Stderr))
 		case "export-waf-corpus":
 			// The embedder's half of `gwaf tune` (ADR 0097): the requests
 			// the WAF let through, as the JSON Lines that command reads.
@@ -196,6 +200,14 @@ func main() {
 		databaseURL := db.AuditDatabaseURL(gc.Audit, gc.Auth)
 		if err := audit.Init(gc.Audit, databaseURL); err != nil {
 			logger.L.LogError("failed to init audit manager", "error", err)
+		}
+		// Administrator activity alerts, and a copy of the log leaves the host
+		// as it is written (ADR 0099). A forwarding address that is set and
+		// cannot be used stops the start: running on without the copy the
+		// operator configured is the silence it exists to prevent.
+		audit.AddSink(alerting.AuditSink)
+		if _, err := syslogsink.Start(ctx); err != nil {
+			logger.Fatal("audit forwarding is configured and cannot be used", "error", err)
 		}
 
 		if gc.Ha != nil && gc.Ha.Enabled {
@@ -540,11 +552,19 @@ func prepareForUpgrades() {
 		logger.Fatal("could not put the database back after a failed upgrade; refusing to start on a schema this version does not know",
 			"error", err)
 	}
-	db.SetMigrationObserver(upgrade.NewRecorder(version(), dirs.Data))
+	db.SetMigrationObserver(upgrade.NewRecorder(version(), CompatibleWith, dirs.Data))
 }
 
 // Version is set at build time via -ldflags "-X main.Version=<tag>".
 var Version string
+
+// CompatibleWith is the release before this one, set at release time via
+// -ldflags "-X main.CompatibleWith=<previous tag>". The release workflow
+// starts that release on a database this build has migrated before it
+// publishes (ADR 0102), which is what lets the upgrade helper put that
+// release back after a migration it cannot undo. Empty in any other build,
+// and the helper then does not.
+var CompatibleWith string
 
 // adaptiveLimitSweep is how often expired adaptive rate limits are lifted: a
 // limit outlives its lease by at most this much.

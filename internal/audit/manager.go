@@ -53,11 +53,9 @@ type AuditManager struct {
 	// anchorID and anchorAt are the tail anchor VerifyRange looks for: the
 	// newest entry stored by this process, or found newest when it started.
 	// Guarded by mu. See checkTail.
-	anchorID   string
-	anchorAt   time.Time
-	stop       chan struct{}
-	stmtInsert *sql.Stmt
-	stmtMu     sync.RWMutex
+	anchorID string
+	anchorAt time.Time
+	stop     chan struct{}
 	// retentionChunk overrides DefaultRetentionChunk; zero uses the default.
 	retentionChunk int
 
@@ -68,6 +66,7 @@ type AuditManager struct {
 	writerDone chan struct{}
 	// lastStamp is the newest timestamp handed to an entry; guarded by mu.
 	lastStamp time.Time
+	stopOnce  sync.Once
 }
 
 // insertAuditQuery stores one entry.
@@ -141,22 +140,28 @@ func Init(cfg *gateonv1.AuditConfig, databaseURL string) error {
 		if cfg != nil && cfg.SignEntries && cfg.SignatureKey == "" {
 			cfg.SignatureKey = GenerateSignatureKey()
 		}
-		manager = &AuditManager{
-			config:  cfg,
-			db:      database,
-			dialect: dialect,
-			Broadcaster: &Broadcaster{
-				subscribers: make(map[chan AuditEntry]struct{}),
-			},
-			stop: make(chan struct{}),
-		}
-		manager.loadLastHash()
-		manager.prepareStatements()
+		manager = newAuditManager(cfg, database, dialect)
 		manager.startWriter()
 		go manager.runRetentionTask()
 		warnIfNotRecording(cfg)
 	})
 	return err
+}
+
+// newAuditManager is a manager on an open, migrated database, ready to log,
+// before its writer and retention task start.
+func newAuditManager(cfg *gateonv1.AuditConfig, database *sql.DB, dialect db.Dialect) *AuditManager {
+	m := &AuditManager{
+		config:  cfg,
+		db:      database,
+		dialect: dialect,
+		Broadcaster: &Broadcaster{
+			subscribers: make(map[chan AuditEntry]struct{}),
+		},
+		stop: make(chan struct{}),
+	}
+	m.loadLastHash()
+	return m
 }
 
 // warnIfNotRecording says at startup what an install that is not recording,
@@ -175,30 +180,18 @@ func warnIfNotRecording(cfg *gateonv1.AuditConfig) {
 	}
 }
 
+// Stop stores what is queued. A second call does nothing.
 func Stop() {
 	if manager != nil {
-		close(manager.stop)
-		if manager.writerDone != nil {
-			<-manager.writerDone // what is queued is stored before the database goes
-		}
-		manager.stmtMu.Lock()
-		if manager.stmtInsert != nil {
-			_ = manager.stmtInsert.Close()
-			manager.stmtInsert = nil
-		}
-		manager.stmtMu.Unlock()
+		manager.stopOnce.Do(manager.shutdown)
 	}
 }
 
-func (m *AuditManager) prepareStatements() {
-	m.stmtMu.Lock()
-	defer m.stmtMu.Unlock()
-	stmt, err := m.db.Prepare(m.dialect.Rebind(insertAuditQuery))
-	if err != nil {
-		logger.L.LogError("audit: failed to prepare insert statement", "error", err)
-		return
+func (m *AuditManager) shutdown() {
+	close(m.stop)
+	if m.writerDone != nil {
+		<-m.writerDone // what is queued is stored before the database goes
 	}
-	m.stmtInsert = stmt
 }
 
 func (m *AuditManager) loadLastHash() {
@@ -301,27 +294,20 @@ func (m *AuditManager) log(ctx context.Context, userID, action, resource, detail
 	m.lastHash = entry.Signature
 	m.mu.Unlock()
 
-	var err error
-	m.stmtMu.RLock()
-	stmt := m.stmtInsert
-	m.stmtMu.RUnlock()
-
-	if stmt != nil {
-		_, err = stmt.ExecContext(ctx, entry.ID, entry.UserID, entry.Action, entry.Resource, entry.Details, entry.Timestamp, entry.IPAddress, entry.Signature, entry.PreviousHash)
-	} else {
-		// Fallback to unnamed statement if preparation failed
-		_, err = m.db.ExecContext(ctx, m.dialect.Rebind(insertAuditQuery), entry.ID, entry.UserID, entry.Action, entry.Resource, entry.Details, entry.Timestamp, entry.IPAddress, entry.Signature, entry.PreviousHash)
-	}
-
+	// Not a statement prepared once and kept: on a PgBouncer in transaction
+	// pooling mode the next execute can reach a server connection that never
+	// saw it, and the entry is lost. An unprepared insert goes in one round
+	// trip (see db.withPostgresSessionParams) and needs nothing to persist.
+	_, err := m.db.ExecContext(ctx, m.dialect.Rebind(insertAuditQuery), entry.ID, entry.UserID,
+		entry.Action, entry.Resource, entry.Details, entry.Timestamp, entry.IPAddress,
+		entry.Signature, entry.PreviousHash)
 	if err != nil {
 		logger.L.LogError("audit: failed to write log", "error", err)
 		return
 	}
 	m.noteStored(entry)
-	// Broadcast to real-time subscribers (for Command Center etc)
-	if m.Broadcaster != nil {
-		m.Broadcaster.Broadcast(entry)
-	}
+	// To the sinks (ADR 0099) and the real-time subscribers (Command Center).
+	m.deliver(entry)
 }
 
 func (m *AuditManager) sign(entry AuditEntry, key string) string {

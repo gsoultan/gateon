@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
@@ -282,39 +283,73 @@ func corpusSampleRate(value string) int {
 	return corpus.ParseRate(strings.TrimSpace(os.Getenv(corpusSampleRateEnv)))
 }
 
-// noSample is what sample returns for a request that is not being kept.
-func noSample() {}
+// schemaLearningEnv turns learning on for every route WAF that does not set
+// it. The gateway-wide WAF never learns: it fronts every API at once, and a
+// document drafted from all of them describes none.
+const schemaLearningEnv = "GATEON_WAF_SCHEMA_LEARNING"
 
-// sample decides whether this request is one to keep for tuning, and returns
-// the writer to answer it through and a function to call once it is answered.
+// schemaLearning reads the route's setting, falling back to the environment
+// and then to off.
+func schemaLearning(value string) bool {
+	v := strings.TrimSpace(strings.ToLower(value))
+	if v == "" {
+		v = strings.TrimSpace(strings.ToLower(os.Getenv(schemaLearningEnv)))
+	}
+	return v == "true"
+}
+
+// unwatched is what watch returns for a request nothing is kept from.
+func unwatched() {}
+
+// watch decides what, if anything, is kept from a request the WAF is
+// forwarding, and returns the writer to answer it through and a function to
+// call once it is answered.
 //
-// It is reached only for a request the WAF is forwarding. The entry is built
-// before the origin sees the request, because the proxy rewrites headers on
-// the way, and kept only if the origin then accepts it: a request the
-// application itself refused is not evidence of what benign traffic looks
-// like. A request that asks for an upgrade is never kept -- it has no status
-// to judge it by, and wrapping its writer would sit between the proxy and the
+// Two things can be kept, and both wait on the origin accepting the request,
+// because a request the application itself refused is not evidence of what
+// its traffic looks like: the request, for tuning (ADR 0097), and its shape,
+// for the route's draft document (ADR 0103). What they need is read before
+// the origin sees the request, because the proxy rewrites it on the way.
+//
+// A request that asks for an upgrade is never watched -- it has no status to
+// judge it by, and wrapping its writer would sit between the proxy and the
 // connection for nothing.
 //
-// All but one request in CorpusSampleRate pay one atomic add.
-func (t *wafRuntime) sample(w http.ResponseWriter, r *http.Request) (http.ResponseWriter, func()) {
-	if t.cfg.CorpusSampleRate < 1 || r.Header.Get("Upgrade") != "" {
-		return w, noSample
+// A route that does neither pays two comparisons. A sampling route pays one
+// atomic add for all but one request in CorpusSampleRate. A learning route
+// pays the status writer and this closure on every request it forwards.
+func (t *wafRuntime) watch(w http.ResponseWriter, r *http.Request) (http.ResponseWriter, func()) {
+	if (t.cfg.CorpusSampleRate < 1 && t.learner == nil) || r.Header.Get("Upgrade") != "" {
+		return w, unwatched
 	}
-	ring := corpus.Shared()
-	if !ring.Due(t.cfg.CorpusSampleRate) {
-		return w, noSample
+	entry := t.sampled(r)
+	if entry == nil && t.learner == nil {
+		return w, unwatched
+	}
+	method, path, query := r.Method, r.URL.Path, r.URL.RawQuery
+	sw := corpus.Watch(w)
+	return sw, func() {
+		if !corpus.Accepted(sw.Status()) {
+			return
+		}
+		if entry != nil {
+			corpus.Shared().Add(entry)
+		}
+		t.learner.Observe(method, path, query)
+	}
+}
+
+// sampled returns the tuning entry for r when r is the one request in
+// CorpusSampleRate to keep, and nil otherwise.
+func (t *wafRuntime) sampled(r *http.Request) *corpus.Entry {
+	if t.cfg.CorpusSampleRate < 1 || !corpus.Shared().Due(t.cfg.CorpusSampleRate) {
+		return nil
 	}
 	entry, ok := corpus.Capture(r, t.cfg.RouteID)
 	if !ok {
-		return w, noSample
+		return nil
 	}
-	sw := corpus.Watch(w)
-	return sw, func() {
-		if corpus.Accepted(sw.Status()) {
-			ring.Add(entry)
-		}
-	}
+	return entry
 }
 
 // guardWebSocket returns w so that a connection upgraded through it has every
@@ -353,36 +388,52 @@ func (t *wafRuntime) guardWebSocket(w http.ResponseWriter, r *http.Request, repu
 // A refusal is recorded and held against the client exactly as a refused
 // request is. On an audit-only route it is recorded and the message forwarded.
 func (e *wafEngine) messageInspector(r *http.Request, reputation float64) wsinspect.Inspector {
-	return func(payload []byte, _ bool) wsinspect.Verdict {
-		tx := e.waf.NewTransaction()
-		// The transaction may keep views into payload, which is only valid
-		// until this returns.
-		defer tx.Close()
-
-		e.addResolvers(tx, r, reputation)
-		host, port := splitAddr(r.RemoteAddr)
-		tx.SetRemoteAddr(net.JoinHostPort(host, strconv.Itoa(port)))
-		tx.SetRequestLine(r.Method, r.URL.EscapedPath(), r.Proto)
-		tx.AddRequestHeader("Host", r.Host)
-		tx.AddRequestHeader("Content-Type", messageContentType(payload))
-
-		d := tx.ProcessRequestHeaders()
-		if !d.Blocked() {
-			tx.SetRequestBody(payload)
-			d = tx.ProcessRequestBody()
-		}
-		obs := wafObservation{
-			decision: d, matches: tx.Matches(), request: r,
-			routeID: e.cfg.RouteID, cfg: e.cfg, repScore: reputation,
-			phase: wafPhaseWebSocket,
-		}
-		recordWAFDecision(obs)
-		e.audit.record(d, obs.matches, obs)
-		if d.Blocked() && !e.cfg.AuditOnly {
-			return wsinspect.Refuse
-		}
-		return wsinspect.Allow
+	return func(payload []byte, _ bool) (v wsinspect.Verdict) {
+		// A message is judged on the goroutine that copies the client to the
+		// backend, which the proxy starts itself, so net/http's recovery is not
+		// above it: a panic here ended the process and every connection on it.
+		// It costs this connection instead, and fails closed.
+		defer func() {
+			if p := recover(); p != nil {
+				logger.L.LogError("WAF panicked judging a WebSocket message; the connection is closed",
+					"route", e.cfg.RouteID, "panic", p, "stack", string(debug.Stack()))
+				v = wsinspect.Refuse
+			}
+		}()
+		return e.judgeMessage(r, reputation, payload)
 	}
+}
+
+// judgeMessage is one message's verdict; see messageInspector.
+func (e *wafEngine) judgeMessage(r *http.Request, reputation float64, payload []byte) wsinspect.Verdict {
+	tx := e.waf.NewTransaction()
+	// The transaction may keep views into payload, which is only valid
+	// until this returns.
+	defer tx.Close()
+
+	e.addResolvers(tx, r, reputation)
+	host, port := splitAddr(r.RemoteAddr)
+	tx.SetRemoteAddr(net.JoinHostPort(host, strconv.Itoa(port)))
+	tx.SetRequestLine(r.Method, r.URL.EscapedPath(), r.Proto)
+	tx.AddRequestHeader("Host", r.Host)
+	tx.AddRequestHeader("Content-Type", messageContentType(payload))
+
+	d := tx.ProcessRequestHeaders()
+	if !d.Blocked() {
+		tx.SetRequestBody(payload)
+		d = tx.ProcessRequestBody()
+	}
+	obs := wafObservation{
+		decision: d, matches: tx.Matches(), request: r,
+		routeID: e.cfg.RouteID, cfg: e.cfg, repScore: reputation,
+		phase: wafPhaseWebSocket,
+	}
+	recordWAFDecision(obs)
+	e.audit.record(d, obs.matches, obs)
+	if d.Blocked() && !e.cfg.AuditOnly {
+		return wsinspect.Refuse
+	}
+	return wsinspect.Allow
 }
 
 // messageContentType names a message's structure for the engine. WebSocket

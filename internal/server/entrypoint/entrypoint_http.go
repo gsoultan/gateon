@@ -8,6 +8,7 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -21,6 +22,8 @@ import (
 	"github.com/gsoultan/gateon/internal/middleware/security"
 	"github.com/gsoultan/gateon/internal/middleware/security/identity"
 	"github.com/gsoultan/gateon/internal/middleware/traffic"
+	"github.com/gsoultan/gateon/internal/server/drain"
+	"github.com/gsoultan/gateon/internal/server/entrypoint/connguard"
 	"github.com/gsoultan/gateon/internal/server/sockets"
 	"github.com/gsoultan/gateon/internal/syncutil"
 	"github.com/gsoultan/gateon/internal/telemetry"
@@ -30,17 +33,18 @@ import (
 )
 
 const (
-	quicMaxIdleTimeout        = 30 * time.Second
-	quicKeepAlivePeriod       = 10 * time.Second
-	quicMaxIncomingStreams    = 1000
-	quicMaxIncomingUniStreams = 500
+	quicMaxIdleTimeout  = 30 * time.Second
+	quicKeepAlivePeriod = 10 * time.Second
+	// A client needs three unidirectional streams of its own -- control and
+	// the two QPACK streams -- and gateon serves nothing that opens more. It
+	// was 500 on every connection; each is a stream the server must track.
+	quicMaxIncomingUniStreams = 16
 
-	// HTTP/2 limits for the public entrypoint. Without explicit configuration the
-	// public TLS server inherits Go's defaults; we pin them to bound per-connection
-	// memory and reduce exposure to HTTP/2 stream-flood DoS (CVE-2023-44487
-	// "Rapid Reset" class). The internal gRPC server caps streams separately.
-	h2MaxConcurrentStreams = 250
-	h2MaxReadFrameSize     = 1 << 18 // 256 KiB
+	// HTTP/2's frame size on the public entrypoints. Its stream cap is the
+	// resource profile's (h2MaxConcurrentStreams), and how fast a client may
+	// cancel streams is bounded per connection (guardRequests, CVE-2023-44487
+	// "Rapid Reset"). The internal gRPC server caps streams separately.
+	h2MaxReadFrameSize = 1 << 18 // 256 KiB
 
 	// defaultEntryPointTimeout is used when an entrypoint has no explicit
 	// read/write timeout configured.
@@ -150,14 +154,21 @@ func (*httpRunner) Run(ctx context.Context, ep *gateonv1.EntryPoint, deps *Deps,
 	if ep.Address == "" {
 		return
 	}
-	e := &httpEntrypoint{ep: ep, deps: deps, wg: wg, slots: newConnSlots(ep), perAddr: newPerAddrLimiter(perAddrConnLimit())}
+	e := &httpEntrypoint{ep: ep, deps: deps, wg: wg, slots: newConnSlots(ep), perAddr: newPerAddrLimiter(perAddrConnLimit()),
+		unproven: newUnprovenGuard(), h2Resets: h2MaxResetsPerSecond(), coolOff: newResetCoolOff()}
 	if ep.Tls != nil && ep.Tls.Enabled {
 		e.tlsConfig = deps.TLSConfig.Clone()
 	}
 	server := e.newServer(dynamicTimeouts(ep, deps, e.startHTTP3(e.frontHandler(ctx))))
+	// Outermost, so a connection is proven, and an HTTP/2 reset counted, before
+	// any other work is done for the request.
+	server.Handler = guardRequests(server.Handler)
+	// Track wraps that in turn: it only notes that the connection's first
+	// request has reached a handler, which is true of one the guard refuses too.
+	e.arrivals = drain.Track(server)
 	if deps.ShutdownRegistry != nil {
 		deps.ShutdownRegistry.Register(func(ctx context.Context) error {
-			return shutdownHTTPServer(ctx, server)
+			return e.arrivals.Shutdown(ctx, e.tcp.closer())
 		})
 	}
 	if hasTCP, _ := protocols(ep); hasTCP {
@@ -179,6 +190,32 @@ type httpEntrypoint struct {
 	// the two, drawn on by the same TCP and QUIC listeners. Nil when the cap is
 	// disabled (ADR 0036).
 	perAddr *perAddrLimiter
+	// arrivals is what lets a shutdown answer the connections the server had
+	// already accepted, and tcp the listener it closes first to do so.
+	arrivals *drain.Arrivals
+	tcp      boundListener
+	// unproven and h2Resets are the TCP listener's guards against connections
+	// that deliver no request (D1) and HTTP/2 rapid reset (D2).
+	unproven *connguard.Unproven
+	h2Resets int
+	coolOff  *connguard.CoolOff
+}
+
+// boundListener is the listener a server is accepting on, once it has bound.
+// An entrypoint whose address was taken binds later, in the background, so a
+// shutdown may find none yet.
+type boundListener struct{ l atomic.Pointer[net.Listener] }
+
+func (b *boundListener) set(l net.Listener) { b.l.Store(&l) }
+
+// closer is the bound listener, or nil when there is none: drain.Shutdown
+// takes a nil io.Closer to mean that, which a nil net.Listener inside the
+// interface would not be.
+func (b *boundListener) closer() io.Closer {
+	if l := b.l.Load(); l != nil {
+		return *l
+	}
+	return nil
 }
 
 // frontHandler is the entrypoint chain around the base handler and the global
@@ -307,7 +344,7 @@ func (e *httpEntrypoint) newServer(h http.Handler) *http.Server {
 		// http2.ConfigureServer, which x/net 0.60.0 deprecates in favour of
 		// this field; one server now means one set of limits to keep right.
 		HTTP2: &http.HTTP2Config{
-			MaxConcurrentStreams: h2MaxConcurrentStreams,
+			MaxConcurrentStreams: h2MaxConcurrentStreams(),
 			MaxReadFrameSize:     h2MaxReadFrameSize,
 		},
 		Protocols: protocols,
@@ -333,6 +370,8 @@ func (e *httpEntrypoint) newServer(h http.Handler) *http.Server {
 			}
 		},
 	}
+	// net/http reports the rapid-reset close it makes itself only here.
+	server.ErrorLog.SetOutput(e.coolOff.WatchServerErrors(server.ErrorLog.Writer(), coolOffKey))
 	return server
 }
 
@@ -355,11 +394,12 @@ func (e *httpEntrypoint) serveTCPOn(server *http.Server, l net.Listener) {
 	if e.deps.Phantom != nil {
 		l = e.deps.Phantom.OptimizeListener(l)
 	}
-	l = &cappedListener{Listener: l, slots: e.slots, perAddr: e.perAddr}
+	l = &cappedListener{Listener: l, slots: e.slots, perAddr: e.perAddr, unproven: e.unproven, h2Resets: e.h2Resets, coolOff: e.coolOff}
+	e.tcp.set(l)
 	if e.tlsConfig != nil {
 		logger.L.LogInfo("starting HTTPS entrypoint", "addr", addr, "type", e.ep.Type.String())
 		e.wg.Go(func() {
-			if err := server.ServeTLS(l, "", ""); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			if err := e.arrivals.Serve(func() error { return server.ServeTLS(l, "", "") }); err != nil {
 				logger.L.LogError("HTTPS server failed", "error", err, "addr", addr)
 			}
 		})
@@ -367,7 +407,7 @@ func (e *httpEntrypoint) serveTCPOn(server *http.Server, l net.Listener) {
 	}
 	logger.L.LogInfo("starting HTTP entrypoint", "addr", addr, "type", e.ep.Type.String())
 	e.wg.Go(func() {
-		if err := server.Serve(l); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		if err := e.arrivals.Serve(func() error { return server.Serve(l) }); err != nil {
 			logger.L.LogError("HTTP server failed", "error", err, "addr", addr)
 		}
 	})
@@ -382,7 +422,7 @@ func newHTTP3Server(addr string, handler http.Handler, tlsConfig *tls.Config) *h
 		QUICConfig: &quic.Config{
 			MaxIdleTimeout:        quicMaxIdleTimeout,
 			KeepAlivePeriod:       quicKeepAlivePeriod,
-			MaxIncomingStreams:    quicMaxIncomingStreams,
+			MaxIncomingStreams:    h3MaxConcurrentStreams(),
 			MaxIncomingUniStreams: quicMaxIncomingUniStreams,
 		},
 	}

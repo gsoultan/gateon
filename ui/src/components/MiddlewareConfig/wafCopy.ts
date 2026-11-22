@@ -68,3 +68,16 @@ export const CORPUS_SAMPLE_HELP =
   "and credentials (Authorization, cookies, API keys and token-shaped values are removed). " +
   "The sample stays in memory, holds a fixed number of requests with the newest replacing the oldest, " +
   "and is lost on restart. Export it with: gateon export-waf-corpus";
+
+/** Under the schema learning switch. */
+export const SCHEMA_LEARNING_HELP =
+  "Draft an OpenAPI document for this route from the requests it forwards and the origin answers 2xx or 3xx. " +
+  "Only shapes are kept: paths, parameter names, and the narrowest type every value fit. No value is kept. " +
+  "The draft enforces nothing until you put it in the document field and save. " +
+  "It is held in memory and lost on restart.";
+
+/** Under the list of learned drafts. */
+export const LEARNED_DRAFT_REVIEW_NOTE =
+  "Read a draft before using it. It describes the traffic seen so far, not the API: an endpoint nobody " +
+  "called is missing, and a parameter that only ever held numbers is declared an integer. " +
+  "Using one fills the document field. Nothing changes on the route until you save.";

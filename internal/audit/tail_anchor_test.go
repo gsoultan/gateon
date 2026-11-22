@@ -160,7 +160,6 @@ func TestAnEntryThatFailedToStoreIsNotTheAnchor(t *testing.T) {
 	if _, err := m.db.Exec("ALTER TABLE audit_logs RENAME TO audit_logs_away"); err != nil {
 		t.Fatal(err)
 	}
-	m.prepareStatements()
 	logEntries(m, 1) // fails: there is no table to write to
 	if _, err := m.db.Exec("ALTER TABLE audit_logs_away RENAME TO audit_logs"); err != nil {
 		t.Fatal(err)

@@ -37,6 +37,7 @@ process (ADR 0092).
 | Connection | What happens |
 | :--- | :--- |
 | Made while the gateway restarts | Waits, then is served by the new gateway. |
+| Accepted by the old gateway, request not sent yet | Answered by the old gateway before it exits (ADR 0101). It waits up to one second for the request. |
 | A request in flight | Finished by the old gateway before it exits. |
 | Long-lived: WebSocket, SSE, a TCP session, HTTP/3 | Closed when the old gateway's drain ends. The client reconnects. |
 
@@ -51,6 +52,19 @@ systemctl show gateon -p NFileDescriptorStore
 
 It prints the number of sockets systemd is holding, one per listener.
 `systemctl stop gateon` closes them.
+
+## Compatibility with the previous release
+
+Every release is held to one rule: the release before it can be upgraded to
+it and rolled back again. The new version starts on the configuration and the
+database the previous one wrote, and the previous one starts again on what
+the new one left, with nothing restored (ADR 0102). A rollback, by the helper
+or by installing the older package, depends on the second half.
+
+The rule is checked on every pull request by running the previous release's
+own binary against the build, on SQLite and on PostgreSQL
+(`make check-compat`). It covers one release back. Upgrading across several
+releases at once is covered only because each step was.
 
 ## Before the first upgrade
 
@@ -120,8 +134,14 @@ applies to every upgrade, including one by package manager.
 `GATEON_MIGRATION_BACKUP=false` turns the copy off. A failed upgrade that
 migrated is then not rolled back (see below).
 
-PostgreSQL is migrated in place. Take a backup of your own before a release
-whose notes mention a migration: see [backup-restore.md](backup-restore.md).
+PostgreSQL is migrated in place, with no copy. A failed upgrade is still
+rolled back when it was one release forward: each release is built knowing
+the release before it and is tested by starting that release on a database
+it has migrated, so the previous version runs on the newer schema and
+nothing needs restoring. What the new version added stays in the database
+and the previous version ignores it. An upgrade across several releases at
+once is not covered by that test and is not rolled back. Take a backup of
+your own before one: see [backup-restore.md](backup-restore.md).
 
 ## When an upgrade fails
 
@@ -131,8 +151,8 @@ Settings, Updates shows how the last install ended, and
 | Outcome | What it means | What to do |
 | :--- | :--- | :--- |
 | **Not installed** | The release was refused before anything changed: signature, checksum, download, or not newer. | Read the reason shown. For a mirror, check it copies `checksums.txt` and `checksums.txt.sig` unmodified. |
-| **Rolled back** | The new version did not become ready and the previous one is running again. If the new version had migrated a SQLite database, the copy taken beforehand was put back and what the new version wrote is kept as `<database>.failed-upgrade`. | `journalctl -u gateon` from the time of the upgrade says why the new version was not ready. Report it before trying again. |
-| **Failed, not rolled back** | The new version is installed and not ready, and it had already migrated PostgreSQL (or SQLite with the copy switched off). The previous binary was not put back, because it would start on a schema it does not know. | Fix what stops the new version starting (`journalctl -u gateon`), or restore the database from your backup and run `sudo gateon upgrade --version <previous> --allow-downgrade`. |
+| **Rolled back** | The new version did not become ready and the previous one is running again. If the new version had migrated a SQLite database, the copy taken beforehand was put back and what the new version wrote is kept as `<database>.failed-upgrade`. If it had migrated PostgreSQL, or SQLite with the copy switched off, and the upgrade was one release forward, the database was left as migrated and the previous version runs on it; the card says so. | `journalctl -u gateon` from the time of the upgrade says why the new version was not ready. Report it before trying again. |
+| **Failed, not rolled back** | The new version is installed and not ready, it had already migrated PostgreSQL (or SQLite with the copy switched off), and the upgrade skipped a release or came from a build that was not a release. The previous binary was not put back, because it was never tested on that schema. | Fix what stops the new version starting (`journalctl -u gateon`), or restore the database from your backup and run `sudo gateon upgrade --version <previous> --allow-downgrade`. |
 
 The previous binary stays at `/var/lib/gateon-upgrade/previous-gateon` until
 the next upgrade replaces it.

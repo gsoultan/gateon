@@ -11,6 +11,141 @@ here after the fact.
 
 ## Unreleased
 
+### A Postgres database behind PgBouncer in transaction pooling mode works
+
+A gateway whose database is reached through PgBouncer in transaction pooling
+mode, the pooler commonly listening on port 6432, set up without complaint and
+then failed a share of its queries with `pq: unnamed prepared statement does
+not exist`, and dropped audit entries with `prepared statement "1" does not
+exist`. A dropped entry had already become the previous hash of the next one,
+so a signed audit log reported a break where nothing was tampered with. The
+more clients were busy at once, the more failed; the block list's first read
+after a start was a common casualty.
+
+Every Postgres connection now sends a query with arguments in one round trip
+(`binary_parameters=yes` is added to the connection string, replacing any value
+it carried), and the audit log no longer keeps a statement prepared for the
+life of the process. Nothing changes for a direct connection or for PgBouncer
+in session mode.
+
+**Who is affected:** an install on PgBouncer in transaction mode. Audit entries
+lost before the upgrade are not recovered; a verification of a range that held
+one keeps reporting the break there.
+
+### A route can draft its own OpenAPI document
+
+A WAF middleware has a new switch, "Learn this route's API from traffic"
+(`schema_learning`, off by default). With it on, the route learns the shape of
+the requests it forwards and the origin answers 2xx or 3xx: paths, query
+parameter names, and the narrowest type every value fit. No value is kept.
+"Show what has been learned" in the same form lists each learning route's
+draft, and "Use as the document" puts one in the document field for you to
+read and save. A draft enforces nothing by itself, and is not offered over a
+document the form already has or while the route refuses requests outside its
+document.
+
+Drafts are held in memory (at most 64 routes) and lost on restart.
+`GET /v1/waf/schema-drafts` returns them and `DELETE
+/v1/waf/schema-drafts/{route}` starts a route again.
+`GATEON_WAF_SCHEMA_LEARNING=true` turns learning on for route WAFs that do not
+set it. Rolling back needs nothing undone: an older build ignores the setting.
+See ADR-0103.
+
+### A restart no longer drops a connection it had just accepted
+
+A gateway that was told to stop closed, without answering, a connection it
+had accepted a moment earlier whose request it had not read yet. Under a
+client opening a new connection per request, about one restart in eight lost
+a request this way. The gateway now stops accepting first and answers every
+connection it had already taken before it shuts its servers down (ADR 0101).
+
+**Who is affected:** everyone, for the better. A connection that was opened
+and has sent nothing is now closed one second into a shutdown instead of
+five, so a restart with such a connection open is about four seconds shorter.
+The fix is in the gateway being stopped: the restart that installs this
+release is still the old version's shutdown.
+
+### Releases are compatible with the one before
+
+From this release on, each release is tested against the previous release's
+own binary: it starts on the previous release's configuration and database,
+and the previous release starts again on what it left (ADR 0102). Nothing
+changes on an installed gateway. It is what makes a rollback after a
+migration sound.
+
+### A failed upgrade is rolled back on PostgreSQL too
+
+A failed upgrade that had already migrated PostgreSQL used to stay on the new
+version as "Failed, not rolled back". When the upgrade was one release
+forward, the helper now puts the previous version back and leaves the
+database as migrated; the previous version runs on it, and Settings, Updates
+says the database was kept. An upgrade across several releases is still not
+rolled back. The same applies to SQLite with `GATEON_MIGRATION_BACKUP=false`.
+
+**Who is affected:** PostgreSQL installs that upgrade themselves, from the
+upgrade after this one. The helper that installs a release is the installed
+version's, so the upgrade that brings this release in still behaves as
+before.
+
+### ClamAV runs only from a ClamAV repository
+
+`waf.clamav.docker_image` must now name `clamav/clamav` or
+`clamav/clamav-debian`, at any tag or digest. If you run ClamAV from a mirror,
+add the mirror's repository to `GATEON_CLAMAV_IMAGE_REPOSITORIES`
+(comma-separated) in the gateway's environment before the next install or
+update; until then the install refuses the image. Saving other settings still
+works with the mirror stored. See ADR-0099.
+
+### Administrator activity alerts, an off-host audit copy, and `gateon admin reset`
+
+With alerting on, every destination now receives an alert for sign-ins from
+a new network, account changes, second-factor resets, audit and alerting
+changes, the WAF switched off or to audit-only, WAF rule changes, certificate
+writes and failed audit verification. These need no playbook. Expect one alert
+the first time each administrator signs in after the upgrade, because their
+network is new to the record.
+
+`GATEON_AUDIT_SYSLOG_ADDR` (`tls://`, `tcp://` or `udp://host:port`) sends
+every audit entry off the host as it is written. A value that is set and
+cannot be used stops the start. Certificate and key uploads are now audited.
+`sudo gateon admin reset <username>` recovers a locked-out administrator; see
+[incident-compromise.md](incident-compromise.md) and ADR-0099.
+
+### Connection floods, HTTP/2 rapid reset and slow backends are bounded
+
+Upgrading from v1.3.8 needs no change and rollback is safe: nothing stored or
+on the wire changes. Four new limits apply by default (ADR-0100):
+
+- A connection that has not yet sent a complete request is closed after 5 s
+  (1 s when its entrypoint is three-quarters full), one address may hold 16 of
+  them (64 on `enterprise`), and a full entrypoint closes the oldest of them to
+  admit a new connection. `GATEON_ENTRYPOINT_HANDSHAKE_TIMEOUT`,
+  `GATEON_ENTRYPOINT_HANDSHAKE_TIMEOUT_UNDER_PRESSURE`,
+  `GATEON_ENTRYPOINT_MAX_UNPROVEN_PER_ADDR`.
+- An HTTP/2 connection whose client cancels more than 100 streams a second
+  (200 on `enterprise`) is closed, and its address is refused for 10 s.
+  `GATEON_H2_MAX_RESETS_PER_SECOND`, `GATEON_H2_RESET_COOLOFF`.
+- HTTP/2 advertises 100 concurrent streams on `minimal` and `standard`, down
+  from 250. `GATEON_H2_MAX_CONCURRENT_STREAMS`.
+- HTTP/3 allows the same number of request streams per connection as HTTP/2
+  (100, or 250 on `enterprise`), down from 1,000, and 16 client
+  unidirectional streams, down from 500. `GATEON_H3_MAX_CONCURRENT_STREAMS`.
+- Each backend target takes at most 256 / 1,024 / 8,192 requests at once by
+  profile; a request past that waits up to 2 s and is answered 503 with
+  `Retry-After: 1`. WebSocket upgrades are not counted.
+  `GATEON_BACKEND_MAX_INFLIGHT`, `GATEON_BACKEND_QUEUE_TIMEOUT`.
+
+Setting `GATEON_ENTRYPOINT_MAX_UNPROVEN_PER_ADDR`, `GATEON_H2_MAX_RESETS_PER_SECOND`,
+`GATEON_H2_RESET_COOLOFF` or `GATEON_BACKEND_MAX_INFLIGHT` to 0 turns that guard
+off.
+
+**Who is affected:** a backend that legitimately serves more requests at once
+than its profile's cap (raise `GATEON_BACKEND_MAX_INFLIGHT`); clients behind
+one NAT with a client that resets HTTP/2 streams in a loop (set
+`GATEON_H2_RESET_COOLOFF=0`). Refusals are counted under
+`backend_max_inflight`, `h2_rapid_reset`, `h2_reset_cooloff` and
+`http_unproven_per_addr`.
+
 ### A route can keep a sample of its traffic for tuning the WAF
 
 A WAF middleware has a new setting, "Sample Requests for Tuning"
