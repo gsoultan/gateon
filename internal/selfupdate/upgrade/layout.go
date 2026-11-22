@@ -70,7 +70,7 @@ type Request struct {
 	Automatic   bool      `json:"automatic,omitempty"`
 	RequestedAt time.Time `json:"requested_at"`
 	// Rollback asks for the release the last upgrade replaced to be put back
-	// (ADR 0104). Version then names the release the asker was shown, and the
+	// (ADR 0105). Version then names the release the asker was shown, and the
 	// helper refuses when that is not the one it kept: which binary goes back
 	// is decided by the helper's own record, not by this file.
 	Rollback bool `json:"rollback,omitempty"`
@@ -131,7 +131,7 @@ const (
 	ReasonMigrated Reason = "migrated"
 )
 
-// The reasons of a rollback an operator asked for (ADR 0104). The phases are
+// The reasons of a rollback an operator asked for (ADR 0105). The phases are
 // the ones an install has; the reason is what says nobody waited for a
 // gateway to fail first.
 const (

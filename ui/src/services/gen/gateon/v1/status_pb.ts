@@ -495,7 +495,7 @@ export const InstallUpdateResponseSchema: GenMessage<InstallUpdateResponse> = /*
 
 /**
  * RollbackUpdateRequest asks the gateway to put back the release the last
- * upgrade replaced (ADR 0104).
+ * upgrade replaced (ADR 0105).
  *
  * @generated from message gateon.v1.RollbackUpdateRequest
  */
@@ -915,7 +915,7 @@ export enum UpgradeReason {
   HELPER = 10,
 
   /**
-   * An operator asked for the previous release to be put back (ADR 0104).
+   * An operator asked for the previous release to be put back (ADR 0105).
    * With phase ROLLED_BACK this is a rollback that worked.
    *
    * @generated from enum value: UPGRADE_REASON_REQUESTED = 11;

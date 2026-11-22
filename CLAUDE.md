@@ -208,7 +208,7 @@ because a self-upgrade rolls back by putting the old binary back. It also has th
 build's helper put the release's binary back, as `gateon upgrade --rollback`
 does, and waits for that binary to answer: in a rollback the helper is the newer
 release and the gateway reading its status the older one, so a field added to
-that file breaks every rollback and nothing inside the tree can see it (ADR 0104). So a migration
+that file breaks every rollback and nothing inside the tree can see it (ADR 0105). So a migration
 may add; it may not drop, rename or narrow what the latest release reads, and
 removing something takes two releases. Nothing in it may skip. See ADR 0102.
 

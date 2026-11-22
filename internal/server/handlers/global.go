@@ -25,6 +25,7 @@ import (
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware"
 	"github.com/gsoultan/gateon/internal/request"
+	"github.com/gsoultan/gateon/internal/security/waf/advisory"
 	"github.com/gsoultan/gateon/internal/security/waf/corpus"
 	"github.com/gsoultan/gateon/internal/security/waf/schemalearn"
 	"github.com/gsoultan/gateon/internal/server/readiness"
@@ -233,6 +234,7 @@ func registerGlobalHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI, d *Deps) {
 	})
 	mux.HandleFunc("GET /v1/waf/corpus", serveWAFCorpus)
 	mux.HandleFunc("GET /v1/waf/schema-drafts", serveWAFSchemaDrafts)
+	mux.HandleFunc("GET /v1/waf/advisory", serveWAFAdvisoryStatus)
 	mux.HandleFunc("DELETE /v1/waf/schema-drafts/{route}", forgetWAFSchemaDraft)
 	mux.HandleFunc("GET /v1/audit/logs", func(w http.ResponseWriter, r *http.Request) {
 		if !RequirePermission(w, r, auth.ActionRead, auth.ResourceDiagnostics) {
@@ -1137,7 +1139,7 @@ func registerUpdateHandlers(mux *http.ServeMux, svc GlobalAndAuthAPI) {
 		}
 		WriteProtoResponse(w, http.StatusAccepted, res.GetStatus())
 	})
-	// Rolling back (ADR 0104), under the same two checks.
+	// Rolling back (ADR 0105), under the same two checks.
 	mux.HandleFunc("POST /v1/update/rollback", func(w http.ResponseWriter, r *http.Request) {
 		if !RequirePermission(w, r, auth.ActionWrite, auth.ResourceGlobal) {
 			return
@@ -1221,4 +1223,20 @@ func forgetWAFSchemaDraft(w http.ResponseWriter, r *http.Request) {
 	}
 	logger.L.LogInfo("WAF schema draft discarded", "route", route, "user", auditUser(r))
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// serveWAFAdvisoryStatus answers where the exchange with the WAF's advisory
+// worker stands (ADR 0104): whether there is one, and how many samples were
+// offered, dropped, sent, lost and flagged.
+//
+// Counts and the worker's host, and nothing of any request: read on the
+// middlewares, as for a draft, because it is what the WAF form shows beside
+// the switch.
+func serveWAFAdvisoryStatus(w http.ResponseWriter, r *http.Request) {
+	if !RequirePermission(w, r, auth.ActionRead, auth.ResourceMiddlewares) {
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	_ = json.NewEncoder(w).Encode(advisory.Shared().Status())
 }

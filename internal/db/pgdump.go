@@ -22,7 +22,7 @@ import (
 )
 
 // PostgresDumpSuffix ends the name of the dump taken before a newer gateway
-// migrates a PostgreSQL database (ADR 0104). One slot per database, like the
+// migrates a PostgreSQL database (ADR 0105). One slot per database, like the
 // SQLite copy: the next migrating upgrade replaces it.
 const PostgresDumpSuffix = ".pre-upgrade.dump"
 

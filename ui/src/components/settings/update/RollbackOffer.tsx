@@ -79,7 +79,7 @@ function RollbackConfirm({ opened, current, previous, error, pending, onConfirm,
 }
 
 /**
- * Going back to the version the last upgrade replaced (ADR 0104). It renders
+ * Going back to the version the last upgrade replaced (ADR 0105). It renders
  * nothing when the host keeps no such version. When going back would need the
  * database copy put back as well, it shows onHost, the command for the host,
  * instead of a button: that discards data, and is not decided from a browser.

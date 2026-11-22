@@ -113,7 +113,7 @@ verified. `GET /v1/update/status` reports progress and history.
 
 An upgrade that started and then misbehaves can be undone without
 downloading anything. The helper keeps the binary the last upgrade replaced,
-and puts it back when asked (ADR 0104).
+and puts it back when asked (ADR 0105).
 
 In the dashboard: **Settings, Updates, Install, Roll back to vX.Y.Z**. Only
 an administrator sees the button enabled. The confirmation names both
@@ -183,7 +183,7 @@ database, and a migration does not run if the copy cannot be made. This
 applies to every upgrade, including one by package manager.
 
 PostgreSQL is dumped first, with `pg_dump`, to
-`<data dir>/postgres-<database>.pre-upgrade.dump` (ADR 0104). The dump holds
+`<data dir>/postgres-<database>.pre-upgrade.dump` (ADR 0105). The dump holds
 the schema the gateway uses, in the custom format `pg_restore` reads. One
 dump is kept per database and the next migrating upgrade replaces it. It
 needs the PostgreSQL client tools on the gateway's host, of the server's

@@ -40,7 +40,7 @@ export function useInstallUpdate() {
   });
 }
 
-/** Asks for the version the last upgrade replaced to be put back (ADR 0104). */
+/** Asks for the version the last upgrade replaced to be put back (ADR 0105). */
 export function useRollbackUpdate() {
   const queryClient = useQueryClient();
   return useMutation({

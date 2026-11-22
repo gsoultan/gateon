@@ -1944,7 +1944,7 @@ func (s *ApiService) InstallUpdate(ctx context.Context, req *gateonv1.InstallUpd
 }
 
 // RollbackUpdate asks for the release the last upgrade replaced to be put
-// back (ADR 0104). An administrator only, on every transport, for the reason
+// back (ADR 0105). An administrator only, on every transport, for the reason
 // InstallUpdate gives: it ends with root replacing the gateway's binary.
 func (s *ApiService) RollbackUpdate(ctx context.Context, req *gateonv1.RollbackUpdateRequest) (*gateonv1.RollbackUpdateResponse, error) {
 	if err := s.requireAdmin(ctx); err != nil {

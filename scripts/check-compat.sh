@@ -15,7 +15,7 @@
 # binaries as real processes on one state, on SQLite and on PostgreSQL.
 #
 # One of them has this tree's upgrade helper put the last release's binary
-# back, as an operator asks for with `gateon upgrade --rollback` (ADR 0104),
+# back, as an operator asks for with `gateon upgrade --rollback` (ADR 0105),
 # and waits for that binary to answer. Every gateway reads the helper's
 # status at /var/lib/gateon-upgrade, so the spec needs that directory: this
 # script creates it, with sudo when it has to, and removes it again. The spec

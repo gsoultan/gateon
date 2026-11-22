@@ -302,7 +302,7 @@ check-folders:
 ##               migration the old binary cannot read breaks every rollback
 ##               after it ships. It also has this tree's helper put the
 ##               release's binary back, as `gateon upgrade --rollback` does,
-##               and waits for that binary to answer (ADR 0104); that needs
+##               and waits for that binary to answer (ADR 0105); that needs
 ##               /var/lib/gateon-upgrade, which the script creates and removes.
 ##               Needs GATEON_TEST_POSTGRES_DSN; nothing in it may skip. See
 ##               ADR 0102.

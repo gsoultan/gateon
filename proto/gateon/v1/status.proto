@@ -176,7 +176,7 @@ enum UpgradeReason {
   // The helper did not pick the request up: gateon-upgrade.path is not
   // enabled.
   UPGRADE_REASON_HELPER = 10;
-  // An operator asked for the previous release to be put back (ADR 0104).
+  // An operator asked for the previous release to be put back (ADR 0105).
   // With phase ROLLED_BACK this is a rollback that worked.
   UPGRADE_REASON_REQUESTED = 11;
   // A rollback was asked for and there is no release to go back to.
@@ -277,7 +277,7 @@ message InstallUpdateResponse {
 }
 
 // RollbackUpdateRequest asks the gateway to put back the release the last
-// upgrade replaced (ADR 0104).
+// upgrade replaced (ADR 0105).
 message RollbackUpdateRequest {
   // The release to go back to, "1.8.2". It must be the one the status
   // reported as rollback_version: the caller names what they were shown.

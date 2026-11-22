@@ -30,7 +30,7 @@ type RollbackOptions struct {
 }
 
 // Rollback puts back the release the last upgrade replaced, on an operator's
-// word rather than because a gateway failed to start (ADR 0104). It returns
+// word rather than because a gateway failed to start (ADR 0105). It returns
 // the outcome, which it has also written to the state directory.
 func Rollback(ctx context.Context, cfg Config, opts RollbackOptions) (upgrade.Status, error) {
 	cfg.defaults()

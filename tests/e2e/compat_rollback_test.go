@@ -152,7 +152,7 @@ func (s *processService) Restart(context.Context) error {
 func (s *processService) Restarts(context.Context) int { return 0 }
 
 // TestAnUpgradeFromTheLastReleaseRollsBackOnRequest runs the rollback an
-// operator asks for (ADR 0104) with nothing simulated but the service
+// operator asks for (ADR 0105) with nothing simulated but the service
 // manager: this checkout's helper puts the last release's own binary back,
 // and that binary, which was written before any of this existed, has to read
 // the helper's status and answer it.

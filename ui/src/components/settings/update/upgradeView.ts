@@ -37,7 +37,7 @@ const ROLLBACK_REASONS = new Set<UpgradeReason>([
   UpgradeReason.PREVIOUS_NOT_READY,
 ]);
 
-/** The record is of a rollback somebody asked for (ADR 0104), not of an install. */
+/** The record is of a rollback somebody asked for (ADR 0105), not of an install. */
 export const isRollback = (r: Pick<UpgradeFacts, "reason">): boolean => ROLLBACK_REASONS.has(r.reason);
 
 /** An install is running: the page asks again every couple of seconds. */

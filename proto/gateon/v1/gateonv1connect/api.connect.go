@@ -239,7 +239,7 @@ type ApiServiceClient interface {
 	// as soon as the download has started; GetUpdateStatus reports progress.
 	InstallUpdate(context.Context, *connect.Request[v1.InstallUpdateRequest]) (*connect.Response[v1.InstallUpdateResponse], error)
 	// RollbackUpdate asks the root-owned helper to put back the release the
-	// last upgrade replaced, which it kept (ADR 0104). Administrators only.
+	// last upgrade replaced, which it kept (ADR 0105). Administrators only.
 	// Nothing is downloaded. It answers as soon as the request is left;
 	// GetUpdateStatus reports progress.
 	RollbackUpdate(context.Context, *connect.Request[v1.RollbackUpdateRequest]) (*connect.Response[v1.RollbackUpdateResponse], error)
@@ -1204,7 +1204,7 @@ type ApiServiceHandler interface {
 	// as soon as the download has started; GetUpdateStatus reports progress.
 	InstallUpdate(context.Context, *connect.Request[v1.InstallUpdateRequest]) (*connect.Response[v1.InstallUpdateResponse], error)
 	// RollbackUpdate asks the root-owned helper to put back the release the
-	// last upgrade replaced, which it kept (ADR 0104). Administrators only.
+	// last upgrade replaced, which it kept (ADR 0105). Administrators only.
 	// Nothing is downloaded. It answers as soon as the request is left;
 	// GetUpdateStatus reports progress.
 	RollbackUpdate(context.Context, *connect.Request[v1.RollbackUpdateRequest]) (*connect.Response[v1.RollbackUpdateResponse], error)

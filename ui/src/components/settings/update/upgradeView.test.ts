@@ -163,7 +163,7 @@ describe("a maintenance window", () => {
   });
 });
 
-// A rollback somebody asked for (ADR 0104) is recorded with the phases of an
+// A rollback somebody asked for (ADR 0105) is recorded with the phases of an
 // install and told apart by its reason. Here 1.8.3 is running and 1.8.2 is
 // the version it replaced.
 describe("a rollback on request", () => {
