@@ -70,7 +70,8 @@ func TestOpenStillParsesSupportedEngines(t *testing.T) {
 }
 
 // A Postgres session always runs in UTC, whatever zone the DSN or the server
-// asked for, and the rest of the DSN survives the rewrite. What this protects
+// asked for, always sends its arguments in one round trip (see
+// withPostgresSessionParams), and the rest of the DSN survives the rewrite. What this protects
 // is tested end to end by TestFingerprintMitigationTTLIgnoresTheDatabaseZone in
 // internal/telemetry; this pins the rewrite itself, including the spellings
 // that would otherwise reach the server as a second, competing parameter.
@@ -79,6 +80,7 @@ func TestPostgresSessionZoneIsPinnedToUTC(t *testing.T) {
 		"postgres://u:p%40ss@h:5432/d?sslmode=disable",
 		"postgres://u:p%40ss@h:5432/d?sslmode=disable&timezone=Asia/Jakarta",
 		"postgresql://u:p%40ss@h:5432/d?TimeZone=America%2FNew_York&sslmode=disable",
+		"postgres://u:p%40ss@h:5432/d?sslmode=disable&Binary_Parameters=no",
 	} {
 		_, got := parseURL(dsn)
 		u, err := neturl.Parse(got)
@@ -86,8 +88,10 @@ func TestPostgresSessionZoneIsPinnedToUTC(t *testing.T) {
 			t.Fatalf("rewritten DSN does not parse: %v", err)
 		}
 		q := u.Query()
-		if len(q) != 2 || q.Get("timezone") != "UTC" || q.Get("sslmode") != "disable" {
-			t.Errorf("%s: parameters after the rewrite are %v, want sslmode=disable and timezone=UTC only",
+		if len(q) != 3 || q.Get("timezone") != "UTC" || q.Get("sslmode") != "disable" ||
+			q.Get("binary_parameters") != "yes" {
+			t.Errorf("%s: parameters after the rewrite are %v, "+
+				"want sslmode=disable, timezone=UTC and binary_parameters=yes only",
 				u.Redacted(), q)
 		}
 		if pw, _ := u.User.Password(); pw != "p@ss" || u.Host != "h:5432" || u.Path != "/d" {
