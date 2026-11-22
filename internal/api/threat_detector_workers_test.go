@@ -96,3 +96,16 @@ func (f *blockingFeed) peak() int {
 	defer f.mu.Unlock()
 	return f.max
 }
+
+// TestThreatAnalysisPanicCostsOneAddress: a panic while analysing one address
+// ends that address's analysis, not the process. Root cause: each address was
+// analysed on a goroutine Detect started and nothing recovered, so any panic
+// there -- here a missing entry -- killed every listener with it.
+func TestThreatAnalysisPanicCostsOneAddress(t *testing.T) {
+	d := &SecurityThreatDetector{Threshold: 5}
+	data := &DiagnosticData{IPStats: map[string]*IPStats{
+		"198.51.100.1": nil,
+		"198.51.100.2": {TotalRequests: 1, LastSeen: time.Now()},
+	}}
+	d.Detect(t.Context(), data)
+}

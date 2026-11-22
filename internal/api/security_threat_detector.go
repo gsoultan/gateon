@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/gsoultan/gateon/internal/security/reputation"
+	"github.com/gsoultan/gateon/internal/syncutil"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
@@ -95,6 +96,7 @@ func (d *SecurityThreatDetector) Detect(ctx context.Context, data *DiagnosticDat
 		go func(ip string, stats *IPStats) {
 			defer wg.Done()
 			defer func() { <-slots }()
+			defer syncutil.Recover("threat analysis of one address")
 			score := 0
 			reasons := []string{}
 			primaryType := "security_threat"
