@@ -400,9 +400,10 @@ type TierDefaults struct {
 	// bounds an outage, and start-up time does not follow the tier.
 	// GATEON_UPGRADE_READY_TIMEOUT overrides it, between 15 s and 15 min.
 	UpgradeReadyTimeout time.Duration
-	// MigrationBackup is whether a SQLite database is copied aside before a
-	// newer gateway migrates it, which is what lets a failed upgrade be
-	// undone. On everywhere; it costs free disk equal to the database.
+	// MigrationBackup is whether a database is copied before a newer gateway
+	// migrates it: a SQLite file copied aside, which is what lets a failed
+	// upgrade be undone, and a PostgreSQL database dumped with pg_dump (ADR
+	// 0104). On everywhere; it costs free disk about equal to the database.
 	// GATEON_MIGRATION_BACKUP=0 turns it off.
 	MigrationBackup bool
 	// SocketHandoff is whether the gateway hands its listening sockets to

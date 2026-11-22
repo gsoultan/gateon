@@ -540,7 +540,7 @@ func upgradeCLI() helper.CLI {
 	return helper.CLI{Version: version(), In: os.Stdin, Out: os.Stdout, Err: os.Stderr}
 }
 
-// prepareForUpgrades does the two things an upgrade needs of a starting
+// prepareForUpgrades does the things an upgrade needs of a starting
 // gateway before any store opens (ADR 0087). A gateway the helper is rolling
 // back to puts the pre-migration database copy back first: it must not open
 // a schema the version it replaced migrated. And every gateway records the
@@ -553,6 +553,11 @@ func prepareForUpgrades() {
 			"error", err)
 	}
 	db.SetMigrationObserver(upgrade.NewRecorder(version(), CompatibleWith, dirs.Data))
+	// A PostgreSQL database is dumped before it is migrated (ADR 0104). With
+	// the helper waiting, a dump that cannot be taken stops the migration and
+	// the helper puts the previous release back; on any other start there is
+	// nobody to do that, and the gateway warns and goes on.
+	db.RequirePostgresDump(upgrade.Awaited(version(), dirs))
 }
 
 // Version is set at build time via -ldflags "-X main.Version=<tag>".

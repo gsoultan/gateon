@@ -20,9 +20,12 @@ const rows = (current: string, target: string): [string, string][] => [
   ["Installed now", `v${current}`],
   ["New version", `v${target}`],
   ["Signature", "Signed by a Gateon release key. The installer checks it again before it replaces anything."],
-  ["Database", "If this release changes the database, a copy is taken first (SQLite). A PostgreSQL database is changed in place."],
+  [
+    "Database",
+    "If this release changes the database, a copy is taken first: the SQLite file is copied, and a PostgreSQL database is dumped with pg_dump. Without pg_dump on this host a PostgreSQL database is not changed and the upgrade is rolled back.",
+  ],
   ["Interruption", "The gateway restarts. New connections are refused for a few seconds."],
-  ["If it fails", `v${current} is put back automatically, unless a PostgreSQL database was already changed.`],
+  ["If it fails", `v${current} is put back automatically. Afterwards you can also roll back from this page.`],
 ];
 
 /**
