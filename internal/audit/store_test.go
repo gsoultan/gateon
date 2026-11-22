@@ -44,15 +44,6 @@ func newTestManager(t *testing.T, cfg *gateonv1.AuditConfig) *AuditManager {
 		Broadcaster: &Broadcaster{subscribers: make(map[chan AuditEntry]struct{})},
 		stop:        make(chan struct{}),
 	}
-	m.prepareStatements()
-	t.Cleanup(func() {
-		m.stmtMu.Lock()
-		if m.stmtInsert != nil {
-			_ = m.stmtInsert.Close()
-			m.stmtInsert = nil
-		}
-		m.stmtMu.Unlock()
-	})
 	return m
 }
 

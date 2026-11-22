@@ -113,6 +113,7 @@ ADRs follow a lightweight [MADR](https://adr.github.io/madr/)-style format:
 | [0101](./0101-a-shutdown-answers-the-connections-it-had-accepted.md) | A shutdown answers the connections it had accepted | Accepted |
 | [0102](./0102-the-last-release-upgrades-to-this-build-and-back.md) | The last release upgrades to this build and back | Accepted |
 | [0103](./0103-a-route-drafts-its-own-api-document-from-the-shape-of-its-traffic.md) | A route drafts its own API document from the shape of its traffic | Accepted |
+| [0104](./0104-a-second-opinion-is-asked-after-the-request-is-answered.md) | A second opinion is asked after the request is answered | Accepted |
 
 ## Conventions
 

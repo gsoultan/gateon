@@ -38,6 +38,7 @@ import (
 	"github.com/gsoultan/gateon/internal/security/mitigation"
 	"github.com/gsoultan/gateon/internal/security/reputation"
 	"github.com/gsoultan/gateon/internal/security/waf"
+	"github.com/gsoultan/gateon/internal/security/waf/advisory"
 	"github.com/gsoultan/gateon/internal/security/waf/corpus"
 	"github.com/gsoultan/gateon/internal/selfupdate/helper"
 	"github.com/gsoultan/gateon/internal/selfupdate/upgrade"
@@ -96,6 +97,13 @@ func main() {
 				os.Exit(1)
 			}
 			return
+		case "advisory-worker":
+			// The reference worker a gateway asks for a second opinion
+			// (ADR 0104). It is its own process, on its own host.
+			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+			code := advisory.WorkerCLI(ctx, os.Args[2:], os.Stderr)
+			stop()
+			os.Exit(code)
 		case "top":
 			apiURL, token := tui.TopArgs(os.Args[2:], "http://localhost:"+getPort())
 			if err := tui.RunTop(context.Background(), apiURL, token); err != nil {

@@ -11,6 +11,55 @@ here after the fact.
 
 ## Unreleased
 
+### A route can ask an advisory worker for a second opinion
+
+A WAF middleware has a new switch, "Ask the advisory worker about forwarded
+requests" (`advisory_review`, off by default), and a rate beside it
+(`advisory_sample_rate`). With the switch on, the route offers a copy of the
+requests it forwards with a rule match, or outside its OpenAPI document, to a
+worker on another host, after the request has been answered. The rate adds one
+in N of the requests nothing matched. Bodies, client addresses and credentials
+are never sent. The worker cannot slow or refuse a request; what it flags is
+listed in the Security Hub.
+
+Nothing is sent until the gateway is given a worker:
+`GATEON_WAF_ADVISORY_URL` (https, or http to the same host) and
+`GATEON_WAF_ADVISORY_TOKEN`. The form says so while there is none. A worker
+ships in the binary: `gateon advisory-worker`, started with the same
+`GATEON_WAF_ADVISORY_TOKEN`, judges each request with every rule family on at
+the highest paranoia level and names the rule.
+
+`GATEON_WAF_ADVISORY_MODE=reputation` also counts a flagged request against
+the client's reputation. Leave it at the default, `record`, until you have
+read what the worker flags on your traffic: at that paranoia level it flags
+ordinary requests on some applications.
+
+`GATEON_WAF_ADVISORY_QUEUE` sizes the queue (64, 256 and 1024 samples by
+tier), `GATEON_WAF_ADVISORY_REVIEW` and `GATEON_WAF_ADVISORY_SAMPLE_RATE` set
+the two route settings for route WAFs that do not, and `GET /v1/waf/advisory`
+returns the counts. Rolling back needs nothing undone: an older build ignores
+the settings. See ADR-0104.
+### A Postgres database behind PgBouncer in transaction pooling mode works
+
+A gateway whose database is reached through PgBouncer in transaction pooling
+mode, the pooler commonly listening on port 6432, set up without complaint and
+then failed a share of its queries with `pq: unnamed prepared statement does
+not exist`, and dropped audit entries with `prepared statement "1" does not
+exist`. A dropped entry had already become the previous hash of the next one,
+so a signed audit log reported a break where nothing was tampered with. The
+more clients were busy at once, the more failed; the block list's first read
+after a start was a common casualty.
+
+Every Postgres connection now sends a query with arguments in one round trip
+(`binary_parameters=yes` is added to the connection string, replacing any value
+it carried), and the audit log no longer keeps a statement prepared for the
+life of the process. Nothing changes for a direct connection or for PgBouncer
+in session mode.
+
+**Who is affected:** an install on PgBouncer in transaction mode. Audit entries
+lost before the upgrade are not recovered; a verification of a range that held
+one keeps reporting the break there.
+
 ### A route can draft its own OpenAPI document
 
 A WAF middleware has a new switch, "Learn this route's API from traffic"

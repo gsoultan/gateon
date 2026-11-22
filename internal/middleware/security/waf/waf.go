@@ -28,6 +28,7 @@ import (
 	"github.com/gsoultan/gateon/internal/security/entropy"
 	"github.com/gsoultan/gateon/internal/security/reputation"
 	"github.com/gsoultan/gateon/internal/security/waf"
+	"github.com/gsoultan/gateon/internal/security/waf/advisory"
 	"github.com/gsoultan/gateon/internal/security/waf/appprofile"
 	"github.com/gsoultan/gateon/internal/security/waf/schemalearn"
 	"github.com/gsoultan/gateon/internal/telemetry"
@@ -202,6 +203,15 @@ type WAFConfig struct {
 	// enforces nothing. GATEON_WAF_SCHEMA_LEARNING sets it for routes that
 	// do not.
 	LearnSchema bool
+
+	// AdvisoryReview offers the requests this WAF forwards with a match or
+	// outside the route's document, and one in AdvisorySampleRate of the
+	// rest, to the gateway's advisory worker for a second opinion after the
+	// fact (ADR 0104). It does nothing on a gateway with no worker
+	// configured. GATEON_WAF_ADVISORY_REVIEW and
+	// GATEON_WAF_ADVISORY_SAMPLE_RATE set them for routes that do not.
+	AdvisoryReview     bool
+	AdvisorySampleRate int
 }
 
 // Fingerprint returns a unique hash representing the WAF policy configuration.
@@ -252,6 +262,9 @@ func (c WAFConfig) Fingerprint() string {
 	}
 	if c.LearnSchema {
 		fmt.Fprint(h, "learn-schema\n")
+	}
+	if c.AdvisoryReview {
+		fmt.Fprintf(h, "advisory:%d\n", c.AdvisorySampleRate)
 	}
 	if c.InspectWebSocket {
 		fmt.Fprintf(h, "ws:%d\n", c.WebSocketMessageLimit)
@@ -400,6 +413,7 @@ func WAF(cfg WAFConfig) (kind.Middleware, error) {
 	if cfg.LearnSchema && cfg.RouteID != "" {
 		t.learner = schemalearn.Shared().For(cfg.RouteID)
 	}
+	t.advisor = advisorFor(cfg)
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			t.serve(next, w, r)
@@ -424,6 +438,9 @@ type wafRuntime struct {
 	// learner is where this route's request shapes go, nil unless the route
 	// learns its schema (ADR 0103).
 	learner *schemalearn.Handle
+	// advisor is where requests worth a second opinion are offered, nil
+	// unless the route asks and the gateway has a worker (ADR 0104).
+	advisor *advisory.Queue
 }
 
 func (t *wafRuntime) serve(next http.Handler, w http.ResponseWriter, r *http.Request) {
@@ -778,7 +795,11 @@ func (t *wafRuntime) inspectAndForward(next http.Handler, w http.ResponseWriter,
 	}
 
 	// From here the request goes to the origin, so it is one the WAF let
-	// through. Whether it is kept for tuning waits on what the origin says.
+	// through. The advisory worker is offered it now, before the proxy
+	// rewrites it, and is asked after it has been answered.
+	t.askAdvisor(r, tx)
+
+	// Whether it is kept for tuning waits on what the origin says.
 	w, keep := t.watch(w, r)
 	defer keep()
 
@@ -1143,6 +1164,8 @@ func parseWAFConfig(cfg map[string]string) WAFConfig {
 		WebSocketMessageLimit:       intVal(cfg[keyWebSocketMessageLimit]),
 		CorpusSampleRate:            corpusSampleRate(cfg[keyCorpusSampleRate]),
 		LearnSchema:                 schemaLearning(cfg[keySchemaLearning]),
+		AdvisoryReview:              advisoryReview(cfg[keyAdvisoryReview]),
+		AdvisorySampleRate:          advisorySampleRate(cfg[keyAdvisorySampleRate]),
 	}
 }
 
