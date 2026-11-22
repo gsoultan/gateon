@@ -124,7 +124,7 @@ func parseURL(url string) (driver, dsn string) {
 
 	// postgres:// or postgresql://
 	if strings.HasPrefix(url, "postgres://") || strings.HasPrefix(url, "postgresql://") {
-		return DriverPostgres, withPostgresSessionZone(url)
+		return DriverPostgres, withPostgresSessionParams(url)
 	}
 
 	return "", ""
@@ -142,22 +142,35 @@ func parseURL(url string) (driver, dsn string) {
 // stopped a request, ahead of UTC a one-hour block lasted hours longer.
 const postgresSessionZone = "UTC"
 
-// withPostgresSessionZone sets the session TimeZone as a startup parameter,
-// replacing any spelling of it the DSN already carried, because what the
-// schema's timestamps mean depends on it. A DSN that does not parse is
-// returned unchanged for sql.Open to reject, and is never echoed.
-func withPostgresSessionZone(dsn string) string {
+// withPostgresSessionParams pins the two connection parameters the gateway
+// depends on, replacing any spelling of either the DSN already carried:
+//
+//   - timezone, because what the schema's timestamps mean depends on it;
+//   - binary_parameters, because it makes lib/pq send a query with arguments
+//     in one round trip -- parse, bind, describe and execute behind a single
+//     Sync -- instead of two. Between two Syncs outside a transaction a
+//     PgBouncer in transaction pooling mode may move the client to another
+//     server connection, where the unnamed statement the first round trip
+//     parsed does not exist, and the query fails with "unnamed prepared
+//     statement does not exist". Arguments other than []byte are still sent
+//     as text; a []byte goes as binary, which is what the BYTEA columns that
+//     take one expect.
+//
+// A DSN that does not parse is returned unchanged for sql.Open to reject, and
+// is never echoed.
+func withPostgresSessionParams(dsn string) string {
 	u, err := neturl.Parse(dsn)
 	if err != nil {
 		return dsn
 	}
 	q := u.Query()
 	for key := range q {
-		if strings.EqualFold(key, "timezone") {
+		if strings.EqualFold(key, "timezone") || strings.EqualFold(key, "binary_parameters") {
 			q.Del(key)
 		}
 	}
 	q.Set("timezone", postgresSessionZone)
+	q.Set("binary_parameters", "yes")
 	u.RawQuery = q.Encode()
 	return u.String()
 }

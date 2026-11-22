@@ -40,8 +40,6 @@ func TestEntryCarryingBytesPostgresRefusesIsStillWritten(t *testing.T) {
 		Broadcaster: &Broadcaster{subscribers: make(map[chan AuditEntry]struct{})},
 		stop:        make(chan struct{}),
 	}
-	m.prepareStatements()
-	t.Cleanup(func() { _ = m.stmtInsert.Close() })
 
 	marker := fmt.Sprintf("hostile-bytes-%d", time.Now().UnixNano())
 	t.Cleanup(func() {

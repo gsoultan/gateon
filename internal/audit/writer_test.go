@@ -122,7 +122,6 @@ func TestSystemAndOperatorEntriesShareOneChain(t *testing.T) {
 			Broadcaster: &Broadcaster{subscribers: map[chan AuditEntry]struct{}{}},
 			stop:        make(chan struct{}),
 		}
-		m.prepareStatements()
 		assertOneChain(t, m)
 	})
 }
