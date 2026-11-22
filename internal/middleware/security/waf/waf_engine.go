@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
@@ -387,36 +388,52 @@ func (t *wafRuntime) guardWebSocket(w http.ResponseWriter, r *http.Request, repu
 // A refusal is recorded and held against the client exactly as a refused
 // request is. On an audit-only route it is recorded and the message forwarded.
 func (e *wafEngine) messageInspector(r *http.Request, reputation float64) wsinspect.Inspector {
-	return func(payload []byte, _ bool) wsinspect.Verdict {
-		tx := e.waf.NewTransaction()
-		// The transaction may keep views into payload, which is only valid
-		// until this returns.
-		defer tx.Close()
-
-		e.addResolvers(tx, r, reputation)
-		host, port := splitAddr(r.RemoteAddr)
-		tx.SetRemoteAddr(net.JoinHostPort(host, strconv.Itoa(port)))
-		tx.SetRequestLine(r.Method, r.URL.EscapedPath(), r.Proto)
-		tx.AddRequestHeader("Host", r.Host)
-		tx.AddRequestHeader("Content-Type", messageContentType(payload))
-
-		d := tx.ProcessRequestHeaders()
-		if !d.Blocked() {
-			tx.SetRequestBody(payload)
-			d = tx.ProcessRequestBody()
-		}
-		obs := wafObservation{
-			decision: d, matches: tx.Matches(), request: r,
-			routeID: e.cfg.RouteID, cfg: e.cfg, repScore: reputation,
-			phase: wafPhaseWebSocket,
-		}
-		recordWAFDecision(obs)
-		e.audit.record(d, obs.matches, obs)
-		if d.Blocked() && !e.cfg.AuditOnly {
-			return wsinspect.Refuse
-		}
-		return wsinspect.Allow
+	return func(payload []byte, _ bool) (v wsinspect.Verdict) {
+		// A message is judged on the goroutine that copies the client to the
+		// backend, which the proxy starts itself, so net/http's recovery is not
+		// above it: a panic here ended the process and every connection on it.
+		// It costs this connection instead, and fails closed.
+		defer func() {
+			if p := recover(); p != nil {
+				logger.L.LogError("WAF panicked judging a WebSocket message; the connection is closed",
+					"route", e.cfg.RouteID, "panic", p, "stack", string(debug.Stack()))
+				v = wsinspect.Refuse
+			}
+		}()
+		return e.judgeMessage(r, reputation, payload)
 	}
+}
+
+// judgeMessage is one message's verdict; see messageInspector.
+func (e *wafEngine) judgeMessage(r *http.Request, reputation float64, payload []byte) wsinspect.Verdict {
+	tx := e.waf.NewTransaction()
+	// The transaction may keep views into payload, which is only valid
+	// until this returns.
+	defer tx.Close()
+
+	e.addResolvers(tx, r, reputation)
+	host, port := splitAddr(r.RemoteAddr)
+	tx.SetRemoteAddr(net.JoinHostPort(host, strconv.Itoa(port)))
+	tx.SetRequestLine(r.Method, r.URL.EscapedPath(), r.Proto)
+	tx.AddRequestHeader("Host", r.Host)
+	tx.AddRequestHeader("Content-Type", messageContentType(payload))
+
+	d := tx.ProcessRequestHeaders()
+	if !d.Blocked() {
+		tx.SetRequestBody(payload)
+		d = tx.ProcessRequestBody()
+	}
+	obs := wafObservation{
+		decision: d, matches: tx.Matches(), request: r,
+		routeID: e.cfg.RouteID, cfg: e.cfg, repScore: reputation,
+		phase: wafPhaseWebSocket,
+	}
+	recordWAFDecision(obs)
+	e.audit.record(d, obs.matches, obs)
+	if d.Blocked() && !e.cfg.AuditOnly {
+		return wsinspect.Refuse
+	}
+	return wsinspect.Allow
 }
 
 // messageContentType names a message's structure for the engine. WebSocket
