@@ -54,7 +54,7 @@ const (
 // worker per gateway, so none of this is route configuration.
 const (
 	URLEnv   = "GATEON_WAF_ADVISORY_URL"
-	TokenEnv = "GATEON_WAF_ADVISORY_TOKEN"
+	TokenEnv = "GATEON_WAF_ADVISORY_TOKEN" // #nosec G101 -- the name of a variable, not its value
 	ModeEnv  = "GATEON_WAF_ADVISORY_MODE"
 	QueueEnv = "GATEON_WAF_ADVISORY_QUEUE"
 )
