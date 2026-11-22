@@ -11,6 +11,35 @@ here after the fact.
 
 ## Unreleased
 
+### A route can ask an advisory worker for a second opinion
+
+A WAF middleware has a new switch, "Ask the advisory worker about forwarded
+requests" (`advisory_review`, off by default), and a rate beside it
+(`advisory_sample_rate`). With the switch on, the route offers a copy of the
+requests it forwards with a rule match, or outside its OpenAPI document, to a
+worker on another host, after the request has been answered. The rate adds one
+in N of the requests nothing matched. Bodies, client addresses and credentials
+are never sent. The worker cannot slow or refuse a request; what it flags is
+listed in the Security Hub.
+
+Nothing is sent until the gateway is given a worker:
+`GATEON_WAF_ADVISORY_URL` (https, or http to the same host) and
+`GATEON_WAF_ADVISORY_TOKEN`. The form says so while there is none. A worker
+ships in the binary: `gateon advisory-worker`, started with the same
+`GATEON_WAF_ADVISORY_TOKEN`, judges each request with every rule family on at
+the highest paranoia level and names the rule.
+
+`GATEON_WAF_ADVISORY_MODE=reputation` also counts a flagged request against
+the client's reputation. Leave it at the default, `record`, until you have
+read what the worker flags on your traffic: at that paranoia level it flags
+ordinary requests on some applications.
+
+`GATEON_WAF_ADVISORY_QUEUE` sizes the queue (64, 256 and 1024 samples by
+tier), `GATEON_WAF_ADVISORY_REVIEW` and `GATEON_WAF_ADVISORY_SAMPLE_RATE` set
+the two route settings for route WAFs that do not, and `GET /v1/waf/advisory`
+returns the counts. Rolling back needs nothing undone: an older build ignores
+the settings. See ADR-0104.
+
 ### A route can draft its own OpenAPI document
 
 A WAF middleware has a new switch, "Learn this route's API from traffic"

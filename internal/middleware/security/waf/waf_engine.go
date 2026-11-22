@@ -20,12 +20,14 @@ import (
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/request"
 	secwaf "github.com/gsoultan/gateon/internal/security/waf"
+	"github.com/gsoultan/gateon/internal/security/waf/advisory"
 	"github.com/gsoultan/gateon/internal/security/waf/apischema"
 	"github.com/gsoultan/gateon/internal/security/waf/appprofile"
 	"github.com/gsoultan/gateon/internal/security/waf/corpus"
 	"github.com/gsoultan/gateon/internal/security/wsinspect"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	"github.com/gsoultan/gwaf"
+	"github.com/gsoultan/gwaf/schema"
 )
 
 // wafEngine is gateon's binding to gwaf.
@@ -295,6 +297,96 @@ func schemaLearning(value string) bool {
 		v = strings.TrimSpace(strings.ToLower(os.Getenv(schemaLearningEnv)))
 	}
 	return v == "true"
+}
+
+// The environment paths of the advisory worker's per-route settings, for a
+// deployment that sets them for every route that does not say otherwise.
+const (
+	advisoryReviewEnv     = "GATEON_WAF_ADVISORY_REVIEW"
+	advisorySampleRateEnv = "GATEON_WAF_ADVISORY_SAMPLE_RATE"
+)
+
+// advisoryReview reads the route's setting, falling back to the environment
+// and then to off. Only "true" turns it on: it sends requests to another
+// host.
+func advisoryReview(value string) bool {
+	v := strings.TrimSpace(strings.ToLower(value))
+	if v == "" {
+		v = strings.TrimSpace(strings.ToLower(os.Getenv(advisoryReviewEnv)))
+	}
+	return v == "true"
+}
+
+// advisorySampleRate reads the route's rate, falling back to the environment
+// and then to 0, which offers only requests something was found in.
+func advisorySampleRate(value string) int {
+	if v := strings.TrimSpace(value); v != "" {
+		return corpus.ParseRate(v)
+	}
+	return corpus.ParseRate(strings.TrimSpace(os.Getenv(advisorySampleRateEnv)))
+}
+
+// advisorFor returns the gateway's advisory queue for a route that asks for a
+// second opinion, and nil for one that does not or a gateway with no worker.
+// The second case is said, once per build: a switch that is on and does
+// nothing is the defect the dashboard's rule is about.
+func advisorFor(cfg WAFConfig) *advisory.Queue {
+	if !cfg.AdvisoryReview {
+		return nil
+	}
+	q := advisory.Shared()
+	if !q.Enabled() {
+		logger.L.LogWarn("WAF advisory review is on for a route and no worker is configured, so nothing is sent",
+			"route", cfg.RouteID, "setting", advisory.URLEnv)
+		return nil
+	}
+	q.SetSink(recordAdvisoryFinding)
+	return q
+}
+
+// askAdvisor offers a request the WAF is forwarding to the advisory worker
+// (ADR 0104): always when a rule matched it or it is outside the route's
+// document, and one in AdvisorySampleRate otherwise.
+//
+// Nothing here waits. A route that does not ask pays one comparison, and so
+// does every request once the queue is full, which is what a flood of
+// requests worth a second opinion comes to. The one that is offered builds
+// its sample here, because the proxy rewrites the request next.
+func (t *wafRuntime) askAdvisor(r *http.Request, tx *gwaf.Transaction) {
+	q := t.advisor
+	if q == nil || tx == nil || !q.Room() {
+		return
+	}
+	matches := tx.Matches()
+	why := advisory.WhySampled
+	switch {
+	case len(matches) > 0:
+		why = advisory.WhyMatched
+	case t.engine.outsideSchema(tx):
+		why = advisory.WhyOutsideSchema
+	case !q.Due(t.cfg.AdvisorySampleRate):
+		return
+	}
+	var ids []uint32
+	if len(matches) > 0 {
+		ids = make([]uint32, 0, len(matches))
+		for i := range matches {
+			ids = append(ids, uint32(matches[i].RuleID))
+		}
+	}
+	if s, ok := advisory.Capture(r, t.cfg.RouteID, why, ids); ok {
+		q.Offer(s)
+	}
+}
+
+// outsideSchema reports whether the route has a document and the request is
+// not one it describes.
+func (e *wafEngine) outsideSchema(tx *gwaf.Transaction) bool {
+	if e.schemaMode == "" {
+		return false
+	}
+	v, _ := tx.SchemaViolation()
+	return v != schema.ViolationNone
 }
 
 // unwatched is what watch returns for a request nothing is kept from.

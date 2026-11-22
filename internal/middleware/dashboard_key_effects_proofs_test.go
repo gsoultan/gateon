@@ -34,6 +34,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/gsoultan/gateon/internal/request"
 	secwaf "github.com/gsoultan/gateon/internal/security/waf"
+	"github.com/gsoultan/gateon/internal/security/waf/advisory"
 	"github.com/gsoultan/gateon/internal/security/waf/corpus"
 	"github.com/gsoultan/gateon/internal/security/waf/schemalearn"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
@@ -290,10 +291,32 @@ var wafBoundaryEffects = []keyEffect{
 			}
 			return total
 		}},
+	// A route that asks the advisory worker offers it a sample of what it
+	// forwards, and one that does not offers none; at a rate of zero an
+	// ordinary request is not one to ask about. The response is the same
+	// either way, so what is measured is how many samples were offered.
+	{mwType: "waf", key: "advisory_review", base: map[string]string{"advisory_sample_rate": "1"},
+		a: "false", b: "true", setup: withAdvisoryWorker, probe: get("/api/v1/orders?id=7"), measure: advisoryOffers},
+	{mwType: "waf", key: "advisory_sample_rate", base: map[string]string{"advisory_review": "true"},
+		a: "0", b: "1", setup: withAdvisoryWorker, probe: get("/api/v1/orders?id=7"), measure: advisoryOffers},
 	{mwType: "waf", key: "websocket_message_limit", base: map[string]string{"websocket_inspection": "true"},
 		a: "0", b: "64", backend: tunnelBackend,
 		probe: upgradeRequest, upgrade: maskedMessage(`{"note":"` + strings.Repeat("a", 100) + `"}`)},
 }
+
+// withAdvisoryWorker gives the gateway an advisory worker for the row. Nothing
+// sends to it: the row measures what the request path offers.
+func withAdvisoryWorker(t *testing.T, _ *Factory) {
+	q, err := advisory.New(advisory.Config{URL: "https://worker.invalid", Capacity: 16})
+	if err != nil {
+		t.Fatalf("advisory queue: %v", err)
+	}
+	shared := advisory.Shared
+	advisory.Shared = func() *advisory.Queue { return q }
+	t.Cleanup(func() { advisory.Shared = shared })
+}
+
+func advisoryOffers(*testing.T) float64 { return float64(advisory.Shared().Status().Offered) }
 
 func upgradeRequest(t *testing.T) *http.Request {
 	r := get("/ws")(t)

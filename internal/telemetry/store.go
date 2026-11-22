@@ -806,6 +806,11 @@ const (
 // the reputation blocker's refusal it is held against nobody.
 const ThreatWAFReputationBlock = "waf_reputation_block"
 
+// ThreatWAFAdvisory is a verdict of the WAF's advisory worker on a request the
+// gateway had already forwarded (ADR 0104). It is Observed, and so held
+// against nobody, unless the operator runs the worker in reputation mode.
+const ThreatWAFAdvisory = "waf_advisory"
+
 // HeldAgainstSource reports whether a threat may count against the client that
 // sent it: lower its reputation, count towards a fingerprint block or an
 // address shun, be a correlation signal, or trigger a playbook's block.

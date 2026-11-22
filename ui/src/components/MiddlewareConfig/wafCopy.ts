@@ -81,3 +81,22 @@ export const LEARNED_DRAFT_REVIEW_NOTE =
   "Read a draft before using it. It describes the traffic seen so far, not the API: an endpoint nobody " +
   "called is missing, and a parameter that only ever held numbers is declared an integer. " +
   "Using one fills the document field. Nothing changes on the route until you save.";
+
+/** Under the advisory review switch. */
+export const ADVISORY_REVIEW_HELP =
+  "After this route has forwarded a request, send a copy to the gateway's advisory worker for a second opinion. " +
+  "Sent: requests a rule matched and let through, and requests outside the route's OpenAPI document. " +
+  "Never sent: bodies, client addresses and credentials. " +
+  "The worker is asked after the request was answered, so it never slows or refuses one. " +
+  "What it flags is listed in the Security Hub.";
+
+/** Under the advisory sample rate. */
+export const ADVISORY_SAMPLE_HELP =
+  "Also send 1 in this many of the requests nothing matched. 100 sends one request in a hundred. " +
+  "Off sends only the requests described above.";
+
+/** Shown when the switch is on and the gateway has no worker to ask. */
+export const ADVISORY_NO_WORKER_NOTE =
+  "This gateway has no advisory worker, so this switch does nothing yet. " +
+  "Set GATEON_WAF_ADVISORY_URL on the gateway to the worker's address and restart it. " +
+  "A worker ships with the gateway: gateon advisory-worker";
