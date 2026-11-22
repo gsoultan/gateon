@@ -11,6 +11,27 @@ here after the fact.
 
 ## Unreleased
 
+### A Postgres database behind PgBouncer in transaction pooling mode works
+
+A gateway whose database is reached through PgBouncer in transaction pooling
+mode, the pooler commonly listening on port 6432, set up without complaint and
+then failed a share of its queries with `pq: unnamed prepared statement does
+not exist`, and dropped audit entries with `prepared statement "1" does not
+exist`. A dropped entry had already become the previous hash of the next one,
+so a signed audit log reported a break where nothing was tampered with. The
+more clients were busy at once, the more failed; the block list's first read
+after a start was a common casualty.
+
+Every Postgres connection now sends a query with arguments in one round trip
+(`binary_parameters=yes` is added to the connection string, replacing any value
+it carried), and the audit log no longer keeps a statement prepared for the
+life of the process. Nothing changes for a direct connection or for PgBouncer
+in session mode.
+
+**Who is affected:** an install on PgBouncer in transaction mode. Audit entries
+lost before the upgrade are not recovered; a verification of a range that held
+one keeps reporting the break there.
+
 ### A route can draft its own OpenAPI document
 
 A WAF middleware has a new switch, "Learn this route's API from traffic"

@@ -84,3 +84,22 @@ func releasePostgresLock() {
 	_ = pgLock.db.Close()
 	pgLock.db, pgLock.conn = nil, nil
 }
+
+// PgBouncerDSN returns GATEON_TEST_PGBOUNCER_DSN, a PgBouncer in transaction
+// pooling mode in front of the database GATEON_TEST_POSTGRES_DSN names, or
+// skips t, giving skipReason, when it is unset.
+//
+// The module-wide lock is taken on the direct DSN when there is one: a
+// session-level advisory lock taken through a transaction pooler is released
+// to whichever client gets that server connection next, so it orders nothing.
+func PgBouncerDSN(t testing.TB, skipReason string) string {
+	t.Helper()
+	dsn := os.Getenv("GATEON_TEST_PGBOUNCER_DSN")
+	if dsn == "" {
+		t.Skip("GATEON_TEST_PGBOUNCER_DSN not set; " + skipReason)
+	}
+	if direct := os.Getenv("GATEON_TEST_POSTGRES_DSN"); direct != "" {
+		LockPostgres(t, direct)
+	}
+	return dsn
+}
