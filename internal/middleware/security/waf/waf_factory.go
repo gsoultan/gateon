@@ -477,6 +477,7 @@ const (
 	keyWebSocketInspection   = "websocket_inspection"
 	keyWebSocketMessageLimit = "websocket_message_limit"
 	keyCorpusSampleRate      = "corpus_sample_rate"
+	keySchemaLearning        = "schema_learning"
 )
 
 func NewWAF(cfg map[string]string, d security.Deps) (kind.Middleware, error) {

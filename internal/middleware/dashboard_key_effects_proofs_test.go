@@ -35,6 +35,7 @@ import (
 	"github.com/gsoultan/gateon/internal/request"
 	secwaf "github.com/gsoultan/gateon/internal/security/waf"
 	"github.com/gsoultan/gateon/internal/security/waf/corpus"
+	"github.com/gsoultan/gateon/internal/security/waf/schemalearn"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
@@ -278,6 +279,17 @@ var wafBoundaryEffects = []keyEffect{
 	// so what is measured is how many entries the sample was given.
 	{mwType: "waf", key: "corpus_sample_rate", a: "0", b: "1", probe: get("/api/v1/orders?id=7"),
 		measure: func(*testing.T) float64 { return float64(corpus.Shared().Total()) }},
+	// A learning route's draft counts the requests it learned from; a route
+	// that is not learning has none. The response is the same either way.
+	{mwType: "waf", key: "schema_learning", a: "false", b: "true", probe: get("/api/v1/orders?id=7"),
+		measure: func(*testing.T) float64 {
+			total := 0.0
+			drafts, _ := schemalearn.Shared().Drafts()
+			for _, d := range drafts {
+				total += float64(d.Observed)
+			}
+			return total
+		}},
 	{mwType: "waf", key: "websocket_message_limit", base: map[string]string{"websocket_inspection": "true"},
 		a: "0", b: "64", backend: tunnelBackend,
 		probe: upgradeRequest, upgrade: maskedMessage(`{"note":"` + strings.Repeat("a", 100) + `"}`)},
