@@ -25,6 +25,10 @@ import (
 // does not never returns at all.
 const shutdownBound = 10 * time.Second
 
+// probeDialTimeout bounds each dial that asks whether a listener is still
+// accepting; well inside drain.FirstRequestGrace.
+const probeDialTimeout = 50 * time.Millisecond
+
 // shutdownWithin runs ShutdownAll with a short deadline and fails the test if
 // it has not returned well after that deadline passed.
 func shutdownWithin(t *testing.T, reg *ShutdownRegistry, deadline time.Duration) {
@@ -321,6 +325,11 @@ func requestAfterShutdownBegins(t *testing.T, addr net.Addr, reg *ShutdownRegist
 		t.Fatalf("dial: %v", err)
 	}
 	defer func() { _ = c.Close() }()
+	// The connection has to be the server's before the shutdown begins:
+	// one still in the kernel's accept queue is reset when the listener
+	// closes, which is not the case under test and fails it about once in
+	// a hundred runs.
+	waitForAccept(t, addr)
 
 	ctx, cancel := context.WithTimeout(context.Background(), shutdownBound)
 	defer cancel()
@@ -330,7 +339,12 @@ func requestAfterShutdownBegins(t *testing.T, addr net.Addr, reg *ShutdownRegist
 		close(done)
 	}()
 	for deadline := time.Now().Add(shutdownBound); ; {
-		probe, err := net.DialTimeout("tcp", addr.String(), time.Second)
+		// Short, because a SYN that reaches the socket as it closes is
+		// dropped, not refused, and the dial then waits out its timeout. At
+		// one second -- drain.FirstRequestGrace -- that wait outlasted the
+		// grace, and the connection under test was closed as silent before
+		// its request was sent: the 1.00 s failures.
+		probe, err := net.DialTimeout("tcp", addr.String(), probeDialTimeout)
 		if err != nil {
 			break
 		}
