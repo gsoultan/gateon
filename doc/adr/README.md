@@ -110,6 +110,9 @@ ADRs follow a lightweight [MADR](https://adr.github.io/madr/)-style format:
 | [0098](./0098-settings-are-not-synced-from-git.md) | Settings are not synced from Git | Accepted |
 | [0099](./0099-a-takeover-is-noticed-off-the-host-and-recoverable-from-it.md) | A takeover is noticed, recorded off the host, and recoverable from it | Accepted |
 | [0100](./0100-a-connection-earns-its-place-before-it-holds-one.md) | A connection earns its place before it holds one | Accepted |
+| [0101](./0101-a-shutdown-answers-the-connections-it-had-accepted.md) | A shutdown answers the connections it had accepted | Accepted |
+| [0102](./0102-the-last-release-upgrades-to-this-build-and-back.md) | The last release upgrades to this build and back | Accepted |
+| [0103](./0103-a-route-drafts-its-own-api-document-from-the-shape-of-its-traffic.md) | A route drafts its own API document from the shape of its traffic | Accepted |
 
 ## Conventions
 

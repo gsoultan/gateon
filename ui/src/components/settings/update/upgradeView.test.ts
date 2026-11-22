@@ -24,6 +24,7 @@ const record = (over: Partial<UpgradeFacts>): UpgradeFacts => ({
   automatic: false,
   requestedBy: "ada",
   databaseRestored: false,
+  databaseKept: false,
   ...over,
 });
 
@@ -78,6 +79,15 @@ describe("a finished install", () => {
     expect(plain?.detail).not.toContain("database");
     const restored = outcomeView(record({ phase: UpgradePhase.ROLLED_BACK, databaseRestored: true }));
     expect(restored?.detail).toContain("the database was put back");
+  });
+
+  test("a rollback that left a migrated database in place says so, and does not say nothing was changed", () => {
+    const kept = outcomeView(record({ phase: UpgradePhase.ROLLED_BACK, reason: UpgradeReason.NOT_READY, databaseKept: true }));
+    expect(kept?.tone).toBe("yellow");
+    expect(kept?.detail).toContain("v1.8.2 is running again");
+    expect(kept?.detail).toContain("had already updated the database");
+    expect(kept?.detail).not.toContain("Nothing else was changed");
+    expect(kept?.detail).not.toContain("put back");
   });
 
   test("every refusal has its own words and says nothing was changed", () => {

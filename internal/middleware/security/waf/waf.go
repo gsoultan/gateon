@@ -29,6 +29,7 @@ import (
 	"github.com/gsoultan/gateon/internal/security/reputation"
 	"github.com/gsoultan/gateon/internal/security/waf"
 	"github.com/gsoultan/gateon/internal/security/waf/appprofile"
+	"github.com/gsoultan/gateon/internal/security/waf/schemalearn"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	"github.com/gsoultan/gwaf"
 	"github.com/gsoultan/gwaf/rules"
@@ -194,6 +195,13 @@ type WAFConfig struct {
 	// not, is in internal/security/waf/corpus. GATEON_WAF_CORPUS_SAMPLE_RATE
 	// sets it for routes that set none.
 	CorpusSampleRate int
+
+	// LearnSchema drafts an OpenAPI document for this route from the shape
+	// of the requests it forwards and the origin accepts (ADR 0103). Shapes
+	// only: no value is kept. The draft is read from the management API and
+	// enforces nothing. GATEON_WAF_SCHEMA_LEARNING sets it for routes that
+	// do not.
+	LearnSchema bool
 }
 
 // Fingerprint returns a unique hash representing the WAF policy configuration.
@@ -241,6 +249,9 @@ func (c WAFConfig) Fingerprint() string {
 	// share an engine. Hashed, because it can be a megabyte.
 	if c.CorpusSampleRate > 0 {
 		fmt.Fprintf(h, "corpus:%d\n", c.CorpusSampleRate)
+	}
+	if c.LearnSchema {
+		fmt.Fprint(h, "learn-schema\n")
 	}
 	if c.InspectWebSocket {
 		fmt.Fprintf(h, "ws:%d\n", c.WebSocketMessageLimit)
@@ -386,6 +397,9 @@ func WAF(cfg WAFConfig) (kind.Middleware, error) {
 	fp := cfg.Fingerprint()
 
 	t := &wafRuntime{cfg: cfg, engine: engine, redactor: redactor, fp: fp}
+	if cfg.LearnSchema && cfg.RouteID != "" {
+		t.learner = schemalearn.Shared().For(cfg.RouteID)
+	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			t.serve(next, w, r)
@@ -407,6 +421,9 @@ type wafRuntime struct {
 	engine   *wafEngine
 	redactor *dlpRedactor
 	fp       string
+	// learner is where this route's request shapes go, nil unless the route
+	// learns its schema (ADR 0103).
+	learner *schemalearn.Handle
 }
 
 func (t *wafRuntime) serve(next http.Handler, w http.ResponseWriter, r *http.Request) {
@@ -762,7 +779,7 @@ func (t *wafRuntime) inspectAndForward(next http.Handler, w http.ResponseWriter,
 
 	// From here the request goes to the origin, so it is one the WAF let
 	// through. Whether it is kept for tuning waits on what the origin says.
-	w, keep := t.sample(w, r)
+	w, keep := t.watch(w, r)
 	defer keep()
 
 	w = t.guardWebSocket(w, r, repScore)
@@ -1125,6 +1142,7 @@ func parseWAFConfig(cfg map[string]string) WAFConfig {
 		InspectWebSocket:            webSocketInspection(cfg[keyWebSocketInspection]),
 		WebSocketMessageLimit:       intVal(cfg[keyWebSocketMessageLimit]),
 		CorpusSampleRate:            corpusSampleRate(cfg[keyCorpusSampleRate]),
+		LearnSchema:                 schemaLearning(cfg[keySchemaLearning]),
 	}
 }
 

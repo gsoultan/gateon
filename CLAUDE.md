@@ -199,6 +199,15 @@ extracted thirteen files, and the package still grew from 65 to 67, because noth
 stopped new middleware landing in it faster than the refactor drained it. See
 ADR-0010.
 
+**`make check-compat`** (a CI step in `build`) enforces backward compatibility with
+the latest release, which is a rule from v1.3.8 on: it downloads that release's
+tarball and runs its binary and this build as real processes on one configuration
+and one database, SQLite and PostgreSQL. The release creates the state, this build
+must start on it, and the release must start again on what this build left —
+because a self-upgrade rolls back by putting the old binary back. So a migration
+may add; it may not drop, rename or narrow what the latest release reads, and
+removing something takes two releases. Nothing in it may skip. See ADR 0102.
+
 **`make check-invariants`** (folded into `make sec`, and a CI step) enforces the vetoes
 above that no compiler or linter can see. Four of the five below were violated in
 shipped code and each failed silently:
@@ -301,7 +310,8 @@ telemetry-fed list capped; every gateway-observed string escaped, never markdown
 HTML; loading/empty/error on every new view; proto changes through `make proto` with
 stores and a new migration in the same change.
 *Every change*: a bug fix ships a regression test that fails before and passes after,
-with the root cause named; nothing skips a layer, and anything structural has an ADR in
+with the root cause named; the latest release still starts on the configuration
+and database this change leaves (`make check-compat`); nothing skips a layer, and anything structural has an ADR in
 `doc/adr/`; every new tunable has an env-var path and a per-tier default; the build
 stays CGO-free and the image stays `nonroot` on distroless; and the mandatory builds
 pass — `rtk go build -o gateon ./cmd/gateon` **and** `cd ui && rtk bun run build`.

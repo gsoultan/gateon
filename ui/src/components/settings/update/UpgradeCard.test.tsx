@@ -34,6 +34,7 @@ const record = (over: Record<string, unknown>) => ({
   requestedBy: "ada",
   automatic: false,
   databaseRestored: false,
+  databaseKept: false,
   ...over,
 });
 

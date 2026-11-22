@@ -209,6 +209,10 @@ message UpgradeRecord {
   // The previous gateway was told to put back the SQLite copy taken before
   // the migration, and reported ready after doing so.
   bool database_restored = 9;
+  // The new version migrated a database that was not put back, and the
+  // previous version is running on it: the new version was built compatible
+  // with the previous one, so its migrations only added.
+  bool database_kept = 10;
 }
 
 // UpgradeStatus is what the gateway knows about installing releases.
