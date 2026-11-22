@@ -91,11 +91,11 @@ func accessLines(buf *bytes.Buffer) []string {
 func captureAccessLogs(t *testing.T) *bytes.Buffer {
 	t.Helper()
 	var buf bytes.Buffer
-	prevShim, prevDefault := logger.L, slog.Default()
-	logger.L = &logger.SlogShim{}
+	prevDefault := slog.Default()
+	prevInner := logger.L.Swap(nil)
 	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
 	t.Cleanup(func() {
-		logger.L = prevShim
+		logger.L.Swap(prevInner)
 		slog.SetDefault(prevDefault)
 	})
 	return &buf
