@@ -35,6 +35,7 @@ import {
 } from "./wafCopy";
 import { ClientAddressNote } from "./RatelimitConfigEditor";
 import { OpenApiSpecFields } from "./OpenApiSpecFields";
+import { AdvisoryReviewFields } from "./AdvisoryReviewFields";
 import { tlsBindingProblem, xfccProblem } from "./middlewareConfigProblems";
 import { ipListError } from "./ipList";
 import { routeSwitchOn, useEffectiveWaf, type EffectiveWaf } from "../../hooks/useEffectiveWaf";
@@ -334,6 +335,9 @@ export function WAFConfigFields({ config, updateConfig, global, globalUnreadable
         min={0}
         allowDecimal={false}
       />
+
+      <Divider label="Second Opinion" labelPosition="center" />
+      <AdvisoryReviewFields config={config} updateConfig={updateConfig} />
 
       <Divider label="Body Limits" labelPosition="center" />
       <Group grow>

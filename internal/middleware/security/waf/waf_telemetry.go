@@ -20,6 +20,7 @@ import (
 	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/security/entropy"
 	secwaf "github.com/gsoultan/gateon/internal/security/waf"
+	"github.com/gsoultan/gateon/internal/security/waf/advisory"
 	"github.com/gsoultan/gateon/internal/security/waf/apischema"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	"github.com/gsoultan/gwaf"
@@ -490,6 +491,87 @@ func (e *wafEngine) recordSchemaViolation(tx *gwaf.Transaction, r *http.Request)
 		Method:         r.Method,
 		Confidence:     defaultThreatConfidence,
 	}))
+}
+
+// The advisory worker's verdicts in the Security Hub (ADR 0104).
+const (
+	advisoryCategory = "advisory"
+
+	// advisoryScoreCap is the most one verdict counts for. It is below the
+	// score at which the gateway mitigates a source on a single threat, and
+	// the reputation penalty is half of it: in reputation mode a client is
+	// refused on what a worker said only once the worker has said it of
+	// several requests, and by the reputation rule, not by the worker.
+	advisoryScoreCap = 60
+
+	advisoryRecommendation = "This is a second opinion from the advisory worker on a request the WAF forwarded. Read the request: if it is an attack, the rule that should have refused it is missing or tuned away on this route. If it is not, the worker is wrong about this traffic and should not be run in reputation mode."
+)
+
+// recordAdvisoryFinding files one verdict of the advisory worker.
+//
+// It is recorded about the request the gateway sampled, from what the gateway
+// kept of it: the worker was never told who sent it. In record mode it is
+// observed, as an audit-only match is, and held against nobody. In reputation
+// mode it is evidence against the source like a detection of the gateway's
+// own -- capped, see advisoryScoreCap. Either way the request was forwarded
+// and answered long before this runs.
+func recordAdvisoryFinding(f advisory.Finding) {
+	s := f.Sample
+	if s == nil || s.Entry == nil {
+		return
+	}
+	score := min(f.Verdict.Score, advisoryScoreCap)
+	details := "The advisory worker flagged this forwarded request (" + f.Verdict.Label + ")"
+	if f.Verdict.Reason != "" {
+		details += ": " + f.Verdict.Reason
+	}
+	telemetry.RecordSecurityThreat(telemetry.SecurityThreat{
+		ID:             "waf-advisory-" + uuid.NewString(),
+		Type:           telemetry.ThreatWAFAdvisory,
+		SourceIP:       s.Source.Addr,
+		Fingerprint:    s.Source.Fingerprint,
+		Score:          float64(score),
+		Details:        details,
+		Recommendation: advisoryRecommendation,
+		Time:           time.Now(),
+		RouteID:        s.Source.Route,
+		RequestURI:     s.Source.URI,
+		Category:       advisoryCategory,
+		Severity:       advisorySeverity(f.Verdict.Score),
+		ActionTaken:    kind.ActionDetected,
+		Observed:       f.Mode != advisory.Reputation,
+		JA4:            s.Source.JA4,
+		JA4H:           s.Source.JA4H,
+		UserAgent:      s.Source.UserAgent,
+		Method:         s.Method,
+		Confidence:     float64(f.Verdict.Score) / 100,
+		TriggeredRules: advisoryRules(s.Rules),
+	})
+}
+
+// advisorySeverity reads the worker's certainty as a severity. It stops at
+// high: critical is for what the gateway refused on its own evidence.
+func advisorySeverity(score int) string {
+	switch {
+	case score >= 70:
+		return threatSeverity(types.SeverityError)
+	case score >= 40:
+		return threatSeverity(types.SeverityWarning)
+	}
+	return threatSeverity(types.SeverityNotice)
+}
+
+// advisoryRules is the JSON array of the rules the gateway itself matched on
+// the request, in the form the WAF's own threats carry them.
+func advisoryRules(ids []uint32) string {
+	if len(ids) == 0 {
+		return ""
+	}
+	b, err := json.Marshal(ids)
+	if err != nil {
+		return ""
+	}
+	return string(b)
 }
 
 func explainWAFDecision(d gwaf.Decision, matches []gwaf.Match) (explanation, recommendation, triggered string) {
