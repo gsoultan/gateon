@@ -405,8 +405,11 @@ GATEON_PPROF_ADDR=127.0.0.1:6060 ./gateon
 go tool pprof http://127.0.0.1:6060/debug/pprof/heap
 ```
 
-> Security: pprof leaks internal state and is a DoS vector. Bind it to loopback
-> only and never expose it on a public interface. It runs on its own listener,
+> Security: pprof leaks internal state and is a DoS vector, and it has no
+> authentication. Gateon refuses any address that is not loopback (`:6060` and
+> `0.0.0.0:6060` included) and logs why. Where the profile must be fetched from
+> outside the host, for example through a port-forward to a container, set
+> `GATEON_PPROF_ALLOW_REMOTE=true` as well. It runs on its own listener,
 > separate from the proxy/API ports.
 
 To catch allocation/performance regressions offline, run the benchmark suite with

@@ -22,11 +22,11 @@ import (
 func captureLog(t *testing.T) *bytes.Buffer {
 	t.Helper()
 	var buf bytes.Buffer
-	prevShim, prevDefault := logger.L, slog.Default()
-	logger.L = &logger.SlogShim{}
+	prevDefault := slog.Default()
+	prevInner := logger.L.Swap(nil)
 	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
 	t.Cleanup(func() {
-		logger.L = prevShim
+		logger.L.Swap(prevInner)
 		slog.SetDefault(prevDefault)
 	})
 	return &buf
@@ -157,11 +157,11 @@ func BenchmarkAccessLogLine(b *testing.B) {
 	b.Setenv(accessLogMaxPerSecondEnv, "0")
 	accessLogs = accessLogCap{}
 	b.Cleanup(func() { accessLogs = accessLogCap{} })
-	prevShim, prevDefault := logger.L, slog.Default()
-	logger.L = &logger.SlogShim{}
+	prevDefault := slog.Default()
+	prevInner := logger.L.Swap(nil)
 	slog.SetDefault(slog.New(logger.NewHandler(io.Discard, slog.LevelInfo, true)))
 	b.Cleanup(func() {
-		logger.L = prevShim
+		logger.L.Swap(prevInner)
 		slog.SetDefault(prevDefault)
 	})
 	h := AccessLogSampled("bench-route", 1)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

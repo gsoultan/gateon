@@ -92,16 +92,28 @@ func reachesBackend(t *testing.T, r *Resolver, ep *gateonv1.EntryPoint) bool {
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
-	defer client.Close()
 	server, err := ln.Accept()
 	if err != nil {
+		_ = client.Close()
 		t.Fatalf("accept: %v", err)
 	}
 	p := r.ResolveTCP(ep, "ssh")
 	if p == nil {
+		_ = client.Close()
 		t.Fatal("no proxy resolved for the ssh route")
 	}
-	go p.ProxyTCP(context.Background(), server)
+	// The session ends before this returns: closing the client ends it, and
+	// waiting for ProxyTCP keeps it off the process-wide spliced-session
+	// gauge that another test reads next.
+	proxied := make(chan struct{})
+	go func() {
+		defer close(proxied)
+		p.ProxyTCP(context.Background(), server)
+	}()
+	defer func() {
+		_ = client.Close()
+		<-proxied
+	}()
 
 	_ = client.SetDeadline(time.Now().Add(5 * time.Second))
 	msg := []byte("SSH-2.0-OpenSSH_10.6\r\n")

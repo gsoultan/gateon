@@ -47,11 +47,11 @@ func (b *lockedBuffer) Len() int {
 func captureLogsAt(t *testing.T, level slog.Level) *lockedBuffer {
 	t.Helper()
 	buf := &lockedBuffer{}
-	prevShim, prevDefault := logger.L, slog.Default()
-	logger.L = &logger.SlogShim{}
+	prevDefault := slog.Default()
+	prevInner := logger.L.Swap(nil)
 	slog.SetDefault(slog.New(slog.NewTextHandler(buf, &slog.HandlerOptions{Level: level})))
 	t.Cleanup(func() {
-		logger.L = prevShim
+		logger.L.Swap(prevInner)
 		slog.SetDefault(prevDefault)
 	})
 	return buf
