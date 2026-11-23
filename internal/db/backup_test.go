@@ -13,7 +13,7 @@ import (
 
 // observed records what a migration told its observer.
 type observed struct {
-	begun, ended []MigrationRun
+	begun, ended, abandoned []MigrationRun
 	// backupAtBegin: the copy existed when Begin was called. It must not:
 	// Begin is what tells the upgrade helper to wait for the copy.
 	backupAtBegin bool
@@ -26,7 +26,8 @@ func (o *observed) Begin(run MigrationRun) {
 		o.backupAtBegin = err == nil
 	}
 }
-func (o *observed) End(run MigrationRun) { o.ended = append(o.ended, run) }
+func (o *observed) End(run MigrationRun)     { o.ended = append(o.ended, run) }
+func (o *observed) Abandon(run MigrationRun) { o.abandoned = append(o.abandoned, run) }
 
 // observe installs an observer for one test.
 func observe(t *testing.T) *observed {
@@ -147,6 +148,7 @@ func TestTheCopyCanBeSwitchedOffAndTheObserverIsToldThereIsNone(t *testing.T) {
 
 func TestAMigrationDoesNotRunWhenItsCopyCannotBeMade(t *testing.T) {
 	const from = 62
+	o := observe(t)
 	database, dialect, path := openAt(t, from)
 	// A directory where the copy goes: it can be neither removed nor written.
 	if err := os.MkdirAll(filepath.Join(path+BackupSuffix, "in-the-way"), 0o700); err != nil {
@@ -157,5 +159,11 @@ func TestAMigrationDoesNotRunWhenItsCopyCannotBeMade(t *testing.T) {
 	}
 	if got := lastMigration(t, database); got != from {
 		t.Fatalf("migration %d ran without a copy to go back to", got)
+	}
+	// The observer was told a migration with a copy had begun. Unless that
+	// is taken back, the upgrade helper orders the copy restored: a file
+	// that does not exist, over a database nothing touched.
+	if len(o.begun) != 1 || len(o.abandoned) != 1 || len(o.ended) != 0 {
+		t.Fatalf("begun %d, abandoned %d, ended %d: want the one begun taken back", len(o.begun), len(o.abandoned), len(o.ended))
 	}
 }

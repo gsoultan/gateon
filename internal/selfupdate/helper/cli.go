@@ -110,6 +110,9 @@ func (c CLI) Helper(ctx context.Context, args []string) int {
 
 // report prints an outcome and turns it into an exit code.
 func (c CLI) report(st upgrade.Status) int {
+	if st.Reason.Requested() {
+		return c.reportRollback(st)
+	}
 	switch st.Phase {
 	case upgrade.PhaseSucceeded:
 		fmt.Fprintf(c.Out, "gateon %s is installed and ready. The previous binary (%s) is kept.\n", st.Target, st.Previous)
@@ -125,10 +128,32 @@ func (c CLI) report(st upgrade.Status) int {
 	return exitFailed
 }
 
+// reportRollback prints how a rollback an operator asked for ended.
+func (c CLI) reportRollback(st upgrade.Status) int {
+	switch st.Reason {
+	case upgrade.ReasonRequested:
+		fmt.Fprintf(c.Out, "gateon %s is back in place and ready; %s was rolled back.\n", st.Previous, st.Target)
+		if st.RestoreDatabase {
+			fmt.Fprintln(c.Out, "The database copy taken before the upgrade was put back. What was written since is kept beside it as <database>.failed-upgrade.")
+		}
+		return exitOK
+	case upgrade.ReasonNoPrevious:
+		fmt.Fprintf(c.Out, "There is no previous release to roll gateon %s back to. Nothing was changed.\n", st.Target)
+	case upgrade.ReasonNeedsRestore:
+		fmt.Fprintf(c.Out, "gateon %s migrated a database that %s was not tested on. Nothing was changed.\n"+
+			"Add --restore-database to put back the copy taken before the upgrade, or restore your own backup first: see doc/self-upgrade.md.\n",
+			st.Target, st.Previous)
+	case upgrade.ReasonPreviousNotReady:
+		fmt.Fprintf(c.Out, "gateon %s did not become ready, so %s was put back and is installed: see `journalctl -u gateon`.\n", st.Previous, st.Target)
+	}
+	return exitFailed
+}
+
 // upgradeFlags is what `gateon upgrade` was asked.
 type upgradeFlags struct {
 	version, source, dataDir string
 	downgrade, yes           bool
+	rollback, restore        bool
 }
 
 // Upgrade is `gateon upgrade`: the same install an administrator starts
@@ -144,18 +169,79 @@ func (c CLI) Upgrade(ctx context.Context, args []string) int {
 	fs.StringVar(&f.dataDir, "data-dir", config.DataDir(), "the gateway's data directory")
 	fs.BoolVar(&f.downgrade, "allow-downgrade", false, "install a release that is not newer than the installed one")
 	fs.BoolVar(&f.yes, "yes", false, "do not ask for confirmation")
+	fs.BoolVar(&f.rollback, "rollback", false, "put back the release the last upgrade replaced")
+	fs.BoolVar(&f.restore, "restore-database", false,
+		"with --rollback: put back the database copy taken before the upgrade, setting aside what was written since")
 	if err := fs.Parse(args); err != nil {
+		return exitUsage
+	}
+	if msg := f.conflict(); msg != "" {
+		fmt.Fprintln(c.Err, msg)
 		return exitUsage
 	}
 	if os.Geteuid() != 0 {
 		fmt.Fprintln(c.Err, "run as root to upgrade: sudo gateon upgrade")
 		return exitUsage
 	}
-	if err := c.upgrade(ctx, f); err != nil {
+	run := c.upgrade
+	if f.rollback {
+		run = c.rollback
+	}
+	if err := run(ctx, f); err != nil {
 		fmt.Fprintln(c.Err, "upgrade:", err)
 		return exitFailed
 	}
 	return exitOK
+}
+
+// conflict names flags that cannot be meant together.
+func (f upgradeFlags) conflict() string {
+	switch {
+	case f.restore && !f.rollback:
+		return "--restore-database is for --rollback"
+	case f.rollback && (f.version != "" || f.downgrade):
+		return "--rollback puts back the release the last upgrade replaced; for any other release use --version with --allow-downgrade"
+	}
+	return ""
+}
+
+// rollback is `gateon upgrade --rollback`: the previous binary is already
+// on the host, so nothing is downloaded and no release source is needed.
+func (c CLI) rollback(ctx context.Context, f upgradeFlags) error {
+	cfg, err := c.base(f.dataDir)
+	if err != nil {
+		return err
+	}
+	to, ok := upgrade.Kept(cfg.StateDir, c.Version)
+	if !ok {
+		return errors.New("there is no previous release to roll back to: the helper keeps the release the last upgrade replaced, until it is rolled back. " +
+			"For another release use --version with --allow-downgrade")
+	}
+	if !f.yes && !c.confirmRollback(to, f.restore) {
+		fmt.Fprintln(c.Out, "Nothing was changed.")
+		return nil
+	}
+	fmt.Fprintf(c.Out, "Putting gateon %s back and restarting the gateway...\n", to)
+	opts := RollbackOptions{To: to, RequestedBy: "root (gateon upgrade --rollback)", RestoreDatabase: f.restore}
+	st, err := Rollback(ctx, cfg, opts)
+	if err != nil {
+		return err
+	}
+	if c.report(st) != exitOK {
+		return errors.New("the rollback did not complete")
+	}
+	return nil
+}
+
+// confirmRollback asks before a restart, naming both releases and, when a
+// database copy is to be put back, what that costs.
+func (c CLI) confirmRollback(to string, restore bool) bool {
+	fmt.Fprintf(c.Out, "Replace gateon %s with %s, the release installed before it, and restart the gateway?", c.Version, to)
+	if restore {
+		fmt.Fprint(c.Out, "\nThe database goes back to the copy taken before the upgrade. Everything written since is set aside as <database>.failed-upgrade.")
+	}
+	fmt.Fprint(c.Out, " [y/N] ")
+	return c.yes()
 }
 
 func (c CLI) upgrade(ctx context.Context, f upgradeFlags) error {
@@ -224,6 +310,10 @@ func (c CLI) target(ctx context.Context, f upgradeFlags) (string, error) {
 // confirm asks before a restart, naming exactly what will be installed.
 func (c CLI) confirm(target string) bool {
 	fmt.Fprintf(c.Out, "Replace gateon %s with %s and restart the gateway? [y/N] ", c.Version, target)
+	return c.yes()
+}
+
+func (c CLI) yes() bool {
 	line, _ := bufio.NewReader(c.In).ReadString('\n')
 	answer := strings.ToLower(strings.TrimSpace(line))
 	return answer == "y" || answer == "yes"

@@ -10,7 +10,8 @@ import { useAdminOnlySetting } from "../../../hooks/usePermissions";
 import { UpdateSignature, UpgradeBlocker, type UpdateStatus, type UpgradeRecord } from "../../../services/gen/gateon/v1/status_pb";
 import { UpgradeConfirm } from "./UpgradeConfirm";
 import { UpgradeHistory } from "./UpgradeHistory";
-import { activeStep, blockerNote, outcomeView, progressNote, UPGRADE_STEPS, upgradeInProgress } from "./upgradeView";
+import { RollbackOffer } from "./RollbackOffer";
+import { activeStep, blockerNote, landedOn, outcomeView, progressNote, ROLLBACK_RESTORE_COMMAND, rollbackOnHostNote, stepsOf, upgradeInProgress } from "./upgradeView";
 
 /** Why an install did not start, in words for a person rather than a status code. */
 function startError(err: unknown): string {
@@ -28,8 +29,8 @@ function startError(err: unknown): string {
 function Progress({ record, unreachable }: { record: UpgradeRecord; unreachable: boolean }) {
   return (
     <Stack gap="md" data-testid="upgrade-progress" aria-live="polite">
-      <Stepper active={activeStep(record.phase)} size="sm" allowNextStepsSelect={false}>
-        {UPGRADE_STEPS.map((step) => (
+      <Stepper active={activeStep(record)} size="sm" allowNextStepsSelect={false}>
+        {stepsOf(record).map((step) => (
           <Stepper.Step key={step.label} label={step.label} description={step.description} />
         ))}
       </Stepper>
@@ -48,7 +49,7 @@ function Outcome({ record, running }: { record: UpgradeRecord; running: string }
   const view = outcomeView(record);
   if (!view) return null;
   // The page was loaded from the version that has just been replaced.
-  const reload = view.tone === "green" && running === record.targetVersion;
+  const reload = running === landedOn(record);
   return (
     <Alert color={view.tone} variant="light" title={view.title} data-testid="upgrade-outcome">
       <Stack gap="sm" align="flex-start">
@@ -67,6 +68,12 @@ function Outcome({ record, running }: { record: UpgradeRecord; running: string }
 function Blocked({ blocker }: { blocker: UpgradeBlocker }) {
   const note = blockerNote(blocker);
   if (!note) return null;
+  return <HostCommand text={note.text} command={note.command} />;
+}
+
+/** A sentence and, when there is one, the command to run on the host, with a button to copy it. */
+function HostCommand({ text, command }: { text: string; command?: string }) {
+  const note = { text, command };
   return (
     <Stack gap="sm">
       <Text size="sm">{note.text}</Text>
@@ -168,6 +175,12 @@ export function UpgradeCard() {
           <>
             {running && record ? <Progress record={record} unreachable={isError} /> : <Offer status={status} onUpgrade={() => setConfirming(true)} />}
             {!running && record && <Outcome record={record} running={status.currentVersion} />}
+            {!running && (
+              <RollbackOffer
+                status={status}
+                onHost={<HostCommand text={rollbackOnHostNote(status.currentVersion, status.upgrade?.rollbackVersion ?? "")} command={ROLLBACK_RESTORE_COMMAND} />}
+              />
+            )}
             <UpgradeHistory history={status.upgrade?.history ?? []} />
             <UpgradeConfirm
               opened={confirming}

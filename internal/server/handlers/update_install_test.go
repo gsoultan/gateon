@@ -24,7 +24,9 @@ import (
 type installRPC struct {
 	updateRPCs
 	asked []string
-	err   error
+	// rolled is what RollbackUpdate was asked for.
+	rolled []string
+	err    error
 }
 
 func (i *installRPC) InstallUpdate(_ context.Context, req *gateonv1.InstallUpdateRequest) (*gateonv1.InstallUpdateResponse, error) {
@@ -39,11 +41,29 @@ func (i *installRPC) InstallUpdate(_ context.Context, req *gateonv1.InstallUpdat
 	return &gateonv1.InstallUpdateResponse{Status: st}, nil
 }
 
+func (i *installRPC) RollbackUpdate(_ context.Context, req *gateonv1.RollbackUpdateRequest) (*gateonv1.RollbackUpdateResponse, error) {
+	i.rolled = append(i.rolled, req.GetVersion())
+	if i.err != nil {
+		return nil, i.err
+	}
+	st := newerStatus()
+	st.Upgrade = &gateonv1.UpgradeStatus{Current: &gateonv1.UpgradeRecord{
+		Phase: gateonv1.UpgradePhase_UPGRADE_PHASE_REQUESTED, Reason: gateonv1.UpgradeReason_UPGRADE_REASON_REQUESTED,
+		PreviousVersion: req.GetVersion(),
+	}}
+	return &gateonv1.RollbackUpdateResponse{Status: st}, nil
+}
+
 func installRequest(t *testing.T, svc GlobalAndAuthAPI, role, method, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	return updatePost(t, svc, "/v1/update/install", role, method, body)
+}
+
+func updatePost(t *testing.T, svc GlobalAndAuthAPI, path, role, method, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	mux := http.NewServeMux()
 	registerUpdateHandlers(mux, svc)
-	req := httptest.NewRequest(method, "/v1/update/install", strings.NewReader(body))
+	req := httptest.NewRequest(method, path, strings.NewReader(body))
 	req = req.WithContext(context.WithValue(req.Context(), middleware.UserContextKey,
 		&auth.Claims{ID: "u-" + role, Username: role, Role: role}))
 	rr := httptest.NewRecorder()
@@ -108,5 +128,52 @@ func TestInstallUpdateRESTAnswersARefusalWithItsReason(t *testing.T) {
 		if strings.Contains(rr.Body.String(), "/var/lib") {
 			t.Errorf("an internal failure reached the caller verbatim: %s", rr.Body)
 		}
+	}
+}
+
+const (
+	rollbackPath = "/v1/update/rollback"
+	rollbackBody = `{"version":"1.8.1"}`
+)
+
+// TestRollbackUpdateRESTServesTheRPC: the dashboard's button reaches the
+// same rollback the gRPC call does, naming the release it was shown.
+func TestRollbackUpdateRESTServesTheRPC(t *testing.T) {
+	svc := &installRPC{}
+	rr := updatePost(t, svc, rollbackPath, auth.RoleAdmin, http.MethodPost, rollbackBody)
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("status %d, want 202 (started, not finished): %s", rr.Code, rr.Body)
+	}
+	if len(svc.rolled) != 1 || svc.rolled[0] != "1.8.1" || len(svc.asked) != 0 {
+		t.Fatalf("rollbacks %v and installs %v, want one rollback to the version in the body", svc.rolled, svc.asked)
+	}
+	if body := rr.Body.String(); !strings.Contains(body, `"previousVersion":"1.8.1"`) {
+		t.Errorf("the answer does not carry the rollback: %s", body)
+	}
+}
+
+func TestRollbackUpdateRESTIsRefusedBeforeTheRPC(t *testing.T) {
+	svc := &installRPC{}
+	if rr := updatePost(t, svc, rollbackPath, auth.RoleViewer, http.MethodPost, rollbackBody); rr.Code != http.StatusForbidden {
+		t.Errorf("viewer: status %d, want 403", rr.Code)
+	}
+	if rr := updatePost(t, svc, rollbackPath, auth.RoleAdmin, http.MethodGet, ""); rr.Code == http.StatusAccepted || rr.Code == http.StatusOK {
+		t.Errorf("GET started a rollback: %d", rr.Code)
+	}
+	if rr := updatePost(t, svc, rollbackPath, auth.RoleAdmin, http.MethodPost, `{"version":`); rr.Code != http.StatusBadRequest {
+		t.Errorf("a body that is not JSON: status %d, want 400", rr.Code)
+	}
+	if len(svc.rolled) != 0 {
+		t.Fatalf("a refused request reached the installer: %v", svc.rolled)
+	}
+	// The service's own refusal of an operator is answered as one.
+	denied := &installRPC{err: status.Error(codes.PermissionDenied, "only an administrator rolls a release back")}
+	if rr := updatePost(t, denied, rollbackPath, auth.RoleOperator, http.MethodPost, rollbackBody); rr.Code != http.StatusForbidden {
+		t.Errorf("an operator the service refused: status %d, want 403", rr.Code)
+	}
+	needs := &installRPC{err: status.Error(codes.FailedPrecondition, "rolling back needs the database copy put back")}
+	rr := updatePost(t, needs, rollbackPath, auth.RoleAdmin, http.MethodPost, rollbackBody)
+	if rr.Code != http.StatusConflict || !strings.Contains(rr.Body.String(), "database copy") {
+		t.Errorf("a rollback that needs a restore: %d %s", rr.Code, rr.Body)
 	}
 }

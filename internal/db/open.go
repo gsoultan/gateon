@@ -86,6 +86,9 @@ func Open(url string) (*sql.DB, Dialect, error) {
 	db.SetMaxIdleConns(idle)
 	db.SetConnMaxLifetime(5 * time.Minute)
 
+	if driver == DriverPostgres {
+		rememberPostgresSource(db, strings.TrimSpace(url))
+	}
 	return db, Dialect{Driver: driver}, nil
 }
 
