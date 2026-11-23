@@ -41,6 +41,15 @@ func expected(stateDir, version string) (Status, bool) {
 	return st, waiting && st.Expect == version && st.Nonce != ""
 }
 
+// Awaited reports whether the upgrade helper installed this gateway a moment
+// ago and is waiting to hear from it: it holds the previous binary and puts
+// it back if this one does not come up. That is the one start in which
+// refusing to go on is safe.
+func Awaited(version string, dirs Dirs) bool {
+	st, waiting := expected(dirs.State, version)
+	return waiting && st.Phase == PhaseRestarting
+}
+
 // Confirm tells the upgrade helper that this gateway came up, once ready
 // says it has: the helper is holding the previous binary and will put it
 // back unless it hears. It does nothing when no helper is waiting for this
@@ -113,6 +122,21 @@ func (r *Recorder) Begin(run db.MigrationRun) { r.record(run, false) }
 // End records that it finished.
 func (r *Recorder) End(run db.MigrationRun) { r.record(run, true) }
 
+// Abandon takes a started migration out of the record: its backup could not
+// be taken, so it changed nothing.
+func (r *Recorder) Abandon(run db.MigrationRun) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	kept := r.rec.Runs[:0]
+	for _, have := range r.rec.Runs {
+		if have.Dialect != run.Driver || have.Database != run.Database {
+			kept = append(kept, have)
+		}
+	}
+	r.rec.Runs = kept
+	r.write()
+}
+
 func (r *Recorder) record(run db.MigrationRun, done bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -126,6 +150,11 @@ func (r *Recorder) record(run db.MigrationRun, done bool) {
 	if !found && len(r.rec.Runs) < maxMigrationRuns {
 		r.rec.Runs = append(r.rec.Runs, entry)
 	}
+	r.write()
+}
+
+// write stores the record. The caller holds mu.
+func (r *Recorder) write() {
 	root, err := openSpoolDir(r.dataDir)
 	if err == nil {
 		defer func() { _ = root.Close() }()

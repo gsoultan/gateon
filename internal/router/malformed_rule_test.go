@@ -63,11 +63,11 @@ var loggedRuleSeq atomic.Int64
 // not a log line.
 func TestAStoredRuleThatDoesNotParseIsLoggedOnce(t *testing.T) {
 	var buf bytes.Buffer
-	prevShim, prevDefault := logger.L, slog.Default()
-	logger.L = &logger.SlogShim{}
+	prevDefault := slog.Default()
+	prevInner := logger.L.Swap(nil)
 	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
 	t.Cleanup(func() {
-		logger.L = prevShim
+		logger.L.Swap(prevInner)
 		slog.SetDefault(prevDefault)
 	})
 

@@ -63,40 +63,35 @@ func signIn(t *testing.T, m *Manager, username, password, source string) (string
 	return token, user, err
 }
 
-// clockShift is how far freshCode has moved each manager's clock on.
-var clockShift sync.Map // *Manager -> time.Duration
-
-// freshCode is a TOTP code from secret for a step m has not spent yet. Each
-// step's code is accepted once (review L1), and a test that signs one account
-// in several times inside thirty seconds would otherwise present the same code
-// twice. It takes the earliest step in the accepted window -- the current one
-// and one either side -- after the last one spent, and when all three are
-// spent it moves m's clock on a step, as thirty seconds of waiting would.
+// freshCode is a TOTP code from secret for a step m has not spent yet, and it
+// stops m's clock in the middle of that step, so the code is checked at the
+// instant it was made for however long the host takes to present it.
+//
+// Each step's code is accepted once (review L1), so a test that signs one
+// account in several times inside thirty seconds needs a later step each time:
+// it takes the earliest step in the accepted window -- the current one and one
+// either side -- after the last one spent, or the step after that.
+//
+// It used to leave m's clock running, and take the step before the current
+// one first. That code is valid only until the current step ends, so whenever
+// the wall clock crossed a thirty-second boundary between making the code and
+// checking it, the check ran a step later and refused it as invalid. That is
+// why TestEnrollPendingRejectedOnceEnrolled failed now and then on a commit
+// that passed on the next run: its enrolment helper's own code was refused.
 func freshCode(t *testing.T, m *Manager, secret string) (string, error) {
 	t.Helper()
-	for {
-		now := m.now()
-		cur := now.Unix() / 30
-		// The latest step any account spent: more cautious than the one
-		// account needs, never less, and read from the database so a second
-		// manager on it sees what the first spent.
-		var last int64
-		if err := m.db.QueryRow("SELECT COALESCE(MAX(two_factor_last_step), 0) FROM users").Scan(&last); err != nil {
-			t.Fatal(err)
-		}
-		for _, step := range []int64{cur - 1, cur, cur + 1} {
-			if step > last {
-				return totp.GenerateCode(secret, time.Unix(step*30, 0))
-			}
-		}
-		shift := 30 * time.Second
-		if v, ok := clockShift.Load(m); ok {
-			d, _ := v.(time.Duration)
-			shift += d
-		}
-		clockShift.Store(m, shift)
-		m.SetClock(func() time.Time { return time.Now().Add(shift) })
+	cur := m.now().Unix() / 30
+	// The latest step any account spent: more cautious than the one account
+	// needs, never less, and read from the database so a second manager on it
+	// sees what the first spent.
+	var last int64
+	if err := m.db.QueryRow("SELECT COALESCE(MAX(two_factor_last_step), 0) FROM users").Scan(&last); err != nil {
+		t.Fatal(err)
 	}
+	step := max(cur-1, last+1)
+	at := time.Unix(step*30+15, 0)
+	m.SetClock(func() time.Time { return at })
+	return totp.GenerateCode(secret, at)
 }
 
 // rememberSecret records secret as the factor of account id for signIn.

@@ -17,7 +17,9 @@ import (
 )
 
 // EnvMigrationBackup turns the copy taken before a migration off when it is
-// a false value. The copy needs as much free disk as the database is large.
+// a false value: the copy of a SQLite file and the dump of a PostgreSQL
+// database alike. Either needs about as much free disk as the database is
+// large.
 const EnvMigrationBackup = "GATEON_MIGRATION_BACKUP"
 
 // BackupSuffix names the copy of a SQLite database taken before a newer
@@ -31,7 +33,8 @@ type MigrationRun struct {
 	Driver string
 	// Database is the SQLite file; empty for PostgreSQL.
 	Database string
-	// Backup is the copy taken first; empty when none was.
+	// Backup is the copy taken first: of the SQLite file, or pg_dump's dump
+	// of a PostgreSQL database. Empty when none was.
 	Backup string
 }
 
@@ -44,6 +47,9 @@ type MigrationObserver interface {
 	Begin(run MigrationRun)
 	// End is called when every pending migration has been applied.
 	End(run MigrationRun)
+	// Abandon is called when the backup could not be taken and so no
+	// migration ran: the database is as it was before Begin.
+	Abandon(run MigrationRun)
 }
 
 var migrationObserver atomic.Pointer[MigrationObserver]
@@ -56,12 +62,13 @@ func SetMigrationObserver(o MigrationObserver) {
 
 // prepareUpgrade runs before the first pending migration of a database that
 // has been migrated before: it tells the observer, and copies a SQLite
-// database aside. A fresh database has nothing to lose and gets neither.
+// database aside or dumps a PostgreSQL one. A fresh database has nothing to
+// lose and gets neither.
 func prepareUpgrade(db *sql.DB, dialect Dialect) (MigrationRun, error) {
-	run := MigrationRun{Driver: dialect.Driver}
-	if dialect.Driver == DriverSQLite {
-		run.Database = sqliteMainFile(db)
+	if dialect.Driver != DriverSQLite {
+		return prepareServerUpgrade(db, dialect)
 	}
+	run := MigrationRun{Driver: dialect.Driver, Database: sqliteMainFile(db)}
 	if run.Database != "" && migrationBackupEnabled() {
 		run.Backup = run.Database + BackupSuffix
 	}
@@ -72,11 +79,63 @@ func prepareUpgrade(db *sql.DB, dialect Dialect) (MigrationRun, error) {
 		return run, nil
 	}
 	if err := backupSQLite(db, run.Backup); err != nil {
+		abandonUpgrade(run)
 		return run, fmt.Errorf("copy %s to %s before migrating it: %w (free the space, or set %s=0 to migrate without a copy)",
 			run.Database, run.Backup, err, EnvMigrationBackup)
 	}
 	logger.L.LogInfo("copied the database aside before migrating it", "database", run.Database, "backup", run.Backup)
 	return run, nil
+}
+
+// prepareServerUpgrade is prepareUpgrade for PostgreSQL: the database is on
+// a server, so the copy is a dump taken by the server's own client program.
+//
+// Nothing restores this dump by itself. A PostgreSQL database may be shared
+// by several gateways, and replacing it beneath the others is not something
+// one of them decides at startup; the dump is there for an operator with
+// pg_restore (doc/self-upgrade.md).
+func prepareServerUpgrade(db *sql.DB, dialect Dialect) (MigrationRun, error) {
+	run := MigrationRun{Driver: dialect.Driver}
+	observer := migrationObserver.Load()
+	begin := func() {
+		if observer != nil {
+			(*observer).Begin(run)
+		}
+	}
+	if !migrationBackupEnabled() {
+		begin()
+		return run, nil
+	}
+	path, schema, err := postgresDumpPath(db)
+	if err == nil {
+		run.Backup = path
+		begin()
+		err = dumpPostgres(db, path, schema)
+	}
+	if err == nil {
+		logger.L.LogInfo("dumped the database before migrating it", "dump", path, "schema", schema)
+		return run, nil
+	}
+	run.Backup = ""
+	if requirePostgresDump.Load() {
+		abandonUpgrade(run)
+		return run, fmt.Errorf("%w; it is not migrated without one (install the PostgreSQL client tools of the server's version, or set %s=false to migrate without a dump)",
+			err, EnvMigrationBackup)
+	}
+	logger.L.LogWarn("MIGRATING A POSTGRESQL DATABASE WITHOUT A DUMP: none could be taken, and nothing is waiting to put the previous version back if this one is refused. Install the PostgreSQL client tools of the server's version to have one next time",
+		"error", err)
+	begin()
+	return run, nil
+}
+
+// abandonUpgrade takes back what Begin said. Left standing, the record would
+// tell the upgrade helper that this gateway migrated a database, and the
+// helper would then restore a copy that does not exist, or leave a release
+// that cannot start installed over a database nothing touched.
+func abandonUpgrade(run MigrationRun) {
+	if o := migrationObserver.Load(); o != nil {
+		(*o).Abandon(run)
+	}
 }
 
 func finishUpgrade(run MigrationRun) {

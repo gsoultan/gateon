@@ -75,6 +75,10 @@ func (target upgradeTarget) url(t *testing.T) string {
 		// This subtest resets the shared schema; hold the module's Postgres
 		// test lock so no other package's test is using it meanwhile.
 		testutil.LockPostgres(t, target.dsn)
+		// An existing PostgreSQL database is dumped into the data directory
+		// before it is migrated, and with none named that is the working
+		// directory: the dump would be left in the checkout.
+		t.Setenv("GATEON_DATA_DIR", t.TempDir())
 		return target.dsn
 	}
 	return "sqlite:" + filepath.Join(t.TempDir(), "gateon.db")

@@ -11,6 +11,44 @@ here after the fact.
 
 ## Unreleased
 
+### An upgrade can be rolled back on request
+
+Until now the previous version was put back only when the new one failed to
+start. An upgrade that started and then misbehaved could be left only by
+downloading the old release again. The upgrade helper already keeps the
+binary each upgrade replaced, and now puts it back when asked: **Settings,
+Updates, Roll back to vX.Y.Z**, `sudo gateon upgrade --rollback`, or
+`POST /v1/update/rollback` (ADR 0105). Nothing is downloaded, the database is
+left as it is, and if the previous version does not come up the newer one is
+put back.
+
+**Who is affected:** gateways installed as a systemd service with the
+upgrade helper enabled. The button appears after the next upgrade the helper
+performs; an upgrade made by a package manager keeps nothing to roll back
+to. **What to do:** nothing. Only an administrator can roll back.
+
+### A PostgreSQL database is dumped before a release migrates it
+
+A gateway that starts on a PostgreSQL database an earlier version used, and
+has migrations to apply, now runs `pg_dump` first and writes
+`<data dir>/postgres-<database>.pre-upgrade.dump`. One dump is kept per
+database. A fresh install, and a start with nothing to migrate, dump nothing.
+
+**Who is affected:** every PostgreSQL install, at each upgrade that carries
+a migration. The dump needs free disk on the gateway's host about equal to
+the database, and the PostgreSQL client tools of the server's version or
+newer.
+
+**What to do:** on a host that upgrades itself, install the client tools
+before the next upgrade (`sudo apt install postgresql-client` or
+`sudo dnf install postgresql`). Without them, a self-upgrade that carries a
+migration does not migrate and is rolled back to the version you had; nothing
+is lost, and `journalctl -u gateon` names the reason. An upgrade by package
+manager or a new container image has nothing to roll back to, so it logs
+`MIGRATING A POSTGRESQL DATABASE WITHOUT A DUMP` and carries on as before.
+`GATEON_MIGRATION_BACKUP=false` turns the dump off together with the SQLite
+copy. See [self-upgrade.md](self-upgrade.md).
+
 ### A route can ask an advisory worker for a second opinion
 
 A WAF middleware has a new switch, "Ask the advisory worker about forwarded
@@ -39,6 +77,7 @@ tier), `GATEON_WAF_ADVISORY_REVIEW` and `GATEON_WAF_ADVISORY_SAMPLE_RATE` set
 the two route settings for route WAFs that do not, and `GET /v1/waf/advisory`
 returns the counts. Rolling back needs nothing undone: an older build ignores
 the settings. See ADR-0104.
+
 ### A Postgres database behind PgBouncer in transaction pooling mode works
 
 A gateway whose database is reached through PgBouncer in transaction pooling

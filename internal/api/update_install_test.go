@@ -23,6 +23,17 @@ type fakeUpgrades struct {
 	view     upgrade.View
 	err      error
 	installs []string
+	// rollbacks is what Rollback was asked, and rollbackErr what it answers.
+	rollbacks   []string
+	rollbackErr error
+}
+
+func (f *fakeUpgrades) Rollback(to, by string) error {
+	if f.rollbackErr != nil {
+		return f.rollbackErr
+	}
+	f.rollbacks = append(f.rollbacks, to+" by "+by)
+	return nil
 }
 
 func (f *fakeUpgrades) View() upgrade.View { return f.view }
@@ -200,5 +211,76 @@ func TestOnlyAnAdministratorTurnsAutomaticInstallOn(t *testing.T) {
 	}
 	if got := s.Globals.Get(t.Context()).GetUpdate(); !got.GetAutoInstall() || got.GetAutoInstallWindowEnd() != "04:00" {
 		t.Fatalf("the administrator's change was not stored: %v", got)
+	}
+}
+
+func rollback() *gateonv1.RollbackUpdateRequest {
+	return &gateonv1.RollbackUpdateRequest{Version: "1.8.1"}
+}
+
+// TestOnlyAnAdministratorRollsARelease: a rollback ends where an install
+// does, with root replacing the gateway's binary, and with an older one. It
+// is held to the same role in the same place.
+func TestOnlyAnAdministratorRollsARelease(t *testing.T) {
+	s, up := installService()
+	h := NewConnectHandler(s)
+	denied := map[string]context.Context{
+		"an operator":       as(auth.RoleOperator),
+		"a viewer":          as(auth.RoleViewer),
+		"nobody signed in":  context.Background(),
+		"claims of no kind": context.WithValue(context.Background(), middleware.UserContextKey, "admin"),
+	}
+	for who, ctx := range denied {
+		if _, err := s.RollbackUpdate(ctx, rollback()); status.Code(err) != codes.PermissionDenied {
+			t.Errorf("%s over gRPC: %v, want PermissionDenied", who, err)
+		}
+		if _, err := h.RollbackUpdate(ctx, connect.NewRequest(rollback())); status.Code(err) != codes.PermissionDenied {
+			t.Errorf("%s over Connect: %v, want PermissionDenied", who, err)
+		}
+	}
+	if len(up.rollbacks) != 0 {
+		t.Fatalf("a refused caller started a rollback: %v", up.rollbacks)
+	}
+
+	res, err := s.RollbackUpdate(as(auth.RoleAdmin), rollback())
+	if err != nil {
+		t.Fatalf("an administrator over gRPC: %v", err)
+	}
+	if res.GetStatus().GetUpgrade() == nil {
+		t.Errorf("the answer does not carry the status: %v", res.GetStatus())
+	}
+	if _, err := h.RollbackUpdate(as(auth.RoleAdmin), connect.NewRequest(rollback())); err != nil {
+		t.Fatalf("an administrator over Connect: %v", err)
+	}
+	want := []string{"1.8.1 by admin", "1.8.1 by admin"}
+	if len(up.rollbacks) != 2 || up.rollbacks[0] != want[0] || up.rollbacks[1] != want[1] {
+		t.Fatalf("rollbacks started: %v, want %v", up.rollbacks, want)
+	}
+	if len(up.installs) != 0 {
+		t.Fatalf("a rollback started an install: %v", up.installs)
+	}
+}
+
+func TestARefusedRollbackSaysWhichStateTheGatewayIsIn(t *testing.T) {
+	cases := map[error]codes.Code{
+		upgrade.ErrBusy:            codes.Aborted,
+		upgrade.ErrNoPrevious:      codes.FailedPrecondition,
+		upgrade.ErrNeedsRestore:    codes.FailedPrecondition,
+		errors.New("disk on fire"): codes.Internal,
+	}
+	for cause, want := range cases {
+		s, up := installService()
+		up.rollbackErr = cause
+		_, err := s.RollbackUpdate(as(auth.RoleAdmin), rollback())
+		if status.Code(err) != want {
+			t.Errorf("%v: answered %v, want %s", cause, err, want)
+		}
+		if want == codes.Internal && status.Convert(err).Message() != "the upgrade could not be started" {
+			t.Errorf("an unexpected failure reached the caller verbatim: %q", status.Convert(err).Message())
+		}
+	}
+	s := &ApiService{Version: "1.8.2", Updates: newerRelease()}
+	if _, err := s.RollbackUpdate(as(auth.RoleAdmin), rollback()); status.Code(err) != codes.FailedPrecondition {
+		t.Fatalf("a gateway with no installer: %v, want FailedPrecondition", err)
 	}
 }

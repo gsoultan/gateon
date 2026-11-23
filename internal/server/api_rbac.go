@@ -181,6 +181,8 @@ var apiPermissions = map[string]apiPermission{
 	// change the global settings here; ApiService additionally requires
 	// admin, as it does for users.
 	gateonv1connect.ApiServiceInstallUpdateProcedure: writeOn(auth.ResourceGlobal),
+	// Rolling one back (ADR 0105), POST /v1/update/rollback: the same.
+	gateonv1connect.ApiServiceRollbackUpdateProcedure: writeOn(auth.ResourceGlobal),
 
 	// Diagnostics reads. GET /v1/status, /v1/diagnostics, /v1/audit/*,
 	// /v1/diag/security-threats, /v1/security/reputations, /v1/traces.

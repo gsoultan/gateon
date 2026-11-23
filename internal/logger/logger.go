@@ -80,6 +80,16 @@ func (s *SlogShim) get() *slog.Logger {
 // set installs a new logger. Callers keep whatever *SlogShim they already hold.
 func (s *SlogShim) set(l *slog.Logger) { s.p.Store(l) }
 
+// Swap installs l and returns the logger it replaces; nil makes the shim fall
+// through to slog's default. It is how a test captures what L logs.
+//
+// Tests used to replace L itself with a fresh shim, which is the unsynchronised
+// write the shim exists to prevent: a handler or loop an earlier test left
+// running reads L while the next test assigns it, and the race detector failed
+// whichever test happened to be swapping (TestStartUpWarnsOnceAboutRoutesThat-
+// CannotServe, against an access log line from a request still finishing).
+func (s *SlogShim) Swap(l *slog.Logger) *slog.Logger { return s.p.Swap(l) }
+
 // newShim builds a shim around l.
 func newShim(l *slog.Logger) *SlogShim {
 	s := &SlogShim{}

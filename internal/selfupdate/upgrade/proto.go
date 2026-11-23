@@ -18,6 +18,9 @@ func (v View) Proto() *gateonv1.UpgradeStatus {
 		AutoInstallScope: scopeProto[v.Auto.Scope],
 		WindowStart:      clock(v.Auto.Window.Start),
 		WindowEnd:        clock(v.Auto.Window.End),
+		RollbackVersion:  v.Rollback.To,
+
+		RollbackNeedsRestore: v.Rollback.NeedsRestore,
 	}
 	if v.Current != nil {
 		out.Current = v.Current.Proto()
@@ -89,4 +92,9 @@ var reasonProto = map[Reason]gateonv1.UpgradeReason{
 	ReasonMigrated:  gateonv1.UpgradeReason_UPGRADE_REASON_MIGRATED,
 	ReasonDownload:  gateonv1.UpgradeReason_UPGRADE_REASON_DOWNLOAD,
 	ReasonHelper:    gateonv1.UpgradeReason_UPGRADE_REASON_HELPER,
+
+	ReasonRequested:        gateonv1.UpgradeReason_UPGRADE_REASON_REQUESTED,
+	ReasonNoPrevious:       gateonv1.UpgradeReason_UPGRADE_REASON_NO_PREVIOUS,
+	ReasonNeedsRestore:     gateonv1.UpgradeReason_UPGRADE_REASON_NEEDS_RESTORE,
+	ReasonPreviousNotReady: gateonv1.UpgradeReason_UPGRADE_REASON_PREVIOUS_NOT_READY,
 }

@@ -14,6 +14,13 @@
 # release's checksums.txt, and runs the specs in tests/e2e that start the two
 # binaries as real processes on one state, on SQLite and on PostgreSQL.
 #
+# One of them has this tree's upgrade helper put the last release's binary
+# back, as an operator asks for with `gateon upgrade --rollback` (ADR 0105),
+# and waits for that binary to answer. Every gateway reads the helper's
+# status at /var/lib/gateon-upgrade, so the spec needs that directory: this
+# script creates it, with sudo when it has to, and removes it again. The spec
+# refuses a directory that already holds a helper's record.
+#
 # Nothing here is allowed to skip. A spec that finds no previous binary or no
 # PostgreSQL fails, because a gate that passes without running reports a rule
 # it did not check.
@@ -38,7 +45,24 @@ if [ -z "${GATEON_TEST_POSTGRES_DSN:-}" ]; then
 fi
 
 work="$(mktemp -d)"
-trap 'rm -rf "$work"' EXIT
+state=/var/lib/gateon-upgrade
+made_state=
+cleanup() {
+  rm -rf "$work"
+  if [ -n "$made_state" ]; then
+    rmdir "$state" 2>/dev/null || sudo -n rmdir "$state" 2>/dev/null || true
+  fi
+}
+trap cleanup EXIT
+
+if [ ! -e "$state" ]; then
+  if ! mkdir "$state" 2>/dev/null && ! sudo -n install -d -o "$(id -u)" -g "$(id -g)" -m 0755 "$state"; then
+    echo "check-compat: $state does not exist and could not be created, so the rollback would go unchecked." >&2
+    echo "              Create it and give it to this account: sudo install -d -o \$(id -u) $state" >&2
+    exit 1
+  fi
+  made_state=1
+fi
 
 previous="${GATEON_COMPAT_PREVIOUS:-}"
 if [ -z "$previous" ]; then
@@ -79,5 +103,5 @@ fi
 cd "$root"
 GATEON_COMPAT_PREVIOUS="$previous" GATEON_COMPAT_REQUIRED=1 \
   go test -count=1 -timeout 15m \
-  -run 'TestTheLastReleaseUpgradesToThisBuildAndBack|TestARestartIntoThisBuildRefusesNoConnection|TestARestartOfThisBuildLosesNoRequest' \
+  -run 'TestTheLastReleaseUpgradesToThisBuildAndBack|TestAnUpgradeFromTheLastReleaseRollsBackOnRequest|TestARestartIntoThisBuildRefusesNoConnection|TestARestartOfThisBuildLosesNoRequest' \
   ./tests/e2e/

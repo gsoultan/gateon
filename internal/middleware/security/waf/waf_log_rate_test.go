@@ -22,14 +22,14 @@ import (
 func captureWAFLog(t *testing.T) *bytes.Buffer {
 	t.Helper()
 	var buf bytes.Buffer
-	prevShim, prevDefault := logger.L, slog.Default()
+	prevDefault := slog.Default()
 	prevBlock, prevWould := wafBlockLines, wafWouldBlockLines
-	logger.L = &logger.SlogShim{}
+	prevInner := logger.L.Swap(nil)
 	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
 	wafBlockLines = newWAFLines("waf block summary")
 	wafWouldBlockLines = newWAFLines("waf would-block summary")
 	t.Cleanup(func() {
-		logger.L = prevShim
+		logger.L.Swap(prevInner)
 		slog.SetDefault(prevDefault)
 		wafBlockLines, wafWouldBlockLines = prevBlock, prevWould
 	})

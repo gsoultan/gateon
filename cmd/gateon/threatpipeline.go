@@ -16,6 +16,7 @@ import (
 	"github.com/gsoultan/gateon/internal/security/correlation"
 	"github.com/gsoultan/gateon/internal/security/mitigation"
 	"github.com/gsoultan/gateon/internal/security/siem"
+	"github.com/gsoultan/gateon/internal/syncutil"
 	"github.com/gsoultan/gateon/internal/telemetry"
 )
 
@@ -74,7 +75,7 @@ func startThreatPipeline(ctx context.Context, version string) {
 			},
 		})
 		signals = make(chan correlation.Signal, signalQueueSize)
-		go engine.Run(ctx, signals)
+		go syncutil.Supervise(ctx.Done(), "correlation engine", func() { engine.Run(ctx, signals) })
 	} else {
 		logger.L.LogInfo("correlation engine disabled by resource profile",
 			"profile", string(config.ResolveProfile()))
@@ -83,9 +84,8 @@ func startThreatPipeline(ctx context.Context, version string) {
 	// Only subscribe to the threat broadcaster if there is a consumer: the
 	// correlation engine and/or raw SIEM shipping.
 	if correlate || shipRaw {
-		go consumeThreats(ctx, threatSinks{
-			signals: signals, shipper: shipper, shipRaw: shipRaw, correlate: correlate,
-		})
+		sinks := threatSinks{signals: signals, shipper: shipper, shipRaw: shipRaw, correlate: correlate}
+		go syncutil.Supervise(ctx.Done(), "threat consumer", func() { consumeThreats(ctx, sinks) })
 	}
 }
 
@@ -134,7 +134,7 @@ func initSIEMShipper(ctx context.Context, version string) *siem.Shipper {
 		logger.L.LogError("failed to initialize SIEM exporter", "error", err)
 		return nil
 	}
-	go shipper.Run(ctx)
+	go syncutil.Supervise(ctx.Done(), "SIEM exporter", func() { shipper.Run(ctx) })
 	// Register so the posture endpoint / Security Hub can report SIEM status.
 	siem.SetDefault(shipper)
 	logger.L.LogInfo("SIEM exporter enabled",

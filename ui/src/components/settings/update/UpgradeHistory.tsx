@@ -4,7 +4,7 @@
 import { Badge, Stack, Table, Text, Title } from "@mantine/core";
 import { UpgradePhase, type UpgradeRecord } from "../../../services/gen/gateon/v1/status_pb";
 import { safeToDateLocaleString } from "../../../utils/format";
-import { outcomeLabel, startedBy } from "./upgradeView";
+import { outcomeLabel, startedBy, versionChange } from "./upgradeView";
 
 const COLORS: Partial<Record<UpgradePhase, string>> = {
   [UpgradePhase.SUCCEEDED]: "green",
@@ -25,7 +25,7 @@ export function UpgradeHistory({ history }: { history: UpgradeRecord[] }) {
       <Title order={4}>Upgrade history</Title>
       {history.length === 0 ? (
         <Text size="sm" c="dimmed">
-          No release has been installed from this gateway yet. Installs made with a package manager are not listed here.
+          No release has been installed or rolled back from this gateway yet. Installs made with a package manager are not listed here.
         </Text>
       ) : (
         <Table.ScrollContainer minWidth={520}>
@@ -40,14 +40,12 @@ export function UpgradeHistory({ history }: { history: UpgradeRecord[] }) {
             </Table.Thead>
             <Table.Tbody>
               {history.map((r) => (
-                <Table.Tr key={`${r.startedAt}-${r.targetVersion}`}>
+                <Table.Tr key={`${r.startedAt}-${r.targetVersion}-${r.reason}`}>
                   <Table.Td>{safeToDateLocaleString(Number(r.finishedAt || r.startedAt) * 1000, "Unknown")}</Table.Td>
-                  <Table.Td>
-                    v{r.previousVersion} to v{r.targetVersion}
-                  </Table.Td>
+                  <Table.Td>{versionChange(r)}</Table.Td>
                   <Table.Td>
                     <Badge variant="light" color={COLORS[r.phase] ?? "blue"} tt="none">
-                      {outcomeLabel(r.phase)}
+                      {outcomeLabel(r)}
                     </Badge>
                   </Table.Td>
                   <Table.Td>{startedBy(r)}</Table.Td>

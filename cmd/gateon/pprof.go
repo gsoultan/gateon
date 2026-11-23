@@ -5,6 +5,9 @@ package main
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"net"
 	"net/http"
 	"net/http/pprof"
 	"os"
@@ -19,6 +22,34 @@ import (
 // explicitly bind it (preferably to a loopback address, e.g. "127.0.0.1:6060").
 const pprofEnvAddr = "GATEON_PPROF_ADDR"
 
+// pprofEnvAllowRemote, set to "true", lets GATEON_PPROF_ADDR name an address
+// other than loopback -- for a container whose profile is fetched through a
+// port-forward or a sidecar. Without it a non-loopback address is refused.
+const pprofEnvAllowRemote = "GATEON_PPROF_ALLOW_REMOTE"
+
+// errPprofNotLoopback is why a profiling address was refused.
+var errPprofNotLoopback = errors.New("pprof address is not loopback")
+
+// checkPprofAddr reports whether addr may serve the profiling endpoints. They
+// have no authentication: /debug/pprof/cmdline returns the process arguments
+// and /debug/pprof/profile holds a CPU busy for as long as the caller asks, so
+// ":6060" -- every interface -- handed both to anyone who could reach the port
+// (2026-11-20 audit, L7). Loopback is accepted, and anything else only when the
+// operator says so a second time.
+func checkPprofAddr(addr string, allowRemote bool) error {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return fmt.Errorf("%s=%q: %w", pprofEnvAddr, addr, err)
+	}
+	if allowRemote || host == "localhost" {
+		return nil
+	}
+	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
+		return nil
+	}
+	return fmt.Errorf("%s=%q: %w; bind 127.0.0.1 or set %s=true", pprofEnvAddr, addr, errPprofNotLoopback, pprofEnvAllowRemote)
+}
+
 // startPprofServer launches the net/http/pprof endpoints on a dedicated mux when
 // GATEON_PPROF_ADDR is set. The server is shut down when ctx is cancelled.
 //
@@ -28,6 +59,10 @@ const pprofEnvAddr = "GATEON_PPROF_ADDR"
 func startPprofServer(ctx context.Context) {
 	addr := os.Getenv(pprofEnvAddr)
 	if addr == "" {
+		return
+	}
+	if err := checkPprofAddr(addr, os.Getenv(pprofEnvAllowRemote) == "true"); err != nil {
+		logger.L.LogError("pprof profiling server not started", "error", err)
 		return
 	}
 

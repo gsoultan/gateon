@@ -67,22 +67,41 @@ func (c *countingInvalidator) InvalidateRoutes(func(*gateonv1.Route) bool) { c.r
 func (c *countingInvalidator) InvalidateTLS()                              { c.tls++ }
 func (c *countingInvalidator) InvalidateWAF()                              { c.waf++ }
 
-// captureLogs points logger.L at a shim with no logger of its own, so it falls
-// through to slog's default, which this swaps for a buffer.
-func captureLogs(t *testing.T) *bytes.Buffer {
+// captureLogs empties logger.L's shim, so it falls through to slog's default,
+// which this swaps for a buffer. The buffer is locked: a request or loop an
+// earlier test started can still be logging while this test reads it.
+func captureLogs(t *testing.T) *syncBuffer {
 	t.Helper()
-	var buf bytes.Buffer
+	var buf syncBuffer
 
-	prevShim := logger.L
-	logger.L = &logger.SlogShim{}
+	prevInner := logger.L.Swap(nil)
 	prevDefault := slog.Default()
 	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
 
 	t.Cleanup(func() {
-		logger.L = prevShim
+		logger.L.Swap(prevInner)
 		slog.SetDefault(prevDefault)
 	})
 	return &buf
+}
+
+// syncBuffer is a bytes.Buffer safe to write from other goroutines while the
+// test reads it.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
 }
 
 // TestInvalidationPublishFailureIsReported closes a silent failure on the
