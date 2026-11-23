@@ -300,8 +300,12 @@ check-folders:
 ##               on it, the release starts again on what this build left. A
 ##               self-upgrade rolls back by putting the old binary back, so a
 ##               migration the old binary cannot read breaks every rollback
-##               after it ships. Needs GATEON_TEST_POSTGRES_DSN; nothing in it
-##               may skip. See ADR 0102.
+##               after it ships. It also has this tree's helper put the
+##               release's binary back, as `gateon upgrade --rollback` does,
+##               and waits for that binary to answer (ADR 0105); that needs
+##               /var/lib/gateon-upgrade, which the script creates and removes.
+##               Needs GATEON_TEST_POSTGRES_DSN; nothing in it may skip. See
+##               ADR 0102.
 check-compat:
 	./scripts/check-compat.sh
 

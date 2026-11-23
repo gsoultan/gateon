@@ -310,6 +310,8 @@ type View struct {
 	Current *Status
 	History []Status
 	Auto    Auto
+	// Rollback is the release this gateway could be put back to.
+	Rollback Rollback
 }
 
 // View reports where installing stands.
@@ -318,10 +320,11 @@ func (i *Installer) View() View {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 	return View{
-		Blocker: i.Blocker(),
-		Current: i.currentLocked(helper),
-		History: history,
-		Auto:    AutoSettings(i.opts.Config()),
+		Blocker:  i.Blocker(),
+		Current:  i.currentLocked(helper),
+		History:  history,
+		Auto:     AutoSettings(i.opts.Config()),
+		Rollback: i.rollback(history),
 	}
 }
 

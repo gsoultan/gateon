@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/gsoultan/gateon/internal/security/reputation"
+	"github.com/gsoultan/gateon/internal/syncutil"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
@@ -40,6 +41,17 @@ type SecurityThreatDetector struct {
 	Reputation *reputation.IPReputationStore
 	Config     *gateonv1.BehavioralConfig
 }
+
+// threatAnalysisWorkers is how many addresses one Detect pass analyses at
+// once. Each may call every configured threat-intelligence provider, with a
+// 10 s timeout. It used to start one goroutine per address in the pass -- up to
+// the 1,000-trace window plus stored threat addresses -- so a client rotating
+// addresses, which costs nothing over IPv6, could make a single pass open
+// hundreds of outbound TLS connections at once on a 2-core host and spend the
+// provider's daily quota in a burst (2026-11-20 audit, L6). Eight keeps a pass
+// of a thousand cached addresses fast and holds the uncached case to eight
+// connections per provider.
+const threatAnalysisWorkers = 8
 
 func (d *SecurityThreatDetector) Detect(ctx context.Context, data *DiagnosticData) []*gateonv1.Anomaly {
 	if d.Config != nil && !d.Config.Enabled {
@@ -75,12 +87,16 @@ func (d *SecurityThreatDetector) Detect(ctx context.Context, data *DiagnosticDat
 		mu.Unlock()
 	}
 
-	// 4. Per-IP analysis (Parallelized)
+	// 4. Per-IP analysis, at most threatAnalysisWorkers addresses at a time.
 	var wg sync.WaitGroup
+	slots := make(chan struct{}, threatAnalysisWorkers)
 	for ip, stats := range data.IPStats {
 		wg.Add(1)
+		slots <- struct{}{}
 		go func(ip string, stats *IPStats) {
 			defer wg.Done()
+			defer func() { <-slots }()
+			defer syncutil.Recover("threat analysis of one address")
 			score := 0
 			reasons := []string{}
 			primaryType := "security_threat"

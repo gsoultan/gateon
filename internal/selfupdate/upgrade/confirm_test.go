@@ -237,3 +237,53 @@ func TestARestoreThatCannotFinishIsAnError(t *testing.T) {
 		t.Fatalf("the database was moved away with nothing to replace it: %q", got)
 	}
 }
+
+// TestAnAbandonedMigrationLeavesTheRecord: a migration whose backup could
+// not be taken changed nothing, and the helper must not read it as one that
+// did: it would restore a copy that does not exist, or refuse to put the
+// previous release back over a database nothing touched.
+func TestAnAbandonedMigrationLeavesTheRecord(t *testing.T) {
+	dirs := Dirs{Data: t.TempDir()}
+	r := NewRecorder("1.8.3", "1.8.2", dirs.Data)
+	kept := db.MigrationRun{Driver: db.DriverSQLite, Database: "/d/gateon.db", Backup: "/d/gateon.db.bak"}
+	r.Begin(kept)
+	r.End(kept)
+	refused := db.MigrationRun{Driver: db.DriverPostgres, Backup: "/d/postgres-gateon.pre-upgrade.dump"}
+	r.Begin(refused)
+	refused.Backup = "" // as db reports it once the dump has failed
+	r.Abandon(refused)
+	var rec Migrated
+	if err := readSpool(t, dirs, MigratedFile, &rec); err != nil {
+		t.Fatal(err)
+	}
+	if len(rec.Runs) != 1 || rec.Runs[0].Dialect != DialectSQLite || !rec.Runs[0].Done {
+		t.Fatalf("the record holds %+v", rec.Runs)
+	}
+	r.Abandon(kept)
+	if err := readSpool(t, dirs, MigratedFile, &rec); err != nil || len(rec.Runs) != 0 {
+		t.Fatalf("the record holds %+v (%v)", rec.Runs, err)
+	}
+}
+
+// TestOnlyAGatewayTheHelperJustInstalledIsAwaited: Awaited is what makes a
+// missing PostgreSQL dump stop a migration, so it must be true only when
+// something is there to put the previous release back.
+func TestOnlyAGatewayTheHelperJustInstalledIsAwaited(t *testing.T) {
+	if !Awaited("1.8.3", site(t, Status{Phase: PhaseRestarting, Expect: "1.8.3", Nonce: "n-1"})) {
+		t.Fatal("the gateway the helper is waiting for is not awaited")
+	}
+	for name, st := range map[string]Status{
+		"being rolled back to":       {Phase: PhaseRollingBack, Expect: "1.8.3", Nonce: "n-1"},
+		"an upgrade long finished":   {Phase: PhaseSucceeded, Target: "1.8.3"},
+		"another version expected":   {Phase: PhaseRestarting, Expect: "1.8.4", Nonce: "n-1"},
+		"no nonce to answer":         {Phase: PhaseRestarting, Expect: "1.8.3"},
+		"the helper still verifying": {Phase: PhaseInstalling, Target: "1.8.3"},
+	} {
+		if Awaited("1.8.3", site(t, st)) {
+			t.Errorf("%s: awaited", name)
+		}
+	}
+	if Awaited("1.8.3", Dirs{Data: t.TempDir(), State: filepath.Join(t.TempDir(), "absent")}) {
+		t.Error("a host with no helper: awaited")
+	}
+}

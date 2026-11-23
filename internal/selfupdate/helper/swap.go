@@ -28,6 +28,8 @@ func (r *run) install(ctx context.Context, staged string) upgrade.Status {
 		_ = os.Remove(staged)
 		return r.finish(upgrade.PhaseRefused, upgrade.ReasonInstall, fmt.Errorf("keep the installed binary: %w", err))
 	}
+	// What an earlier gateway said it migrated is not this one's record.
+	_ = r.data.Remove(spool(upgrade.MigratedFile))
 	r.expect(upgrade.PhaseRestarting, r.status.Target)
 	if err := os.Rename(staged, r.cfg.BinaryPath); err != nil {
 		// Nothing was replaced and nothing was restarted: the gateway is
@@ -54,9 +56,6 @@ func (r *run) restart(ctx context.Context) {
 // its own version, which is not the one expected.
 func (r *run) expect(phase upgrade.Phase, version string) {
 	_ = r.data.Remove(spool(upgrade.ReadyFile))
-	if phase == upgrade.PhaseRestarting {
-		_ = r.data.Remove(spool(upgrade.MigratedFile))
-	}
 	nonce := make([]byte, 16)
 	_, _ = rand.Read(nonce)
 	r.status.Phase, r.status.Expect, r.status.Nonce = phase, version, hex.EncodeToString(nonce)

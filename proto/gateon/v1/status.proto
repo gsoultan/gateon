@@ -176,6 +176,19 @@ enum UpgradeReason {
   // The helper did not pick the request up: gateon-upgrade.path is not
   // enabled.
   UPGRADE_REASON_HELPER = 10;
+  // An operator asked for the previous release to be put back (ADR 0105).
+  // With phase ROLLED_BACK this is a rollback that worked.
+  UPGRADE_REASON_REQUESTED = 11;
+  // A rollback was asked for and there is no release to go back to.
+  UPGRADE_REASON_NO_PREVIOUS = 12;
+  // A rollback was asked for, and the installed release migrated a database
+  // the previous one was not tested on. Nothing was changed: putting the
+  // database copy back is decided on the host, with
+  // `gateon upgrade --rollback --restore-database`.
+  UPGRADE_REASON_NEEDS_RESTORE = 13;
+  // A rollback was asked for, the previous release did not report ready,
+  // and the release it replaced was put back.
+  UPGRADE_REASON_PREVIOUS_NOT_READY = 14;
 }
 
 // UpgradeBlocker is why this gateway cannot install a release itself.
@@ -231,6 +244,12 @@ message UpgradeStatus {
   // The maintenance window in force, "HH:MM" local time.
   string window_start = 7;
   string window_end = 8;
+  // The release RollbackUpdate would put back: the one the last upgrade
+  // replaced. Empty when there is none, which is always the case on a
+  // gateway that cannot install a release itself.
+  string rollback_version = 9;
+  // RollbackUpdate would be refused with NEEDS_RESTORE.
+  bool rollback_needs_restore = 10;
 }
 
 message GetUpdateStatusRequest {}
@@ -254,5 +273,17 @@ message InstallUpdateRequest {
 }
 
 message InstallUpdateResponse {
+  UpdateStatus status = 1;
+}
+
+// RollbackUpdateRequest asks the gateway to put back the release the last
+// upgrade replaced (ADR 0105).
+message RollbackUpdateRequest {
+  // The release to go back to, "1.8.2". It must be the one the status
+  // reported as rollback_version: the caller names what they were shown.
+  string version = 1;
+}
+
+message RollbackUpdateResponse {
   UpdateStatus status = 1;
 }

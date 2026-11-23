@@ -54,4 +54,5 @@ type GlobalAndAuthAPI interface {
 	GetUpdateStatus(ctx context.Context, req *gateonv1.GetUpdateStatusRequest) (*gateonv1.GetUpdateStatusResponse, error)
 	CheckForUpdate(ctx context.Context, req *gateonv1.CheckForUpdateRequest) (*gateonv1.CheckForUpdateResponse, error)
 	InstallUpdate(ctx context.Context, req *gateonv1.InstallUpdateRequest) (*gateonv1.InstallUpdateResponse, error)
+	RollbackUpdate(ctx context.Context, req *gateonv1.RollbackUpdateRequest) (*gateonv1.RollbackUpdateResponse, error)
 }

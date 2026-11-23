@@ -12,6 +12,7 @@ import (
 	"github.com/gsoultan/gateon/internal/ebpf"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/security/mitigation"
+	"github.com/gsoultan/gateon/internal/syncutil"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
@@ -47,7 +48,7 @@ func (ad *AnomalyDetector) Start(ctx context.Context) {
 	}
 
 	// Start the aggregator's collection loop
-	go ad.aggregator.Start(ctx)
+	go syncutil.Supervise(ctx.Done(), "metrics aggregator", func() { ad.aggregator.Start(ctx) })
 
 	// Non-positive, not just zero: the API stores a negative value as given,
 	// and time.NewTicker panics on it on a goroutine with no recover.
@@ -68,9 +69,17 @@ func (ad *AnomalyDetector) Start(ctx context.Context) {
 			logger.L.LogInfo("Anomaly detection service stopping")
 			return
 		case t := <-ticker.C:
-			ad.runChecks(ctx, t)
+			ad.runChecksRecovered(ctx, t)
 		}
 	}
+}
+
+// runChecksRecovered runs one pass of checks, and a panic in it costs that
+// pass instead of the process: the checks read metrics derived from client
+// traffic, on a goroutine nothing else recovers.
+func (ad *AnomalyDetector) runChecksRecovered(ctx context.Context, now time.Time) {
+	defer syncutil.Recover("anomaly checks")
+	ad.runChecks(ctx, now)
 }
 
 func (ad *AnomalyDetector) runChecks(ctx context.Context, now time.Time) {

@@ -47,8 +47,8 @@ func hangUpBackend(t *testing.T) *httptest.Server {
 func TestProxyErrorLinesAreRateLimited(t *testing.T) {
 	const failures = 200
 	var buf bytes.Buffer
-	prevShim, prevDefault, prevLines := logger.L, slog.Default(), proxyErrorLines
-	logger.L = &logger.SlogShim{}
+	prevDefault, prevLines := slog.Default(), proxyErrorLines
+	prevInner := logger.L.Swap(nil)
 	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
 	proxyErrorLines = logger.NewLineLimiter(logger.LineLimit{
 		Level: slog.LevelError, Summary: "proxy errors left out", PerSecond: proxyErrorLinesPerSecond,
@@ -64,7 +64,7 @@ func TestProxyErrorLinesAreRateLimited(t *testing.T) {
 	ph := NewProxyHandler(&gateonv1.Route{Id: "hangup-route", ServiceId: "hangup"}, reg)
 	t.Cleanup(func() {
 		ph.Close()
-		logger.L = prevShim
+		logger.L.Swap(prevInner)
 		slog.SetDefault(prevDefault)
 		proxyErrorLines = prevLines
 	})

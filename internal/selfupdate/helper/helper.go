@@ -148,6 +148,9 @@ func Run(ctx context.Context, cfg Config) (upgrade.Status, error) {
 	if err != nil {
 		return upgrade.Status{}, err
 	}
+	if req.Rollback {
+		return r.rollback(ctx, RollbackOptions{To: req.Version, RequestedBy: req.RequestedBy}), nil
+	}
 	r.begin(req)
 	staged, err := r.stage()
 	if err != nil {
@@ -292,12 +295,7 @@ func (r *run) archiveName() string {
 
 // remember appends the finished status to the history, newest first.
 func (r *run) remember() {
-	var history []upgrade.Status
-	if err := upgrade.ReadJSON(r.state, upgrade.HistoryFile, &history); err != nil && !errors.Is(err, os.ErrNotExist) {
-		r.cfg.Logf("the upgrade history could not be read and is started again: %v", err)
-		history = nil
-	}
-	history = append([]upgrade.Status{r.status}, history...)
+	history := append([]upgrade.Status{r.status}, r.history()...)
 	if len(history) > upgrade.MaxHistory {
 		history = history[:upgrade.MaxHistory]
 	}
