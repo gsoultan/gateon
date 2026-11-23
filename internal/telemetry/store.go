@@ -1192,7 +1192,7 @@ func initStore(databaseURL string, retentionDays int) error {
 	// dashboard reflects past activity instead of resetting to 0 on restart.
 	st.wg.Go(st.restoreWAFBlockCounter)
 
-	st.wg.Go(st.loop)
+	st.wg.Go(func() { syncutil.Supervise(st.stopCh, "telemetry writer", st.loop) })
 	st.wg.Go(st.dailyResetLoop)
 	st.wg.Go(func() { st.blockListLoop(st.blockListLoaded) })
 

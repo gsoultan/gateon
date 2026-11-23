@@ -174,21 +174,21 @@ func copyAndPatchConfig(t *testing.T, srcDir, dstDir string, ports map[string]in
 	}
 }
 
+// patchPorts swaps the fixed ports the E2E configs are written with for the
+// ones this environment allocated. All placeholders go in one pass over the
+// original text: replaced one after another, a pass would also rewrite a port
+// an earlier pass had just written whenever that port contained a later
+// placeholder (TLS given 38085 became 338899 once 8085 was replaced), and the
+// gateway then failed to bind a port the test was waiting on.
 func patchPorts(s string, ports map[string]int) string {
-	// Simple string replacement for common ports used in E2E configs
-	s = replacePort(s, "8080", ports["mgmt"])
-	s = replacePort(s, "8081", ports["http_plain"])
-	s = replacePort(s, "8282", ports["http_tls"])
-	s = replacePort(s, "8085", ports["grpc"])
-	s = replacePort(s, "8086", ports["tcp"])
-	s = replacePort(s, "8082", ports["mock_backend"])
-	return s
-}
-
-func replacePort(s, oldPort string, newPort int) string {
-	// Look for ":8080", "8080", "localhost:8080", etc.
-	// This is a bit naive but should work for the controlled E2E configs.
-	return strings.ReplaceAll(s, oldPort, strconv.Itoa(newPort))
+	return strings.NewReplacer(
+		"8080", strconv.Itoa(ports["mgmt"]),
+		"8081", strconv.Itoa(ports["http_plain"]),
+		"8282", strconv.Itoa(ports["http_tls"]),
+		"8085", strconv.Itoa(ports["grpc"]),
+		"8086", strconv.Itoa(ports["tcp"]),
+		"8082", strconv.Itoa(ports["mock_backend"]),
+	).Replace(s)
 }
 
 func waitForPort(t *testing.T, port int) {
