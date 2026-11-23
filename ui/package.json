@@ -28,7 +28,7 @@
     "@tanstack/react-router-devtools": "^1.167.3",
     "@types/dagre": "^0.7.54",
     "@types/leaflet": "^1.9.22",
-    "@xyflow/react": "^12.12.1",
+    "@xyflow/react": "^13.0.2",
     "dagre": "^0.8.5",
     "date-fns": "^4.1.0",
     "leaflet": "^1.9.4",
