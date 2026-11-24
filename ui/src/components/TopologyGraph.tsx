@@ -232,6 +232,9 @@ const TopologyGraphInner: React.FC<TopologyGraphProps> = ({
   services,
 }) => {
   const { fitView } = useReactFlow();
+  // React Flow 13 follows the OS colour scheme unless told otherwise, which
+  // would split the canvas from the dashboard's own light/dark setting.
+  const colorMode = useComputedColorScheme("light");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [direction, setDirection] = useState<LayoutDirection>("LR");
   const { nodes: initialNodes, edges: initialEdges } = useMemo(() => {
@@ -486,6 +489,7 @@ const TopologyGraphInner: React.FC<TopologyGraphProps> = ({
         onNodeClick={onNodeClick}
         onPaneClick={onPaneClick}
         nodeTypes={nodeTypes}
+        forceColorMode={colorMode}
         fitView
         connectionLineType={ConnectionLineType.SmoothStep}
         defaultEdgeOptions={{
