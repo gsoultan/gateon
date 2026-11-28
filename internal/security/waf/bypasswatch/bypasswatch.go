@@ -251,7 +251,7 @@ func (w *Watch) Run(ctx context.Context) {
 // a process that does not call Run -- a test, or a tool -- and must not be
 // called while Run is running.
 func (w *Watch) Drain() {
-	for w.in != nil && len(w.in) > 0 {
+	for len(w.in) > 0 {
 		w.apply(<-w.in)
 	}
 }
