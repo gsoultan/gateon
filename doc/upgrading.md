@@ -11,6 +11,19 @@ here after the fact.
 
 ## Unreleased
 
+### The Security Hub points at the request that got through after a search
+
+When the WAF has refused five different payloads from one client on one
+endpoint and then forwards a request from that client there, the request is
+recorded as `waf_bypass_suspected` (ADR 0107). It may be the payload that got
+past the rules. The entry is observed and held against nobody, and it carries
+the request's query with its credentials masked.
+
+**Who is affected:** every gateway with a WAF. The watch is on by default, and
+holds at most about 5 MiB on `standard`. **What to do:** read these entries.
+Set `GATEON_WAF_BYPASS_REFUSALS` (2 to 32) to change the threshold, or
+`GATEON_WAF_BYPASS_SOURCES=0` to turn the watch off.
+
 ### A refusal no longer says which check refused it
 
 Every refusal a security decision makes now has the body

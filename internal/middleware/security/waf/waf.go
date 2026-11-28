@@ -30,6 +30,7 @@ import (
 	"github.com/gsoultan/gateon/internal/security/waf"
 	"github.com/gsoultan/gateon/internal/security/waf/advisory"
 	"github.com/gsoultan/gateon/internal/security/waf/appprofile"
+	"github.com/gsoultan/gateon/internal/security/waf/bypasswatch"
 	"github.com/gsoultan/gateon/internal/security/waf/schemalearn"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	"github.com/gsoultan/gwaf"
@@ -414,6 +415,7 @@ func WAF(cfg WAFConfig) (kind.Middleware, error) {
 		t.learner = schemalearn.Shared().For(cfg.RouteID)
 	}
 	t.advisor = advisorFor(cfg)
+	bypasswatch.Shared().SetSink(recordBypassFinding)
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			t.serve(next, w, r)
@@ -776,6 +778,7 @@ func (t *wafRuntime) inspectAndForward(next http.Handler, w http.ResponseWriter,
 	if decision != nil {
 		observe(*decision)
 		if !t.cfg.AuditOnly {
+			t.watchRefusal(r, *decision)
 			status := decision.Status()
 			if status == 0 {
 				status = http.StatusForbidden
@@ -791,6 +794,7 @@ func (t *wafRuntime) inspectAndForward(next http.Handler, w http.ResponseWriter,
 	// through. The advisory worker is offered it now, before the proxy
 	// rewrites it, and is asked after it has been answered.
 	t.askAdvisor(r, tx)
+	bypasswatch.Shared().Forwarded(r, request.ClientAddr(r), t.cfg.RouteID)
 
 	// Whether it is kept for tuning waits on what the origin says.
 	w, keep := t.watch(w, r)
@@ -881,6 +885,7 @@ func (t *wafRuntime) refuseFastPath(w http.ResponseWriter, r *http.Request, f fa
 	if f.observed {
 		return true
 	}
+	bypasswatch.Shared().Refused(r, request.ClientAddr(r), f.routeID, f.threatType, f.details)
 	kind.Refuse(w, f.status)
 	return false
 }
