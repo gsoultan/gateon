@@ -47,6 +47,10 @@ type WAFConfig struct {
 	TrustCloudflare bool   // Use CF-Connecting-IP for REMOTE_ADDR in request
 	AuditOnly       bool   // If true, log matches but do not block (detection-only mode)
 
+	// bypassWatch replaces the process's bypass watch, for a test that must
+	// not share one with every other WAF in the binary.
+	bypassWatch *bypasswatch.Watch
+
 	// AllowedMethods is the HTTP method allowlist. Empty means the default set.
 	// It replaces the SecLang tx.allowed_methods variable that the directive
 	// preamble used to seed for CRS rule 911.
@@ -415,7 +419,8 @@ func WAF(cfg WAFConfig) (kind.Middleware, error) {
 		t.learner = schemalearn.Shared().For(cfg.RouteID)
 	}
 	t.advisor = advisorFor(cfg)
-	bypasswatch.Shared().SetSink(recordBypassFinding)
+	t.bypass = cmp.Or(cfg.bypassWatch, bypasswatch.Shared())
+	t.bypass.SetSink(recordBypassFinding)
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			t.serve(next, w, r)
@@ -443,6 +448,9 @@ type wafRuntime struct {
 	// advisor is where requests worth a second opinion are offered, nil
 	// unless the route asks and the gateway has a worker (ADR 0104).
 	advisor *advisory.Queue
+	// bypass is the search detector refusals and forwards are told of (ADR
+	// 0107): the process's, unless the config names another.
+	bypass *bypasswatch.Watch
 }
 
 func (t *wafRuntime) serve(next http.Handler, w http.ResponseWriter, r *http.Request) {
@@ -794,7 +802,7 @@ func (t *wafRuntime) inspectAndForward(next http.Handler, w http.ResponseWriter,
 	// through. The advisory worker is offered it now, before the proxy
 	// rewrites it, and is asked after it has been answered.
 	t.askAdvisor(r, tx)
-	bypasswatch.Shared().Forwarded(r, request.ClientAddr(r), t.cfg.RouteID)
+	t.bypass.Forwarded(r, request.ClientAddr(r), t.cfg.RouteID)
 
 	// Whether it is kept for tuning waits on what the origin says.
 	w, keep := t.watch(w, r)
@@ -885,7 +893,7 @@ func (t *wafRuntime) refuseFastPath(w http.ResponseWriter, r *http.Request, f fa
 	if f.observed {
 		return true
 	}
-	bypasswatch.Shared().Refused(r, request.ClientAddr(r), f.routeID, f.threatType, f.details)
+	t.bypass.Refused(r, request.ClientAddr(r), f.routeID, f.threatType, f.details)
 	kind.Refuse(w, f.status)
 	return false
 }

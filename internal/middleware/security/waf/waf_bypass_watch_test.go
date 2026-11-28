@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -28,15 +29,23 @@ func TestTheRequestThatGotThroughAfterASearchIsRecorded(t *testing.T) {
 	threats := telemetry.ThreatBroadcaster.Subscribe()
 	t.Cleanup(func() { telemetry.ThreatBroadcaster.Unsubscribe(threats) })
 
-	mw, err := WAF(WAFConfig{ParanoiaLevel: 1, RouteID: t.Name()})
+	if !bypasswatch.Shared().Enabled() {
+		t.Fatal("the bypass watch is off on the default tier")
+	}
+	// A watch of its own: the process's is shared with every WAF the
+	// package's other tests build, and nothing in a test binary runs its
+	// goroutine, so their refusals filled its queue and this test's were
+	// dropped whenever it ran after enough of them.
+	// The state the package's other tests leave: the shared queue full.
+	for i := range 512 {
+		bypasswatch.Shared().Refused(httptest.NewRequest(http.MethodGet, "/", nil), "198.18.9.9", "other", strconv.Itoa(i))
+	}
+	watch := bypasswatch.New(bypasswatch.Config{MaxSources: 16, Refusals: bypasswatch.DefaultRefusals})
+	mw, err := WAF(WAFConfig{ParanoiaLevel: 1, RouteID: t.Name(), bypassWatch: watch})
 	if err != nil {
 		t.Fatalf("create WAF: %v", err)
 	}
 	h := mw(okOrigin())
-	watch := bypasswatch.Shared()
-	if !watch.Enabled() {
-		t.Fatal("the bypass watch is off on the default tier")
-	}
 
 	const attacker = "198.18.7.7"
 	sendQuery := func(raw string) int {

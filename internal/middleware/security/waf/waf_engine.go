@@ -24,7 +24,6 @@ import (
 	"github.com/gsoultan/gateon/internal/security/waf/advisory"
 	"github.com/gsoultan/gateon/internal/security/waf/apischema"
 	"github.com/gsoultan/gateon/internal/security/waf/appprofile"
-	"github.com/gsoultan/gateon/internal/security/waf/bypasswatch"
 	"github.com/gsoultan/gateon/internal/security/waf/corpus"
 	"github.com/gsoultan/gateon/internal/security/wsinspect"
 	"github.com/gsoultan/gateon/internal/telemetry"
@@ -879,7 +878,7 @@ func (g *largeBodyGate) acquire(ctx context.Context) (func(), bool) {
 // that refused it, where, and the query and body length it was in: a request
 // retried unchanged counts once.
 func (t *wafRuntime) watchRefusal(r *http.Request, d gwaf.Decision) {
-	w := bypasswatch.Shared()
+	w := t.bypass
 	if !w.Enabled() {
 		return
 	}
