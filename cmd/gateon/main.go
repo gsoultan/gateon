@@ -40,6 +40,7 @@ import (
 	"github.com/gsoultan/gateon/internal/security/waf"
 	"github.com/gsoultan/gateon/internal/security/waf/advisory"
 	"github.com/gsoultan/gateon/internal/security/waf/corpus"
+	"github.com/gsoultan/gateon/internal/security/waf/features"
 	"github.com/gsoultan/gateon/internal/selfupdate/helper"
 	"github.com/gsoultan/gateon/internal/selfupdate/upgrade"
 	"github.com/gsoultan/gateon/internal/server"
@@ -97,6 +98,10 @@ func main() {
 				os.Exit(1)
 			}
 			return
+		case "export-waf-features":
+			// Labelled rows for a learned model on mimir-server (ADR 0108),
+			// built by the same code the advisory worker asks it with.
+			os.Exit(features.ExportCLI(os.Args[2:], os.Stdout, os.Stderr))
 		case "advisory-worker":
 			// The reference worker a gateway asks for a second opinion
 			// (ADR 0104). It is its own process, on its own host.

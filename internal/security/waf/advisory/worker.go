@@ -12,7 +12,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"os"
 	"slices"
 	"strconv"
@@ -20,6 +19,7 @@ import (
 	"time"
 
 	secwaf "github.com/gsoultan/gateon/internal/security/waf"
+	"github.com/gsoultan/gateon/internal/security/waf/features"
 	"github.com/gsoultan/gwaf"
 	"github.com/gsoultan/gwaf/types"
 )
@@ -46,6 +46,9 @@ const (
 type Worker struct {
 	engine *gwaf.WAF
 	token  string
+	// mimir, when set, judges each sample by a learned model and falls back
+	// to the rules when the model does not answer (ADR 0108).
+	mimir *mimirJudge
 }
 
 // NewWorker returns a worker that takes batches bearing token. A worker with
@@ -82,13 +85,28 @@ func (w *Worker) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 	answer := Answer{Verdicts: []Verdict{}}
-	for _, s := range batch.Samples {
-		if v, flagged := w.Judge(s); flagged {
-			answer.Verdicts = append(answer.Verdicts, v)
+	if w.mimir != nil {
+		answer.Verdicts = w.mimir.judgeBatch(r.Context(), batch.Samples, w.Judge)
+	} else {
+		for _, s := range batch.Samples {
+			if v, flagged := w.Judge(s); flagged {
+				answer.Verdicts = append(answer.Verdicts, v)
+			}
 		}
 	}
 	rw.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(rw).Encode(answer)
+}
+
+// UseMimir has the worker judge by a model on mimir-server, scanning each
+// sample at the paranoia level the model's rows were exported at.
+func (w *Worker) UseMimir(cfg MimirConfig, paranoia int) error {
+	m, err := newMimirJudge(cfg, paranoia)
+	if err != nil {
+		return err
+	}
+	w.mimir = m
+	return nil
 }
 
 // Judge runs the strict rules over one sample and reports what they found.
@@ -105,7 +123,7 @@ func (w *Worker) Judge(s *Sample) (Verdict, bool) {
 	defer tx.Close()
 	tx.AddResolver(secwaf.ReputationResolver{Score: 100})
 
-	tx.SetRequestLine(s.Method, requestURI(s.Target, s.Args), "HTTP/1.1")
+	tx.SetRequestLine(s.Method, features.RequestURI(s.Target, s.Args), "HTTP/1.1")
 	for name, value := range s.Headers {
 		tx.AddRequestHeader(name, value)
 	}
@@ -134,20 +152,6 @@ func (w *Worker) Judge(s *Sample) (Verdict, bool) {
 	return Verdict{ID: s.ID, Label: label, Score: severityScore(d.Severity()), Reason: reason}, true
 }
 
-// requestURI puts a sample's query parameters back on its path. The order
-// and the encoding the client used are not in a sample, so an attack that
-// lives in either is not one this worker can see.
-func requestURI(target string, args map[string]string) string {
-	if len(args) == 0 {
-		return target
-	}
-	q := make(url.Values, len(args))
-	for name, value := range args {
-		q.Set(name, value)
-	}
-	return target + "?" + q.Encode()
-}
-
 func severityScore(s types.Severity) int {
 	switch s {
 	case types.SeverityCritical:
@@ -169,6 +173,11 @@ func WorkerCLI(ctx context.Context, args []string, stderr io.Writer) int {
 	cert := fs.String("cert", "", "TLS certificate file; with --key, serves HTTPS")
 	key := fs.String("key", "", "TLS private key file")
 	paranoia := fs.Int("paranoia", 4, "paranoia level the samples are judged at, 1 to 4")
+	judge := fs.String("judge", "rules", "rules, or mimir to judge by a learned model on mimir-server (ADR 0108)")
+	mimir := MimirConfig{}
+	fs.StringVar(&mimir.URL, "mimir-url", "", "mimir-server address, for --judge mimir")
+	fs.StringVar(&mimir.Model, "mimir-model", "", "id of the model taught on export-waf-features rows")
+	fs.IntVar(&mimir.Threshold, "threshold", 80, "score from 1 to 100 at or above which the model's answer is a verdict")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -177,6 +186,9 @@ func WorkerCLI(ctx context.Context, args []string, stderr io.Writer) int {
 		return 2
 	}
 	w, err := NewWorker(strings.TrimSpace(os.Getenv(TokenEnv)), *paranoia)
+	if err == nil {
+		err = useJudge(w, *judge, mimir, *paranoia)
+	}
 	if err != nil {
 		fmt.Fprintf(stderr, "advisory-worker: %v\n", err)
 		return 1
@@ -197,7 +209,7 @@ func WorkerCLI(ctx context.Context, args []string, stderr io.Writer) int {
 		defer cancel()
 		_ = srv.Shutdown(stop)
 	}()
-	fmt.Fprintf(stderr, "advisory-worker: judging at paranoia %d on %s\n", *paranoia, *listen)
+	fmt.Fprintf(stderr, "advisory-worker: judging by %s at paranoia %d on %s\n", *judge, *paranoia, *listen)
 	if *cert != "" {
 		err = srv.ListenAndServeTLS(*cert, *key)
 	} else {
@@ -208,4 +220,16 @@ func WorkerCLI(ctx context.Context, args []string, stderr io.Writer) int {
 		return 1
 	}
 	return 0
+}
+
+// useJudge sets the worker's judge by name.
+func useJudge(w *Worker, judge string, cfg MimirConfig, paranoia int) error {
+	switch judge {
+	case "rules":
+		return nil
+	case "mimir":
+		cfg.Key = strings.TrimSpace(os.Getenv(MimirKeyEnv))
+		return w.UseMimir(cfg, paranoia)
+	}
+	return errors.New("--judge is rules or mimir")
 }
