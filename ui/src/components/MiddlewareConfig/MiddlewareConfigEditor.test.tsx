@@ -175,6 +175,20 @@ describe("bot management editor", () => {
     flip(integrity, false);
     expect(c.last).toEqual({ enable_browser_integrity: "false" });
   });
+
+  // ADR 0108: the gateway reads ai_agents as off, verify or refuse, and
+  // refuses anything else at build, so "off" is written as no key at all.
+  test("the AI agent policy is bound to ai_agents", () => {
+    const c = capture();
+    const tree = BotManagementConfigEditor({ config: { ai_agents: "verify" }, updateConfig: c.updateConfig });
+    const policy = findElement(tree, byLabel("AI Crawlers and Agents"));
+    expect(policy?.props.value).toBe("verify");
+    const choose = policy!.props.onChange as (v: string | null) => void;
+    choose("refuse");
+    expect(c.last).toEqual({ ai_agents: "refuse" });
+    choose("off");
+    expect(c.last).toEqual({ ai_agents: "" });
+  });
 });
 
 // A control the gateway does not read is worse than a missing one: an operator

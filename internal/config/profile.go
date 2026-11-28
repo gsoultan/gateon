@@ -297,6 +297,13 @@ type TierDefaults struct {
 	// the watch off.
 	WAFBypassWatchSources int
 
+	// AIAgentMaxPrefixes is how many address prefixes the AI agent range
+	// lists may hold in force across every list (ADR 0108). A netip.Prefix
+	// is 32 bytes, so it is also the lists' memory bound. A list that would
+	// take the total past it is refused whole and its last good copy kept.
+	// GATEON_AI_AGENT_MAX_PREFIXES overrides it.
+	AIAgentMaxPrefixes int
+
 	// CompressMaxBrotliEncoders is how many responses the compress middleware
 	// brotli-encodes at once in the whole process (ADR 0073). One encoder holds
 	// about 2.6 MiB once it has seen more than its 256 KiB window -- gzip about
@@ -511,6 +518,7 @@ func DefaultsFor(tier Tier) TierDefaults {
 			WAFCorpusEntries:                        512,      // at most 2 MiB
 			WAFAdvisoryQueue:                        64,       // at most 384 KiB
 			WAFBypassWatchSources:                   256,      // at most 1.25 MiB
+			AIAgentMaxPrefixes:                      4096,     // at most 128 KiB
 			CompressMaxBrotliEncoders:               8,
 			SchemaMaxBodyBytes:                      1 << 20, // 1 MiB
 			SchemaMaxLargeBodies:                    2,
@@ -581,6 +589,7 @@ func DefaultsFor(tier Tier) TierDefaults {
 			WAFCorpusEntries:                        8192,      // at most 32 MiB
 			WAFAdvisoryQueue:                        1024,      // at most 6 MiB
 			WAFBypassWatchSources:                   4096,      // at most 20 MiB
+			AIAgentMaxPrefixes:                      65536,     // at most 2 MiB
 			CompressMaxBrotliEncoders:               128,
 			SchemaMaxBodyBytes:                      4 << 20, // 4 MiB
 			SchemaMaxLargeBodies:                    16,
@@ -651,6 +660,7 @@ func DefaultsFor(tier Tier) TierDefaults {
 			WAFCorpusEntries:                        2048,     // at most 8 MiB
 			WAFAdvisoryQueue:                        256,      // at most 1.5 MiB
 			WAFBypassWatchSources:                   1024,     // at most 5 MiB
+			AIAgentMaxPrefixes:                      16384,    // at most 512 KiB
 			CompressMaxBrotliEncoders:               32,
 			SchemaMaxBodyBytes:                      1 << 20, // 1 MiB
 			SchemaMaxLargeBodies:                    8,

@@ -11,6 +11,20 @@ here after the fact.
 
 ## Unreleased
 
+### A route can tell a real AI crawler from one that only names it
+
+Bot management has a new route setting, **AI Crawlers and Agents** (ADR 0108).
+Set to verify, a client whose User-Agent names an agent such as GPTBot or
+ClaudeBot passes the challenge only from an address its vendor publishes, and
+is refused, and recorded, from any other. Set to refuse, every AI agent is
+turned away. Administrators list each vendor's address list URL under
+Settings, Security, Bot Management; the gateway fetches them every 12 hours.
+
+**Who is affected:** nobody until a route chooses a policy. **What to do:** to
+use it, add the vendors' list URLs (https only), then set the policy on the
+routes that should verify. `GATEON_AI_AGENT_MAX_PREFIXES` overrides the bound
+on the prefixes held (16384 on `standard`).
+
 ### The Security Hub points at the request that got through after a search
 
 When the WAF has refused five different payloads from one client on one

@@ -24,7 +24,12 @@ import { IconPlus, IconTrash } from "@tabler/icons-react";
 import { apiFetch, getCloudflareIPs } from "../../hooks/useGateon";
 import { StoredSecretInput } from "../settings/StoredSecretInput";
 import { WAF_APP_PROFILES } from "../../types/gateon";
-import { BROWSER_HEADER_CHECK_HELP, JS_CHALLENGE_HELP } from "./botManagementCopy";
+import {
+  AI_AGENT_POLICY_OPTIONS,
+  AI_AGENTS_HELP,
+  BROWSER_HEADER_CHECK_HELP,
+  JS_CHALLENGE_HELP,
+} from "./botManagementCopy";
 import {
   AUDIT_ONLY_HELP,
   CORPUS_SAMPLE_HELP,
@@ -450,6 +455,14 @@ export function BotManagementConfigEditor({ config, updateConfig }: EditorProps)
         description={JS_CHALLENGE_HELP}
         checked={isEnabled("enable_js_challenge")}
         onChange={(e) => toggle("enable_js_challenge", e.currentTarget.checked)}
+      />
+      <Select
+        label="AI Crawlers and Agents"
+        description={AI_AGENTS_HELP}
+        data={AI_AGENT_POLICY_OPTIONS}
+        value={config.ai_agents || "off"}
+        onChange={(val) => updateConfig("ai_agents", !val || val === "off" ? "" : val)}
+        allowDeselect={false}
       />
       <NumberInput
         label="Challenge Timeout"

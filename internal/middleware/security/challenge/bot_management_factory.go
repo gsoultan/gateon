@@ -12,6 +12,7 @@ import (
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware/kind"
+	"github.com/gsoultan/gateon/internal/security/aiagent"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 )
 
@@ -97,7 +98,12 @@ func NewBotManagement(cfg map[string]string, store config.GlobalConfigStore) (ki
 	// following it alone left every dashboard-built middleware passing all
 	// traffic through while its editor showed the JS challenge on. An explicit
 	// enabled=false still turns the middleware off.
-	routeOn := bools.Get("enable_js_challenge", false) || bools.Get("enable_browser_integrity", false)
+	aiAgents, err := ParseAIAgentPolicy(cfg[AIAgentsKey])
+	if err != nil {
+		return nil, kind.CfgError(AIAgentsKey, cfg[AIAgentsKey], err)
+	}
+	routeOn := bools.Get("enable_js_challenge", false) || bools.Get("enable_browser_integrity", false) ||
+		aiAgents != AIAgentsOff
 	enabled := bools.Get("enabled", g.GetEnabled() || routeOn)
 	if err := bools.Err(); err != nil {
 		return nil, err
@@ -123,5 +129,7 @@ func NewBotManagement(cfg map[string]string, store config.GlobalConfigStore) (ki
 		ChallengeTimeoutSeconds: timeout,
 		SecretKey:               secret,
 		RouteID:                 cfg[kind.RouteIDKey],
+		AIAgents:                aiAgents,
+		AIAgentRanges:           aiagent.Shared(),
 	}), nil
 }

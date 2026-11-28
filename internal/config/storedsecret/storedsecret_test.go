@@ -118,6 +118,7 @@ var notCredentials = map[string]string{
 	"tls.client_auth_type":                      "a verification mode",
 	"tls.certificates.key_file":                 "a path to the key file, not the key",
 	"security_advanced.ip_reputation.feed_urls": "public blocklist feed addresses",
+	"waf.bot_management.ai_agent_ranges.url":    "a vendor's public address list for its crawler",
 	"ai.base_url":                               "the provider's endpoint; llm.Validate refuses credentials, a query or a fragment in it",
 	"update.source_url":                         "the release source; selfupdate.ValidateSource refuses credentials, a query or a fragment in it",
 }

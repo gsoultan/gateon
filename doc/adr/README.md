@@ -117,6 +117,7 @@ ADRs follow a lightweight [MADR](https://adr.github.io/madr/)-style format:
 | [0105](./0105-an-operator-rolls-an-upgrade-back-and-postgresql-is-dumped-first.md) | An operator rolls an upgrade back, and PostgreSQL is dumped first | Accepted |
 | [0106](./0106-a-refusal-tells-the-client-nothing-it-can-act-on.md) | A refusal tells the client nothing it can act on | Accepted |
 | [0107](./0107-the-request-that-passed-after-a-search-is-recorded.md) | The request that passed after a search is recorded | Accepted |
+| [0108](./0108-a-crawler-is-who-its-vendor-says-it-is.md) | A crawler is who its vendor says it is | Accepted |
 
 ## Conventions
 

@@ -10,6 +10,7 @@ import (
 
 	"github.com/gsoultan/gateon/internal/logger"
 	"github.com/gsoultan/gateon/internal/middleware/kind"
+	"github.com/gsoultan/gateon/internal/security/aiagent"
 	"github.com/gsoultan/gateon/internal/telemetry"
 )
 
@@ -20,6 +21,10 @@ type BotManagementConfig struct {
 	ChallengeTimeoutSeconds int
 	SecretKey               string
 	RouteID                 string
+	// AIAgents is what the route does with a client that names an AI agent,
+	// and AIAgentRanges the lists it verifies the claim against (ADR 0108).
+	AIAgents      AIAgentPolicy
+	AIAgentRanges *aiagent.Store
 }
 
 const (
@@ -48,6 +53,13 @@ func serveBotManagement(cfg BotManagementConfig, next http.Handler, w http.Respo
 	}
 
 	clientIP := telemetry.ClientIPOf(r)
+
+	// 0. A client that names an AI agent, on a route with a policy for one.
+	// First, because the browser check and the challenge are what a real
+	// crawler fails, and what a fake one is refused for instead says less.
+	if cfg.AIAgents != AIAgentsOff && serveAIAgent(cfg, clientIP, next, w, r) {
+		return
+	}
 
 	// 1. Browser header consistency.
 	if cfg.EnableBrowserIntegrity && !checkBrowserIntegrity(r) {

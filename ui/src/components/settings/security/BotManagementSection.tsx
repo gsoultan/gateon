@@ -4,6 +4,7 @@
 import { Group, Divider, Switch, Text } from "@mantine/core";
 import type { WafConfig } from "../../../types/gateon";
 import { BROWSER_HEADER_CHECK_HELP, JS_CHALLENGE_HELP } from "../../MiddlewareConfig/botManagementCopy";
+import { AIAgentRangesEditor } from "./AIAgentRangesEditor";
 
 interface BotManagementSectionProps {
   waf: WafConfig;
@@ -62,6 +63,17 @@ export function BotManagementSection({ waf, onChange, disabled }: BotManagementS
           disabled={disabled || !waf.botManagement?.enabled}
         />
       </Group>
+      <AIAgentRangesEditor
+        ranges={waf.botManagement?.aiAgentRanges || []}
+        onChange={(aiAgentRanges) => onChange({
+          ...waf,
+          botManagement: {
+            ...(waf.botManagement || {}),
+            aiAgentRanges
+          }
+        })}
+        disabled={disabled}
+      />
     </>
   );
 }
