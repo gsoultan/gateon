@@ -811,11 +811,11 @@ const ThreatWAFReputationBlock = "waf_reputation_block"
 // against nobody, unless the operator runs the worker in reputation mode.
 const ThreatWAFAdvisory = "waf_advisory"
 
-// ThreatWAFBypassSuspected is a request the WAF forwarded after refusing
+// ThreatWAFEvasionSuspected is a request the WAF forwarded after refusing
 // several different payloads from the same client on the same endpoint
 // (ADR 0107): the likeliest bypass it has. It is always Observed: the request
 // was let through, and a person retrying after a false refusal looks the same.
-const ThreatWAFBypassSuspected = "waf_bypass_suspected"
+const ThreatWAFEvasionSuspected = "waf_evasion_suspected"
 
 // HeldAgainstSource reports whether a threat may count against the client that
 // sent it: lower its reputation, count towards a fingerprint block or an

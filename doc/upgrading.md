@@ -15,7 +15,7 @@ here after the fact.
 
 When the WAF has refused five different payloads from one client on one
 endpoint and then forwards a request from that client there, the request is
-recorded as `waf_bypass_suspected` (ADR 0107). It may be the payload that got
+recorded as `waf_evasion_suspected` (ADR 0107). It may be the payload that got
 past the rules. The entry is observed and held against nobody, and it carries
 the request's query with its credentials masked.
 

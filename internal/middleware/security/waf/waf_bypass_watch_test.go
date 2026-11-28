@@ -65,7 +65,7 @@ func TestTheRequestThatGotThroughAfterASearchIsRecorded(t *testing.T) {
 
 	var found *telemetry.SecurityThreat
 	for _, th := range drainThreats(threats) {
-		if th.Type == telemetry.ThreatWAFBypassSuspected {
+		if th.Type == telemetry.ThreatWAFEvasionSuspected {
 			found = &th
 		}
 	}

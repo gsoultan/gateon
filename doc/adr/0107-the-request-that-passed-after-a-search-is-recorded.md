@@ -40,7 +40,7 @@ once the count reaches the threshold, is a finding.
 - **The threshold** is 5 distinct payloads. `GATEON_WAF_BYPASS_REFUSALS`
   sets it between 2 and 32.
 - **A finding is an entry in the Security Hub** of type
-  `waf_bypass_suspected`. It names the client, the route and the endpoint, and
+  `waf_evasion_suspected`. It names the client, the route and the endpoint, and
   carries the forwarded request's query as the tuning sample captures it,
   with every credential masked (ADR 0097).
 - **A finding is observed and held against nobody** (ADR 0059). The request

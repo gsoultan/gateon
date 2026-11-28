@@ -688,7 +688,7 @@ func recordBypassFinding(f bypasswatch.Finding) {
 	}
 	telemetry.RecordSecurityThreat(telemetry.SecurityThreat{
 		ID:             "waf-bypass-" + uuid.NewString(),
-		Type:           telemetry.ThreatWAFBypassSuspected,
+		Type:           telemetry.ThreatWAFEvasionSuspected,
 		SourceIP:       f.Source,
 		Score:          50,
 		Details:        details,
