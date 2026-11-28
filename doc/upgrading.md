@@ -78,6 +78,19 @@ the two route settings for route WAFs that do not, and `GET /v1/waf/advisory`
 returns the counts. Rolling back needs nothing undone: an older build ignores
 the settings. See ADR-0104.
 
+The worker can also judge by a learned model on
+[mimir-server](https://github.com/gsoultan/mimir-server), which weighs the
+same paranoia-4 signals instead of taking the first rule that fires, so it
+flags far fewer ordinary requests. Write labelled rows with
+`gateon export-waf-features --attacks attacks.jsonl --clean corpus.jsonl >
+rows.csv` (both files are JSON Lines in the shape `export-waf-corpus` writes),
+teach a table model from `rows.csv` on mimir with `label` as the answer, and
+start the worker with `--judge mimir --mimir-url https://mimir.example.com
+--mimir-model <id>` and a viewer's API key in `GATEON_MIMIR_API_KEY`.
+`--threshold` (80) is the score at which the model's answer is a verdict.
+When mimir does not answer, the rules judge as before. The gateway itself
+needs nothing new. See ADR-0106.
+
 ### A Postgres database behind PgBouncer in transaction pooling mode works
 
 A gateway whose database is reached through PgBouncer in transaction pooling
