@@ -119,3 +119,18 @@ func TestTheRoutesSettingIsReadStrictly(t *testing.T) {
 		t.Fatal(`ai_agents="Verify" was accepted; a typo must not silently mean off`)
 	}
 }
+
+// TestAMazeRouteAnswersTheFakeWithAPageThatIsNotTheOrigins is ADR 0109: on
+// a maze route, a client that names GPTBot from an address OpenAI does not
+// publish gets a maze page, never the origin's, and the real crawler is
+// unaffected.
+func TestAMazeRouteAnswersTheFakeWithAPageThatIsNotTheOrigins(t *testing.T) {
+	h := aiRoute(AIAgentsMaze, openAIRanges(t))
+	if rr := crawl(h, "192.0.2.40", gptbotUA); rr.Body.String() != "origin" {
+		t.Fatalf("the real GPTBot got %d %q, want the origin's page", rr.Code, head(rr))
+	}
+	rr := crawl(h, "198.51.100.45", gptbotUA)
+	if rr.Code != http.StatusOK || rr.Body.String() == "origin" || rr.Header().Get("X-Robots-Tag") == "" {
+		t.Fatalf("a scraper naming GPTBot got %d %q, want a maze page", rr.Code, head(rr))
+	}
+}

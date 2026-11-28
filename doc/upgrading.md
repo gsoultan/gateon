@@ -11,6 +11,17 @@ here after the fact.
 
 ## Unreleased
 
+### A fake AI crawler can be sent into a maze
+
+The **AI Crawlers and Agents** setting has a fourth choice, maze (ADR 0109).
+It verifies like verify, but a client that names an agent from an address its
+vendor does not publish gets generated pages of links that lead only to more
+of them, with a `200`, instead of a refusal. They are recorded in the
+Security Hub like a refusal.
+
+**Who is affected:** nobody until a route chooses maze. **What to do:**
+nothing.
+
 ### A route can tell a real AI crawler from one that only names it
 
 Bot management has a new route setting, **AI Crawlers and Agents** (ADR 0108).

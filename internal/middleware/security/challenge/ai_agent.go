@@ -29,6 +29,10 @@ const (
 	// AIAgentsRefuse refuses every client that names an AI agent, real or
 	// not.
 	AIAgentsRefuse
+	// AIAgentsMaze verifies as AIAgentsVerify does, and answers a client
+	// that names an agent from any other address with a maze page instead of
+	// a refusal (ADR 0109).
+	AIAgentsMaze
 )
 
 // AIAgentsKey is the route's setting.
@@ -43,8 +47,10 @@ func ParseAIAgentPolicy(v string) (AIAgentPolicy, error) {
 		return AIAgentsVerify, nil
 	case "refuse":
 		return AIAgentsRefuse, nil
+	case "maze":
+		return AIAgentsMaze, nil
 	}
-	return AIAgentsOff, errors.New("want off, verify or refuse")
+	return AIAgentsOff, errors.New("want off, verify, maze or refuse")
 }
 
 // Outcomes on gateon_middleware_bot_management_total. A spoofed claim is a
@@ -74,12 +80,26 @@ func serveAIAgent(cfg BotManagementConfig, clientIP string, next http.Handler, w
 		next.ServeHTTP(w, r)
 		return true
 	case aiagent.Spoofed:
-		logger.SecurityEvent("bot_detected_ai_agent_spoofed", r, "named an AI agent from an address its vendor does not publish")
-		recordBotThreat(r, cfg, clientIP, "ai_agent", 60,
-			"Named "+agent.Name+" ("+agent.Vendor+") from an address "+agent.Vendor+" does not publish for it",
-			kind.SeverityMedium)
-		kind.Refuse(w, http.StatusForbidden)
+		refuseSpoofedAgent(cfg, clientIP, agent, w, r)
 		return true
 	}
 	return false
+}
+
+// refuseSpoofedAgent answers a client that named agent from an address its
+// vendor does not publish: with the maze on a route that asks for it, and the
+// uniform refusal otherwise. Either way it is recorded, and nothing of the
+// request reaches the origin.
+func refuseSpoofedAgent(cfg BotManagementConfig, clientIP string, agent aiagent.Agent, w http.ResponseWriter, r *http.Request) {
+	details := "Named " + agent.Name + " (" + agent.Vendor + ") from an address " + agent.Vendor + " does not publish for it"
+	if cfg.AIAgents == AIAgentsMaze {
+		details += "; served a maze page"
+	}
+	logger.SecurityEvent("bot_detected_ai_agent_spoofed", r, "named an AI agent from an address its vendor does not publish")
+	recordBotThreat(r, cfg, clientIP, "ai_agent", 60, details, kind.SeverityMedium)
+	if cfg.AIAgents == AIAgentsMaze {
+		aiagent.Maze(w, r, []byte(cfg.SecretKey))
+		return
+	}
+	kind.Refuse(w, http.StatusForbidden)
 }

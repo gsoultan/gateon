@@ -118,6 +118,7 @@ ADRs follow a lightweight [MADR](https://adr.github.io/madr/)-style format:
 | [0106](./0106-a-refusal-tells-the-client-nothing-it-can-act-on.md) | A refusal tells the client nothing it can act on | Accepted |
 | [0107](./0107-the-request-that-passed-after-a-search-is-recorded.md) | The request that passed after a search is recorded | Accepted |
 | [0108](./0108-a-crawler-is-who-its-vendor-says-it-is.md) | A crawler is who its vendor says it is | Accepted |
+| [0109](./0109-a-fake-crawler-is-answered-with-a-maze.md) | A fake crawler can be answered with a maze | Accepted |
 
 ## Conventions
 

@@ -18,10 +18,13 @@ export const AI_AGENTS_HELP =
   "For clients whose User-Agent names an AI crawler or agent (GPTBot, ClaudeBot, PerplexityBot and others). " +
   "Verify admits a client at an address its vendor publishes, past the JavaScript challenge it cannot run, and " +
   "refuses one that names an agent from any other address. The vendor lists are set in Settings, Security, Bot " +
-  "Management; an agent with no list loaded meets this route's other checks. Refuse turns every AI agent away.";
+  "Management; an agent with no list loaded meets this route's other checks. Maze verifies the same way, but " +
+  "answers a fake with generated pages of links that lead only to more of them, so a scraper spends its crawl on " +
+  "nothing of the site's. Refuse turns every AI agent away.";
 export const AI_AGENT_POLICY_OPTIONS = [
   { value: "off", label: "Off: treat like any other client" },
   { value: "verify", label: "Verify against the vendor's addresses" },
+  { value: "maze", label: "Verify, and send fakes into a maze" },
   { value: "refuse", label: "Refuse every AI agent" },
 ];
 
