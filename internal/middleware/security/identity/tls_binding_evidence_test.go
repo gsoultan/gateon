@@ -9,9 +9,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
-	"strings"
 	"testing"
 
+	"github.com/gsoultan/gateon/internal/middleware/kind"
 	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	"github.com/gsoultan/gateon/internal/telemetry/repid"
@@ -62,10 +62,14 @@ func TestADuplicateSessionCookieIsRefusedAndNotHeldAgainstTheClient(t *testing.T
 		telemetry.ResetReputation(repid.For(bindingBuild, thief))
 	})
 
+	// Every refusal has the same body (ADR 0106), so whose 403 it was is read
+	// from what was recorded: tls_binding's own, and no reputation block.
+	threats := telemetry.ThreatBroadcaster.Subscribe()
+	t.Cleanup(func() { telemetry.ThreatBroadcaster.Unsubscribe(threats) })
 	twice := "session=OWN; session=OWN; session_binding=" + b.mac(certA[:], "OWN")
 	for n := range 4 {
 		rec := sendBound(h, user, twice)
-		if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "binding mismatch") {
+		if rec.Code != http.StatusForbidden || refusedBy(threats) != "tls_binding_mismatch" {
 			t.Fatalf("duplicate cookie request %d: %d %q, want tls_binding's own 403: the refusals "+
 				"before it were held against the client", n+1, rec.Code, rec.Body.String())
 		}
@@ -77,8 +81,24 @@ func TestADuplicateSessionCookieIsRefusedAndNotHeldAgainstTheClient(t *testing.T
 	stolen := "session=STOLEN; session_binding=" + b.mac(certB[:], "STOLEN")
 	if rec := sendBound(h, thief, stolen); rec.Code != http.StatusForbidden {
 		t.Fatalf("a session bound to another certificate got %d, want 403", rec.Code)
+	} else if rec.Body.String() != kind.RefusalBody {
+		t.Errorf("a binding refusal says %q, want %q (ADR 0106)", rec.Body.String(), kind.RefusalBody)
 	}
 	if got := telemetry.GetReputationScore(repid.For(bindingBuild, thief)); got >= 100 {
 		t.Errorf("a binding mismatch left the presenter's score at %v: a stolen cookie is evidence", got)
 	}
+}
+
+// refusedBy drains threats and names the refusing decision: the reputation
+// blocker if it recorded a block, else the last type recorded.
+func refusedBy(threats chan telemetry.SecurityThreat) string {
+	var last string
+	for len(threats) > 0 {
+		th := <-threats
+		if th.Type == "reputation_block" {
+			return th.Type
+		}
+		last = th.Type
+	}
+	return last
 }

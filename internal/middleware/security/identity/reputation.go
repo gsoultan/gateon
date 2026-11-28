@@ -88,8 +88,7 @@ func (h *reputationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 			// No credential was checked, so this is not an attempt (ADR 0031).
 			request.MarkRefused(r, request.RefusalMitigation)
-			w.WriteHeader(http.StatusForbidden)
-			_, _ = w.Write([]byte("Forbidden by Security Policy (Reputation Block)"))
+			kind.Refuse(w, http.StatusForbidden)
 			return
 		}
 	}

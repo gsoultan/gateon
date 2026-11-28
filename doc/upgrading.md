@@ -11,6 +11,21 @@ here after the fact.
 
 ## Unreleased
 
+### A refusal no longer says which check refused it
+
+Every refusal a security decision makes now has the body
+`Forbidden by Security Policy` (ADR 0106). Before, most of them named the
+check, for example `(High Entropy Detected)`, `(Reputation Block)`,
+`Browser Integrity Check Failed` or the zero-trust error's own text. That told
+an attacker who adapts its payload from each answer what to change next. The
+status codes are unchanged, and so are the messages an API caller needs to
+fix its request (schema validation, GraphQL, authentication, upload size).
+
+**Who is affected:** anything that matched on a refusal's old text, such as a
+monitoring probe or a client's error handling. **What to do:** match on the
+status instead. To find out why a request was refused, look up its
+`X-Request-Id` in the trace, or the client and time in the Security Hub.
+
 ### An upgrade can be rolled back on request
 
 Until now the previous version was put back only when the new one failed to

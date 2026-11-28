@@ -54,7 +54,7 @@ func serveBotManagement(cfg BotManagementConfig, next http.Handler, w http.Respo
 		logger.SecurityEvent("bot_detected_integrity", r, "failed browser integrity check")
 		recordBotThreat(r, cfg, clientIP, "integrity", 40,
 			"Failed browser integrity check (Sec-Fetch headers)", kind.SeverityMedium)
-		http.Error(w, "Forbidden - Browser Integrity Check Failed", http.StatusForbidden)
+		kind.Refuse(w, http.StatusForbidden)
 		return
 	}
 

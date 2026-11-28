@@ -205,11 +205,16 @@ func TestADataLeakInAResponseNeverRefusesItsReader(t *testing.T) {
 			h, threats := innocentRoute(t, map[string]string{"dlp": "true", "dlp_action": action}, innocentPage)
 			t.Cleanup(func() { telemetry.ResetReputation(repid.For(stockBuild, reader)) })
 
+			// Every refusal has the same body (ADR 0106), so which decision
+			// refused is read from what it recorded.
+			var seen []telemetry.SecurityThreat
 			for i := range 4 {
 				rr := visit(t, h, reader, httptest.NewRequest(http.MethodGet, "/orders/1", nil))
-				if strings.Contains(rr.Body.String(), "Reputation Block") {
+				got := recorded(threats)
+				if hasThreat(got, "reputation_block") {
 					t.Fatalf("view %d: the reader was refused by reputation", i+1)
 				}
+				seen = append(seen, got...)
 				if action != "block" && rr.Code != http.StatusOK {
 					t.Fatalf("view %d got %d (%q)", i+1, rr.Code, rr.Body.String())
 				}
@@ -217,7 +222,7 @@ func TestADataLeakInAResponseNeverRefusesItsReader(t *testing.T) {
 			if got := scoreOf(reader); got != 100 {
 				t.Errorf("a leak in the response moved the reader's score to %v", got)
 			}
-			assertAnExposureOnTheRoute(t, recorded(threats), reader)
+			assertAnExposureOnTheRoute(t, seen, reader)
 		})
 	}
 }
@@ -248,7 +253,7 @@ func assertAnExposureOnTheRoute(t *testing.T, threats []telemetry.SecurityThreat
 // for what it sent loses its score on its own network, and is refused there.
 func TestAnAttackerIsStillRefused(t *testing.T) {
 	const attacker, elsewhere = "198.18.5.5", "203.0.113.11"
-	h, _ := innocentRoute(t, map[string]string{"audit_only": "false"}, plainPage)
+	h, threats := innocentRoute(t, map[string]string{"audit_only": "false"}, plainPage)
 	t.Cleanup(func() { telemetry.ResetReputation(repid.For(stockBuild, attacker)) })
 
 	for i := range 2 {
@@ -256,11 +261,22 @@ func TestAnAttackerIsStillRefused(t *testing.T) {
 			t.Fatalf("attack %d got %d, want the WAF's 403", i+1, rr.Code)
 		}
 	}
+	_ = recorded(threats)
 	rr := visit(t, h, attacker, httptest.NewRequest(http.MethodGet, "/home", nil))
-	if rr.Code != http.StatusForbidden || !strings.Contains(rr.Body.String(), "Reputation Block") {
+	if rr.Code != http.StatusForbidden || !hasThreat(recorded(threats), "reputation_block") {
 		t.Errorf("the attacker's next ordinary request got %d (%q), want a reputation block", rr.Code, rr.Body.String())
 	}
 	if rr := visit(t, h, elsewhere, httptest.NewRequest(http.MethodGet, "/home", nil)); rr.Code != http.StatusOK {
 		t.Errorf("a user of the same build on another network got %d", rr.Code)
 	}
+}
+
+// hasThreat reports whether a threat of type typ is among threats.
+func hasThreat(threats []telemetry.SecurityThreat, typ string) bool {
+	for _, th := range threats {
+		if th.Type == typ {
+			return true
+		}
+	}
+	return false
 }

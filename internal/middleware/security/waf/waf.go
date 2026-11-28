@@ -573,7 +573,7 @@ func (t *wafRuntime) enforceProtocol(w http.ResponseWriter, r *http.Request) boo
 
 	return t.refuseFastPath(w, r, fastPathFinding{
 		threatType: "protocol_violation", details: v.reason,
-		status: v.status, message: "Forbidden by Security Policy (" + v.reason + ")",
+		status: v.status,
 	})
 }
 
@@ -614,7 +614,6 @@ func (t *wafRuntime) fastPathChecks(w http.ResponseWriter, r *http.Request, rs *
 		if detail, found := suspiciousHeaderEntropy(r, t.cfg, repScore); found {
 			return t.refuseFastPath(w, r, fastPathFinding{
 				threatType: threatFastPathEntropy, details: detail,
-				message: "Forbidden by Security Fast-Path (High Entropy Detected)",
 			})
 		}
 	}
@@ -629,7 +628,6 @@ func (t *wafRuntime) fastPathChecks(w http.ResponseWriter, r *http.Request, rs *
 		if detail, found := suspiciousBodyEntropy(r, rs, t.cfg, repScore); found {
 			return t.refuseFastPath(w, r, fastPathFinding{
 				threatType: threatFastPathEntropy, details: detail,
-				message: "Forbidden by Security Fast-Path (High Body Entropy Detected)",
 			})
 		}
 	}
@@ -652,7 +650,6 @@ func (t *wafRuntime) checkFingerprintConsistency(w http.ResponseWriter, r *http.
 		details := fmt.Sprintf("Fingerprint mismatch: Browser UA '%s' with suspicious TLS profile (v%x)", ua, r.TLS.Version)
 		return t.refuseFastPath(w, r, fastPathFinding{
 			threatType: "fast_path_fingerprint", details: details,
-			message: "Forbidden by Security (Client Spoofing Detected)",
 		})
 	}
 
@@ -662,7 +659,6 @@ func (t *wafRuntime) checkFingerprintConsistency(w http.ResponseWriter, r *http.
 		details := fmt.Sprintf("Protocol violation: %s request from '%s' contains forbidden 'Connection' header", r.Proto, ua)
 		return t.refuseFastPath(w, r, fastPathFinding{
 			threatType: "fast_path_protocol_violation", details: details,
-			message: "Forbidden by Security (Protocol Violation)",
 		})
 	}
 
@@ -671,7 +667,6 @@ func (t *wafRuntime) checkFingerprintConsistency(w http.ResponseWriter, r *http.
 		details := fmt.Sprintf("Suspicious client: %s request from '%s' missing 'Accept-Encoding'", r.Proto, ua)
 		return t.refuseFastPath(w, r, fastPathFinding{
 			threatType: "fast_path_suspicious_client", details: details,
-			message: "Forbidden by Security (Suspicious Client)",
 		})
 	}
 
@@ -712,7 +707,6 @@ func (t *wafRuntime) checkTokenStructure(w http.ResponseWriter, r *http.Request)
 	return t.refuseFastPath(w, r, fastPathFinding{
 		threatType: "fast_path_malformed_token",
 		details:    "Malformed security token structure in Authorization header",
-		message:    "Forbidden by Security (Malformed Security Token)",
 	})
 }
 
@@ -770,8 +764,7 @@ func (t *wafRuntime) inspectAndForward(next http.Handler, w http.ResponseWriter,
 		logger.L.LogError("WAF could not inspect the request",
 			"error", err, "route", t.cfg.RouteID, "fail_open", t.cfg.FailOpen)
 		if !t.cfg.FailOpen {
-			http.Error(w, "Forbidden by Security Policy (request could not be inspected)",
-				http.StatusForbidden)
+			kind.Refuse(w, http.StatusForbidden)
 			return
 		}
 		next.ServeHTTP(t.guardWebSocket(w, r, repScore), r)
@@ -787,7 +780,7 @@ func (t *wafRuntime) inspectAndForward(next http.Handler, w http.ResponseWriter,
 			if status == 0 {
 				status = http.StatusForbidden
 			}
-			http.Error(w, "Forbidden by Security Policy (WAF)", status)
+			kind.Refuse(w, status)
 			return
 		}
 	} else {
@@ -868,8 +861,7 @@ func (t *wafRuntime) inspectResponse(next http.Handler, w http.ResponseWriter, r
 type fastPathFinding struct {
 	threatType string
 	details    string
-	status     int    // the refusal's status; 0 is 403
-	message    string // the refusal's body
+	status     int // the refusal's status; 0 is 403; the body is kind.RefusalBody
 
 	// Filled in by refuseFastPath from the WAF's configuration.
 	routeID  string
@@ -889,7 +881,7 @@ func (t *wafRuntime) refuseFastPath(w http.ResponseWriter, r *http.Request, f fa
 	if f.observed {
 		return true
 	}
-	http.Error(w, f.message, cmp.Or(f.status, http.StatusForbidden))
+	kind.Refuse(w, f.status)
 	return false
 }
 
@@ -1896,7 +1888,8 @@ func (w *wafResponseWriter) abortIfCut() {
 }
 
 // responseBlockedBody is what a refused response is replaced with.
-var responseBlockedBody = []byte("Forbidden by Security Policy (response blocked)")
+// It is the same refusal every request-side decision gives (ADR 0106).
+var responseBlockedBody = []byte(kind.RefusalBody)
 
 // originRepresentationHeaders describe the origin's body. A refusal is a
 // different body, so none of them may travel with it.
