@@ -99,7 +99,7 @@ func main() {
 			}
 			return
 		case "export-waf-features":
-			// Labelled rows for a learned model on mimir-server (ADR 0106),
+			// Labelled rows for a learned model on mimir-server (ADR 0108),
 			// built by the same code the advisory worker asks it with.
 			os.Exit(features.ExportCLI(os.Args[2:], os.Stdout, os.Stderr))
 		case "advisory-worker":
