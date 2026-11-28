@@ -47,7 +47,7 @@ type Worker struct {
 	engine *gwaf.WAF
 	token  string
 	// mimir, when set, judges each sample by a learned model and falls back
-	// to the rules when the model does not answer (ADR 0106).
+	// to the rules when the model does not answer (ADR 0108).
 	mimir *mimirJudge
 }
 
@@ -173,7 +173,7 @@ func WorkerCLI(ctx context.Context, args []string, stderr io.Writer) int {
 	cert := fs.String("cert", "", "TLS certificate file; with --key, serves HTTPS")
 	key := fs.String("key", "", "TLS private key file")
 	paranoia := fs.Int("paranoia", 4, "paranoia level the samples are judged at, 1 to 4")
-	judge := fs.String("judge", "rules", "rules, or mimir to judge by a learned model on mimir-server (ADR 0106)")
+	judge := fs.String("judge", "rules", "rules, or mimir to judge by a learned model on mimir-server (ADR 0108)")
 	mimir := MimirConfig{}
 	fs.StringVar(&mimir.URL, "mimir-url", "", "mimir-server address, for --judge mimir")
 	fs.StringVar(&mimir.Model, "mimir-model", "", "id of the model taught on export-waf-features rows")

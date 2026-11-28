@@ -89,7 +89,7 @@ start the worker with `--judge mimir --mimir-url https://mimir.example.com
 --mimir-model <id>` and a viewer's API key in `GATEON_MIMIR_API_KEY`.
 `--threshold` (80) is the score at which the model's answer is a verdict.
 When mimir does not answer, the rules judge as before. The gateway itself
-needs nothing new. See ADR-0106.
+needs nothing new. See ADR-0108.
 
 ### A Postgres database behind PgBouncer in transaction pooling mode works
 

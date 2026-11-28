@@ -27,7 +27,7 @@ import (
 // process listing.
 const MimirKeyEnv = "GATEON_MIMIR_API_KEY" // #nosec G101 -- the name of a variable, not its value
 
-// The bounds on asking mimir (ADR 0106). The gateway gives a batch ten
+// The bounds on asking mimir (ADR 0108). The gateway gives a batch ten
 // seconds; the worker spends at most batchBudget of it on the model, and a
 // sample still unanswered then is judged by the rules alone.
 const (

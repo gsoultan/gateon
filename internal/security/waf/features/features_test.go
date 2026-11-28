@@ -155,7 +155,7 @@ func TestRequestURIKeepsAQueryAlreadyInTheTarget(t *testing.T) {
 }
 
 // closed is every value a column that is not a number may hold. A value
-// outside it would be text the client wrote, which ADR 0106 keeps out of
+// outside it would be text the client wrote, which ADR 0108 keeps out of
 // every row.
 var closed = map[string]bool{
 	"yes": true, "no": true, "none": true, "other": true, "matched": true, "outside_schema": true,

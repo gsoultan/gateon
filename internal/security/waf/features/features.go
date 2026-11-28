@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 // Package features turns one advisory sample into the row a learned model
-// reads (ADR 0106).
+// reads (ADR 0108).
 //
 // The same code builds a row when a model is taught and when it is asked. If
 // the two ever differed, the model would be scored on something it never
