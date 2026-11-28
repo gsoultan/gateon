@@ -36,6 +36,7 @@ import (
 	"github.com/gsoultan/gateon/internal/security/reputation"
 	"github.com/gsoultan/gateon/internal/security/waf"
 	"github.com/gsoultan/gateon/internal/security/waf/advisory"
+	"github.com/gsoultan/gateon/internal/security/waf/bypasswatch"
 	"github.com/gsoultan/gateon/internal/selfupdate"
 	"github.com/gsoultan/gateon/internal/selfupdate/upgrade"
 	"github.com/gsoultan/gateon/internal/server/entrypoint"
@@ -381,6 +382,9 @@ func Run(ctx context.Context, s *Server, uiHandler http.Handler) {
 	// and no longer once the gateway is told to stop (ADR 0104). It returns
 	// at once on a gateway with no worker.
 	wg.Go(func() { advisory.Shared().Run(ctx) })
+	// The bypass watch's counts live in one goroutine, which stops with the
+	// gateway (ADR 0107). It returns at once when the watch is off.
+	wg.Go(func() { bypasswatch.Shared().Run(ctx) })
 
 	<-ctx.Done()
 	logger.L.LogInfo("shutting down gracefully")

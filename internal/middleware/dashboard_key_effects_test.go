@@ -118,6 +118,10 @@ var dashboardKeyEffects = []keyEffect{
 		probe: postJSON("/graphql", `{"query":"{ a { b { c { d } } } }"}`)},
 	{mwType: "graphql_firewall", key: "introspection", a: "true", b: "false",
 		probe: postJSON("/graphql", `{"query":"{ __schema { types { name } } }"}`)},
+	// Off, a client naming GPTBot is any client; refuse turns it away, real or
+	// not, and needs no vendor list to (ADR 0108).
+	{mwType: "bot_management", key: "ai_agents", a: "off", b: "refuse",
+		probe: withUA("Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko); compatible; GPTBot/1.2; +https://openai.com/gptbot")},
 	// Under the bound the body is validated and passed; over it, 413 (ADR 0074).
 	{mwType: "schema_validation", key: "max_body_bytes", base: map[string]string{"schema": `{"type":"array"}`},
 		a: "1048576", b: "8", probe: postJSON("/items", "[1,2,3,4,5,6,7,8]")},

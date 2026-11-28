@@ -469,6 +469,21 @@ message BotManagementConfig {
   bool enable_browser_integrity = 5;
   int32 challenge_timeout_seconds = 3;
   string secret_key = 4;
+  // Where each AI agent's vendor publishes the addresses it crawls from
+  // (ADR 0108). A route whose bot management verifies AI agents refuses a
+  // client that names one of these agents from any other address.
+  repeated AIAgentRangeSource ai_agent_ranges = 6;
+}
+
+// One vendor-published address list for one AI agent: a JSON document of
+// {"prefixes":[{"ipv4Prefix":..},{"ipv6Prefix":..}]}, or one address or CIDR
+// per line.
+message AIAgentRangeSource {
+  // The agent's User-Agent token, from the gateway's catalog ("GPTBot",
+  // "ClaudeBot", ...).
+  string agent = 1;
+  // https://, or http:// to this machine's loopback only.
+  string url = 2;
 }
 
 message HaConfig {

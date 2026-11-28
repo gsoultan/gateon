@@ -17,6 +17,7 @@ import (
 	"github.com/gsoultan/gateon/internal/auth/apitoken"
 	"github.com/gsoultan/gateon/internal/config"
 	"github.com/gsoultan/gateon/internal/logger"
+	"github.com/gsoultan/gateon/internal/middleware/kind"
 	"github.com/gsoultan/gateon/internal/request"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	"golang.org/x/sync/singleflight"
@@ -176,7 +177,11 @@ func (v *JWTValidator) Handler(next http.Handler) http.Handler {
 		fp := telemetry.GenerateFingerprint(r)
 		if err := telemetry.CheckZeroTrust(userID, fp.Hash, clientIP, r); err != nil {
 			telemetry.MiddlewareAuthFailuresTotal.WithLabelValues(activeRouteID, "zerotrust").Inc()
-			http.Error(w, "Security check failed: "+err.Error(), http.StatusForbidden)
+			// The reason ("impossible travel detected") is the operator's,
+			// not the caller's: it says which signal to defeat (ADR 0106).
+			logger.L.LogInfo("Zero-trust check refused a token", "route", activeRouteID,
+				"request_id", kind.GetRequestID(r), "error", err)
+			kind.Refuse(w, http.StatusForbidden)
 			return
 		}
 

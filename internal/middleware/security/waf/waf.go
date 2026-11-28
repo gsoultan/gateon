@@ -30,6 +30,7 @@ import (
 	"github.com/gsoultan/gateon/internal/security/waf"
 	"github.com/gsoultan/gateon/internal/security/waf/advisory"
 	"github.com/gsoultan/gateon/internal/security/waf/appprofile"
+	"github.com/gsoultan/gateon/internal/security/waf/bypasswatch"
 	"github.com/gsoultan/gateon/internal/security/waf/schemalearn"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	"github.com/gsoultan/gwaf"
@@ -45,6 +46,10 @@ type WAFConfig struct {
 	DirectivesFile  string // Optional path to custom directives file
 	TrustCloudflare bool   // Use CF-Connecting-IP for REMOTE_ADDR in request
 	AuditOnly       bool   // If true, log matches but do not block (detection-only mode)
+
+	// bypassWatch replaces the process's bypass watch, for a test that must
+	// not share one with every other WAF in the binary.
+	bypassWatch *bypasswatch.Watch
 
 	// AllowedMethods is the HTTP method allowlist. Empty means the default set.
 	// It replaces the SecLang tx.allowed_methods variable that the directive
@@ -414,6 +419,8 @@ func WAF(cfg WAFConfig) (kind.Middleware, error) {
 		t.learner = schemalearn.Shared().For(cfg.RouteID)
 	}
 	t.advisor = advisorFor(cfg)
+	t.bypass = cmp.Or(cfg.bypassWatch, bypasswatch.Shared())
+	t.bypass.SetSink(recordBypassFinding)
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			t.serve(next, w, r)
@@ -441,6 +448,9 @@ type wafRuntime struct {
 	// advisor is where requests worth a second opinion are offered, nil
 	// unless the route asks and the gateway has a worker (ADR 0104).
 	advisor *advisory.Queue
+	// bypass is the search detector refusals and forwards are told of (ADR
+	// 0107): the process's, unless the config names another.
+	bypass *bypasswatch.Watch
 }
 
 func (t *wafRuntime) serve(next http.Handler, w http.ResponseWriter, r *http.Request) {
@@ -573,7 +583,7 @@ func (t *wafRuntime) enforceProtocol(w http.ResponseWriter, r *http.Request) boo
 
 	return t.refuseFastPath(w, r, fastPathFinding{
 		threatType: "protocol_violation", details: v.reason,
-		status: v.status, message: "Forbidden by Security Policy (" + v.reason + ")",
+		status: v.status,
 	})
 }
 
@@ -614,7 +624,6 @@ func (t *wafRuntime) fastPathChecks(w http.ResponseWriter, r *http.Request, rs *
 		if detail, found := suspiciousHeaderEntropy(r, t.cfg, repScore); found {
 			return t.refuseFastPath(w, r, fastPathFinding{
 				threatType: threatFastPathEntropy, details: detail,
-				message: "Forbidden by Security Fast-Path (High Entropy Detected)",
 			})
 		}
 	}
@@ -629,7 +638,6 @@ func (t *wafRuntime) fastPathChecks(w http.ResponseWriter, r *http.Request, rs *
 		if detail, found := suspiciousBodyEntropy(r, rs, t.cfg, repScore); found {
 			return t.refuseFastPath(w, r, fastPathFinding{
 				threatType: threatFastPathEntropy, details: detail,
-				message: "Forbidden by Security Fast-Path (High Body Entropy Detected)",
 			})
 		}
 	}
@@ -652,7 +660,6 @@ func (t *wafRuntime) checkFingerprintConsistency(w http.ResponseWriter, r *http.
 		details := fmt.Sprintf("Fingerprint mismatch: Browser UA '%s' with suspicious TLS profile (v%x)", ua, r.TLS.Version)
 		return t.refuseFastPath(w, r, fastPathFinding{
 			threatType: "fast_path_fingerprint", details: details,
-			message: "Forbidden by Security (Client Spoofing Detected)",
 		})
 	}
 
@@ -662,7 +669,6 @@ func (t *wafRuntime) checkFingerprintConsistency(w http.ResponseWriter, r *http.
 		details := fmt.Sprintf("Protocol violation: %s request from '%s' contains forbidden 'Connection' header", r.Proto, ua)
 		return t.refuseFastPath(w, r, fastPathFinding{
 			threatType: "fast_path_protocol_violation", details: details,
-			message: "Forbidden by Security (Protocol Violation)",
 		})
 	}
 
@@ -671,7 +677,6 @@ func (t *wafRuntime) checkFingerprintConsistency(w http.ResponseWriter, r *http.
 		details := fmt.Sprintf("Suspicious client: %s request from '%s' missing 'Accept-Encoding'", r.Proto, ua)
 		return t.refuseFastPath(w, r, fastPathFinding{
 			threatType: "fast_path_suspicious_client", details: details,
-			message: "Forbidden by Security (Suspicious Client)",
 		})
 	}
 
@@ -712,7 +717,6 @@ func (t *wafRuntime) checkTokenStructure(w http.ResponseWriter, r *http.Request)
 	return t.refuseFastPath(w, r, fastPathFinding{
 		threatType: "fast_path_malformed_token",
 		details:    "Malformed security token structure in Authorization header",
-		message:    "Forbidden by Security (Malformed Security Token)",
 	})
 }
 
@@ -770,8 +774,7 @@ func (t *wafRuntime) inspectAndForward(next http.Handler, w http.ResponseWriter,
 		logger.L.LogError("WAF could not inspect the request",
 			"error", err, "route", t.cfg.RouteID, "fail_open", t.cfg.FailOpen)
 		if !t.cfg.FailOpen {
-			http.Error(w, "Forbidden by Security Policy (request could not be inspected)",
-				http.StatusForbidden)
+			kind.Refuse(w, http.StatusForbidden)
 			return
 		}
 		next.ServeHTTP(t.guardWebSocket(w, r, repScore), r)
@@ -783,11 +786,12 @@ func (t *wafRuntime) inspectAndForward(next http.Handler, w http.ResponseWriter,
 	if decision != nil {
 		observe(*decision)
 		if !t.cfg.AuditOnly {
+			t.watchRefusal(r, *decision)
 			status := decision.Status()
 			if status == 0 {
 				status = http.StatusForbidden
 			}
-			http.Error(w, "Forbidden by Security Policy (WAF)", status)
+			kind.Refuse(w, status)
 			return
 		}
 	} else {
@@ -798,6 +802,7 @@ func (t *wafRuntime) inspectAndForward(next http.Handler, w http.ResponseWriter,
 	// through. The advisory worker is offered it now, before the proxy
 	// rewrites it, and is asked after it has been answered.
 	t.askAdvisor(r, tx)
+	t.bypass.Forwarded(r, request.ClientAddr(r), t.cfg.RouteID)
 
 	// Whether it is kept for tuning waits on what the origin says.
 	w, keep := t.watch(w, r)
@@ -868,8 +873,7 @@ func (t *wafRuntime) inspectResponse(next http.Handler, w http.ResponseWriter, r
 type fastPathFinding struct {
 	threatType string
 	details    string
-	status     int    // the refusal's status; 0 is 403
-	message    string // the refusal's body
+	status     int // the refusal's status; 0 is 403; the body is kind.RefusalBody
 
 	// Filled in by refuseFastPath from the WAF's configuration.
 	routeID  string
@@ -889,7 +893,8 @@ func (t *wafRuntime) refuseFastPath(w http.ResponseWriter, r *http.Request, f fa
 	if f.observed {
 		return true
 	}
-	http.Error(w, f.message, cmp.Or(f.status, http.StatusForbidden))
+	t.bypass.Refused(r, request.ClientAddr(r), f.routeID, f.threatType, f.details)
+	kind.Refuse(w, f.status)
 	return false
 }
 
@@ -1896,7 +1901,8 @@ func (w *wafResponseWriter) abortIfCut() {
 }
 
 // responseBlockedBody is what a refused response is replaced with.
-var responseBlockedBody = []byte("Forbidden by Security Policy (response blocked)")
+// It is the same refusal every request-side decision gives (ADR 0106).
+var responseBlockedBody = []byte(kind.RefusalBody)
 
 // originRepresentationHeaders describe the origin's body. A refusal is a
 // different body, so none of them may travel with it.

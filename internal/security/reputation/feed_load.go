@@ -248,6 +248,12 @@ func checkFeedURL(raw string) error {
 	return fmt.Errorf("%w: %q", errFeedScheme, raw)
 }
 
+// CheckFeedURL is the rule for any address list the gateway fetches and puts
+// in force (ADR 0061): https, or http only to this machine's loopback. The AI
+// agent range lists (ADR 0108) follow it too, because whoever can rewrite one
+// in transit decides which clients pass as a crawler.
+func CheckFeedURL(raw string) error { return checkFeedURL(raw) }
+
 // loopbackHost reports whether host names this machine's loopback.
 func loopbackHost(host string) bool {
 	if strings.EqualFold(host, "localhost") {

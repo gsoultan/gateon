@@ -872,3 +872,17 @@ func (g *largeBodyGate) acquire(ctx context.Context) (func(), bool) {
 	}
 	return func() {}, false
 }
+
+// watchRefusal tells the bypass watch the WAF refused this request (ADR
+// 0107). What tells one refused payload from the client's others is the rule
+// that refused it, where, and the query and body length it was in: a request
+// retried unchanged counts once.
+func (t *wafRuntime) watchRefusal(r *http.Request, d gwaf.Decision) {
+	w := t.bypass
+	if !w.Enabled() {
+		return
+	}
+	w.Refused(r, request.ClientAddr(r), t.cfg.RouteID,
+		strconv.FormatUint(uint64(d.RuleID()), 10), d.Key(), r.URL.RawQuery,
+		strconv.FormatInt(r.ContentLength, 10))
+}

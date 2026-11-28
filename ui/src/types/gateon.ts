@@ -532,6 +532,12 @@ export type BotManagementConfig = {
   enableBrowserIntegrity?: boolean;
   challengeTimeoutSeconds?: number;
   secretKey?: string;
+  aiAgentRanges?: AIAgentRangeSource[];
+};
+
+export type AIAgentRangeSource = {
+  agent?: string;
+  url?: string;
 };
 
 export type HaConfig = {

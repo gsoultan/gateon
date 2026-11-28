@@ -11,6 +11,7 @@ import (
 	"github.com/gsoultan/gateon/internal/ebpf"
 	"github.com/gsoultan/gateon/internal/ha"
 	"github.com/gsoultan/gateon/internal/logger"
+	"github.com/gsoultan/gateon/internal/security/aiagent"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	gateonv1 "github.com/gsoultan/gateon/proto/gateon/v1"
 	"google.golang.org/protobuf/proto"
@@ -99,6 +100,7 @@ func newSecuritySupervisor(rootCtx context.Context, reg *config.GlobalRegistry, 
 // Run applies the current configuration once and then subscribes to future
 // config changes so toggles take effect live.
 func (s *securitySupervisor) Run() {
+	go aiagent.Shared().Run(s.rootCtx)
 	if gc := s.reg.Get(s.rootCtx); gc != nil {
 		s.reconcile(gc)
 	}
@@ -119,6 +121,8 @@ func (s *securitySupervisor) reconcile(gc *gateonv1.GlobalConfig) {
 	s.reconcileWAFAutoUpdate(gc.GetWaf())
 	s.reconcileClamAV(gc.GetWaf().GetClamav())
 	s.reconcileEbpf(gc.GetEbpf())
+	// The AI agent lists the routes verify crawlers against (ADR 0108).
+	aiagent.Shared().Configure(aiagent.SourcesOf(gc.GetWaf().GetBotManagement()))
 }
 
 // reconcileAnomaly starts/stops/restarts the anomaly detection loop.

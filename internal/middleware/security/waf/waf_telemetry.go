@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -22,6 +23,7 @@ import (
 	secwaf "github.com/gsoultan/gateon/internal/security/waf"
 	"github.com/gsoultan/gateon/internal/security/waf/advisory"
 	"github.com/gsoultan/gateon/internal/security/waf/apischema"
+	"github.com/gsoultan/gateon/internal/security/waf/bypasswatch"
 	"github.com/gsoultan/gateon/internal/telemetry"
 	"github.com/gsoultan/gwaf"
 	"github.com/gsoultan/gwaf/schema"
@@ -663,4 +665,41 @@ func (o wafObservation) phaseOrRequest() string {
 		return wafPhaseRequest
 	}
 	return o.phase
+}
+
+// recordBypassFinding files a forwarded request that came after a search as
+// an observed entry in the Security Hub, held against nobody: the request
+// was let through (ADR 0059), and a person retyping a form after a false
+// refusal looks the same.
+func recordBypassFinding(f bypasswatch.Finding) {
+	target := f.Path
+	if f.Request != nil && f.Request.Target != "" {
+		target = f.Request.Target
+	}
+	details := fmt.Sprintf("%d different payloads from this client were refused on %s %s, then this request was forwarded. It may be the payload that got through.",
+		f.Refusals, f.Method, f.Path)
+	if f.Request != nil && len(f.Request.Args) > 0 {
+		// The capture masked every credential already (ADR 0097).
+		q := make(url.Values, len(f.Request.Args))
+		for k, v := range f.Request.Args {
+			q.Set(k, v)
+		}
+		details += " Its query: " + q.Encode()
+	}
+	telemetry.RecordSecurityThreat(telemetry.SecurityThreat{
+		ID:             "waf-bypass-" + uuid.NewString(),
+		Type:           telemetry.ThreatWAFEvasionSuspected,
+		SourceIP:       f.Source,
+		Score:          50,
+		Details:        details,
+		Time:           time.Now(),
+		RouteID:        f.Route,
+		RequestURI:     target,
+		Method:         f.Method,
+		Category:       "evasion",
+		Severity:       kind.SeverityHigh,
+		ActionTaken:    kind.ActionFlagged,
+		Recommendation: "Read the request. If it is an attack, add a rule or exception narrow enough to refuse it; if it is a person retrying after a false refusal, tune the rule that refused them.",
+		Observed:       true,
+	})
 }

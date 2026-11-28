@@ -914,8 +914,10 @@ func addFunnelStages(idx map[string]*dto.MetricFamily, f *MitigationFunnel) {
 // threat pipeline recorded for a failed check or a wrong answer ("blocked").
 // The funnel used to count "integrity_failed" and "challenge_failed",
 // which nothing records, and missed the served challenges.
+// A client a route refuses for naming an AI agent ("ai_agent_refused", ADR
+// 0108) is a refusal too; a fake one is a recorded threat, so "blocked".
 func botRefusal(outcome string) bool {
-	return outcome == ActionBlocked || strings.HasSuffix(outcome, "challenge_served")
+	return outcome == ActionBlocked || outcome == "ai_agent_refused" || strings.HasSuffix(outcome, "challenge_served")
 }
 
 // outcomeCount reads one series of gateon_request_outcomes_total.

@@ -115,6 +115,10 @@ ADRs follow a lightweight [MADR](https://adr.github.io/madr/)-style format:
 | [0103](./0103-a-route-drafts-its-own-api-document-from-the-shape-of-its-traffic.md) | A route drafts its own API document from the shape of its traffic | Accepted |
 | [0104](./0104-a-second-opinion-is-asked-after-the-request-is-answered.md) | A second opinion is asked after the request is answered | Accepted |
 | [0105](./0105-an-operator-rolls-an-upgrade-back-and-postgresql-is-dumped-first.md) | An operator rolls an upgrade back, and PostgreSQL is dumped first | Accepted |
+| [0106](./0106-a-refusal-tells-the-client-nothing-it-can-act-on.md) | A refusal tells the client nothing it can act on | Accepted |
+| [0107](./0107-the-request-that-passed-after-a-search-is-recorded.md) | The request that passed after a search is recorded | Accepted |
+| [0108](./0108-a-crawler-is-who-its-vendor-says-it-is.md) | A crawler is who its vendor says it is | Accepted |
+| [0109](./0109-a-fake-crawler-is-answered-with-a-maze.md) | A fake crawler can be answered with a maze | Accepted |
 
 ## Conventions
 

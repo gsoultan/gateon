@@ -11,6 +11,59 @@ here after the fact.
 
 ## Unreleased
 
+### A fake AI crawler can be sent into a maze
+
+The **AI Crawlers and Agents** setting has a fourth choice, maze (ADR 0109).
+It verifies like verify, but a client that names an agent from an address its
+vendor does not publish gets generated pages of links that lead only to more
+of them, with a `200`, instead of a refusal. They are recorded in the
+Security Hub like a refusal.
+
+**Who is affected:** nobody until a route chooses maze. **What to do:**
+nothing.
+
+### A route can tell a real AI crawler from one that only names it
+
+Bot management has a new route setting, **AI Crawlers and Agents** (ADR 0108).
+Set to verify, a client whose User-Agent names an agent such as GPTBot or
+ClaudeBot passes the challenge only from an address its vendor publishes, and
+is refused, and recorded, from any other. Set to refuse, every AI agent is
+turned away. Administrators list each vendor's address list URL under
+Settings, Security, Bot Management; the gateway fetches them every 12 hours.
+
+**Who is affected:** nobody until a route chooses a policy. **What to do:** to
+use it, add the vendors' list URLs (https only), then set the policy on the
+routes that should verify. `GATEON_AI_AGENT_MAX_PREFIXES` overrides the bound
+on the prefixes held (16384 on `standard`).
+
+### The Security Hub points at the request that got through after a search
+
+When the WAF has refused five different payloads from one client on one
+endpoint and then forwards a request from that client there, the request is
+recorded as `waf_evasion_suspected` (ADR 0107). It may be the payload that got
+past the rules. The entry is observed and held against nobody, and it carries
+the request's query with its credentials masked.
+
+**Who is affected:** every gateway with a WAF. The watch is on by default, and
+holds at most about 5 MiB on `standard`. **What to do:** read these entries.
+Set `GATEON_WAF_BYPASS_REFUSALS` (2 to 32) to change the threshold, or
+`GATEON_WAF_BYPASS_SOURCES=0` to turn the watch off.
+
+### A refusal no longer says which check refused it
+
+Every refusal a security decision makes now has the body
+`Forbidden by Security Policy` (ADR 0106). Before, most of them named the
+check, for example `(High Entropy Detected)`, `(Reputation Block)`,
+`Browser Integrity Check Failed` or the zero-trust error's own text. That told
+an attacker who adapts its payload from each answer what to change next. The
+status codes are unchanged, and so are the messages an API caller needs to
+fix its request (schema validation, GraphQL, authentication, upload size).
+
+**Who is affected:** anything that matched on a refusal's old text, such as a
+monitoring probe or a client's error handling. **What to do:** match on the
+status instead. To find out why a request was refused, look up its
+`X-Request-Id` in the trace, or the client and time in the Security Hub.
+
 ### An upgrade can be rolled back on request
 
 Until now the previous version was put back only when the new one failed to

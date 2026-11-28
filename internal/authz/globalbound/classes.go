@@ -180,6 +180,9 @@ var classes = map[protoreflect.FullName]Class{
 	"gateon.v1.BotManagementConfig.enable_browser_integrity":  Operational,
 	"gateon.v1.BotManagementConfig.challenge_timeout_seconds": Operational,
 	"gateon.v1.BotManagementConfig.secret_key":                Operational,
+	// Decides which clients pass a route's challenge as a crawler: whom the
+	// gateway trusts, so administrator-only (ADR 0108).
+	"gateon.v1.BotManagementConfig.ai_agent_ranges": Boundary,
 
 	// What the gateway installs and runs on its own host, and where it sends
 	// every upload it scans, are an administrator's to decide. They were

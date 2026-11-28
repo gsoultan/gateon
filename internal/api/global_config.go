@@ -26,6 +26,7 @@ import (
 	"github.com/gsoultan/gateon/internal/middleware/security"
 	wafmw "github.com/gsoultan/gateon/internal/middleware/security/waf"
 	hostsecurity "github.com/gsoultan/gateon/internal/security"
+	"github.com/gsoultan/gateon/internal/security/aiagent"
 	"github.com/gsoultan/gateon/internal/security/reputation"
 	"github.com/gsoultan/gateon/internal/selfupdate"
 	"github.com/gsoultan/gateon/internal/selfupdate/upgrade"
@@ -411,6 +412,14 @@ func validateGlobalSave(stored, proposed *gateonv1.GlobalConfig) error {
 	if err := reputation.ValidateFeedURLs(
 		stored.GetSecurityAdvanced().GetIpReputation().GetFeedUrls(),
 		proposed.GetSecurityAdvanced().GetIpReputation().GetFeedUrls(),
+	); err != nil {
+		return status.Error(codes.InvalidArgument, err.Error())
+	}
+	// The AI agent lists decide which clients pass as a crawler, under the
+	// same rule as the feeds (ADR 0108).
+	if err := aiagent.ValidateSources(
+		stored.GetWaf().GetBotManagement().GetAiAgentRanges(),
+		proposed.GetWaf().GetBotManagement().GetAiAgentRanges(),
 	); err != nil {
 		return status.Error(codes.InvalidArgument, err.Error())
 	}

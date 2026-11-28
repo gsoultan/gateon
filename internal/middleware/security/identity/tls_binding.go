@@ -262,5 +262,5 @@ func refuseBinding(w http.ResponseWriter, r *http.Request, why bindingRefusal) {
 		ActionTaken: kind.ActionBlocked,
 		Observed:    why.duplicate,
 	})
-	http.Error(w, "Security Check Failed: Session binding mismatch", http.StatusForbidden)
+	kind.Refuse(w, http.StatusForbidden)
 }
